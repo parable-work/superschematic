@@ -301,7 +301,9 @@ its provisioner, the schema of every resource type its platforms,
 connectors and default DNS platform emit, and its policy rules. A kind it
 names no platform for is refused in its environments, so a stack whose
 APIs declare jobs or workers resolves on it only with each placed on
-another target's platform.
+another target's platform. `Unplaced` says, for such a kind, why the
+target places none and where one runs, which the refusal gives in place
+of that advice: the cloudflare target's queue workers.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:
@@ -331,7 +333,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
-| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
+| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, or for a job whose artifact is a bundle its digest (`Bundle`), and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 | `Queues` | `QueueRunner` | runs a queue document, `stack queue`'s operation on a queue's dead messages, on a deployed run's database where `superschematic-migrate` reaches it, and returns the runner's result; a `QueueRequest` names the run, the database, the DB service and the document. The result may hold personal data, so it never goes to a log (D68, amended) |
 | `Sites` | `SitePublisher` | puts a site's files under their digest, and its config for a run, where its platform serves them (D55) |
 | `Bundles` | `BundlePublisher` | keeps the files of a server's, job's or worker's bundle under their digest, `Publish(ctx, run, deployable, dir, digest)` (D64) |
@@ -385,8 +387,9 @@ from Cloud Logging (D52). Each operation works on a
 parameters.
 
 The cloudflare target fills each but `Builder`, since its servers, jobs
-and sites ship as bundles and files rather than images, and `Jobs`, so
-`stack run` refuses its environments (D64). Its bundle and site
+and sites ship as bundles and files rather than images; its job runner
+starts an instance of a job's Workflow with the bundle's digest (D64,
+amended). Its bundle and site
 publishers keep files in R2 by their digest and are `ArtifactFetcher`s,
 its `PreDestroy` empties each bucket of a parameterized member, and its
 migration runner runs `superschematic-migrate` on the deploying machine

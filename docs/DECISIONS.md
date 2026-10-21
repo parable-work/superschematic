@@ -7868,8 +7868,8 @@ Status: built.
 Not built:
 - Export on gcp: built by the amendment at the end of this file that
   names it (`### D67, amended`).
-- The cloudflare target's Workers build, which does not import
-  `./telemetry`.
+- The cloudflare target's Workers build: built by the D64 amendment that
+  names `./workers-telemetry`, at the end of this file.
 - Metrics and logs, as above.
 - A message span that continues the trace that enqueued it.
 
@@ -8254,7 +8254,9 @@ gcp's `TestDeployRunsTheJobOnEveryDeploy` reads a failed execution's error,
 the gcp goldens hold a job that runs on deploy, the Pulumi render goldens
 are unchanged by it, and the local target's
 `TestJobRunsOnceTheEnvironmentIsUp` runs it under `stack dev`. No job has
-run on a deploy on Google Cloud.
+run on a deploy on Google Cloud. A job whose artifact is a bundle runs on
+a deploy on cloudflare through its Workflow (D64, amended, at the end of
+this file), so the deploy no longer refuses one.
 
 The rule is reversible until the first release.
 
@@ -8784,3 +8786,54 @@ lease as it should, not a delay in the handover. The test now ends the
 holder's new session too until the other takes the lease
 (`hand_over`), and held in 20 runs of 20 beside a release build, the
 first taking its lease again in two of them.
+
+### D64, amended: a job's Worker is a Workflow the job runner starts, Workers export traces under nodejs_als, a bucket names its jurisdiction, and a worker's refusal says where one runs
+
+The target left four gaps (#402's "Not built"): a job on every deploy
+and `stack run`, which `checkDeployJobs` and the missing `Jobs` seam
+refused; OpenTelemetry on Workers, whose bundles left `./telemetry` out
+for its `node:async_hooks` (D67); R2 jurisdictions, whose S3 host the R2
+credential did not name; and the refusal of a queue worker, which said to
+place it with a settings platform, advice no cloudflare environment can
+follow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every job's Worker is also a Workflow, `<job>.workflow` (pinned `cloudflare:index/workflow:Workflow`), named as the Worker, of the class `JobRun` (`ir.JobRunClass`) that `scheduled.ts` exports, after the deployment. The target's `Jobs` seam starts an instance through Cloudflare's API (`POST /accounts/<id>/workflows/<name>/instances`) with the run's token, which `Workers Scripts Write` and `Read` cover, and polls it every two seconds until it is `complete`, `errored` or `terminated`, returning the error its run threw. `JobRun` runs the job's tries within one step that retries nothing and may take every try's timeout and a minute, as a firing runs them, so a run on demand behaves as a scheduled one. | A `fetch` entry on the job's Worker guarded by a deploy-scoped token: the Worker would need workers.dev or a route, public addresses `nothing-public-unless-exposed` refuses for a job, and a token per deploy in a graph that is a function of the schemas, which D52's amendment rejected for Cloud Run's execution token; a client that disconnects mid-run cancels the Worker. An API that fires a deployed Worker's scheduled handler: Cloudflare has none, only wrangler's local `/__scheduled`. The Workflow's own retries and timeout per try, which would log and fail unlike a firing and leave a try's timeout to Cloudflare's step semantics. A Workflow `schedules` in place of the Cron Trigger, which changes what a schedule is for no gain. |
+| The instance's payload is `{"bundle": "<hex>"}`, the digest the deploy manifest records or the rollout pinned (`JobRunRequest.Bundle`), and the job's version binds `SUPERSCHEMATIC_BUNDLE` (`ir.BundleDigestVariable`) to `{bundle-digest}`, which the deploy pins: `JobRun` refuses another bundle before any step, naming both. A Workflow runs the Worker's current deployment, so this is gcp's refusal of an image the manifest does not record. The API takes `params` as JSON in a string, so `JobRun` parses a string payload too. | Trusting the deployment, which a deploy under way or a version made by hand would change unseen. Comparing the version's id from the graph's outputs, which `JobRunRequest` does not carry. |
+| `JobRunRequest` gains `Bundle`; `Check` asks for the artifact the job's platform runs; the deploy's jobs step and `stack run` fill it from the rollout and the manifest; `checkDeployJobs` refuses only a job with neither an image nor a bundle. | A second request type for bundles, which every runner would switch on anyway. |
+| The HTTP runtime's `./workers-telemetry`, beside `./telemetry` on a shared `telemetry-core`, reads OpenTelemetry's variables from the Worker's string bindings with `./telemetry`'s refusals, and refuses a member without `=` of `OTEL_RESOURCE_ATTRIBUTES` or of a headers variable. A span's context travels in `AsyncLocalStorage` from `node:async_hooks`. Ended spans wait in the isolate, at most 2048, until `flush()`, which `fetch.ts` hands to each request's `waitUntil` and a scheduled run and a Workflow step await: an isolate runs no I/O outside a request, so no timer exports. The entry posts the OTLP/HTTP protobuf body itself, built by `@opentelemetry/otlp-transformer`'s serializer, which a Workers package depends on. | An explicit context with no `AsyncLocalStorage`: clients are built once per isolate and shared by concurrent requests, so a client span could not find its request's server span. OpenTelemetry's browser exporter, which sends `fetch` with `mode` and `keepalive` that workerd refuses. A `BatchSpanProcessor`, whose timer would export from one request's I/O context in another's. |
+| Every server's and job's version names `compatibilityFlags: ["nodejs_als"]` (`WorkersCompatibilityFlags`), workerd's `AsyncLocalStorage` without the rest of Node, whether or not its environment exports, since one bundle serves every environment. workerd gives `node:` modules with no flag from compatibility date 2026-08-04, the pinned 2026-09-15 among them, so the flag keeps a server whose `compatibilityDate` is earlier running. `bundle.ts`, `workers-check.mjs` and the workerd harness keep `node:*` external, since Bun's browser target swaps `node:async_hooks` named alone for an empty module, and refuse every `node:` import but `node:async_hooks`. | `nodejs_compat`, all of Node for one class. No flag, relying on the date, which breaks a server that pins an earlier one. Loading the telemetry only where an environment exports, which the bundle, one per deployable, cannot know. |
+| The environment's values take `telemetry: { endpoint, sampleRatio? }`, and a server's or a job's settings `telemetry: true\|false`, as gcp's (D67, amended); the endpoint is required, since Cloudflare has no OTLP endpoint of its own for a Worker's traces. A Worker that exports gets `plain_text` bindings: the endpoint, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (the environment with a member's parameters, `cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`, `cloud.account.id`, and `service.version=sha256:{bundle-digest}`, which the deploy pins), and the sampler. A config field of one of those names is refused. | Bindings the engineer writes by hand, which no setting reaches. A collector header from a Secrets Store secret, which waits for a secret identity outside an API, as gcp's does. |
+| An `r2` bucket takes `jurisdiction`, `eu` or `fedramp`: the bucket and its lifecycle name it, the edge's token names the bucket's objects as `<account>_<jurisdiction>_<bucket>`, and the R2 credential gains an optional `jurisdiction` member (`<FIELD>_R2_JURISDICTION`), which the TypeScript runtime reads to presign URLs for `<account>.<jurisdiction>.r2.cloudflarestorage.com`, refusing a value that is no lowercase label or one with no credential, and the Go and Rust readers refuse with the other Worker-only R2 variables. `PreDestroy` empties a member's bucket at its jurisdiction's host through `JurisdictionCloud`. A jurisdiction beside `locationHint` is refused as unrealizable. This reverses the third amendment's row that left `jurisdiction` out. | A jurisdiction without the member, whose signed URLs would name the default host. A host in the credential, which a value could point anywhere. |
+| A target may say why it places no deployable of a kind (`TargetSpec.Unplaced`), and resolution gives that reason in place of "place it with a settings platform". The cloudflare target says a worker's claim loop needs a long-lived process and Postgres, and that gcp's `gcp.cloudrunworker` or `stack dev` runs one. | Leaving the generic advice, which a cloudflare environment, mixing no other target, cannot follow. A cloudflare check of its own, which the core's placement runs before any platform sees the worker. |
+
+Status: built, proven offline. `extensions/cloudflare`'s `jobs_test.go`
+reads each job's Workflow and bundle binding, runs a fake Workflow through
+the runner, `stack run` after a deploy and a deploy's jobs step with
+`onDeploy`, and reports an errored, a terminated and a missing Workflow;
+`telemetry_test.go` reads the `OTEL_` bindings, the flag and the
+refusals; `TestR2BucketInAJurisdiction`,
+`TestPreDestroyEmptiesABucketInAJurisdiction` and
+`TestCloudS3InAJurisdiction`, which signs object calls for the EU host
+against a TLS stand-in that signs them again from the Host it received;
+and the worker's refusal in `TestWorkersRefusals`. servergen's
+`TestTypeScriptCronEntrypointCompilesAndBundles` runs `JobRun` under the
+runtime's pinned workerd through a binding to the entrypoint, as
+Cloudflare's engine calls it: the tries in one step, another bundle
+refused before any step, and the last try's error thrown. The HTTP
+runtime's `telemetry` workerd fixture exports to a receiver Worker: two
+concurrent requests land in their own traces with their callee's client
+spans, a job's span follows, and with no `OTEL_` binding nothing is sent;
+`telemetry-refused` is refused at module scope. The stackconfig parity
+vectors hold the jurisdiction in all three runtimes, and `r2.test.ts`
+signs for the EU host. Nothing has reached Cloudflare. A live run must
+check: that a Workflow of a Worker managed through versions and
+deployments runs the current deployment after each rollout, and that
+`params` reaches `run` as the object; that `Workers Scripts Write` starts
+and reads instances; an instance's error message for a thrown error;
+that Cloudflare accepts `nodejs_als` at a date that implies it; that
+spans reach a collector from `waitUntil`; and a presigned PUT and GET for
+an EU bucket, with the edge's token scoped to it.
+
+The rule is reversible until the first release.
