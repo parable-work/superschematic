@@ -4372,10 +4372,11 @@ Status: built.
 The amendments below ship the archives the workflow's builds link and
 pin each generated module to the release. The workflow builds a stack's
 static sites (D55): `check` installs the output root's Bun workspace and
-builds each site, and the deploy and preview jobs of an environment with
-a site set up Bun, even in an npm project, and install the workspace,
-since `stack deploy` builds the site on the runner (`CIStack.Sites`,
-`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+builds each site, and a `prepare` job with no credentials sets up Bun,
+even in an npm project, installs the workspace and builds each site and
+bundle, which the deploy and preview jobs take with `stack deploy
+--prepared` and build nothing (`CIStack.Sites`, `TestSitesInTheWorkflow`;
+the amendment "no project code runs where deploy credentials are"). Jobs, workers and buckets need nothing of the
 workflow: the deploy builds their images on the target and applies the
 rest as graph resources. No generated workflow has run on GitHub
 Actions: a run needs a release, a project bootstrapped with a GitHub
@@ -8413,9 +8414,10 @@ Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
 the builds; actionlint passes on them. No generated workflow has run on
 GitHub Actions.
 
-Not built: a deploy that runs the project's TypeScript with no
-credentials in its environment. The bindings scoped by claim, so a pull
-request's job cannot act as the deployer of an environment without
+Not built here: a deploy that runs the project's TypeScript with no
+credentials in its environment, which the amendment "no project code runs
+where deploy credentials are" builds. The bindings scoped by claim, so a
+pull request's job cannot act as the deployer of an environment without
 parameters, are D69's.
 
 ## D69. Each CI account admits only the runs of the jobs that sign in as it (D47 amended)
@@ -8817,3 +8819,27 @@ request's code, which makes what deploys, as the cloud jobs' builds did.
 The artifact holds the repository's own sources and the files built from
 them, no secret, and anyone who can read the repository's Actions runs
 can download it.
+
+Status: built, proven offline. `internal/childenv` and its tests; the
+document harness and `stackdeploy`'s installs and builds run with it, and
+`TestRunDocument_SeesNoCredential` and `TestBuildsSeeNoCredential` set
+gcp's, Cloudflare's, Pulumi's and GitHub's identity-token variables and
+find none of them in the child. `stackdeploy.Prepare`, `ReadPrepared` and
+`Sources.Prepared`: `TestPrepareThenDeployASite`, `...Images` and
+`...ABundle` prepare with the fake builds, then deploy with a `Run` that
+fails the test if called, and get the digests a deploy that builds
+records; a changed archive, a stale document, a directory of other files
+and a documents-only directory for a build are refused. `stack prepare`
+and `--prepared` in the CLI: `TestStackPrepare` deploys from a prepared
+context with the output root removed. The generated workflow's `prepare`
+job and cloud jobs are in every cigen, gcp and cloudflare golden;
+`TestCloudJobsSignInLast` holds each cloud job to steps that run no
+project code and each stack command to `--prepared`, and prepare to no
+identity token or secret; actionlint passes on all of them. No generated
+workflow has run on GitHub Actions: an artifact's upload and download
+between jobs, `--ignore-scripts` with the loader's reading of the schemas
+root's packages, and a TypeScript sidecar document replayed in CI are
+proven by tests on this machine only.
+
+Not built: `stack dev`'s child processes keep the shell's environment. A
+sandbox that keeps a credentials file on disk from a child.

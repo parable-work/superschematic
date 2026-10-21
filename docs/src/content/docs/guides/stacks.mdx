@@ -1551,6 +1551,27 @@ and `--no-build` builds nothing. A deploy keeps the image the manifest
 records for a server whose context did not change. A parameterized
 member takes its values with `--param pr=123`.
 
+A deploy runs your project's code: its sidecar documents through Bun,
+the install of `schemas/dist`'s workspace, each site's build and each
+bundle's. Each of those processes gets an environment with no
+credential in it, so an install script cannot read
+`GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDFLARE_API_TOKEN` or
+`PULUMI_CONFIG_PASSPHRASE`; to hand one a variable it needs, such as a
+private registry's token, list its name in `SUPERSCHEMATIC_CHILD_ENV`.
+gcloud's credentials file stays readable on disk to any process you run.
+To keep your project's code away from your credentials altogether, run
+it first in a shell that holds none, then deploy what it made:
+
+```sh
+superschematic stack prepare Staging          # no credentials needed
+superschematic stack deploy Staging --prepared schemas/dist/prepared/shop-stack
+```
+
+`stack prepare` evaluates the documents, writes each image's build
+context and builds each site and bundle into the directory; `stack plan`,
+`build`, `deploy` and `destroy` given `--prepared` read them from it and
+start no Bun, no install and no build. The generated CI works this way.
+
 The migration job's image is built once per release of the runner. A
 binary built from a checkout names no release, so set
 `SUPERSCHEMATIC_MIGRATE_IMAGE` to an image of `superschematic-migrate`, by
@@ -1987,7 +2008,7 @@ The workflow:
   sets up the Rust release `tools.env` pins before the build, fails when
   `schemas/dist/Cargo.lock` is not committed or the build changed it, and
   compiles each Rust server, job and worker with `cargo check --locked`;
-  every job that builds sets up the same release. For a stack with a
+  `prepare` sets up the same release before its build. For a stack with a
   TypeScript server, job or worker it then installs `schemas/dist`'s Bun
   workspace with `bun install --frozen-lockfile`, failing when
   `schemas/dist/bun.lock` is not committed or no longer matches the
@@ -2001,7 +2022,14 @@ The workflow:
   on, and every job of a project that installs with npm sets up the
   Node.js release superschematic's own CI runs on, so `npm ci` runs on
   the same release from run to run.
-- After it, `plan-<environment>` runs `stack plan` for each cloud
+- Beside it, `prepare` runs all of your project's code the cloud jobs
+  need, with no credentials: the install, the build, the workspace's
+  install, and `stack prepare` for every environment with a cloud job,
+  which evaluates the sidecar documents, writes each image's build
+  context and builds each site and bundle. It uploads the result as the
+  artifact `prepared`. When a pull request with a preview closes, it
+  prepares the documents alone, for the destroy.
+- After both, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>
   --param <parameter>=<pull request number>` for each environment with one
@@ -2015,13 +2043,14 @@ The workflow:
   the `Production` environment required reviewers in the repository's
   settings, and each production deploy waits for their approval.
   `workflow_dispatch` runs the same on demand from the branch.
-- A deploy or preview job of an environment with a site sets up Bun,
-  even when the schemas root installs with npm, and installs the
-  workspace from `schemas/dist/bun.lock` after the build, since `stack
-  deploy` builds the site on the runner. Jobs, workers and buckets need
-  nothing more: the deploy builds a job's or a worker's image on the
-  target, as it builds a server's, and a bucket is a resource of the
-  environment's graph.
+- Every cloud job downloads `prepared`, installs the schemas root's
+  packages with `--ignore-scripts`, and runs its `stack` command with
+  `--prepared`: it runs no build, no Bun and no package's script.
+  `prepare` set up Bun, even when the schemas root installs with npm, and
+  built the sites and bundles. Jobs, workers and buckets need nothing
+  more: the deploy builds a job's or a worker's image on the target from
+  its prepared context, as it builds a server's, and a bucket is a
+  resource of the environment's graph.
 - One deploy runs at a time per environment, and one preview job per
   member.
 
@@ -2034,13 +2063,14 @@ Identity Federation, through the pool `stack bootstrap` creates for the
 GitHub repository of the git remote, as `<stack>-planner` or
 `<stack>-deployer`, with `google-github-actions/auth`, whose credentials
 file gives superschematic and Pulumi application default credentials.
-A job signs in last, right before its `stack` command: its installs and
-builds, which run the pull request's lockfiles and their packages'
-install scripts, run before any credential is on the runner, as they do
-in `check`. The job can still ask GitHub for an identity token from any
-step, and the `stack` command runs your TypeScript (its documents and
-each site's build) with the credentials, so treat a pull request from
-the repository as able to act as the job's account.
+A job signs in last, right before its `stack` command, and runs none of
+your project's code: GitHub lets any step of a job with `id-token: write`
+ask for an identity token, so the pull request's lockfiles, their
+packages' install scripts, the build, the sites' and bundles' builds and
+the sidecar documents run in `prepare`, which has no identity token and
+no secret. A pull request from the repository can still change the
+workflow itself, so treat its author as able to act as the job's
+account; what this stops is code its dependencies bring.
 The provider's name holds the project's number, `projectNumber` in the
 environment's `gcp` values, which bootstrap records and you may enter by
 hand. An environment that extends another inherits it. Until it is set,

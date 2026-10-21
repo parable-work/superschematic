@@ -851,7 +851,7 @@ which no queue is claimed.
 | `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
 | `--yes` | off | `drop`: confirm `--all` |
 
-## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
+## `stack bootstrap`, `secrets set`, `prepare`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
 destroys the environments a Stack service declares
@@ -863,8 +863,9 @@ target only when it links the target's extension and the provisioner's
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
+`prepare` reaches no target and takes its own flags.
 
-Each of these commands takes these flags:
+Each of the others takes these flags:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -944,6 +945,42 @@ superschematic stack secrets set Staging
 superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 ```
 
+### `stack prepare [environment...]`
+
+Run, with no credentials, all the project code that `stack plan`, `build`,
+`deploy` and `destroy` would otherwise run beside the target's
+credentials, and write what it made into a directory: each service's
+sidecar documents, evaluated with Bun; the build context of each server,
+job and worker whose Dockerfile `superschematic build-all` wrote; each
+site, built with its build script after one frozen install of the output
+root's workspace; and each bundle, built with `bun bundle.ts`. A site's or
+a bundle's files are kept as the tar stream their digest is of. It reaches
+no target. Given the directory with `--prepared`, `stack plan`, `build`,
+`deploy` and `destroy` read all of it from there and start no Bun, no
+install and no build, so a dependency's install script, a build plugin or
+a sidecar document never runs where the credentials are; a document whose
+file or imports changed since is refused. The generated GitHub workflow
+runs it in its `prepare` job, which holds no identity token and no
+secret. With no environment named it prepares every environment off the
+local target. Run `superschematic build-all` first.
+
+```
+superschematic stack prepare Staging
+superschematic stack deploy Staging --prepared schemas/dist/prepared/shop-stack
+```
+
+Every process a `stack` command starts to run your project's code, here
+or in a deploy without `--prepared`, gets an environment with no
+credential in it; `SUPERSCHEMATIC_CHILD_ENV` names more variables to pass,
+such as a private registry's token, and never passes a `GOOGLE_*`,
+`CLOUDSDK_*`, `CLOUDFLARE_*`, `PULUMI_*`, `AWS_*` or `ACTIONS_*` variable.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--dir` | `<output-root>/prepared/<stack>` | write here; an earlier prepare's directory is replaced, and one holding anything else is refused |
+| `--no-build` | false | write the sidecar documents alone, which a plan or a destroy needs |
+| `--out` | `<schemas-root>/dist` | the output root `build-all` wrote |
+
 ### `stack plan <environment>`
 
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
@@ -970,6 +1007,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
 | `--format` | `text` | print the plan as `text` or `json` |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack build <environment>`
 
@@ -1009,6 +1047,7 @@ A build writes no deploy manifest.
 | `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image`, `--site` and `--bundle` flags (`text`) or the result as `json` |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack deploy <environment>`
 
@@ -1073,12 +1112,15 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack destroy <environment>`
 
 Remove every resource of the run and its deploy manifest. It asks for the
 run's name at a terminal unless `--yes`, and refuses without either. It
 holds the run's deploy lock while it runs, as a deploy does.
+`--prepared` reads the sidecar documents from what `stack prepare
+--no-build` wrote, and runs none of them.
 
 ### `stack unlock <environment>`
 
