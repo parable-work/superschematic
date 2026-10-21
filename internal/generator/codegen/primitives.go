@@ -47,3 +47,15 @@ func PrimitiveOf(name string) ir.LanguagePrimitive {
 func GoOptionalBoolIsPointer(typeName string, required, isArray, isMap bool, def *string) bool {
 	return typeName == PrimitiveBoolean && !required && !isArray && !isMap && def == nil
 }
+
+// GoOptionalIntegerScalarIsPointer reports whether generated Go output types
+// represent an integer-like scalar field (Generic.Int64, Temporal.Seconds,
+// Network.Port and the other scalars whose Go type is an integer) as a
+// pointer: a single, non-required field with no declared default. omitempty
+// drops a 0 integer, so only a pointer keeps an explicit 0 distinct from an
+// absent value. With a declared default the field stays a value type. The
+// caller has already established that the field is an integer-like scalar.
+// typegen, ormgen and envgen share this rule.
+func GoOptionalIntegerScalarIsPointer(required, isArray, isMap bool, def *string) bool {
+	return !required && !isArray && !isMap && def == nil
+}

@@ -103,7 +103,7 @@ null is a value of an optional field, apart from absent
 
 | Language | A nullable field |
 | --- | --- |
-| Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`) and for a `boolean` without a default (`*bool`); the plain value, left out when empty, for `string` and `number` |
+| Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`) and for a `boolean` without a default (`*bool`); the plain value, left out when empty, for `string`, `number` and an integer scalar with a default |
 | TypeScript | `updatedAt?: TemporalDateTime \| null` |
 | Python | `Optional[T]` with a default of `None` |
 | Rust | `Option<T>` |
@@ -113,6 +113,10 @@ A nullable `boolean` is `*bool` in Go because `encoding/json` leaves a
 `false` from absent. With `Default<boolean, true>` the field stays `bool`
 and is always written, since an absent value would read back as `true`.
 With `Default<boolean, false>` it stays `bool` and is left out when `false`.
+
+An integer scalar, such as `Generic.Int64`, is a pointer for the same
+reason, so an explicit `0` is written. With a default it stays the value
+type and is left out when `0`.
 
 ## Defaults
 
