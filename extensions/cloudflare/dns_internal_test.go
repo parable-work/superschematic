@@ -11,7 +11,7 @@ import (
 
 const testZoneID = "0123456789abcdef0123456789abcdef"
 
-func context(proxied bool, records ...ir.DNSRecord) registry.DNSContext {
+func dnsContext(proxied bool, records ...ir.DNSRecord) registry.DNSContext {
 	return registry.DNSContext{
 		Environment: registry.StackEnvironment{Stack: "shop", Name: "Staging", Domain: "staging.acme.dev"},
 		Values:      map[string]any{"zone": "acme.dev", "zoneId": testZoneID, "proxied": proxied},
@@ -34,7 +34,7 @@ func TestLowerRecordTypes(t *testing.T) {
 		{Deployable: "www", Name: "staging.acme.dev", Type: "TXT", Value: ir.Output{Resource: "www.verification", Name: "token"}},
 	}
 	for _, proxied := range []bool{false, true} {
-		got, err := lowerRecords(context(proxied, records...))
+		got, err := lowerRecords(dnsContext(proxied, records...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,11 +78,11 @@ func TestLowerRefuses(t *testing.T) {
 		ctx  registry.DNSContext
 		want string
 	}{
-		{"type", context(false, ir.DNSRecord{Deployable: "shop-api", Name: "staging.acme.dev", Type: "MX", Value: "mail.acme.dev"}),
+		{"type", dnsContext(false, ir.DNSRecord{Deployable: "shop-api", Name: "staging.acme.dev", Type: "MX", Value: "mail.acme.dev"}),
 			"record staging.acme.dev of shop-api has type MX; the cloudflare DNS platform writes A, AAAA, CNAME and TXT records"},
-		{"record outside", context(false, ir.DNSRecord{Deployable: "shop-api", Name: "shop-api.acme.com", Type: "A", Value: "192.0.2.1"}),
+		{"record outside", dnsContext(false, ir.DNSRecord{Deployable: "shop-api", Name: "shop-api.acme.com", Type: "A", Value: "192.0.2.1"}),
 			"record shop-api.acme.com of shop-api is not in zone acme.dev"},
-		{"concat outside", context(false, ir.DNSRecord{Deployable: "shop-api", Name: ir.Concat{"shop-api-", ir.Parameter("pr"), ".notacme.dev"}, Type: "A", Value: "192.0.2.1"}),
+		{"concat outside", dnsContext(false, ir.DNSRecord{Deployable: "shop-api", Name: ir.Concat{"shop-api-", ir.Parameter("pr"), ".notacme.dev"}, Type: "A", Value: "192.0.2.1"}),
 			`record {"$concat":["shop-api-",{"$parameter":"pr"},".notacme.dev"]} of shop-api is not in zone acme.dev`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,7 +92,7 @@ func TestLowerRefuses(t *testing.T) {
 			}
 		})
 	}
-	ctx := context(false)
+	ctx := dnsContext(false)
 	ctx.Environment.Domain = "acme.devx"
 	if _, err := lowerRecords(ctx); err == nil || !strings.Contains(err.Error(), "domain acme.devx, which is not in zone acme.dev") {
 		t.Errorf("domain outside the zone: %v", err)

@@ -85,8 +85,10 @@ Version sites (relative to the repository root):
   extensions/cloudflare/go.mod        require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
   extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
-                                      .../superschematic/ir vX.Y.Z and
-                                      .../extensions/gcp vX.Y.Z (its tests')
+                                      .../superschematic/ir vX.Y.Z,
+                                      .../extensions/gcp vX.Y.Z and
+                                      .../extensions/cloudflare vX.Y.Z (its
+                                      tests')
   extensions/topcoat/go.mod           require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
@@ -487,6 +489,7 @@ def sites():
                 (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
             ],
             "gomod",
         )

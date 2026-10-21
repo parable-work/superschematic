@@ -1,0 +1,28 @@
+{
+  "name": "@schemas/ts-cron-stack-ts-reports-compile-reports-server",
+  "version": "0.0.0",
+  "description": "Job ts-reports-compile-reports of stack ts-cron-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/core": "2.12.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-trace": "2.12.0",
+    "@schemas/ts-reports-api": "workspace:*",
+    "@schemas/ts-reports-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

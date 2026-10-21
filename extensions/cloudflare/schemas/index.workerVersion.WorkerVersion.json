@@ -1,0 +1,697 @@
+{
+  "token": "cloudflare:index/workerVersion:WorkerVersion",
+  "terraform": {
+    "type": "cloudflare_worker_version",
+    "renames": {
+      "accountId": "account_id",
+      "annotations.workersMessage": "workers_message",
+      "annotations.workersTag": "workers_tag",
+      "annotations.workersTriggeredBy": "workers_triggered_by",
+      "assets.assetManifestSha256": "asset_manifest_sha256",
+      "assets.config.basePath": "base_path",
+      "assets.config.htmlHandling": "html_handling",
+      "assets.config.notFoundHandling": "not_found_handling",
+      "assets.config.runWorkerFirst": "run_worker_first",
+      "bindings.allowedDestinationAddresses": "allowed_destination_addresses",
+      "bindings.allowedSenderAddresses": "allowed_sender_addresses",
+      "bindings.appId": "app_id",
+      "bindings.bucketName": "bucket_name",
+      "bindings.certificateId": "certificate_id",
+      "bindings.className": "class_name",
+      "bindings.databaseId": "database_id",
+      "bindings.destinationAddress": "destination_address",
+      "bindings.dispatchNamespace": "dispatch_namespace",
+      "bindings.indexName": "index_name",
+      "bindings.instanceName": "instance_name",
+      "bindings.keyBase64": "key_base64",
+      "bindings.keyJwk": "key_jwk",
+      "bindings.namespaceId": "namespace_id",
+      "bindings.networkId": "network_id",
+      "bindings.oldName": "old_name",
+      "bindings.queueName": "queue_name",
+      "bindings.scriptName": "script_name",
+      "bindings.secretName": "secret_name",
+      "bindings.serviceId": "service_id",
+      "bindings.simple.mitigationTimeout": "mitigation_timeout",
+      "bindings.storeId": "store_id",
+      "bindings.tunnelId": "tunnel_id",
+      "bindings.versionId": "version_id",
+      "bindings.workflowName": "workflow_name",
+      "cacheOptions": "cache_options",
+      "cacheOptions.crossVersionCache": "cross_version_cache",
+      "compatibilityDate": "compatibility_date",
+      "compatibilityFlags": "compatibility_flags",
+      "containers.className": "class_name",
+      "limits.cpuMs": "cpu_ms",
+      "mainModule": "main_module",
+      "migrations.deletedClasses": "deleted_classes",
+      "migrations.newClasses": "new_classes",
+      "migrations.newSqliteClasses": "new_sqlite_classes",
+      "migrations.newTag": "new_tag",
+      "migrations.oldTag": "old_tag",
+      "migrations.renamedClasses": "renamed_classes",
+      "migrations.steps.deletedClasses": "deleted_classes",
+      "migrations.steps.newClasses": "new_classes",
+      "migrations.steps.newSqliteClasses": "new_sqlite_classes",
+      "migrations.steps.renamedClasses": "renamed_classes",
+      "migrations.steps.transferredClasses": "transferred_classes",
+      "migrations.steps.transferredClasses.fromScript": "from_script",
+      "migrations.transferredClasses": "transferred_classes",
+      "migrations.transferredClasses.fromScript": "from_script",
+      "modules.contentBase64": "content_base64",
+      "modules.contentFile": "content_file",
+      "modules.contentSha256": "content_sha256",
+      "modules.contentType": "content_type",
+      "packageDependencies": "package_dependencies",
+      "packageDependencies.installedVersion": "installed_version",
+      "packageDependencies.packageJsonVersion": "package_json_version",
+      "placement.targets": "target",
+      "usageModel": "usage_model",
+      "workerId": "worker_id"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "annotations": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionAnnotations:WorkerVersionAnnotations"
+    },
+    "assets": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionAssets:WorkerVersionAssets"
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkerVersionBinding:WorkerVersionBinding"
+      }
+    },
+    "cacheOptions": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionCacheOptions:WorkerVersionCacheOptions"
+    },
+    "compatibilityDate": {
+      "type": "string"
+    },
+    "compatibilityFlags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "containers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkerVersionContainer:WorkerVersionContainer"
+      }
+    },
+    "deploy": {
+      "type": "boolean"
+    },
+    "exports": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/types/cloudflare:index/WorkerVersionExports:WorkerVersionExports"
+      }
+    },
+    "include": {
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionLimits:WorkerVersionLimits"
+    },
+    "mainModule": {
+      "type": "string"
+    },
+    "migrations": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionMigrations:WorkerVersionMigrations"
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkerVersionModule:WorkerVersionModule"
+      }
+    },
+    "packageDependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkerVersionPackageDependency:WorkerVersionPackageDependency"
+      }
+    },
+    "placement": {
+      "$ref": "#/types/cloudflare:index/WorkerVersionPlacement:WorkerVersionPlacement"
+    },
+    "usageModel": {
+      "type": "string",
+      "deprecationMessage": "This attribute is deprecated."
+    },
+    "workerId": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "workerId"
+  ],
+  "types": {
+    "cloudflare:index/WorkerVersionAnnotations:WorkerVersionAnnotations": {
+      "type": "object",
+      "properties": {
+        "workersMessage": {
+          "type": "string"
+        },
+        "workersTag": {
+          "type": "string"
+        },
+        "workersTriggeredBy": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionAssets:WorkerVersionAssets": {
+      "type": "object",
+      "properties": {
+        "assetManifestSha256": {
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/types/cloudflare:index/WorkerVersionAssetsConfig:WorkerVersionAssetsConfig"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "jwt": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionAssetsConfig:WorkerVersionAssetsConfig": {
+      "type": "object",
+      "properties": {
+        "basePath": {
+          "type": "string"
+        },
+        "htmlHandling": {
+          "type": "string"
+        },
+        "notFoundHandling": {
+          "type": "string"
+        },
+        "runWorkerFirst": {
+          "$ref": "pulumi.json#/Any"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionBinding:WorkerVersionBinding": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string"
+        },
+        "allowedDestinationAddresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowedSenderAddresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "appId": {
+          "type": "string"
+        },
+        "bucketName": {
+          "type": "string"
+        },
+        "certificateId": {
+          "type": "string"
+        },
+        "className": {
+          "type": "string"
+        },
+        "databaseId": {
+          "type": "string"
+        },
+        "dataset": {
+          "type": "string"
+        },
+        "destinationAddress": {
+          "type": "string"
+        },
+        "dispatchNamespace": {
+          "type": "string"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "identity": {
+          "type": "string"
+        },
+        "indexName": {
+          "type": "string"
+        },
+        "instanceName": {
+          "type": "string"
+        },
+        "json": {
+          "type": "string"
+        },
+        "jurisdiction": {
+          "type": "string"
+        },
+        "keyBase64": {
+          "type": "string"
+        },
+        "keyJwk": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "namespaceId": {
+          "type": "string"
+        },
+        "networkId": {
+          "type": "string"
+        },
+        "oldName": {
+          "type": "string"
+        },
+        "outbound": {
+          "$ref": "#/types/cloudflare:index/WorkerVersionBindingOutbound:WorkerVersionBindingOutbound"
+        },
+        "part": {
+          "type": "string"
+        },
+        "pipeline": {
+          "type": "string"
+        },
+        "queueName": {
+          "type": "string"
+        },
+        "scriptName": {
+          "type": "string"
+        },
+        "secretName": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "simple": {
+          "$ref": "#/types/cloudflare:index/WorkerVersionBindingSimple:WorkerVersionBindingSimple"
+        },
+        "storeId": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "tunnelId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "usages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "versionId": {
+          "type": "string"
+        },
+        "workflowName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ]
+    },
+    "cloudflare:index/WorkerVersionBindingOutbound:WorkerVersionBindingOutbound": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionBindingOutboundParam:WorkerVersionBindingOutboundParam"
+          }
+        },
+        "worker": {
+          "$ref": "#/types/cloudflare:index/WorkerVersionBindingOutboundWorker:WorkerVersionBindingOutboundWorker"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionBindingOutboundParam:WorkerVersionBindingOutboundParam": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "cloudflare:index/WorkerVersionBindingOutboundWorker:WorkerVersionBindingOutboundWorker": {
+      "type": "object",
+      "properties": {
+        "entrypoint": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionBindingSimple:WorkerVersionBindingSimple": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number"
+        },
+        "mitigationTimeout": {
+          "type": "integer"
+        },
+        "period": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit",
+        "period"
+      ]
+    },
+    "cloudflare:index/WorkerVersionCacheOptions:WorkerVersionCacheOptions": {
+      "type": "object",
+      "properties": {
+        "crossVersionCache": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionContainer:WorkerVersionContainer": {
+      "type": "object",
+      "properties": {
+        "className": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "className"
+      ]
+    },
+    "cloudflare:index/WorkerVersionExports:WorkerVersionExports": {
+      "type": "object",
+      "properties": {
+        "cache": {
+          "$ref": "#/types/cloudflare:index/WorkerVersionExportsCache:WorkerVersionExportsCache"
+        },
+        "renamedTo": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "storage": {
+          "type": "string"
+        },
+        "transferFrom": {
+          "type": "string"
+        },
+        "transferredTo": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "cloudflare:index/WorkerVersionExportsCache:WorkerVersionExportsCache": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "cloudflare:index/WorkerVersionLimits:WorkerVersionLimits": {
+      "type": "object",
+      "properties": {
+        "cpuMs": {
+          "type": "integer"
+        },
+        "subrequests": {
+          "type": "integer"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrations:WorkerVersionMigrations": {
+      "type": "object",
+      "properties": {
+        "deletedClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "newClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "newSqliteClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "newTag": {
+          "type": "string"
+        },
+        "oldTag": {
+          "type": "string"
+        },
+        "renamedClasses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionMigrationsRenamedClass:WorkerVersionMigrationsRenamedClass"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionMigrationsStep:WorkerVersionMigrationsStep"
+          }
+        },
+        "transferredClasses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionMigrationsTransferredClass:WorkerVersionMigrationsTransferredClass"
+          }
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrationsRenamedClass:WorkerVersionMigrationsRenamedClass": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrationsStep:WorkerVersionMigrationsStep": {
+      "type": "object",
+      "properties": {
+        "deletedClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "newClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "newSqliteClasses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "renamedClasses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionMigrationsStepRenamedClass:WorkerVersionMigrationsStepRenamedClass"
+          }
+        },
+        "transferredClasses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionMigrationsStepTransferredClass:WorkerVersionMigrationsStepTransferredClass"
+          }
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrationsStepRenamedClass:WorkerVersionMigrationsStepRenamedClass": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrationsStepTransferredClass:WorkerVersionMigrationsStepTransferredClass": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "fromScript": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionMigrationsTransferredClass:WorkerVersionMigrationsTransferredClass": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "fromScript": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionModule:WorkerVersionModule": {
+      "type": "object",
+      "properties": {
+        "contentBase64": {
+          "type": "string"
+        },
+        "contentFile": {
+          "type": "string"
+        },
+        "contentSha256": {
+          "type": "string"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contentType",
+        "name"
+      ]
+    },
+    "cloudflare:index/WorkerVersionPackageDependency:WorkerVersionPackageDependency": {
+      "type": "object",
+      "properties": {
+        "installedVersion": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "packageJsonVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installedVersion",
+        "name",
+        "packageJsonVersion"
+      ]
+    },
+    "cloudflare:index/WorkerVersionPlacement:WorkerVersionPlacement": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerVersionPlacementTarget:WorkerVersionPlacementTarget"
+          }
+        }
+      }
+    },
+    "cloudflare:index/WorkerVersionPlacementTarget:WorkerVersionPlacementTarget": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

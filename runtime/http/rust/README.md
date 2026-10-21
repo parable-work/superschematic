@@ -104,6 +104,9 @@ TypeScript runtimes' (D51):
   `ServiceAuthConfig` `JwtServiceAuthenticator` takes; and `load_cors`
   `<field>_ORIGINS`. Each refuses what Go's refuses, with its messages, all
   of a field's in one `StackConfigError`, and has a `_from` twin over a map.
+  The members only a Worker reads, a D1 binding, a service binding and an
+  R2 binding with its credential (D64), are refused with a message that
+  says so, as Go's are.
   `runtime/http/testdata/stackconfig_parity.json` holds the three runtimes
   to one encoding; `tests/stackconfig_parity.rs` runs every vector. An
   API's identity config, `<API>_IDENTITY`, is the JSON `identity::Config`

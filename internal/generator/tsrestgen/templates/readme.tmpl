@@ -44,7 +44,8 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   without it, such an operation answers 401 `service_unauthorized`.
 {{- end }}
 - `deps.ts`: `Deps`, what the implementation is built from (its `config`
-  when it has one, a `pg` Pool `db` for its database, an SDK client per API
+  when it has one, {{ if .DepsSQLite }}a `SqlDatabase` `db`, D1's interface, for its database,
+  whose DB service lists sqlite first{{ else }}a `pg` Pool `db` for its database{{ end }}, an SDK client per API
   it calls, and a `logger`), and `Constructor`, the type of the
   implementation's `create`.
 {{- if .ChecksEndUsers }} `AuthenticatorFactory` is the type of its

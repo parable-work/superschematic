@@ -95,6 +95,20 @@ Its entry points:
   for a stack's server, job and worker on Bun (D67, below). It is the
   only entry that imports the `@opentelemetry/*` packages, so the other
   entries bundle without them.
+- `@superschematic/http-runtime/workers`, what a Worker's generated entry
+  reads its env and bindings with on Cloudflare Workers (D64, below).
+- `@superschematic/http-runtime/d1`, `SqlDatabase`, the runtime's copy of
+  D1's interface, which `Deps.db` is for a database whose DB service lists
+  `sqlite` first, and `ping`.
+- `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
+  `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
+  the path a `sqlite:` URL names. It runs under Bun alone.
+- `@superschematic/http-runtime/r2`, a `Bucket` over a Worker's R2
+  binding, which presigns S3 URLs with WebCrypto.
+
+The main entry, `./hono`, `./workers`, `./d1` and `./r2` import nothing
+from `node:` and read no Bun global, so a Worker bundles them with no
+`nodejs_compat`; `scripts/workers-check.mjs` holds them to it (below).
 
 ## Authentication and permissions
 
@@ -273,19 +287,27 @@ these, the twins of the Go runtime's `stackconfig` package (D51):
 
 - `loadDatabase(field, env = process.env)` reads a database connection:
   `field_URL`, a connection string, or `field_CLOUD_SQL_INSTANCE`,
-  `_DATABASE` and `_USER`, a Cloud SQL connector configuration. It
-  returns a `Database`, `{ url }` or `{ cloudSql: { instance, database,
-  user } }`.
-- `loadService(field, env)` reads a service endpoint: `field_URL`, and,
-  when `field_CREDENTIAL_SOURCE` is set, the members that source reads.
-  It returns a `Service`, `{ url, credential? }`, whose credential is a
+  `_DATABASE` and `_USER`, a Cloud SQL connector configuration, or on
+  Workers `field_D1_BINDING` and `field_D1_DATABASE`, a D1 binding (D64).
+  It returns a `DatabaseConnection`: a `Database`, `{ url }` or
+  `{ cloudSql: { instance, database, user } }`, which a server opens a
+  pool over, or `{ d1: { binding, database } }`.
+- `loadService(field, env)` reads a service endpoint: `field_URL`, on
+  Workers `field_BINDING_NAME` and `field_BINDING_WORKER`, the service
+  binding the callee is reached through (D64), and, when
+  `field_CREDENTIAL_SOURCE` is set, the members that source reads. It
+  returns a `Service`, `{ url, binding?, credential? }`, whose credential
+  is a
   `google-id-token` (`audience`), a `token-file` (`tokenFile`) or a
   `signed-token` (`audience`, `issuer`, `key`, a private JWK's JSON or,
   from the generic connector, an Ed25519 private key's PKCS#8 PEM, D63),
   with the `headers` that carry it when they are set.
 - `loadBucket(field, env)` reads a bucket connection (D54): `field_NAME`,
-  and `field_ENDPOINT` when an emulator serves the bucket. It returns a
-  `BucketConnection`, `{ name, endpoint? }`.
+  `field_ENDPOINT` when an emulator serves the bucket, and on Workers
+  `field_BINDING`, the R2 binding, and `field_R2_ACCOUNT`,
+  `field_R2_ACCESS_KEY_ID` and `field_R2_TOKEN`, the credential that signs
+  its URLs (D64). It returns a `BucketConnection`, `{ name, endpoint?,
+  binding?, r2? }`.
 - `loadCallers(field, env)` reads an API's callers field
   (`<API>_CALLERS`): its issuers, keys and callers, as the
   `ServiceAuthConfig` that `serviceAuthenticator` takes. A key is a JWK's
@@ -307,8 +329,11 @@ empty one are alike, but under a callers field an empty optional member
 is present and empty, as Go reads its environment. The vectors in
 `runtime/http/testdata/stackconfig_parity.json`, which the Go runtime
 writes from `ir.DerivedVariables` (`go test ./stackconfig -run
-TestWriteParityVectors -update` in `runtime/http/go`), hold both runtimes
-to one encoding.
+TestWriteParityVectors -update` in `runtime/http/go`), hold the three
+runtimes to one encoding. The members only a Worker reads, a D1 binding, a
+service binding and an R2 binding with its credential, are read here and
+refused by the Go and Rust readers, which say only a Worker reads them; a
+vector's `workerOnly` holds their refusal.
 
 `createLogger(fields, { level, write })` returns a `Logger` that writes
 one JSON object per line to stdout through `console.log`: `level`, `time`
@@ -385,6 +410,94 @@ client takes the application default credentials and signs as the
 workload's account through IAM's `signBlob`. `src/gcs.test.ts` runs
 against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
 
+## On Cloudflare Workers
+
+A TypeScript server or job some environment places on the `cloudflare`
+target runs as a Worker (D64, section 18 of `docs/stack-model.md`). A
+server's generated `fetch.ts`, and a job's `scheduled.ts`, build what
+`main.ts` builds on Bun from these. A site's Worker runs a script the
+target embeds, and none of this package:
+
+- `stackEnvOf(env)` turns the Worker's env into the string map the readers
+  above take: each `plain_text` and `secret_text` binding, a literal, a
+  parameter or a derived variable, by its name. The entry reads its config
+  from it at module scope, so a refused config fails the version's upload.
+- `loadSecrets(env, names)` awaits each Secrets Store secret binding a
+  config names (a `Secret<T>` field's) once per isolate, and again after a
+  `get()` that failed; `stackEnvWithSecrets(env, names)` adds them to the
+  map.
+- `binding(env, name, kind)` takes a `d1`, `r2`, `service` or `secret`
+  binding by the name a value gives (`database.d1.binding`,
+  `service.binding.name`, `bucket.binding`), and throws a
+  `WorkersBindingError` naming one that is missing or of another kind.
+  `serviceFetch(binding)` is the `fetch` an SDK client takes, so its calls
+  go through the service binding.
+- `requestIP(request)` reads `CF-Connecting-IP` in the shape of Bun's
+  `server.requestIP`, which the Hono adapter reads from the bindings
+  `app.fetch` takes: `app.fetch(request, { requestIP })`.
+- `perIsolate(build)` builds a value on the first call of an isolate,
+  shares it with every later call and every call while it builds, and
+  builds again after a build that failed: `Deps`, the clients and the app.
+
+`SqlDatabase`, from `./d1`, is D1's interface: `prepare(sql).bind(...)`
+then `first`, `all`, `run` or `raw`; `batch`, atomic; and `exec`, which
+runs a script one line per statement. Placeholders are `?` and `?N`.
+`ping(db)` resolves when `SELECT 1` answers within two seconds, as
+`/readyz` asks. A D1 binding is one; `openSqlite(path)`, from `./sqlite`,
+gives one over `bun:sqlite` for `stack dev`, with foreign keys on, a
+boolean bound as 1 or 0, `bind` throwing D1's `D1_TYPE_ERROR` for
+`undefined` (bind an optional field as `value ?? null`), a BLOB read back
+as an `Array` of its bytes, `batch` in one transaction and each run's
+`changes`, `last_row_id` and duration in its `meta`, as D1 reports them.
+`connectPostgres` refuses a D1 connection. Under `stack dev` the local
+target derives a sqlite-first database's connection as a `sqlite:` URL to
+a file under the environment's state directory: `sqliteFile(url)` reads
+`sqlite:PATH` and `sqlite://PATH` as `PATH`, as the migration runner
+does, and refuses any other URL by its scheme alone, since a connection
+string may hold a password. The generated `main.ts` opens the database
+with `openSqlite(sqliteFile(url))`.
+
+`openR2Bucket(binding, connection)`, from `./r2`, is the `Bucket` over an
+R2 binding: `put` (a stream read whole first, since R2 takes a stream
+only when it knows its length), `get`, `delete`, `list` in key order,
+and `signedUrl`, a V4 query-string URL for
+`https://<account>.r2.cloudflarestorage.com/<bucket>/<object>`, signed
+with WebCrypto's HMAC, for at most seven days. Its access key is the
+edge's token id and its secret the hex SHA-256 of the token's value, which
+it computes once. `presignV4` signs AWS's published example as AWS does.
+
+`scripts/workers-check.mjs` bundles the main entry, `./hono`,
+`./workers`, `./d1` and `./r2` from `dist/` as a Worker's `bundle.ts`
+does, `bun build --target=browser --conditions=workerd` with `.wasm`
+modules external, and fails on an import from `node:` (read from the
+bundle's metafile, since Bun's browser target swaps such a module for a
+polyfill or an empty one), an import from `bun:` or the `Bun` global, and
+a WebAssembly module other than superscalar's `superscalar_wasm_bg.wasm`.
+Given files, it checks them instead; `src/workers-check.test.ts` plants a
+`node:fs` import, the `Bun` global and another module, and sees each
+refused.
+
+`scripts/workerd-test.mjs` runs the fixtures under `test/workerd/fixtures`
+with the `workerd` binary that `test/workerd/bun.lock` pins, apart from
+the runtime's own dependencies. It bundles each fixture as above, copies
+superscalar's module beside it, writes its `config.capnp` with a fresh
+Ed25519 key pair for the edge, and runs `workerd test`. The `app` fixture
+is a storefront Worker configured as the cloudflare target configures one:
+text bindings for its config, wrapped stand-ins for D1, R2 and a Secrets
+Store secret, and a service binding to a pricing Worker. Its test handler
+reads a cart through a Hono app built once per isolate, checks the
+shopper's address through superscalar's `workerd` build, signs a token for
+pricing, which verifies it against its callers field, and signs an R2
+URL. The `calls` fixture holds the two Workers of the cloudflare target's
+calls fixture with the bindings its Staging gives them, which the
+target's tests hold to its golden file: the storefront's call through
+the service binding with a token signed by the edge's key is accepted,
+one with no credential and one signed by another key are refused 401, a
+call to an API the server serves itself stays in process, and an object
+goes into the bucket through its r2_bucket binding and gets a URL signed
+with the edge's R2 credential. The `refused` fixture's config is refused
+at module scope, and workerd must fail to load it, naming the variable.
+
 ## Trace export
 
 `startTelemetry({ service, stack, kind, logger })`, from
@@ -452,7 +565,7 @@ app.onError(errorHandler());
 cd runtime/http/typescript
 bun install --frozen-lockfile
 bun run build    # links superscalar, then tsc writes dist/
-bun run test     # links superscalar, runs tsc --noEmit, bun test src, then the identity check under Node
+bun run test     # links superscalar, runs tsc --noEmit, bun test src, the identity check under Node, the Workers check and the workerd fixtures
 ```
 
 Both scripts link `third_party/superscalar` (built by

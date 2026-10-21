@@ -1,0 +1,21 @@
+{
+  "name": "@acme/shop-wishlist-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the shop-wishlist API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@acme/shop-wishlist-api": "workspace:*",
+    "@acme/shop-wishlist-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

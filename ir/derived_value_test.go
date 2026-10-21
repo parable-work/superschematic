@@ -2,6 +2,7 @@ package ir
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,27 @@ func TestDerivedValuesMeetTheirContract(t *testing.T) {
 		{"a bucket on its provider", EdgeBucket, BucketConnection{Name: Output{Resource: "shop-media.bucket", Name: "name"}}},
 		{"a bucket on an emulator", EdgeBucket, BucketConnection{Name: "shop-media", Endpoint: "http://127.0.0.1:24443"}},
 		{"a bucket as json", EdgeBucket, map[string]any{"name": Concat{"acme-shop-media-", Parameter("pr")}}},
+		{"a d1 binding", EdgeSQL, DatabaseConnection{D1: &D1Connection{
+			Binding: "SHOP_DB_DATABASE", Database: Output{Resource: "shop-db.database", Name: "uuid"},
+		}}},
+		{"a service binding", EdgeHTTP, ServiceEndpoint{
+			URL:     "https://shop-api",
+			Binding: &ServiceBinding{Name: "SHOP_API_SERVICE", Worker: "shop-api"},
+			Credential: &ServiceCredential{
+				Source: CredentialSignedToken, Audience: "shop-api", Issuer: "Storefront",
+				Key: Output{Resource: "Storefront.calls.shop-api.key", Name: "privateKeyPemPkcs8"},
+			},
+		}},
+		{"an r2 binding with its credential", EdgeBucket, BucketConnection{
+			Name:    Output{Resource: "shop-media.bucket", Name: "name"},
+			Binding: "SHOP_MEDIA_BUCKET",
+			R2: &R2Credential{
+				Account:     "0123456789abcdef0123456789abcdef",
+				AccessKeyID: Output{Resource: "Storefront.shop-media.token", Name: "id"},
+				Token:       Output{Resource: "Storefront.shop-media.token", Name: "value"},
+			},
+		}},
+		{"an r2 binding alone", EdgeBucket, BucketConnection{Name: "shop-media", Binding: "SHOP_MEDIA_BUCKET"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,8 +92,11 @@ func TestDerivedValuesThatBreakTheContract(t *testing.T) {
 		want  string
 	}{
 		{"free-form string", EdgeSQL, "postgres://localhost/shop", "a database connection must be an object"},
-		{"neither form", EdgeSQL, DatabaseConnection{}, "sets url or cloudSql"},
-		{"both forms", EdgeSQL, DatabaseConnection{URL: "postgres://x", CloudSQL: &CloudSQLConnection{Instance: "a", Database: "b", User: "c"}}, "not both"},
+		{"neither form", EdgeSQL, DatabaseConnection{}, "sets url, cloudSql or d1"},
+		{"both forms", EdgeSQL, DatabaseConnection{URL: "postgres://x", CloudSQL: &CloudSQLConnection{Instance: "a", Database: "b", User: "c"}}, "not url and cloudSql"},
+		{"a url and a d1 binding", EdgeSQL, DatabaseConnection{URL: "postgres://x", D1: &D1Connection{Binding: "B", Database: "d"}}, "not url and d1"},
+		{"a d1 binding without its database", EdgeSQL, DatabaseConnection{D1: &D1Connection{Binding: "B"}}, "d1.database is null"},
+		{"a d1 binding's unknown member", EdgeSQL, map[string]any{"d1": map[string]any{"binding": "B", "database": "d", "account": "a"}}, "d1 has no member account"},
 		{"unknown member", EdgeSQL, map[string]any{"instance": "acme:us:shop", "database": "shop_db"}, "has no member database"},
 		{"missing cloud sql member", EdgeSQL, DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "a", Database: "b"}}, "cloudSql.user is null"},
 		{"empty url", EdgeSQL, DatabaseConnection{URL: ""}, `url is ""`},
@@ -89,6 +114,10 @@ func TestDerivedValuesThatBreakTheContract(t *testing.T) {
 		{"a bucket without a name", EdgeBucket, BucketConnection{Endpoint: "http://127.0.0.1:24443"}, "name is null"},
 		{"a bucket with a credential", EdgeBucket, map[string]any{"name": "shop-media", "key": "secret"}, "a bucket connection has no member key"},
 		{"an empty endpoint", EdgeBucket, map[string]any{"name": "shop-media", "endpoint": ""}, `endpoint is ""`},
+		{"a service binding without its worker", EdgeHTTP, ServiceEndpoint{URL: "https://x", Binding: &ServiceBinding{Name: "X_SERVICE"}}, "binding.worker is null"},
+		{"an r2 credential without a binding", EdgeBucket, BucketConnection{Name: "m", R2: &R2Credential{Account: "a", AccessKeyID: "i", Token: Output{Resource: "t", Name: "value"}}}, "with r2 sets binding"},
+		{"an r2 credential without its token", EdgeBucket, BucketConnection{Name: "m", Binding: "B", R2: &R2Credential{Account: "a", AccessKeyID: "i"}}, "r2.token is null"},
+		{"an r2 binding on an emulator", EdgeBucket, BucketConnection{Name: "m", Binding: "B", Endpoint: "http://127.0.0.1:24443"}, "endpoint or binding, not both"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,17 +215,37 @@ func TestDerivedVariablesMarkSecretMembers(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("variables:\n got %#v\nwant %#v", got, want)
 	}
-	for _, path := range []string{"credential.key"} {
+	secrets := []string{"credential.key", "r2.token"}
+	for _, path := range secrets {
 		if !SecretDerivedMember(path) {
 			t.Errorf("%s is no secret member", path)
 		}
 	}
 	for _, kind := range []EdgeKind{EdgeSQL, EdgeHTTP, EdgeSite, EdgeBucket} {
 		for _, path := range DerivedMembers(kind) {
-			if SecretDerivedMember(path) != (path == "credential.key") {
+			if SecretDerivedMember(path) != slices.Contains(secrets, path) {
 				t.Errorf("%s %s: SecretDerivedMember = %v", kind, path, SecretDerivedMember(path))
 			}
 		}
+	}
+	// An R2 credential's token is one too (D64).
+	token := Output{Resource: "Storefront.shop-media.token", Name: "value"}
+	got, err = DerivedVariables("SHOP_MEDIA_BUCKET", BucketConnection{
+		Name: "shop-media", Binding: "SHOP_MEDIA_BUCKET",
+		R2: &R2Credential{Account: "acct", AccessKeyID: "id", Token: token},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []DerivedVariable{
+		{Name: "SHOP_MEDIA_BUCKET_BINDING", Value: "SHOP_MEDIA_BUCKET"},
+		{Name: "SHOP_MEDIA_BUCKET_NAME", Value: "shop-media"},
+		{Name: "SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID", Value: "id"},
+		{Name: "SHOP_MEDIA_BUCKET_R2_ACCOUNT", Value: "acct"},
+		{Name: "SHOP_MEDIA_BUCKET_R2_TOKEN", Value: token, Secret: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("r2 variables:\n got %#v\nwant %#v", got, want)
 	}
 	// A member of the same name deeper in another value is no secret.
 	got, err = DerivedVariables("F", map[string]any{"a": map[string]any{"credential": map[string]any{"key": "k"}}})
@@ -302,26 +351,41 @@ func TestDerivedConfigFields(t *testing.T) {
 // TestDerivedMembersNameTheVariables: DerivedVariables names a value's
 // variables as DerivedVariableName names its members.
 func TestDerivedMembersNameTheVariables(t *testing.T) {
-	values := map[EdgeKind]any{
-		EdgeSQL: DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "i", Database: "d", User: "u"}},
-		EdgeHTTP: ServiceEndpoint{URL: "u", Credential: &ServiceCredential{
+	values := map[EdgeKind][]any{
+		EdgeSQL: {
+			DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "i", Database: "d", User: "u"}},
+			DatabaseConnection{D1: &D1Connection{Binding: "b", Database: "d"}},
+		},
+		EdgeHTTP: {ServiceEndpoint{URL: "u", Binding: &ServiceBinding{Name: "n", Worker: "w"}, Credential: &ServiceCredential{
 			Source: CredentialSignedToken, Audience: "a", Issuer: "i", Key: "k", Headers: []string{ServiceAuthorizationHeader},
-		}},
-		EdgeBucket: BucketConnection{Name: "n", Endpoint: "e"},
+		}}},
+		EdgeBucket: {
+			BucketConnection{Name: "n", Endpoint: "e"},
+			BucketConnection{Name: "n", Binding: "b", R2: &R2Credential{Account: "a", AccessKeyID: "i", Token: "t"}},
+		},
 	}
-	for kind, value := range values {
-		names := map[string]bool{}
-		for _, path := range DerivedMembers(kind) {
-			names[DerivedVariableName("F", path)] = true
+	for kind, list := range values {
+		for _, value := range list {
+			checkVariablesAreMembers(t, kind, value)
 		}
-		vars, err := DerivedVariables("F", value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, v := range vars {
-			if !names[v.Name] {
-				t.Errorf("%s: variable %s is no member DerivedMembers lists", kind, v.Name)
-			}
+	}
+}
+
+// checkVariablesAreMembers checks each variable DerivedVariables makes of
+// value is a member DerivedMembers lists for kind.
+func checkVariablesAreMembers(t *testing.T, kind EdgeKind, value any) {
+	t.Helper()
+	names := map[string]bool{}
+	for _, path := range DerivedMembers(kind) {
+		names[DerivedVariableName("F", path)] = true
+	}
+	vars, err := DerivedVariables("F", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vars {
+		if !names[v.Name] {
+			t.Errorf("%s: variable %s is no member DerivedMembers lists", kind, v.Name)
 		}
 	}
 }

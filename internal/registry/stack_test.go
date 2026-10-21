@@ -65,6 +65,10 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
 		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
 		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image or bundle)`},
+		{"no identity beside an identity config", func(s *PlatformSpec) {
+			s.NoIdentity = "its isolates hash no passwords"
+			s.IdentityConfig = `{"cookie": {"secure": false}}`
+		}, "declares an identity config and says it runs no identity runtime"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,6 +91,13 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("database that runs no identity runtime", func(t *testing.T) {
+		spec := sqlPlatform("fake.sql")
+		spec.NoIdentity = "it serves no API"
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform serves an API over the user model") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -377,6 +388,8 @@ func TestRegisterTargetRejects(t *testing.T) {
 		{"no name", func(s *TargetSpec) { s.Name = "" }, "has no name"},
 		{"unknown kind", func(s *TargetSpec) { s.Platforms["queue"] = "fake.queue" }, `deployable kind "queue"`},
 		{"empty platform", func(s *TargetSpec) { s.Platforms[ir.DeployableServer] = "" }, "empty platform for server"},
+		{"database platform of an unknown dialect", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{"mysql": "fake.my"} }, `database platform for dialect "mysql" (want postgres or sqlite)`},
+		{"empty database platform", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{SQLDialectSQLite: ""} }, "empty database platform for sqlite"},
 		{"bad values schema", func(s *TargetSpec) { s.Values = json.RawMessage(`{"required": 1}`) }, "Values"},
 		{"bad resource type schema", func(s *TargetSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"fake:x/y:Z": json.RawMessage(`{"type": 1}`)}
@@ -451,6 +464,22 @@ func TestRegisterTargetRejects(t *testing.T) {
 	t.Run("platform of another kind", func(t *testing.T) {
 		err := finalize(t, func(_ *Registry, s *TargetSpec) { s.Platforms[ir.DeployableDatabase] = "fake.run" })
 		if err == nil || !strings.Contains(err.Error(), `names platform "fake.run" for database, but it is a server platform`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("unknown database platform", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.lite"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `target "fake" names database platform "fake.lite" for sqlite, which is not registered`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("database platform of another dialect", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.sql"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.sql" for sqlite databases, but it is a database platform of dialects [postgres]`) {
 			t.Fatalf("Finalize = %v", err)
 		}
 	})

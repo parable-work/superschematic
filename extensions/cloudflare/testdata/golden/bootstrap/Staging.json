@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "stack": "edge-stackBootstrap",
+  "environment": "0123456789abcdef0123456789abcdef",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef"
+  },
+  "deployables": [],
+  "resources": {
+    "resources": [
+      {
+        "id": "deployer",
+        "type": "cloudflare:index/accountToken:AccountToken",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "edge-stack-deployer",
+          "policies": [
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "7e744e7ed99f78c66add427f2d45ed4e"
+                },
+                {
+                  "id": "12dcf01dffe1eaf6de53887ed5c7a6aa"
+                },
+                {
+                  "id": "92228b84342d37cfe87737426f3faf24"
+                },
+                {
+                  "id": "179d3bb8e0da2b8cffe0c19d698699b3"
+                },
+                {
+                  "id": "cce7bffb1614015a55f65573a0b0a36b"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":\"*\"}"
+            },
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "48fe54888f2c2aede5394d8a0fa65add"
+                },
+                {
+                  "id": "6519df0bc5fb791f418bb9affe72c873"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":{\"com.cloudflare.api.account.zone.*\":\"*\"}}"
+            }
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner",
+        "type": "cloudflare:index/accountToken:AccountToken",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "edge-stack-planner",
+          "policies": [
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "15815937a48312cf568c33cb9ed93f11"
+                },
+                {
+                  "id": "3df83be047b48c0bbf9b4a59262d1197"
+                },
+                {
+                  "id": "01bcfb7a50e1cea9eba6cb8f6208a5ac"
+                },
+                {
+                  "id": "a5209f08d7bcd5bba86defdc51410a69"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":\"*\"}"
+            },
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "74650fa66ff907cbc3850a5b0a23c955"
+                },
+                {
+                  "id": "c4c0b111b94489de8ed41a7035ee9f09"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":{\"com.cloudflare.api.account.zone.*\":\"*\"}}"
+            },
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "2efd5506f9c8494dacb1fa10a3e7d5b6"
+                }
+              ],
+              "resources": "{\"com.cloudflare.edge.r2.bucket.0123456789abcdef0123456789abcdef_default_superschematic-state\":\"*\"}"
+            }
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "preview",
+        "type": "cloudflare:index/accountToken:AccountToken",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "edge-stack-preview",
+          "policies": [
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "7e744e7ed99f78c66add427f2d45ed4e"
+                },
+                {
+                  "id": "12dcf01dffe1eaf6de53887ed5c7a6aa"
+                },
+                {
+                  "id": "92228b84342d37cfe87737426f3faf24"
+                },
+                {
+                  "id": "01bcfb7a50e1cea9eba6cb8f6208a5ac"
+                },
+                {
+                  "id": "cce7bffb1614015a55f65573a0b0a36b"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":\"*\"}"
+            },
+            {
+              "effect": "allow",
+              "permissionGroups": [
+                {
+                  "id": "48fe54888f2c2aede5394d8a0fa65add"
+                },
+                {
+                  "id": "6519df0bc5fb791f418bb9affe72c873"
+                }
+              ],
+              "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":{\"com.cloudflare.api.account.zone.*\":\"*\"}}"
+            }
+          ]
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "deployer",
+        "planner",
+        "preview"
+      ]
+    }
+  ]
+}

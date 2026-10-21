@@ -8,6 +8,10 @@
     "build": "rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+  "dependencies": {
+    "@acme/shop-api-sdk": "workspace:*",
+    "@acme/shop-api-types": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "5.9.3"
   }

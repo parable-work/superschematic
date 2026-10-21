@@ -40,16 +40,22 @@ func init() { registerStackCommands(newStackInitCmd) }
 // does not. A test names stacktest's fake target in its place.
 var cloudTarget = "gcp"
 
+// cloudflareTarget is the target of the cloud environment init writes from
+// a Cloudflare account: cloudflare, which the installed binary links
+// (extensions/cloudflare, D64). A test names a target of its own.
+var cloudflareTarget = "cloudflare"
+
 // stackInitFlags holds `stack init`'s flag values.
 type stackInitFlags struct {
-	name        string
-	gcpProject  string
-	region      string
-	environment string
-	ci          []string
-	expose      []string
-	force       bool
-	namingPath  string
+	name              string
+	gcpProject        string
+	region            string
+	cloudflareAccount string
+	environment       string
+	ci                []string
+	expose            []string
+	force             bool
+	namingPath        string
 }
 
 func newStackInitCmd(a *app) *cobra.Command {
@@ -72,9 +78,11 @@ names the APIs to expose in their place, or none.
 Its environments are Dev, on the local target that stack dev runs, and,
 given a Google Cloud project and region, one on the gcp target, Staging
 unless --environment names it, with src/gcp-target.ts typing the target's
-values and settings for tsc. Only the installed binary links the gcp
-target. --ci github turns on the stack's generated GitHub Actions workflow
-(outputs.ci).
+values and settings for tsc. Given a Cloudflare account's id instead
+(--cloudflare-account), that environment is on the cloudflare target, with
+src/cloudflare-target.ts. Only the installed binary links the gcp and
+cloudflare targets. --ci github turns on the stack's generated GitHub
+Actions workflow (outputs.ci).
 
 It adds to the .gitignore that covers the schemas root, the nearest one at
 or above it in its repository, else a new one there: the output root's
@@ -98,6 +106,7 @@ Without a directory, init writes under ./schemas/services.
 Examples:
   superschematic stack init
   superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+  superschematic stack init --cloudflare-account 0123456789abcdef0123456789abcdef
   superschematic stack init ./schemas/services --name shop-stack --expose shop-api`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -111,7 +120,8 @@ Examples:
 	cmd.Flags().StringVar(&flags.name, "name", "", "the stack service's name (default: the first word its services' names share, then -stack, such as shop-stack)")
 	cmd.Flags().StringVar(&flags.gcpProject, "gcp-project", "", "the Google Cloud project of a gcp environment")
 	cmd.Flags().StringVar(&flags.region, "region", "", "the region of the gcp environment, such as us-east1")
-	cmd.Flags().StringVar(&flags.environment, "environment", "", "the gcp environment's name (default "+stackinit.DefaultCloudEnvironment+")")
+	cmd.Flags().StringVar(&flags.cloudflareAccount, "cloudflare-account", "", "the Cloudflare account of a cloudflare environment: its id, 32 hexadecimal digits from the dashboard")
+	cmd.Flags().StringVar(&flags.environment, "environment", "", "the cloud environment's name (default "+stackinit.DefaultCloudEnvironment+")")
 	cmd.Flags().StringSliceVar(&flags.ci, "ci", nil, "the CI renderer the stack's config turns on, github for GitHub Actions (outputs.ci)")
 	cmd.Flags().StringSliceVar(&flags.expose, "expose", nil, "the API services to expose, comma-separated, in place of those derived from their operations; none exposes none")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "write the stack although the tree has a Stack service: replace the one of the same name, or add another")
@@ -221,8 +231,15 @@ func runStackInit(cmd *cobra.Command, a *app, flags *stackInitFlags, servicesRoo
 		return fmt.Errorf("the tree has a Stack service already, %s; pass --force to replace the one --name names or to write another beside it", strings.Join(have, ", "))
 	}
 	_, cloudLinked := reg.Target(cloudTarget)
-	if (flags.gcpProject != "" || flags.region != "" || flags.environment != "") && !cloudLinked {
+	gcpFlags := flags.gcpProject != "" || flags.region != ""
+	if flags.cloudflareAccount != "" && gcpFlags {
+		return errors.New("stack init writes one cloud environment: give --gcp-project and --region, or --cloudflare-account")
+	}
+	if (gcpFlags || flags.environment != "" && flags.cloudflareAccount == "") && !cloudLinked {
 		return fmt.Errorf("a gcp environment needs the %s target, which this binary does not link (its targets: %s); the installed superschematic links it", cloudTarget, strings.Join(reg.Targets(), ", "))
+	}
+	if _, ok := reg.Target(cloudflareTarget); flags.cloudflareAccount != "" && !ok {
+		return fmt.Errorf("a cloudflare environment needs the %s target, which this binary does not link (its targets: %s); the installed superschematic links it", cloudflareTarget, strings.Join(reg.Targets(), ", "))
 	}
 	for _, renderer := range flags.ci {
 		if _, ok := reg.CIRenderer(renderer); !ok {
@@ -236,7 +253,7 @@ func runStackInit(cmd *cobra.Command, a *app, flags *stackInitFlags, servicesRoo
 
 	prompter := newLinePrompter(cmd)
 	var gcloud func() gcloudDefaults
-	if prompter != nil && cloudLinked && (flags.gcpProject == "" || flags.region == "") {
+	if prompter != nil && cloudLinked && flags.cloudflareAccount == "" && (flags.gcpProject == "" || flags.region == "") {
 		gcloud = startGcloudDefaults(cmd.Context())
 	}
 
@@ -473,6 +490,9 @@ func printStackInitSummary(w io.Writer, tree *stackInitTree, plan *stackinit.Pla
 		if project, ok := env.Values["project"]; ok {
 			fmt.Fprintf(&b, ", project %v in %v", project, env.Values["region"])
 		}
+		if account, ok := env.Values["accountId"]; ok {
+			fmt.Fprintf(&b, ", account %v", account)
+		}
 		b.WriteString("\n")
 	}
 	if len(plan.CI) > 0 {
@@ -613,9 +633,16 @@ func stackInitAnswers(cmd *cobra.Command, flags *stackInitFlags, tree *stackInit
 		return nil, err
 	}
 
-	// The gcp environment.
-	if target, ok := reg.Target(cloudTarget); ok {
+	// The gcp environment, or else the cloudflare one.
+	if target, ok := reg.Target(cloudTarget); ok && flags.cloudflareAccount == "" {
 		cloud, err := askCloudEnvironment(ask, flags, target, handles, gcloud)
+		if err != nil {
+			return nil, err
+		}
+		values.cloud = cloud
+	}
+	if target, ok := reg.Target(cloudflareTarget); ok && values.cloud == nil {
+		cloud, err := askCloudflareEnvironment(ask, flags, target, handles)
 		if err != nil {
 			return nil, err
 		}
@@ -682,15 +709,7 @@ func parseExpose(list []string) []string {
 // what they leave out at a terminal, and returns nil for none.
 func askCloudEnvironment(ask *asker, flags *stackInitFlags, target registry.TargetSpec, handles []string, gcloud func() gcloudDefaults) (*stackinit.Environment, error) {
 	project, region, name := flags.gcpProject, flags.region, flags.environment
-	checkName := func(n string) error {
-		if err := stackinit.CheckEnvironment(n); err != nil {
-			return err
-		}
-		if n == stackinit.LocalEnvironment || slices.Contains(handles, n) {
-			return fmt.Errorf("environment name %s is taken: the local environment or a service's handle has it", n)
-		}
-		return nil
-	}
+	checkName := checkCloudEnvironmentName(handles)
 	if ask.p == nil {
 		switch {
 		case project == "" && region == "" && name == "":
@@ -749,6 +768,71 @@ func askCloudEnvironment(ask *asker, flags *stackInitFlags, target registry.Targ
 		Target:  cloudTarget,
 		Values:  map[string]any{"project": project, "region": region},
 		Comment: fmt.Sprintf("Google Cloud: superschematic stack bootstrap %s prepares the project once,\nthen superschematic stack deploy %s deploys to it.", name, name),
+	}, nil
+}
+
+// checkCloudEnvironmentName refuses a cloud environment's name that is no
+// class name, or that the local environment or a service's handle has.
+func checkCloudEnvironmentName(handles []string) func(string) error {
+	return func(n string) error {
+		if err := stackinit.CheckEnvironment(n); err != nil {
+			return err
+		}
+		if n == stackinit.LocalEnvironment || slices.Contains(handles, n) {
+			return fmt.Errorf("environment name %s is taken: the local environment or a service's handle has it", n)
+		}
+		return nil
+	}
+}
+
+// askCloudflareEnvironment takes the cloudflare environment from the
+// flags, asks for what they leave out at a terminal, and returns nil for
+// none (D64). Its one value is the account's id; bootstrap records the
+// rest.
+func askCloudflareEnvironment(ask *asker, flags *stackInitFlags, target registry.TargetSpec, handles []string) (*stackinit.Environment, error) {
+	account, name := flags.cloudflareAccount, flags.environment
+	checkName := checkCloudEnvironmentName(handles)
+	check := func(account string) error {
+		if err := target.ValidateValues(map[string]any{"accountId": account}); err != nil {
+			return fmt.Errorf("the cloudflare environment's account %q: %w; the account's id is 32 hexadecimal digits, on the dashboard", account, err)
+		}
+		return nil
+	}
+	if account == "" {
+		if ask.p == nil {
+			return nil, nil
+		}
+		yes, err := ask.yesNo("Add an environment on Cloudflare (the cloudflare target)", false)
+		if err != nil || !yes {
+			return nil, err
+		}
+	}
+	if name == "" {
+		name = stackinit.DefaultCloudEnvironment
+		if ask.p != nil {
+			var err error
+			if name, err = ask.text("Its environment name", name, checkName); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := checkName(name); err != nil {
+		return nil, err
+	}
+	if account == "" {
+		var err error
+		if account, err = ask.text("Cloudflare account id", "", check); err != nil {
+			return nil, err
+		}
+	}
+	if err := check(account); err != nil {
+		return nil, err
+	}
+	return &stackinit.Environment{
+		Name:    name,
+		Target:  cloudflareTarget,
+		Values:  map[string]any{"accountId": account},
+		Comment: fmt.Sprintf("Cloudflare: superschematic stack bootstrap %s prepares the account once,\nthen superschematic stack deploy %s deploys to it.", name, name),
 	}, nil
 }
 

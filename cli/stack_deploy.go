@@ -376,6 +376,7 @@ func (c *deployContext) planner() stackdeploy.Planner {
 func newStackBootstrapCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
 	var repository string
+	var github bool
 	cmd := &cobra.Command{
 		Use:   "bootstrap <environment>",
 		Short: "Prepare the cloud project an environment deploys to",
@@ -395,6 +396,18 @@ file alone when it matches, and prints a line for each. A TypeScript
 schema changes in that property alone; for a JSON or YAML schema it
 prints the property to add.
 
+On cloudflare it verifies the token in CLOUDFLARE_API_TOKEN, creates the R2
+buckets that hold the state and bootstrap's own state, generates each one's
+passphrase on the first run and prints it once, or checks the ones in
+PULUMI_CONFIG_PASSPHRASE and SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE, finds or
+creates the account's Secrets Store, and applies the deployer, planner and
+preview account tokens. With --github it sets the tokens the
+environment's jobs read and the state's passphrase as the repository's
+GitHub Actions secrets through gh, at the scopes the generated workflow
+reads them from; without gh, it prints the commands to run and each token
+once. No CI job gets the bootstrap's passphrase. It records
+workersSubdomain and secretsStoreId beside accountId.
+
 Last, it asks for each credential that has no value, without echoing it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -411,6 +424,8 @@ Last, it asks for each credential that has no value, without echoing it.`,
 				Repository: repository,
 				Prompter:   terminalPrompter(cmd),
 				Source:     &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir, EditTypeScript: editTypeScript},
+				GitHub:     github,
+				Reveal:     cmd.OutOrStdout(),
 			})
 			// A value recorded before a credential's prompt failed is
 			// in the schema all the same, so its line is printed.
@@ -422,6 +437,7 @@ Last, it asks for each credential that has no value, without echoing it.`,
 	}
 	flags.register(cmd, false)
 	cmd.Flags().StringVar(&repository, "repository", "", "the GitHub repository the CI runs in, owner/name (default: read from the git remote origin)")
+	cmd.Flags().BoolVar(&github, "github", false, "store what the generated CI signs in with as the repository's GitHub Actions secrets, through gh: the cloudflare target's tokens and passphrase")
 	return cmd
 }
 

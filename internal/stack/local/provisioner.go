@@ -61,7 +61,8 @@ const otelServiceName = "OTEL_SERVICE_NAME"
 //     keeping its data when it is stopped, says how to remove a container
 //     of the environment an older superschematic named for no checkout,
 //     waits until each is ready, and creates each database and each bucket
-//     that is missing (D54);
+//     that is missing (D54), and each sqlite-first database's SQLite file
+//     under the environment's state directory (D64);
 //   - migrate expand: it plans each hosted DB schema's migration from the
 //     model its database recorded to the model the deploy wrote into
 //     ModelsDir, and applies it with the migration runner, expand and
@@ -81,8 +82,9 @@ const otelServiceName = "OTEL_SERVICE_NAME"
 //
 // Each process's output reaches Out a line at a time, prefixed with its
 // name. The processes run until Destroy, which stops them and the
-// containers, keeping the containers' data; Purge removes the containers
-// and their data too: the databases and the buckets' objects.
+// containers, keeping the containers' data and the SQLite files; Purge
+// removes the containers and their data too: the databases, the SQLite
+// files and the buckets' objects.
 //
 // The zero value runs commands with os/exec and writes to os.Stdout. A
 // Provisioner keeps the processes it started in memory, so the one that
@@ -260,6 +262,9 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 			}
 		}
 		for _, m := range prog.Migrations {
+			if m.File != "" {
+				continue // a SQLite file's, below
+			}
 			pending := true
 			if exists[m.Resource] {
 				if pending, err = p.migrationPending(ctx, req, m); err != nil {
@@ -279,6 +284,34 @@ func (p *Provisioner) Plan(ctx context.Context, req registry.ProvisionRequest) (
 			}
 			if !exists {
 				changes = append(changes, registry.PlannedChange{Resource: b.ID, Action: "create"})
+			}
+		}
+	}
+	if len(prog.SQLiteDatabases) > 0 {
+		dir, err := stateDirOf(req.Backend)
+		if err != nil {
+			return nil, fmt.Errorf("local: environment %s has SQLite databases, but %w", req.Environment.Environment, err)
+		}
+		exists := map[string]bool{}
+		for _, db := range prog.SQLiteDatabases {
+			if _, err := os.Stat(db.path(dir)); err == nil {
+				exists[db.ID] = true
+			} else {
+				changes = append(changes, registry.PlannedChange{Resource: db.ID, Action: "create"})
+			}
+		}
+		for _, m := range prog.Migrations {
+			if m.File == "" {
+				continue
+			}
+			pending := true
+			if exists[m.Resource] {
+				if pending, err = p.migrationPending(ctx, req, m); err != nil {
+					return nil, err
+				}
+			}
+			if pending {
+				changes = append(changes, registry.PlannedChange{Resource: m.Resource, Action: "migrate"})
 			}
 		}
 	}
@@ -342,6 +375,7 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	}
 	var containers []*Container
 	var databases []*Database
+	var sqliteDatabases []*SQLiteDatabase
 	var buckets []*Bucket
 	var keyPairs []*KeyPair
 	var servers []*Server
@@ -352,6 +386,8 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			containers = append(containers, c)
 		} else if db := prog.database(id); db != nil {
 			databases = append(databases, db)
+		} else if lite := prog.sqliteDatabase(id); lite != nil {
+			sqliteDatabases = append(sqliteDatabases, lite)
 		} else if b := prog.bucket(id); b != nil {
 			buckets = append(buckets, b)
 		} else if k := prog.keyPair(id); k != nil {
@@ -364,6 +400,21 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 			sites = append(sites, site)
 		} else {
 			return fmt.Errorf("local: step %s applies %s, which is not in the program", step.Step, id)
+		}
+	}
+	if len(sqliteDatabases) > 0 {
+		dir, err := stateDirOf(req.Backend)
+		if err != nil {
+			return fmt.Errorf("local: environment %s has SQLite databases to keep, but %w", req.Environment.Environment, err)
+		}
+		for _, db := range sqliteDatabases {
+			created, err := ensureSQLiteFile(db.path(dir))
+			if err != nil {
+				return fmt.Errorf("local: create database %s: %w", db.Service, err)
+			}
+			if created {
+				p.printf("create database %s: %s, a SQLite file", db.Service, db.path(dir))
+			}
 		}
 	}
 	if len(keyPairs) > 0 {
@@ -464,6 +515,23 @@ func (p *Provisioner) destroy(ctx context.Context, req registry.ProvisionRequest
 		return err
 	}
 	errs := []error{p.stopSites(key(req.Environment)), p.stopServers(key(req.Environment))}
+	if purge && len(prog.SQLiteDatabases) > 0 {
+		// The SQLite files are the environment's data as the containers'
+		// volumes are; Destroy keeps them, Purge removes them.
+		if dir, err := stateDirOf(req.Backend); err != nil {
+			errs = append(errs, fmt.Errorf("local: environment %s has SQLite databases to remove, but %w", req.Environment.Environment, err))
+		} else {
+			for _, db := range prog.SQLiteDatabases {
+				removed, err := removeSQLiteFile(db.path(dir))
+				switch {
+				case err != nil:
+					errs = append(errs, fmt.Errorf("local: remove database %s: %w", db.Service, err))
+				case removed:
+					p.printf("removed database %s, the SQLite file %s", db.Service, db.path(dir))
+				}
+			}
+		}
+	}
 	if len(prog.Containers) > 0 {
 		docker, err := p.lookPath("docker")
 		if err != nil {
@@ -506,6 +574,7 @@ func (p *Provisioner) Outputs(_ context.Context, req registry.ProvisionRequest) 
 	}
 	out := prog.outputs()
 	if dir, err := stateDirOf(req.Backend); err == nil {
+		prog.sqliteOutputs(dir, out)
 		for _, k := range prog.KeyPairs {
 			if key, err := readKey(dir, k.ID); err == nil {
 				public, err := json.Marshal(key.Public())
@@ -1142,6 +1211,14 @@ var binaryNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // engineer's own bun install does, so the lockfile the project commits
 // (D51, amended) follows the schemas through stack dev. It is not frozen:
 // the generated CI's frozen install is what refuses a stale lockfile.
+//
+// A root built for one stack leaves out, with `!` patterns, the
+// implementations and sites whose generated packages the stack's build
+// did not write (tsgen.WorkspaceRoot; D51, amended). Bun drops from the
+// lockfile what the manifest no longer names, so the install of such a
+// partial workspace runs with --no-save: it installs the versions the
+// lockfile pins and leaves it as it is, pinning the whole workspace, as
+// the project commits it.
 func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun string) error {
 	p.mu.Lock()
 	done := p.installed[outputRoot]
@@ -1149,11 +1226,18 @@ func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun stri
 	if done {
 		return nil
 	}
-	if _, err := os.Stat(filepath.Join(outputRoot, "package.json")); err != nil {
+	leftOut, err := workspaceLeftOut(outputRoot)
+	if err != nil {
 		return fmt.Errorf("local: no Bun workspace at %s, whose package.json the stack's build writes for its TypeScript servers (docs/stack-model.md, section 8.6): %w", outputRoot, err)
 	}
-	p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
-	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: []string{"install"}, Dir: outputRoot, Env: os.Environ()}); err != nil {
+	args := []string{"install"}
+	if len(leftOut) > 0 {
+		args = append(args, "--no-save")
+		p.printf("install the TypeScript workspace: bun install --no-save in %s, which leaves out %s, whose packages this output root lacks, and keeps its lockfile as it is", outputRoot, strings.Join(leftOut, ", "))
+	} else {
+		p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
+	}
+	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: args, Dir: outputRoot, Env: os.Environ()}); err != nil {
 		return fmt.Errorf("local: install the TypeScript workspace at %s: %w", outputRoot, err)
 	}
 	p.mu.Lock()
@@ -1165,12 +1249,44 @@ func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun stri
 	return nil
 }
 
+// workspaceLeftOut returns the members the Bun workspace's root in
+// outputRoot leaves out, as its `!` patterns name them, which the build
+// writes for the implementations and sites whose generated packages the
+// output root lacks (tsgen.WorkspaceLeftOut, which the provisioner, apart
+// from the generators, does not import).
+func workspaceLeftOut(outputRoot string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(outputRoot, "package.json"))
+	if err != nil {
+		return nil, err
+	}
+	var manifest struct {
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, pattern := range manifest.Workspaces {
+		if member, ok := strings.CutPrefix(pattern, "!"); ok {
+			out = append(out, member)
+		}
+	}
+	return out, nil
+}
+
 // runOutputs are the outputs a process's env references resolve against:
 // the program's, and each key pair's, its private key included, read from
 // the environment's state directory, where applying its infrastructure
 // generated them.
 func (p *Provisioner) runOutputs(req registry.ProvisionRequest, prog *Program) (map[string]map[string]any, error) {
 	outputs := prog.outputs()
+	if len(prog.SQLiteDatabases) > 0 {
+		dir, err := stateDirOf(req.Backend)
+		if err != nil {
+			return nil, fmt.Errorf("local: environment %s has SQLite databases, but %w", req.Environment.Environment, err)
+		}
+		prog.sqliteOutputs(dir, outputs)
+	}
 	keys, err := p.keysFor(req, prog)
 	if err != nil {
 		return nil, err

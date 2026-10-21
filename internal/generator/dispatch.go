@@ -26,6 +26,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
@@ -670,12 +671,17 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
 	}
+	dialect, err := r.databaseDialect()
+	if err != nil {
+		return nil, nil, err
+	}
 	envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
-		SchemaName:   r.Config.Name,
-		Dependencies: deps,
-		Naming:       r.Options.Naming,
-		Derived:      true,
-		Callers:      true,
+		SchemaName:      r.Config.Name,
+		Dependencies:    deps,
+		Naming:          r.Options.Naming,
+		Derived:         true,
+		Callers:         true,
+		DatabaseDialect: dialect,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
@@ -687,6 +693,7 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	tsDeps.Dialect = dialect
 	if e := apiOutput.Engine; e != nil {
 		// Deps holds the engine of the API's engine database, which a server
 		// opens in the background (D58).
@@ -697,6 +704,38 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	}
 	output.HasEnvConfig = envOutput != nil
 	return output, envOutput, nil
+}
+
+// databaseDialect returns the first dialect the DB service of the API's
+// database lists in its outputs.sql.dialects, which types the TypeScript
+// API's Deps.db and its database field (D64; docs/stack-model.md, section
+// 18.6): postgres for a pg Pool, sqlite for a SqlDatabase. It is empty for
+// an API with no database, and postgres when the build has no config for
+// the database, as for a build of IR alone.
+func (r run) databaseDialect() (string, error) {
+	db, _, ok := r.Schema.Database()
+	if !ok {
+		return "", nil
+	}
+	var cfg *schemaconfig.SchemaConfig
+	if r.Options.DependencyConfig != nil {
+		cfg, _ = r.Options.DependencyConfig(db)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		loaded, err := r.Options.LoadDependencyConfig(db)
+		if err != nil {
+			return "", fmt.Errorf("generator: read the config of %s, the database of %s, whose first dialect types its Deps.db: %w", db, r.Config.Name, err)
+		}
+		cfg = loaded
+	}
+	if cfg == nil {
+		return registry.SQLDialectPostgres, nil
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return "", fmt.Errorf("generator: schema config for %s: %w", db, err)
+	}
+	return outputs.SQLDialects()[0], nil
 }
 
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its

@@ -15,11 +15,6 @@ import (
 // (Terraform's `cloudflare_record`) to it. It is pinned in schemas/.
 const TypeRecord = "cloudflare:index/dnsRecord:DnsRecord"
 
-// TokenEnv is the environment variable the provider reads its API token
-// from. A run sets it from the secret TokenSecret names; the token never
-// enters the resource graph, the rendered program or a file.
-const TokenEnv = "CLOUDFLARE_API_TOKEN"
-
 const (
 	// recordTTL is the TTL of a DNS-only record, as Cloud DNS writes its
 	// records.
@@ -78,8 +73,13 @@ func TokenSecret(stack, zone string) string {
 }
 
 // credentials names the API token the provider reads: one scoped to the
-// zone's DNS, which bootstrap asks for.
+// zone's DNS, which bootstrap asks for. An environment on the cloudflare
+// target needs none: the run's own token, in TokenEnv, carries the zone
+// (section 18.3).
 func credentials(ctx registry.DNSContext) []ir.DNSCredential {
+	if ctx.Environment.Target == Target {
+		return nil
+	}
 	zone := valuesOf(ctx.Values).zone
 	return []ir.DNSCredential{{
 		Secret:      TokenSecret(ctx.Environment.Stack, zone),

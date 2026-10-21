@@ -1,0 +1,27 @@
+# ts-reports' server and its job CompileReports in two environments: Edge
+# on stacktest's fake target, which places the job on the fake cron
+# platform, whose artifact is a bundle as Cloudflare's Cron Triggers' is
+# (D64), and Local on the local target, which runs main.ts on Bun. The
+# job's package gets scheduled.ts and bundle.ts beside main.ts.
+kind: Stack
+types:
+  Reports:
+    name: Reports
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-reports, kind: API }
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { service: { name: ts-reports, kind: API }, job: CompileReports }
+          platform: fake.cron
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

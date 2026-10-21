@@ -4,14 +4,15 @@
 // (D51). The generator writes the site's typed browser config into it on
 // every build, ConfigFile: a module that fetches the site's config,
 // ir.SiteConfigPath, which a deploy writes per environment, and returns
-// each API the site calls with its public base URL and a factory for a
-// client of it. When the package is missing, it scaffolds a minimal site
-// there once, built with `bun build`.
+// each API the site calls with its public base URL and a client of its
+// generated TypeScript SDK at that address. When the package is missing,
+// it scaffolds a minimal site there once, built with `bun build`.
 //
-// The config module imports no SDK: a browser bundle of a generated SDK
-// takes superscalar's Node backend today, so a site builds a client of an
-// API through the factory, from the SDK when it bundles, else from fetch
-// (D55, amended).
+// The config module imports each API's SDK: the SDKs validate through
+// superscalar, whose browser build a bundler takes through the `browser`
+// export condition, so `bun build --target=browser` bundles a site with
+// no plugin (D55, amended twice). An API whose config generates no
+// TypeScript SDK gets its base URL alone.
 package sitegen
 
 import (
@@ -26,6 +27,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -48,7 +50,22 @@ type API struct {
 
 	// Property is its member of the typed Apis: the name in camel case.
 	Property string
+
+	// Package is the npm name of the API's TypeScript SDK, which the
+	// config imports; empty when the API's config generates none.
+	Package string
+
+	// Client is the SDK's root class, `ShopApiSDK`; empty with Package.
+	Client string
 }
+
+// HasSDK reports whether the API's config generates a TypeScript SDK.
+func (a API) HasSDK() bool { return a.Package != "" }
+
+// SDKs reports whether the config of the API service named service
+// generates a TypeScript SDK. The generator reads it from the API's
+// config; a nil SDKs takes every API to have one.
+type SDKs func(service string) bool
 
 // Site is what the generator writes for one Site service.
 type Site struct {
@@ -66,8 +83,21 @@ type Site struct {
 	APIs []API
 }
 
-// Of reads what the generator writes for the Site schema s.
-func Of(s *ir.Schema, n naming.Naming) (*Site, error) {
+// SDKPackages are the npm names of the SDKs the config imports, in the
+// order of APIs.
+func (s *Site) SDKPackages() []string {
+	var out []string
+	for _, api := range s.APIs {
+		if api.HasSDK() {
+			out = append(out, api.Package)
+		}
+	}
+	return out
+}
+
+// Of reads what the generator writes for the Site schema s, with an SDK
+// client for each API it calls whose config generates a TypeScript SDK.
+func Of(s *ir.Schema, n naming.Naming, sdks SDKs) (*Site, error) {
 	if s == nil || s.Kind != ir.SchemaKindSite {
 		return nil, errors.New("sitegen: not a Site schema")
 	}
@@ -90,7 +120,12 @@ func Of(s *ir.Schema, n naming.Naming) (*Site, error) {
 			return nil, fmt.Errorf("sitegen: site %s calls %s and %s, which its typed config would both name %s", s.Name, other, call.Name, property)
 		}
 		seen[property] = call.Name
-		site.APIs = append(site.APIs, API{Service: call.Name, Property: property})
+		api := API{Service: call.Name, Property: property}
+		if sdks == nil || sdks(call.Name) {
+			api.Package = n.OrDefault().NpmSDKPackage(call.Name)
+			api.Client = sdkgen.ClassName(call.Name)
+		}
+		site.APIs = append(site.APIs, api)
 	}
 	sort.Slice(site.APIs, func(i, j int) bool { return site.APIs[i].Service < site.APIs[j].Service })
 	return site, nil
@@ -185,7 +220,17 @@ var configTemplate = template.Must(template.New("config.generated.ts").Funcs(fun
 // section 8.10, D55). One build of the site serves every environment: the
 // deploy writes the site's config per environment, with the public address
 // of each API the site calls, at CONFIG_PATH on the site's origin, and
-// never caches it. loadApis() reads it once, when the site loads.
+// never caches it. loadApis() reads it once, when the site loads, and
+// returns each API with a client of its generated SDK at that address.
+//
+// The SDKs validate through superscalar, whose browser build a bundler
+// takes through the browser export condition (bun build --target=browser,
+// with no plugin) and which instantiates its WebAssembly module from the
+// bundle: a page's Content-Security-Policy must allow 'wasm-unsafe-eval'
+// in script-src (D55, amended).
+{{- range .APIs }}{{ if .HasSDK }}
+import { {{ .Client }}, type SDKConfig as {{ .Client }}Config } from {{ tsQuote .Package }};
+{{- end }}{{ end }}
 
 /** The path of the site's config on its own origin. */
 export const CONFIG_PATH = '{{ configPath }}';
@@ -197,33 +242,37 @@ export interface SiteConfig {
 }
 
 /** An API the site calls, where a browser reaches it in this environment. */
-export interface ApiEndpoint {
+export interface ApiAddress {
   /** The API service's name. */
   readonly service: string;
   /** The API's public base URL, with no trailing slash. */
   readonly baseUrl: string;
+}
+
+/** What a client of an API's SDK takes beside its base URL: auth, credentials, fetch, a timeout. */
+export type ClientOptions<Config> = Omit<Config, 'baseUrl'>;
+
+/** An API the site calls, with a client of its generated SDK at its public address. */
+export interface ApiEndpoint<Client, Config extends { readonly baseUrl: string }> extends ApiAddress {
   /**
-   * Builds a client of the API at its base URL: its generated SDK, as
-   * endpoint.client(options => new ShopApiSDK({ ...options, auth })), or
-   * any client that takes a base URL.
+   * Builds a client of the API's SDK at baseUrl, with the SDK's other
+   * options: apis.shopApi.client({ auth: { token } }).
    */
-  client<T>(create: (options: { readonly baseUrl: string }) => T): T;
+  client(options?: ClientOptions<Config>): Client;
 }
 
 /** The APIs site {{ .Service }} calls. */
 export interface Apis {
 {{- range .APIs }}
+{{- if .HasSDK }}
   /** {{ .Service }} */
-  readonly {{ .Property }}: ApiEndpoint;
+  readonly {{ .Property }}: ApiEndpoint<{{ .Client }}, {{ .Client }}Config>;
+{{- else }}
+  /** {{ .Service }}, whose config generates no TypeScript SDK: enable outputs.sdk.typescript for a client. */
+  readonly {{ .Property }}: ApiAddress;
+{{- end }}
 {{- end }}
 }
-
-/** The services of the APIs the site calls, by their member of Apis. */
-const services = {
-{{- range .APIs }}
-  {{ .Property }}: {{ tsQuote .Service }},
-{{- end }}
-} as const;
 
 let loaded: Promise<SiteConfig> | undefined;
 
@@ -244,22 +293,45 @@ export function loadConfig(fetcher: typeof fetch = globalThis.fetch.bind(globalT
   return loaded;
 }
 
+/** The address of service in config. Throws when config names no URL for it. */
+function addressOf(config: SiteConfig, service: string): ApiAddress {
+  const url = config.apis?.[service]?.url;
+  if (typeof url !== 'string' || url === '') {
+    throw new Error(` + "`" + `site {{ .Service }}: ${CONFIG_PATH} has no URL for ${service}` + "`" + `);
+  }
+  return { service, baseUrl: url.replace(/\/+$/, '') };
+}
+{{- if .SDKPackages }}
+
+/** The API at address, whose client create builds at its base URL. */
+function endpoint<Client, Config extends { readonly baseUrl: string }>(
+  address: ApiAddress,
+  create: (config: Config) => Client
+): ApiEndpoint<Client, Config> {
+  return { ...address, client: options => create({ ...options, baseUrl: address.baseUrl } as Config) };
+}
+{{- end }}
+
 /**
  * Returns each API the site calls, read from the site's config. It rejects
  * when the config names no URL for one of them.
  */
 export async function loadApis(fetcher?: typeof fetch): Promise<Apis> {
+{{- if .APIs }}
   const config = await loadConfig(fetcher);
-  const apis: Record<string, ApiEndpoint> = {};
-  for (const [property, service] of Object.entries(services)) {
-    const url = config.apis?.[service]?.url;
-    if (typeof url !== 'string' || url === '') {
-      throw new Error(` + "`" + `site {{ .Service }}: ${CONFIG_PATH} has no URL for ${service}` + "`" + `);
-    }
-    const baseUrl = url.replace(/\/+$/, '');
-    apis[property] = { service, baseUrl, client: create => create({ baseUrl }) };
-  }
-  return apis as unknown as Apis;
+  return {
+{{- range .APIs }}
+{{- if .HasSDK }}
+    {{ .Property }}: endpoint(addressOf(config, {{ tsQuote .Service }}), (options: {{ .Client }}Config) => new {{ .Client }}(options)),
+{{- else }}
+    {{ .Property }}: addressOf(config, {{ tsQuote .Service }}),
+{{- end }}
+{{- end }}
+  };
+{{- else }}
+  await loadConfig(fetcher);
+  return {};
+{{- end }}
 }
 `))
 
@@ -273,6 +345,13 @@ var packageTemplate = template.Must(template.New("package.json").Funcs(funcs).Pa
     {{ jsonQuote .Config.Build }}: "rm -rf {{ .Config.Output }} && bun build ./index.html --outdir={{ .Config.Output }} --public-path=/ --minify",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+{{- with .SDKPackages }}
+  "dependencies": {
+{{- range $i, $pkg := . }}{{ if $i }},{{ end }}
+    {{ jsonQuote $pkg }}: "workspace:*"
+{{- end }}
+  },
+{{- end }}
   "devDependencies": {
     "typescript": "{{ tsVersion }}"
   }

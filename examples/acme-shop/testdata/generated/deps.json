@@ -120,6 +120,26 @@
       ]
     },
     {
+      "id": "shop-wishlist-db-orm",
+      "language": "go",
+      "kind": "orm",
+      "name": "example.com/acme/orm/shop-wishlist-db",
+      "path": "orm/shop-wishlist-db",
+      "service": "shop-wishlist-db",
+      "deps": [
+        "shop-wishlist-db-types"
+      ]
+    },
+    {
+      "id": "shop-wishlist-db-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-wishlist-db",
+      "path": "types/go/shop-wishlist-db",
+      "service": "shop-wishlist-db",
+      "deps": null
+    },
+    {
       "id": "shop-common-types",
       "language": "python",
       "kind": "types",
@@ -325,6 +345,35 @@
       "deps": [
         "shop-common-types"
       ]
+    },
+    {
+      "id": "shop-wishlist-api",
+      "language": "typescript",
+      "kind": "api",
+      "name": "@acme/shop-wishlist-api",
+      "path": "api/shop-wishlist",
+      "service": "shop-wishlist",
+      "deps": [
+        "shop-wishlist-types"
+      ]
+    },
+    {
+      "id": "shop-wishlist-db-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-wishlist-db-types",
+      "path": "types/typescript/shop-wishlist-db",
+      "service": "shop-wishlist-db",
+      "deps": null
+    },
+    {
+      "id": "shop-wishlist-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-wishlist-types",
+      "path": "types/typescript/shop-wishlist",
+      "service": "shop-wishlist",
+      "deps": null
     }
   ]
 }

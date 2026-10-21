@@ -1,0 +1,34 @@
+# One declared TypeScript server, Till, serves ts-checkout and ts-pricing,
+# exposed. Edge, on stacktest's fake target, places it on the fake bundle
+# platform, whose artifact is a bundle as Cloudflare Workers' is (D64), so
+# its package gets fetch.ts: ts-checkout's calls of ts-pricing stay in
+# process there, handed to Till's own app, and carry Till's loopback
+# credential, which ts-pricing, admitting only calling services, accepts
+# (docs/stack-model.md, sections 9.9 and 18.2).
+kind: Stack
+types:
+  Checkout:
+    name: Checkout
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-checkout, kind: API }
+        - { name: ts-pricing, kind: API }
+      expose:
+        - deployable: Till
+  Till:
+    name: Till
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: ts-checkout, kind: API }
+        - { name: ts-pricing, kind: API }
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { deployable: Till }
+          platform: fake.bundle

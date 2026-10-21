@@ -1,0 +1,51 @@
+{
+  "token": "cloudflare:index/d1Database:D1Database",
+  "terraform": {
+    "type": "cloudflare_d1_database",
+    "renames": {
+      "accountId": "account_id",
+      "primaryLocationHint": "primary_location_hint",
+      "readReplication": "read_replication"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "jurisdiction": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "primaryLocationHint": {
+      "type": "string"
+    },
+    "readReplication": {
+      "$ref": "#/types/cloudflare:index/D1DatabaseReadReplication:D1DatabaseReadReplication"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "name"
+  ],
+  "types": {
+    "cloudflare:index/D1DatabaseReadReplication:D1DatabaseReadReplication": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    }
+  }
+}

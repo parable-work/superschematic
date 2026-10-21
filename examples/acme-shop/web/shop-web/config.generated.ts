@@ -4,7 +4,15 @@
 // section 8.10, D55). One build of the site serves every environment: the
 // deploy writes the site's config per environment, with the public address
 // of each API the site calls, at CONFIG_PATH on the site's origin, and
-// never caches it. loadApis() reads it once, when the site loads.
+// never caches it. loadApis() reads it once, when the site loads, and
+// returns each API with a client of its generated SDK at that address.
+//
+// The SDKs validate through superscalar, whose browser build a bundler
+// takes through the browser export condition (bun build --target=browser,
+// with no plugin) and which instantiates its WebAssembly module from the
+// bundle: a page's Content-Security-Policy must allow 'wasm-unsafe-eval'
+// in script-src (D55, amended).
+import { ShopApiSDK, type SDKConfig as ShopApiSDKConfig } from '@acme/shop-api-sdk';
 
 /** The path of the site's config on its own origin. */
 export const CONFIG_PATH = '/__superschematic/config.json';
@@ -16,29 +24,30 @@ export interface SiteConfig {
 }
 
 /** An API the site calls, where a browser reaches it in this environment. */
-export interface ApiEndpoint {
+export interface ApiAddress {
   /** The API service's name. */
   readonly service: string;
   /** The API's public base URL, with no trailing slash. */
   readonly baseUrl: string;
+}
+
+/** What a client of an API's SDK takes beside its base URL: auth, credentials, fetch, a timeout. */
+export type ClientOptions<Config> = Omit<Config, 'baseUrl'>;
+
+/** An API the site calls, with a client of its generated SDK at its public address. */
+export interface ApiEndpoint<Client, Config extends { readonly baseUrl: string }> extends ApiAddress {
   /**
-   * Builds a client of the API at its base URL: its generated SDK, as
-   * endpoint.client(options => new ShopApiSDK({ ...options, auth })), or
-   * any client that takes a base URL.
+   * Builds a client of the API's SDK at baseUrl, with the SDK's other
+   * options: apis.shopApi.client({ auth: { token } }).
    */
-  client<T>(create: (options: { readonly baseUrl: string }) => T): T;
+  client(options?: ClientOptions<Config>): Client;
 }
 
 /** The APIs site shop-web calls. */
 export interface Apis {
   /** shop-api */
-  readonly shopApi: ApiEndpoint;
+  readonly shopApi: ApiEndpoint<ShopApiSDK, ShopApiSDKConfig>;
 }
-
-/** The services of the APIs the site calls, by their member of Apis. */
-const services = {
-  shopApi: 'shop-api',
-} as const;
 
 let loaded: Promise<SiteConfig> | undefined;
 
@@ -59,20 +68,30 @@ export function loadConfig(fetcher: typeof fetch = globalThis.fetch.bind(globalT
   return loaded;
 }
 
+/** The address of service in config. Throws when config names no URL for it. */
+function addressOf(config: SiteConfig, service: string): ApiAddress {
+  const url = config.apis?.[service]?.url;
+  if (typeof url !== 'string' || url === '') {
+    throw new Error(`site shop-web: ${CONFIG_PATH} has no URL for ${service}`);
+  }
+  return { service, baseUrl: url.replace(/\/+$/, '') };
+}
+
+/** The API at address, whose client create builds at its base URL. */
+function endpoint<Client, Config extends { readonly baseUrl: string }>(
+  address: ApiAddress,
+  create: (config: Config) => Client
+): ApiEndpoint<Client, Config> {
+  return { ...address, client: options => create({ ...options, baseUrl: address.baseUrl } as Config) };
+}
+
 /**
  * Returns each API the site calls, read from the site's config. It rejects
  * when the config names no URL for one of them.
  */
 export async function loadApis(fetcher?: typeof fetch): Promise<Apis> {
   const config = await loadConfig(fetcher);
-  const apis: Record<string, ApiEndpoint> = {};
-  for (const [property, service] of Object.entries(services)) {
-    const url = config.apis?.[service]?.url;
-    if (typeof url !== 'string' || url === '') {
-      throw new Error(`site shop-web: ${CONFIG_PATH} has no URL for ${service}`);
-    }
-    const baseUrl = url.replace(/\/+$/, '');
-    apis[property] = { service, baseUrl, client: create => create({ baseUrl }) };
-  }
-  return apis as unknown as Apis;
+  return {
+    shopApi: endpoint(addressOf(config, 'shop-api'), (options: ShopApiSDKConfig) => new ShopApiSDK(options)),
+  };
 }

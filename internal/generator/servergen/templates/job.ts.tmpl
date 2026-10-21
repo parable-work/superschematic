@@ -21,9 +21,12 @@
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
+{{- end }}
+{{- if .SQLiteDatabases }}
+import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
@@ -62,9 +65,13 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-open-sqlite" . }}
 {{- end }}
 {{- if .Engines }}
 

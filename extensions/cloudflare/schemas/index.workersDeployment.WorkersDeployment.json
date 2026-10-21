@@ -1,0 +1,70 @@
+{
+  "token": "cloudflare:index/workersDeployment:WorkersDeployment",
+  "terraform": {
+    "type": "cloudflare_workers_deployment",
+    "renames": {
+      "accountId": "account_id",
+      "annotations.workersMessage": "workers_message",
+      "annotations.workersTriggeredBy": "workers_triggered_by",
+      "scriptName": "script_name",
+      "versions.versionId": "version_id"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "annotations": {
+      "$ref": "#/types/cloudflare:index/WorkersDeploymentAnnotations:WorkersDeploymentAnnotations"
+    },
+    "force": {
+      "type": "boolean"
+    },
+    "scriptName": {
+      "type": "string"
+    },
+    "strategy": {
+      "type": "string"
+    },
+    "versions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkersDeploymentVersion:WorkersDeploymentVersion"
+      }
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "scriptName",
+    "strategy",
+    "versions"
+  ],
+  "types": {
+    "cloudflare:index/WorkersDeploymentAnnotations:WorkersDeploymentAnnotations": {
+      "type": "object",
+      "properties": {
+        "workersMessage": {
+          "type": "string"
+        },
+        "workersTriggeredBy": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkersDeploymentVersion:WorkersDeploymentVersion": {
+      "type": "object",
+      "properties": {
+        "percentage": {
+          "type": "number"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "percentage",
+        "versionId"
+      ]
+    }
+  }
+}

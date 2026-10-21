@@ -17,9 +17,25 @@
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
     },
+    "DEPS_DB_DATABASE_D1_BINDING": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
+    "DEPS_DB_DATABASE_D1_DATABASE": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
     "DEPS_DB_DATABASE_URL": {
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
+    "DEPS_ORDERS_SERVICE_BINDING_NAME": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_ORDERS_SERVICE, the service endpoint of deps-orders, which the platform sets."
+    },
+    "DEPS_ORDERS_SERVICE_BINDING_WORKER": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_ORDERS_SERVICE, the service endpoint of deps-orders, which the platform sets."
     },
     "DEPS_ORDERS_SERVICE_CREDENTIAL_AUDIENCE": {
       "type": "string",
@@ -67,7 +83,9 @@
           "DEPS_DB_DATABASE_URL",
           "DEPS_DB_DATABASE_CLOUD_SQL_INSTANCE",
           "DEPS_DB_DATABASE_CLOUD_SQL_DATABASE",
-          "DEPS_DB_DATABASE_CLOUD_SQL_USER"
+          "DEPS_DB_DATABASE_CLOUD_SQL_USER",
+          "DEPS_DB_DATABASE_D1_BINDING",
+          "DEPS_DB_DATABASE_D1_DATABASE"
         ]
       },
       {
@@ -81,6 +99,8 @@
         "service": "deps-orders",
         "variables": [
           "DEPS_ORDERS_SERVICE_URL",
+          "DEPS_ORDERS_SERVICE_BINDING_NAME",
+          "DEPS_ORDERS_SERVICE_BINDING_WORKER",
           "DEPS_ORDERS_SERVICE_CREDENTIAL_SOURCE",
           "DEPS_ORDERS_SERVICE_CREDENTIAL_AUDIENCE",
           "DEPS_ORDERS_SERVICE_CREDENTIAL_TOKEN_FILE",

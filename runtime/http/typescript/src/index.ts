@@ -19,7 +19,10 @@ bucket it lists (bucket.ts, D54). ./hono.ts binds it to Hono,
 ./postgres.ts opens a database's pg Pool and runs a queue's enqueue and
 claims (queue.ts, D53), ./worker.ts is a worker's claim loop and ./gcs.ts
 opens a bucket on GCS; nothing in this file imports a framework, pg or a
-provider's client.
+provider's client. On Cloudflare Workers (D64), ./workers.ts reads a
+Worker's env and bindings, ./d1.ts is D1's interface, SqlDatabase, which
+./sqlite.ts gives over bun:sqlite for stack dev, and ./r2.ts is the Bucket
+over an R2 binding.
 */
 
 export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
@@ -121,8 +124,12 @@ export type { CorsApi, CorsDecision, CorsOperation, CorsPolicy } from './cors.js
 export type {
   BucketConnection,
   CloudSqlConnection,
+  D1Connection,
   Database,
+  DatabaseConnection,
+  R2Credential,
   Service,
+  ServiceBinding,
   ServiceCredential,
   ServiceCredentialConfig,
   ServiceCredentialOptions,

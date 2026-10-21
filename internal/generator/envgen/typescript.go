@@ -181,13 +181,18 @@ type typeScriptEnvConfig struct {
 	TypesPackage   string
 	RuntimePackage string
 	// TypeName is the @envVars type, empty without one.
-	TypeName       string
-	Derived        []typeScriptDerivedField
-	HasDatabase    bool
-	HasService     bool
-	HasBucket      bool
-	Callers        string
-	CallersLiteral string
+	TypeName    string
+	Derived     []typeScriptDerivedField
+	HasDatabase bool
+	// HasDatabaseType and HasDatabaseConnection say which type the
+	// database field has: Database, or for a sqlite-first database
+	// DatabaseConnection (D64).
+	HasDatabaseType       bool
+	HasDatabaseConnection bool
+	HasService            bool
+	HasBucket             bool
+	Callers               string
+	CallersLiteral        string
 	// Background is true for an API with a callers field and a job or a
 	// worker: loadEnvConfig and loadBackgroundEnvConfig, which leaves the
 	// callers field without issuers, share readEnvConfig, which reads it
@@ -235,6 +240,14 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 			}
 			derived.Reader, derived.Type = "loadDatabase", "Database"
 			derived.Doc = fmt.Sprintf("The connection to %s, the API's database: %s. It is read from %s_*.", field.Service, from, field.Key)
+			if field.SQLite() {
+				// A Worker reads the field as a D1 binding (D64).
+				derived.Type = "DatabaseConnection"
+				derived.Doc = fmt.Sprintf("The connection to %s, the API's database: %s, whose DB service lists sqlite first. It is read from %s_*: a sqlite: URL under stack dev, a D1 binding on Workers.", field.Service, from, field.Key)
+				view.HasDatabaseConnection = true
+			} else {
+				view.HasDatabaseType = true
+			}
 			view.HasDatabase = true
 		case ir.EdgeBucket:
 			derived.Reader, derived.Type = "loadBucket", "BucketConnection"

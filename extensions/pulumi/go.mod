@@ -13,6 +13,9 @@ replace github.com/parable-work/superschematic/ir => ../../ir
 // itself never imports a target.
 replace github.com/parable-work/superschematic/extensions/gcp => ../gcp
 
+// The state tests read the cloudflare target's state backend (D64).
+replace github.com/parable-work/superschematic/extensions/cloudflare => ../cloudflare
+
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.
 replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
@@ -20,6 +23,7 @@ replace github.com/microsoft/typescript-go => github.com/parable-work/typescript
 require (
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/parable-work/superschematic v0.0.0
+	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/pulumi/pulumi/sdk/v3 v3.259.0
@@ -122,7 +126,7 @@ require (
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect

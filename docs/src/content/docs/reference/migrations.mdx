@@ -363,6 +363,24 @@ Plan from the model the database recorded (`--from <model.json>`), which
 is checked by its own `dialect`, or from an empty database. The Postgres
 DDL is the same whether `sqlite` is listed or not.
 
+The order of the list matters to a [stack](/superschematic/guides/stacks/):
+the first dialect is the one the service's database runs in where the
+target can choose. A service that lists `sqlite` first,
+`["sqlite", "postgres"]`, is sqlite-first (D64):
+
+- a TypeScript API on it gets `Deps.db` as the HTTP runtime's
+  `SqlDatabase`, D1's interface, not a `pg` Pool;
+- `stack dev` keeps its database in a SQLite file under the environment's
+  state directory, `databases/<database>.sqlite`, which the provisioner
+  migrates from the SQLite plan with `superschematic-migrate` at its
+  `sqlite:<path>` URL, as it migrates a Postgres database;
+- the cloudflare target keeps it on D1, and migrates it from the
+  deploying machine at `d1://<account>/<uuid>`.
+
+A Go or Rust API on a sqlite-first database is refused where the database
+runs on SQLite, since their `Deps` reach Postgres alone, and so is a
+TypeScript API whose database runs in another dialect than its first.
+
 ### Types and defaults
 
 SQLite stores each type as the type its values need:

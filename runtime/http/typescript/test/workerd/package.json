@@ -1,0 +1,8 @@
+{
+  "name": "superschematic-http-runtime-workerd",
+  "private": true,
+  "description": "The workerd runtime that scripts/workerd-test.mjs runs the Workers fixtures under, kept out of the runtime's own devDependencies so that installing the runtime does not fetch it.",
+  "devDependencies": {
+    "workerd": "1.20260930.2"
+  }
+}

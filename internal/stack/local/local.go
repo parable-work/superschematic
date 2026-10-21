@@ -53,6 +53,13 @@ const (
 	DatabasePlatform = "local.postgres"
 	JobPlatform      = "local.job"
 
+	// SQLitePlatform keeps a database whose DB services list sqlite first
+	// in a SQLite file per hosted DB schema, under the environment's state
+	// directory (D64): the target places such a database on it
+	// (TargetSpec.DatabasePlatforms), so a TypeScript API's Deps.db is the
+	// SqlDatabase its first dialect types.
+	SQLitePlatform = "local.sqlite"
+
 	// SitePlatform serves a site's built files and its config from a file
 	// server in the provisioner, on loopback (D55).
 	SitePlatform = "local.site"
@@ -83,6 +90,12 @@ const (
 	HTTPConnector    = "local.process-process"
 	JobSQLConnector  = "local.job-postgres"
 	JobHTTPConnector = "local.job-process"
+
+	// SQLiteConnector and JobSQLiteConnector connect a process and a job
+	// to a SQLite file: its sqlite: URL (D64). A worker claims on Postgres
+	// alone, so none connects one.
+	SQLiteConnector    = "local.process-sqlite"
+	JobSQLiteConnector = "local.job-sqlite"
 
 	// BucketConnector and JobBucketConnector connect a process and a job
 	// to a bucket on the storage emulator (D54).
@@ -127,6 +140,11 @@ const (
 
 	// TypeDatabase is a database on a Postgres container.
 	TypeDatabase = "local:postgres/database:Database"
+
+	// TypeSQLiteDatabase is a SQLite file under the environment's state
+	// directory, which the provisioner creates (D64). Its url output is the
+	// file's sqlite: URL.
+	TypeSQLiteDatabase = "local:sqlite/database:Database"
 
 	// TypeKeyPair is an http edge's Ed25519 key pair. The provisioner
 	// generates it into the environment's state directory, never the
@@ -241,6 +259,15 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerDatabase,
 		},
 		{
+			Name:     SQLitePlatform,
+			Kind:     ir.DeployableDatabase,
+			Dialects: []string{registry.SQLDialectSQLite},
+			NameOf:   databaseDeployableName,
+			// A file has no address: each edge derives its file's URL.
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerSQLite,
+		},
+		{
 			Name:      BucketPlatform,
 			Kind:      ir.DeployableBucket,
 			NameOf:    bucketDeployableName,
@@ -257,6 +284,8 @@ func Register(r *registry.Registry) error {
 		{Name: SQLConnector, Edge: ir.EdgeSQL, From: ServerPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: HTTPConnector, Edge: ir.EdgeHTTP, From: ServerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: JobSQLConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: SQLiteConnector, Edge: ir.EdgeSQL, From: ServerPlatform, To: SQLitePlatform, Connect: connectSQLite},
+		{Name: JobSQLiteConnector, Edge: ir.EdgeSQL, From: JobPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: JobHTTPConnector, Edge: ir.EdgeHTTP, From: JobPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: SiteConnector, Edge: ir.EdgeSite, From: SitePlatform, To: ServerPlatform, Connect: connectSite},
 		{Name: BucketConnector, Edge: ir.EdgeBucket, From: ServerPlatform, To: BucketPlatform, Connect: connectBucket},
@@ -288,9 +317,10 @@ func Register(r *registry.Registry) error {
 			ir.DeployableWorker:   WorkerPlatform,
 			ir.DeployableRunner:   RunnerPlatform,
 		},
-		Values:        json.RawMessage(targetValues),
-		Provisioner:   ProvisionerName,
-		ResourceTypes: types,
+		DatabasePlatforms: map[string]string{registry.SQLDialectSQLite: SQLitePlatform},
+		Values:            json.RawMessage(targetValues),
+		Provisioner:       ProvisionerName,
+		ResourceTypes:     types,
 		Policies: []registry.PolicyRule{
 			{Name: PolicyNoDomain, Check: checkNoDomain},
 			{Name: PolicyNoParameters, Check: checkNoParameters},
@@ -372,6 +402,16 @@ var resourceTypes = map[string]string{
 	    "service": {"type": "string", "minLength": 1},
 	    "container": {"type": "string", "minLength": 1},
 	    "url": {"type": "string", "minLength": 1}
+	  },
+	  "additionalProperties": false
+	}`,
+	TypeSQLiteDatabase: `{
+	  "type": "object",
+	  "required": ["name", "service", "file"],
+	  "properties": {
+	    "name": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+	    "service": {"type": "string", "minLength": 1},
+	    "file": {"type": "string", "pattern": "^databases/[a-z_][a-z0-9_]*\\.sqlite$"}
 	  },
 	  "additionalProperties": false
 	}`,

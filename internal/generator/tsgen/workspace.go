@@ -66,8 +66,25 @@ import (
 // The install writes the workspace's lockfile, bun.lock, beside the root.
 // The project commits it (D51, amended), so a server's image and the
 // generated CI install the versions it pins: no build removes it, and the
-// root it pairs with is the same bytes on every build of the same schemas,
-// so a committed lockfile stays current until a manifest changes.
+// root it pairs with is the same bytes on every build of every service of
+// the same schemas, so a committed lockfile stays current until a
+// manifest changes.
+//
+// The output root holds only the packages of the services built into it:
+// a stack's build, which stack dev runs, builds that stack's services and
+// the services they need, and no other. An implementation or a site
+// depends on its API's generated packages with workspace:*, which Bun
+// cannot resolve when they are missing, and it refuses the whole install
+// then, even one --filter narrows. So the root leaves out, with a `!`
+// pattern after the patterns that take it in, each implementation or site
+// whose workspace dependencies the output root does not hold, nor another
+// member (LeftOutPattern; D51, amended). The generated packages need no
+// such pattern: their patterns match only the packages a build wrote, and
+// a build writes the packages each one depends on. Once every service is
+// built, as build-all builds them, the root leaves out nothing and is the
+// manifest the committed lockfile pins. A root that leaves a package out
+// is a partial workspace, whose install must not save the lockfile
+// (WorkspaceLeftOut).
 
 // The directories under the output root that hold the generated
 // TypeScript packages, as the generator's paths.go lays them out: a
@@ -194,8 +211,11 @@ type workspaceManifest struct {
 }
 
 // Manifest returns the root's package.json: the same bytes for every
-// build of one output root, so the builds that run in parallel each write
-// it for their own package.
+// build of one output root holding the same packages, so the builds that
+// run in parallel each write it for their own package. The packages it
+// leaves out depend on the generated packages on disk, so a build that
+// writes several, as build-all does, writes the root once more when they
+// are all in place.
 func (w WorkspaceRoot) Manifest() (string, error) {
 	n := w.Naming.OrDefault()
 	manifest := workspaceManifest{
@@ -220,6 +240,13 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		// of the APIs it calls with workspace:* (D55).
 		if site := path.Join(rel, n.SiteImplementationGlob()); !slices.Contains(manifest.Workspaces, site) {
 			manifest.Workspaces = append(manifest.Workspaces, site)
+		}
+		leftOut, err := w.leftOut(rel, n)
+		if err != nil {
+			return "", fmt.Errorf("workspace root: %w", err)
+		}
+		for _, member := range leftOut {
+			manifest.Workspaces = append(manifest.Workspaces, LeftOutPattern+member)
 		}
 	}
 	for _, local := range []struct{ pkg, dir string }{
@@ -251,6 +278,166 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// LeftOutPattern opens a workspace pattern that leaves a package out of
+// the workspace: Bun's negation, which the root writes for each
+// implementation or site whose workspace dependencies the output root
+// lacks.
+const LeftOutPattern = "!"
+
+// workspacePackage is what the root reads of a package's package.json:
+// its name and the packages it names with a workspace: spec.
+type workspacePackage struct {
+	member string
+	name   string
+	needs  []string
+	in     bool
+}
+
+// readWorkspacePackage reads the package in dir. A package.json that is
+// not JSON names no dependency, so the root keeps the package and Bun
+// reports the error.
+func readWorkspacePackage(dir string) (workspacePackage, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return workspacePackage{}, err
+	}
+	var manifest struct {
+		Name                 string            `json:"name"`
+		Dependencies         map[string]string `json:"dependencies"`
+		DevDependencies      map[string]string `json:"devDependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"`
+		PeerDependencies     map[string]string `json:"peerDependencies"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return workspacePackage{}, nil
+	}
+	pkg := workspacePackage{name: manifest.Name}
+	for _, deps := range []map[string]string{manifest.Dependencies, manifest.DevDependencies, manifest.OptionalDependencies, manifest.PeerDependencies} {
+		for dep, spec := range deps {
+			if strings.HasPrefix(spec, "workspace:") && !slices.Contains(pkg.needs, dep) {
+				pkg.needs = append(pkg.needs, dep)
+			}
+		}
+	}
+	return pkg, nil
+}
+
+// leftOut returns the implementations and sites the root leaves out, as
+// members relative to the output root (rel is the repository root's):
+// each package the implementations' or the sites' pattern takes in that
+// depends with workspace: on a package that is neither a generated
+// package on disk nor another member, sorted.
+func (w WorkspaceRoot) leftOut(rel string, n naming.Naming) ([]string, error) {
+	present := map[string]bool{}
+	for _, pattern := range workspacePackagePatterns {
+		matches, err := filepath.Glob(filepath.Join(w.OutputRoot, filepath.FromSlash(pattern), "package.json"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			pkg, err := readWorkspacePackage(filepath.Dir(m))
+			if errors.Is(err, fs.ErrNotExist) {
+				// A build running beside this one emptied the
+				// package's directory; it writes the root again.
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if pkg.name != "" {
+				present[pkg.name] = true
+			}
+		}
+	}
+	var candidates []workspacePackage
+	for _, glob := range []string{n.TypeScriptImplementationGlob(), n.SiteImplementationGlob()} {
+		matches, err := filepath.Glob(filepath.Join(w.RepositoryRoot, filepath.FromSlash(glob), "package.json"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			dir := filepath.Dir(m)
+			sub, err := filepath.Rel(w.RepositoryRoot, dir)
+			if err != nil {
+				return nil, err
+			}
+			member := path.Join(rel, filepath.ToSlash(sub))
+			if slices.ContainsFunc(candidates, func(c workspacePackage) bool { return c.member == member }) {
+				continue
+			}
+			pkg, err := readWorkspacePackage(dir)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			pkg.member = member
+			candidates = append(candidates, pkg)
+		}
+	}
+	// A member may depend on another, so the members grow until none
+	// more resolves.
+	for grew := true; grew; {
+		grew = false
+		for i, c := range candidates {
+			if c.in || !all(c.needs, func(dep string) bool { return present[dep] }) {
+				continue
+			}
+			if c.name != "" {
+				present[c.name] = true
+			}
+			candidates[i].in = true
+			grew = true
+		}
+	}
+	var out []string
+	for _, c := range candidates {
+		if !c.in {
+			out = append(out, c.member)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// all reports whether every element of s satisfies f.
+func all(s []string, f func(string) bool) bool {
+	for _, v := range s {
+		if !f(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// WorkspaceLeftOut returns the packages the Bun workspace whose root is
+// outputRoot's package.json leaves out, as its `!` patterns name them: a
+// partial workspace, whose install must not save the lockfile, which pins
+// the whole workspace (D51, amended). Bun drops from the lockfile what a
+// manifest no longer names, and an engineer's or a deploy's install of
+// one stack would drop the other stacks' packages from the lockfile the
+// project commits.
+func WorkspaceLeftOut(outputRoot string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(outputRoot, "package.json"))
+	if err != nil {
+		return nil, err
+	}
+	var manifest struct {
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("the Bun workspace's root %s: %w", filepath.Join(outputRoot, "package.json"), err)
+	}
+	var out []string
+	for _, pattern := range manifest.Workspaces {
+		if member, ok := strings.CutPrefix(pattern, LeftOutPattern); ok {
+			out = append(out, member)
+		}
+	}
+	return out, nil
 }
 
 // legacyTypesWorkspaceManifest is the package.json earlier builds wrote at

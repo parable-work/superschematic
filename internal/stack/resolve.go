@@ -245,6 +245,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	}
 	r.nameDeployables()
 	r.deriveEdges()
+	r.checkDatabaseDialects()
 	r.orderRollout()
 	r.bindConfig()
 	if r.failed() {
@@ -881,6 +882,11 @@ func (r *resolver) place() {
 				continue // resolveTarget reported it
 			}
 			platformName = r.target.Platforms[res.Kind]
+			if res.Kind == ir.DeployableDatabase {
+				if p := r.target.DatabasePlatforms[r.firstDialectOf(res)]; p != "" {
+					platformName = p
+				}
+			}
 			if platformName == "" {
 				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a %s; place it with a settings platform", res.Kind, name, r.target.Name, res.Kind)
 				continue
@@ -938,6 +944,38 @@ func (r *resolver) placeServer(d *deployable) {
 		}
 		r.fail(CodeUnrealizable, "%s", msg)
 	}
+	if reason := d.platform.NoIdentity; reason != "" && d.res.Kind == ir.DeployableServer {
+		for _, served := range d.res.Services {
+			if svc := r.services[served.Name]; svc != nil && svc.Identity {
+				r.fail(CodeUnrealizable, "server %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Name, svc.Name, d.platform.Name, reason)
+			}
+		}
+	}
+	if d.res.Artifact == ir.ArtifactBundle {
+		r.refuseEngineInBundle(d)
+	}
+}
+
+// refuseEngineInBundle refuses a server or a job on a platform whose
+// artifact is a bundle (D64) when an API of it connects to an engine
+// database: the entrypoint opens the engine on it (D58), and the engine
+// is a native addon, the Rust engine through Node-API, which a bundle,
+// run in an isolate with no native code, cannot load.
+func (r *resolver) refuseEngineInBundle(d *deployable) {
+	for _, served := range d.res.Services {
+		svc := r.services[served.Name]
+		if svc == nil || svc.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		db, ok := r.connectsQuietly(svc)
+		if !ok {
+			continue
+		}
+		if engine := r.services[db]; engine != nil && engine.Engine {
+			r.fail(CodeUnrealizable, "%s %s serves %s, which connects to %s, an engine database whose engine its entrypoint opens (D58), and platform %s builds a bundle, which cannot load the engine: it is a native addon, the Rust engine through Node-API; place %s on a platform that builds an image",
+				d.res.Kind, d.res.Name, svc.Name, db, d.platform.Name, d.res.Name)
+		}
+	}
 }
 
 // unbuiltDeployables names, by kind and then language, the decision that
@@ -980,6 +1018,30 @@ func (r *resolver) serverLanguage(res *ir.ResolvedDeployable) (string, bool) {
 		return lang, true
 	}
 	return "", true
+}
+
+// firstDialect is the dialect a DB service lists first in its
+// outputs.sql.dialects, postgres when it lists none: what a TypeScript
+// API's Deps.db is typed by (D64).
+func firstDialect(svc *Service) string {
+	if svc == nil || len(svc.Dialects) == 0 {
+		return registry.SQLDialectPostgres
+	}
+	return svc.Dialects[0]
+}
+
+// firstDialectOf is the dialect every DB service a database hosts lists
+// first, or "" when they disagree.
+func (r *resolver) firstDialectOf(res *ir.ResolvedDeployable) string {
+	first := ""
+	for _, ref := range res.Services {
+		dialect := firstDialect(r.services[ref.Name])
+		if first != "" && dialect != first {
+			return ""
+		}
+		first = dialect
+	}
+	return first
 }
 
 func (r *resolver) placeDatabase(d *deployable) {

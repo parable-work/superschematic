@@ -178,6 +178,12 @@ func ParseBundles(values []string) (map[string]string, error) {
 	return stackdeploy.ParseBundles(values)
 }
 
+// PinSites pins the digest of the files each site serves in its nodes
+// (D55); see internal/stackdeploy.PinSites.
+func PinSites(env *ir.ResolvedEnvironment, digests map[string]string) (*ir.ResolvedEnvironment, error) {
+	return stackdeploy.PinSites(env, digests)
+}
+
 // PinBundles pins each bundle's digest and its files' hashes in its
 // deployable's nodes (D64); see internal/stackdeploy.PinBundles.
 func PinBundles(env *ir.ResolvedEnvironment, bundles map[string]Bundle) (*ir.ResolvedEnvironment, error) {

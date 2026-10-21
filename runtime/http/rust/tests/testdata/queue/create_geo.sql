@@ -37,3 +37,5 @@ duration as an INTERVAL.';
 CREATE INDEX idx_delivery_planned_queue_due_at ON delivery_planned_queue USING BTREE (due_at) WHERE state = 'ready';
 
 CREATE INDEX idx_delivery_planned_queue_claim_expires_at ON delivery_planned_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_delivery_planned_queue_updated_at ON delivery_planned_queue USING BTREE (updated_at) WHERE state = 'done';
