@@ -3,6 +3,7 @@ package bodyargs
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -23,15 +24,18 @@ import (
 var enumError = validate.ValidationError{Validator: "enum", Message: "invalid enum value"}
 
 // DecodeRefusal is the refusal of an input body, raw, that the decoder of
-// target, a pointer to the input type, refused. When raw decodes once each
-// string an enum lacks is replaced by one of the enum's values, it is
-// "validation failed", with "enum" at each such string's path and the
-// field errors the input type's Validate finds in the rest; any other body
-// is "does not match the declared type", as a value of the wrong JSON type
-// is.
-func DecodeRefusal(raw json.RawMessage, target any) *InputRefusal {
+// target, a pointer to the input type, refused with err. When err is an
+// enum's refusal of a string it lacks and raw decodes once each such string
+// is replaced by one of the enum's values, it is "validation failed", with
+// "enum" at each such string's path and the field errors the input type's
+// Validate finds in the rest; any other body is "does not match the
+// declared type", as a value of the wrong JSON type is. The replaced value
+// is the enum's first member, so the input type's rules must not depend on
+// one enum value against another (none of the generated rules do); its
+// errors at a replaced string's path are the "enum" alone.
+func DecodeRefusal(raw json.RawMessage, target any, err error) *InputRefusal {
 	t := reflect.TypeOf(target)
-	if t == nil || t.Kind() != reflect.Pointer {
+	if t == nil || t.Kind() != reflect.Pointer || !isEnumRefusal(err) {
 		return Mismatch("does not match the declared type", nil)
 	}
 	fresh := reflect.New(t.Elem()).Interface()
@@ -144,6 +148,14 @@ func replaceUnknownEnums(value any, t reflect.Type, errs validate.ValidationErro
 		}
 	}
 	return value
+}
+
+// isEnumRefusal reports whether err is a generated enum's refusal of a
+// value, the *json.UnmarshalTypeError naming the enum's type, so that a
+// body refused for any other reason is not read twice.
+func isEnumRefusal(err error) bool {
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &typeErr) && typeErr.Type != nil && isEnumType(typeErr.Type)
 }
 
 // isEnumType reports whether t is a generated enum: a string type with

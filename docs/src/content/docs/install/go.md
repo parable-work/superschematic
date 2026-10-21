@@ -216,12 +216,24 @@ as it was.
 A `Temporal.Duration` field holds a `time.Duration`, but is read from its
 text as every validator reads it: the scalar's pattern and length, then
 the scalar core, check the text, and a text they accept is the core's
-value (`1.5ns` is 2ns, as the core rounds it). A text they refuse (`+1s`,
-` 1s`, `1d`) decodes to 0s, and `Validate` reports it at its path by the
-rule it breaks, as the TypeScript and Rust validators do; Go's own
-duration parser would read `+1s` and refuse ` 1s`. A value set in Go is
-checked as set. A duration beyond what a `time.Duration` holds, about 292
-years (`2562047h1h`), is refused when it decodes.
+value (`1.5ns` is 2ns, as the core rounds it). A text they refuse but
+Go's own duration parser reads (`+1s`, `0`, a negative duration such as
+the `-1h2m0s` Go writes) keeps Go's value, and `Validate` reports it at
+its path by the rule it breaks, as the TypeScript and Rust validators do;
+a reader that does not validate, an SDK reading a response or the ORM's
+history, keeps the value. A text Go's parser refuses too (` 1s`, `1d`)
+is a decode error naming the field, and so is a duration beyond what a
+`time.Duration` holds, about 292 years (`2562047h1h`). A value set in Go
+is checked as set.
+
+An enum's members are part of the wire contract. A Go reader refuses a
+member it does not know, as Rust and Python readers do, so adding a member
+breaks an older Go client that receives it until it is regenerated,
+removing or renaming one makes JSON stored with it (a JSON column, a
+queue message, a version graph's history) unreadable, and a required enum
+left unset in Go, which encodes as `""`, is refused by the reader.
+Regenerate the Go clients with a new member before a server sends it, and
+keep a member as long as stored data holds it.
 
 ## Serve a generated API
 
@@ -313,7 +325,8 @@ string an enum lacks, which the enum's decoder refuses, is `validation
 failed` with `enum` at its path beside the other rules the body breaks, as
 the TypeScript and Rust servers, which validate before they decode, answer
 it: the route reads the body again with each such string replaced by one
-of the enum's values (`bodyargs.DecodeRefusal`). Any other body the type's
+of the enum's values (`bodyargs.DecodeRefusal`). The `data` part of a
+multipart input is answered the same way. Any other body the type's
 decoder refuses, a value of the wrong JSON type among them, is `does not
 match the declared type`. A top-level key the type does not declare is
 refused, `unknown` at its key:

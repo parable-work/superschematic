@@ -943,30 +943,36 @@ var vectors = []parityVector{
 
 	// Temporal.Duration's text (D31, amended): the scalar's pattern and
 	// maxLength, then the scalar core, check the text as sent. Go's value
-	// is a time.Duration, whose own parser reads "+1s" and refuses " 1s";
-	// its decoder checks the text as the other validators do and reads the
-	// core's canonical value.
+	// is a time.Duration: its decoder checks the text as the other
+	// validators do and reads the core's canonical value, or for a text they
+	// refuse the value Go's own parser reads, and a text that parser
+	// refuses too is a decode refusal.
 	{
 		name:    "duration_valid",
 		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "1h30m", "waits": ["1.5s", "500ms", "1\u00b5s", "2562047h"]}`,
 		want:    map[string][]string{},
 	},
 	{
-		// A sign, space around the text, a bare number, a unit the scalar
-		// lacks, and a fraction without its integer part all break the
-		// pattern, which Go's parser alone would read.
+		// A sign, a negative duration as Go writes one, a bare number and a
+		// fraction without its integer part break the pattern, which Go's
+		// parser alone would read.
 		name: "duration_bad_format",
 		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "+1s",
-			"waits": [" 1s", "-1s", "0", "1d", ".5s", "1s "]}`,
+			"waits": ["-1h2m0s", "0", ".5s"]}`,
 		want: map[string][]string{
 			"wait":     {"pattern"},
 			"waits[0]": {"pattern"},
 			"waits[1]": {"pattern"},
 			"waits[2]": {"pattern"},
-			"waits[3]": {"pattern"},
-			"waits[4]": {"pattern"},
-			"waits[5]": {"pattern"},
 		},
+	},
+	{
+		// Space around the text and a unit the scalar lacks break the
+		// pattern too, and Go's duration parser refuses them.
+		name:          "duration_bad_format_go_cannot_parse",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "waits": [" 1s", "1d", "1s "]}`,
+		want:          map[string][]string{"waits[0]": {"pattern"}, "waits[1]": {"pattern"}, "waits[2]": {"pattern"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:    "duration_too_long",
@@ -974,11 +980,13 @@ var vectors = []parityVector{
 		want:    map[string][]string{"wait": {"maxLength"}},
 	},
 	{
-		// A text the rules accept but whose amount the core refuses.
-		name:    "duration_beyond_the_core",
-		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "99999999999999999999h"}`,
-		want:    map[string][]string{"wait": {"parse"}},
-		core:    []string{"wait"},
+		// A text the rules accept but whose amount the core refuses, and
+		// Go's parser too.
+		name:          "duration_beyond_the_core",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "99999999999999999999h"}`,
+		want:          map[string][]string{"wait": {"parse"}},
+		core:          []string{"wait"},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:          "duration_wrong_type",

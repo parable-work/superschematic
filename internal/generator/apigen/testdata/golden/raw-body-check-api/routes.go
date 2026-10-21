@@ -169,7 +169,7 @@ func createNoteSaveNoteHandler(impl NoteImplementation) gohttp.HandlerFunc {
 			// A string an enum lacks, which its decoder refuses, is "enum"
 			// at its path beside the type's other rules, as every server
 			// answers it.
-			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input))
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
 			return
 		}
 
@@ -232,7 +232,7 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 				return
 			}
 			if err := json.Unmarshal(rawInput, &input); err != nil {
-				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input))
+				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
 				return
 			}
 			files = nil
@@ -279,7 +279,7 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 					return
 				}
 				if err := json.Unmarshal([]byte(dataField), &input); err != nil {
-					RespondError(w, r, gohttp.StatusBadRequest, "Invalid 'data' field: "+err.Error())
+					RespondInputRefusal(w, r, bodyargs.DecodeRefusal(json.RawMessage(dataField), &input, err))
 					return
 				}
 			}

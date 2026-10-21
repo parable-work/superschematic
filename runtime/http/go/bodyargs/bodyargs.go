@@ -579,18 +579,20 @@ func decode[T any](errs validate.ValidationErrors, arg *Arg, path string, raw js
 			// An object the decoder refused for strings its enums lack is
 			// checked with them replaced: they are "enum" at their paths,
 			// beside the object's other errors.
-			if refused, ok := decodeWithoutUnknownEnums(raw, target); ok {
-				own := validate.NewValidationErrors()
-				if validator, isObject := any(target).(interface {
-					Validate() validate.ValidationErrors
-				}); isObject {
-					if nested := validator.Validate(); nested != nil {
-						own = nested
+			if isEnumRefusal(err) {
+				if refused, ok := decodeWithoutUnknownEnums(raw, target); ok {
+					own := validate.NewValidationErrors()
+					if validator, isObject := any(target).(interface {
+						Validate() validate.ValidationErrors
+					}); isObject {
+						if nested := validator.Validate(); nested != nil {
+							own = nested
+						}
 					}
+					mergeErrors(own, refused)
+					errs.AddNestedError(path, own)
+					return
 				}
-				mergeErrors(own, refused)
-				errs.AddNestedError(path, own)
-				return
 			}
 			errs.AddFieldError(path, "type", "does not match the declared type")
 			return

@@ -1100,11 +1100,11 @@
       }
     },
     {
-      "name": "a duration with space around it, which the pattern refuses",
+      "name": "a negative duration as Go writes it, which the pattern refuses",
       "operation": "probe",
       "path": "/api/probe",
       "body": {
-        "wait": " 1s"
+        "wait": "-1h2m0s"
       },
       "status": 400,
       "input": true,
@@ -1130,7 +1130,7 @@
         "waits": [
           "1s",
           "-1s",
-          "1d"
+          "0"
         ]
       },
       "status": 400,

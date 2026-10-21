@@ -58,6 +58,7 @@ const durationLegsSchema = `{
 // INTERVAL, which the ORM writes as the duration's whole microseconds,
 // truncated toward zero, and reads as pgx does, a day 24 hours and a month
 // 30 days (D53, amended). The test writes positive and negative durations,
+// each of which reads back, and goes through Go's JSON and back, as itself,
 // one of microseconds, one over a day and one with a nanosecond remainder
 // through CreateOne, CreateMany, UpdateOneIfVersion and UpdateMany, reads
 // the columns' text with SQL, writes an interval of a month and days with
@@ -156,6 +157,7 @@ const durationORMTest = `package orm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -264,6 +266,17 @@ func TestDurationsOnPostgres(t *testing.T) {
 		}
 		if time.Duration(got.Planned) != c.read || got.Delay == nil || time.Duration(*got.Delay) != c.read || got.At != sf {
 			t.Errorf("%s: GetOne = planned %v delay %v at %v, want %v at %v", c.name, time.Duration(got.Planned), got.Delay, got.At, c.read, sf)
+		}
+		// The row read goes through Go's JSON and back as itself, a negative
+		// duration included, which Go writes as "-1h2m0s" and the scalar's
+		// pattern refuses (D31, amended).
+		encoded, err := json.Marshal(got)
+		if err != nil {
+			t.Fatalf("%s: marshal %+v: %v", c.name, got, err)
+		}
+		var decoded types.Leg
+		if err := json.Unmarshal(encoded, &decoded); err != nil || decoded.Planned != got.Planned || decoded.Delay == nil || *decoded.Delay != *got.Delay {
+			t.Errorf("%s: %s decoded as planned %v delay %v, %v; want %v", c.name, encoded, time.Duration(decoded.Planned), decoded.Delay, err, c.read)
 		}
 		// = matches the stored microseconds, a nanosecond remainder truncated.
 		found, err := db.Leg.FindOne(ctx, &LegFilter{Planned: &DurationFilter{Eq: ptr(c.in)}, Delay: &DurationFilter{Eq: ptr(c.read)}}, nil)
