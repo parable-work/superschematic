@@ -9,6 +9,10 @@
 //     and Transport return what they wrap.
 //   - OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_TIMEOUT and their
 //     per-signal forms reach the exporter, which reads them itself.
+//   - An endpoint under googleapis.com, Cloud Trace's OTLP endpoint, gets
+//     the access token of the workload's account from the metadata server
+//     on each export, unless a headers variable names an authorization
+//     header (google.go).
 //   - OTEL_EXPORTER_OTLP_PROTOCOL, and its traces form, may only name
 //     http/protobuf, the one protocol the runtime exports over.
 //   - OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the defaults
@@ -87,6 +91,10 @@ const JobAttribute = "superschematic.job"
 // spans still buffered to reach the collector.
 const flushTimeout = 5 * time.Second
 
+// exportTimeout bounds one export through the client that sends Google's
+// access token (google.go), as the exporter's own client's default does.
+const exportTimeout = 10 * time.Second
+
 // scope is the instrumentation scope of the spans the package makes
 // itself.
 const scope = "github.com/parable-work/superschematic/runtime/http/go/telemetry"
@@ -140,7 +148,15 @@ func Start(ctx context.Context, d Defaults) (stop func(), err error) {
 	if err != nil {
 		return nil, fmt.Errorf("OTEL_SERVICE_NAME or OTEL_RESOURCE_ATTRIBUTES: %w", err)
 	}
-	exporter, err := otlptracehttp.New(ctx)
+	var options []otlptracehttp.Option
+	google := googleAuth(cfg.endpoint, os.Getenv)
+	if google {
+		options = append(options, otlptracehttp.WithHTTPClient(&http.Client{
+			Transport: newGoogleTokenTransport(nil, ""),
+			Timeout:   exportTimeout,
+		}))
+	}
+	exporter, err := otlptracehttp.New(ctx, options...)
 	if err != nil {
 		return nil, fmt.Errorf("the OTLP exporter: %w", err)
 	}
@@ -155,7 +171,7 @@ func Start(ctx context.Context, d Defaults) (stop func(), err error) {
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(cfg.propagator)
 	enabled.Store(true)
-	logger.Info("exporting traces", zap.String("endpoint", cfg.endpoint), zap.String("protocol", Protocol))
+	logger.Info("exporting traces", zap.String("endpoint", cfg.endpoint), zap.String("protocol", Protocol), zap.Bool("googleAuth", google))
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
 		defer cancel()

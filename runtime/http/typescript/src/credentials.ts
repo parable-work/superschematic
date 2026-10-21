@@ -77,6 +77,34 @@ export function googleIdTokenSource(audience: string, options: GoogleIdTokenSour
   };
 }
 
+/**
+ * An OAuth access token of the account the Cloud Run service or VM this
+ * runs on runs as, from its metadata server, as Google's APIs take in
+ * Authorization: Bearer, such as Cloud Trace's OTLP endpoint (D67,
+ * amended). It is cached until 5 minutes before it expires.
+ */
+export function googleAccessTokenSource(options: GoogleIdTokenSourceOptions = {}): ServiceTokenSource {
+  const now = options.now ?? Date.now;
+  const request = options.fetch ?? ((url, init) => fetch(url, init));
+  let cached: { token: string; refreshAt: number } | undefined;
+  const fetchToken = singleFlight(async () => {
+    const url = `http://${metadataHostOf(options)}/computeMetadata/v1/instance/service-accounts/default/token`;
+    const response = await request(url, { headers: { 'metadata-flavor': 'Google' } });
+    if (!response.ok) throw new Error(`the metadata server answered ${response.status} for an access token`);
+    const answer = (await response.json()) as { access_token?: unknown; expires_in?: unknown };
+    if (typeof answer.access_token !== 'string' || answer.access_token === '') {
+      throw new Error('the metadata server answered no access token');
+    }
+    const expiresIn = typeof answer.expires_in === 'number' ? answer.expires_in : 0;
+    cached = { token: answer.access_token, refreshAt: now() + expiresIn * 1000 - GOOGLE_REFRESH_BEFORE_MS };
+    return answer.access_token;
+  });
+  return async fresh => {
+    if (!fresh && cached && now() < cached.refreshAt) return cached.token;
+    return fetchToken();
+  };
+}
+
 export interface TokenFileSourceOptions {
   /** Reads the file; node:fs/promises through process.getBuiltinModule by default. */
   readonly readFile?: (path: string) => Promise<string>;

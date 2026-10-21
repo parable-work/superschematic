@@ -12,6 +12,12 @@
 //!   only awaits.
 //! - `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT` and their
 //!   per-signal forms reach the exporter, which reads them itself.
+//! - An endpoint under `googleapis.com`, Cloud Trace's OTLP endpoint, gets
+//!   the access token of the workload's account from the metadata server
+//!   on each export (`GCE_METADATA_HOST` when set, else
+//!   `metadata.google.internal`), held until five minutes before it
+//!   expires, unless a headers variable names an `authorization` header
+//!   (D67, amended). An export that gets no token fails, as any other.
 //! - `OTEL_EXPORTER_OTLP_PROTOCOL`, and its traces form, may only name
 //!   `http/protobuf`, the one protocol the runtime exports over.
 //! - `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override the
@@ -51,7 +57,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -235,7 +241,10 @@ pub fn dispatch(
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_http_client(ExportClient::new(config.timeout)?)
+        .with_http_client(ExportClient::new(
+            config.timeout,
+            google_auth(&endpoint(&env), &env).then(|| GoogleToken::new(&metadata_host())),
+        )?)
         .build()
         .map_err(|err| TelemetryError::Exporter(err.to_string()))?;
     let provider = SdkTracerProvider::builder()
@@ -428,15 +437,125 @@ fn read_propagators(
     TextMapCompositePropagator::new(propagators)
 }
 
+/// Whether export to `endpoint` sends the access token of the workload's
+/// account (D67, amended): whether its host is `googleapis.com` or under
+/// it, and neither `OTEL_EXPORTER_OTLP_TRACES_HEADERS` nor
+/// `OTEL_EXPORTER_OTLP_HEADERS` names an `authorization` header.
+fn google_auth(endpoint: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let Some(host) = endpoint
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(str::to_ascii_lowercase))
+    else {
+        return false;
+    };
+    if host != "googleapis.com" && !host.ends_with(".googleapis.com") {
+        return false;
+    }
+    ![
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+    ]
+    .into_iter()
+    .filter_map(env)
+    .any(|headers| {
+        headers.split(',').any(|pair| {
+            let key = pair.split('=').next().unwrap_or_default().trim();
+            key.eq_ignore_ascii_case("authorization")
+        })
+    })
+}
+
+/// The metadata server's path for the account's access token.
+const GOOGLE_TOKEN_PATH: &str = "/computeMetadata/v1/instance/service-accounts/default/token";
+
+/// An access token is fetched again this long before it expires.
+const GOOGLE_TOKEN_MARGIN: Duration = Duration::from_secs(5 * 60);
+
+/// The access token of the workload's account, from the metadata server,
+/// held until [`GOOGLE_TOKEN_MARGIN`] before it expires.
+struct GoogleToken {
+    url: String,
+    now: fn() -> SystemTime,
+    cached: tokio::sync::Mutex<Option<(String, SystemTime)>>,
+}
+
+impl GoogleToken {
+    /// A token from the metadata server at `host` (`host[:port]`).
+    fn new(host: &str) -> Self {
+        GoogleToken {
+            url: format!("http://{host}{GOOGLE_TOKEN_PATH}"),
+            now: SystemTime::now,
+            cached: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// The token held, or a new one when it expires within the margin.
+    async fn token(&self, client: &reqwest::Client) -> Result<String, HttpError> {
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            access_token: String,
+            #[serde(default)]
+            expires_in: u64,
+        }
+        let mut cached = self.cached.lock().await;
+        let now = (self.now)();
+        if let Some((token, expires)) = cached.as_ref() {
+            if now + GOOGLE_TOKEN_MARGIN < *expires {
+                return Ok(token.clone());
+            }
+        }
+        let fail = |err: String| -> HttpError {
+            format!("telemetry: an access token from the metadata server: {err}").into()
+        };
+        let response = client
+            .get(&self.url)
+            .header("Metadata-Flavor", "Google")
+            .send()
+            .await
+            .map_err(|err| fail(err.to_string()))?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|err| fail(err.to_string()))?;
+        if !status.is_success() {
+            return Err(fail(format!(
+                "it answered {}: {}",
+                status.as_u16(),
+                String::from_utf8_lossy(&body).trim()
+            )));
+        }
+        let answer: Answer = serde_json::from_slice(&body)
+            .map_err(|_| fail("the answer is not an access token".to_string()))?;
+        if answer.access_token.is_empty() {
+            return Err(fail("the answer's access token is empty".to_string()));
+        }
+        *cached = Some((
+            answer.access_token.clone(),
+            now + Duration::from_secs(answer.expires_in),
+        ));
+        Ok(answer.access_token)
+    }
+}
+
+/// The metadata server's `host[:port]`.
+fn metadata_host() -> String {
+    crate::token_source::metadata_host()
+}
+
 /// The exporter's HTTP client: `reqwest`, on a current-thread runtime of
-/// its own, which the batch processor's thread blocks on for each export.
+/// its own, which the batch processor's thread blocks on for each export,
+/// with the account's access token on each request for Google's OTLP
+/// endpoint.
 struct ExportClient {
     client: reqwest::Client,
+    google: Option<GoogleToken>,
     runtime: Mutex<Option<tokio::runtime::Runtime>>,
 }
 
 impl ExportClient {
-    fn new(timeout: Duration) -> Result<Self, TelemetryError> {
+    fn new(timeout: Duration, google: Option<GoogleToken>) -> Result<Self, TelemetryError> {
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
@@ -447,8 +566,29 @@ impl ExportClient {
             .map_err(|err| TelemetryError::Exporter(err.to_string()))?;
         Ok(ExportClient {
             client,
+            google,
             runtime: Mutex::new(Some(runtime)),
         })
+    }
+
+    /// Sends one export, with the access token when the endpoint is
+    /// Google's.
+    async fn send(&self, request: Request<Bytes>) -> Result<Response<Bytes>, HttpError> {
+        let mut request = reqwest::Request::try_from(request)?;
+        if let Some(google) = &self.google {
+            let token = google.token(&self.client).await?;
+            request.headers_mut().insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))?,
+            );
+        }
+        let response = self.client.execute(request).await?;
+        let mut out = Response::builder().status(response.status());
+        if let Some(headers) = out.headers_mut() {
+            *headers = response.headers().clone();
+        }
+        let body = response.bytes().await?;
+        Ok(out.body(body)?)
     }
 }
 
@@ -475,20 +615,9 @@ impl Drop for ExportClient {
 #[async_trait]
 impl HttpClient for ExportClient {
     async fn send_bytes(&self, request: Request<Bytes>) -> Result<Response<Bytes>, HttpError> {
-        let request = reqwest::Request::try_from(request)?;
-        let client = self.client.clone();
-        let send = async move {
-            let response = client.execute(request).await?;
-            let mut out = Response::builder().status(response.status());
-            if let Some(headers) = out.headers_mut() {
-                *headers = response.headers().clone();
-            }
-            let body = response.bytes().await?;
-            Ok::<_, HttpError>(out.body(body)?)
-        };
         let runtime = self.runtime.lock().unwrap_or_else(PoisonError::into_inner);
         match runtime.as_ref() {
-            Some(runtime) => runtime.block_on(send),
+            Some(runtime) => runtime.block_on(self.send(request)),
             None => Err("the exporter is stopped".into()),
         }
     }
@@ -739,5 +868,153 @@ pub(crate) fn message_span(queue: &str, id: &str, attempt: u32) -> tracing::Span
 pub(crate) fn message_failed(span: &tracing::Span, cause: &str) {
     if !span.is_none() {
         span.set_status(Status::error(cause.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicU32;
+
+    /// Export sends the account's access token to an endpoint under
+    /// `googleapis.com` alone, and not when a headers variable names an
+    /// `authorization` header of its own (D67, amended).
+    #[test]
+    fn google_auth_goes_to_google_alone() {
+        let none = |_: &str| None;
+        for (endpoint, want) in [
+            ("https://telemetry.googleapis.com", true),
+            ("https://telemetry.googleapis.com:443/v1/traces", true),
+            ("https://TELEMETRY.GOOGLEAPIS.COM", true),
+            ("https://telemetry.us-central1.rep.googleapis.com/", true),
+            ("https://googleapis.com", true),
+            ("http://collector.internal:4318", false),
+            ("https://notgoogleapis.com", false),
+            ("https://googleapis.com.example.com", false),
+        ] {
+            assert_eq!(google_auth(endpoint, &none), want, "{endpoint}");
+        }
+        for (name, value) in [
+            ("OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer%20abc"),
+            (
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+                "x-a=1, authorization = Basic%20x",
+            ),
+        ] {
+            let env = |n: &str| (n == name).then(|| value.to_string());
+            assert!(
+                !google_auth("https://telemetry.googleapis.com", &env),
+                "{name}={value}"
+            );
+        }
+        let project = |n: &str| {
+            (n == "OTEL_EXPORTER_OTLP_HEADERS").then(|| "x-goog-user-project=p".to_string())
+        };
+        assert!(google_auth("https://telemetry.googleapis.com", &project));
+    }
+
+    static FETCHED: AtomicU32 = AtomicU32::new(0);
+    static FAILING: AtomicBool = AtomicBool::new(false);
+    static NOW: Mutex<Option<SystemTime>> = Mutex::new(None);
+
+    fn now() -> SystemTime {
+        NOW.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .expect("the test's clock")
+    }
+
+    fn advance(by: Duration) {
+        let mut now = NOW.lock().unwrap_or_else(PoisonError::into_inner);
+        *now = now.map(|t| t + by);
+    }
+
+    /// Each export goes with the metadata server's access token, asked
+    /// for with `Metadata-Flavor: Google`, held until five minutes before
+    /// it expires and then fetched again; a metadata server that fails
+    /// fails the export, which sends nothing.
+    #[tokio::test]
+    async fn each_export_carries_the_access_token() {
+        use axum::http::HeaderMap;
+        *NOW.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_497_600));
+        let metadata = axum::Router::new().route(
+            GOOGLE_TOKEN_PATH,
+            axum::routing::get(|headers: HeaderMap| async move {
+                if headers.get("metadata-flavor").and_then(|v| v.to_str().ok()) != Some("Google") {
+                    return (axum::http::StatusCode::FORBIDDEN, String::new());
+                }
+                if FAILING.load(Ordering::SeqCst) {
+                    return (
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        "no account".to_string(),
+                    );
+                }
+                let n = FETCHED.fetch_add(1, Ordering::SeqCst) + 1;
+                (
+                    axum::http::StatusCode::OK,
+                    format!(
+                        r#"{{"access_token":"token-{n}","expires_in":3599,"token_type":"Bearer"}}"#
+                    ),
+                )
+            }),
+        );
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let collector = axum::Router::new().route(
+            "/v1/traces",
+            axum::routing::post({
+                let seen = seen.clone();
+                move |headers: HeaderMap| async move {
+                    let auth = headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
+                    seen.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(auth);
+                }
+            }),
+        );
+        let serve = |router: axum::Router| async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("address");
+            tokio::spawn(async move { axum::serve(listener, router).await });
+            addr
+        };
+        let metadata = serve(metadata).await;
+        let collector = serve(collector).await;
+        let mut google = GoogleToken::new(&metadata.to_string());
+        google.now = now;
+        let client = ExportClient::new(EXPORT_TIMEOUT, Some(google)).expect("client");
+        let export = || {
+            let request = Request::post(format!("http://{collector}/v1/traces"))
+                .header("content-type", "application/x-protobuf")
+                .body(Bytes::from_static(b"spans"))
+                .expect("request");
+            client.send(request)
+        };
+        export().await.expect("first export");
+        export().await.expect("second export");
+        advance(Duration::from_secs(54 * 60));
+        export().await.expect("an export before the margin");
+        advance(Duration::from_secs(60));
+        export().await.expect("an export within the margin");
+        assert_eq!(
+            *seen.lock().unwrap_or_else(PoisonError::into_inner),
+            [
+                "Bearer token-1",
+                "Bearer token-1",
+                "Bearer token-1",
+                "Bearer token-2"
+            ]
+        );
+        FAILING.store(true, Ordering::SeqCst);
+        advance(Duration::from_secs(60 * 60));
+        let err = export().await.expect_err("an export with no token");
+        assert!(err.to_string().contains("it answered 500"), "{err}");
+        assert_eq!(seen.lock().unwrap_or_else(PoisonError::into_inner).len(), 4);
+        drop(client);
     }
 }
