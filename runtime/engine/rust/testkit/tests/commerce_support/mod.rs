@@ -117,7 +117,9 @@ pub fn items_of(engine: &Engine, schema: &str, id: &str) -> Vec<HolderItem> {
 }
 
 fn int(value: &Value) -> i64 {
-    value.as_i64().unwrap_or_else(|| panic!("an integer: {value}"))
+    value
+        .as_i64()
+        .unwrap_or_else(|| panic!("an integer: {value}"))
 }
 
 /// Holds Stock's ledger on every instance of a schema that composes it:
@@ -135,11 +137,23 @@ pub fn assert_ledger(engine: &Engine, schema: &str, backorder: bool) {
         );
         let mut running = 0;
         for (index, movement) in moved.iter().enumerate() {
-            assert_eq!(int(&movement["seq"]), index as i64 + 1, "{schema} {id}: {movement}");
+            assert_eq!(
+                int(&movement["seq"]),
+                index as i64 + 1,
+                "{schema} {id}: {movement}"
+            );
             running += int(&movement["delta"]);
-            assert_eq!(int(&movement["on_hand"]), running, "{schema} {id}: {movement}");
+            assert_eq!(
+                int(&movement["on_hand"]),
+                running,
+                "{schema} {id}: {movement}"
+            );
         }
-        assert_eq!(int(&stock["onHand"]), running, "{schema} {id}: onHand is the sum of its movements");
+        assert_eq!(
+            int(&stock["onHand"]),
+            running,
+            "{schema} {id}: onHand is the sum of its movements"
+        );
         let held: i64 = rows(
             engine,
             &format!("SELECT quantity FROM {holds} WHERE schema = ? AND id = ? AND state = 'held'"),
@@ -148,7 +162,11 @@ pub fn assert_ledger(engine: &Engine, schema: &str, backorder: bool) {
         .iter()
         .map(|row| int(&row["quantity"]))
         .sum();
-        assert_eq!(int(&stock["held"]), held, "{schema} {id}: held is what its records hold");
+        assert_eq!(
+            int(&stock["held"]),
+            held,
+            "{schema} {id}: held is what its records hold"
+        );
         let free = running - held;
         assert_eq!(
             int(&stock["available"]),
@@ -240,7 +258,8 @@ pub fn assert_matched(engine: &Engine, claims: &[&str], supplies: &[Supply<'_>])
                 if !item.state.takes() {
                     continue;
                 }
-                let Some(supply) = supplies.iter().find(|s| s.schema() == item.supply.schema) else {
+                let Some(supply) = supplies.iter().find(|s| s.schema() == item.supply.schema)
+                else {
                     continue;
                 };
                 let found = records
@@ -253,7 +272,11 @@ pub fn assert_matched(engine: &Engine, claims: &[&str], supplies: &[Supply<'_>])
                             && record["item"] == json!(item.item)
                     })
                     .unwrap_or_else(|| panic!("no record of {schema} {claim}'s item {item:?}"));
-                assert_eq!(found.2["state"], json!(item.state.as_str()), "{schema} {claim}: {item:?}");
+                assert_eq!(
+                    found.2["state"],
+                    json!(item.state.as_str()),
+                    "{schema} {claim}: {item:?}"
+                );
                 match item.ask.quantity() {
                     Some(quantity) => assert_eq!(found.2["quantity"], json!(quantity)),
                     None => assert_eq!(

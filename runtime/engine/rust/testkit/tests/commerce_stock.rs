@@ -99,9 +99,12 @@ fn open_matching(
     stock: Value,
     matcher: Option<Arc<dyn PermissionMatcher>>,
 ) -> Engine {
-    let engine = target.open_with(BehaviorSet::new().with(Stock).with(HoldsStandIn), |options| {
-        options.permission_matcher = matcher;
-    });
+    let engine = target.open_with(
+        BehaviorSet::new().with(Stock).with(HoldsStandIn),
+        |options| {
+            options.permission_matcher = matcher;
+        },
+    );
     publish(&engine, &inventory(stock)).expect("publish Inventory");
     let mut cart = schema_document(
         "Cart",
@@ -146,7 +149,10 @@ fn invoke(
 }
 
 fn stock(engine: &Engine, id: &str) -> Value {
-    read(engine, "Inventory", id).expect("the inventory").behaviors["Stock"].clone()
+    read(engine, "Inventory", id)
+        .expect("the inventory")
+        .behaviors["Stock"]
+        .clone()
 }
 
 fn line(id: &str, item: i64, quantity: i64) -> Value {
@@ -155,7 +161,15 @@ fn line(id: &str, item: i64, quantity: i64) -> Value {
 
 fn cart(engine: &Engine, id: &str, lines: Value) {
     create(engine, "Cart", id, json!({}));
-    invoke(engine, &alice(), "Cart", id, "stage", json!({ "items": lines })).expect("stage");
+    invoke(
+        engine,
+        &alice(),
+        "Cart",
+        id,
+        "stage",
+        json!({ "items": lines }),
+    )
+    .expect("stage");
 }
 
 fn advance(engine: &Engine, id: &str, to: &str) -> Result<Value, Error> {
@@ -317,7 +331,12 @@ fn stock_is_received_adjusted_and_counted_with_its_permission_each_a_movement() 
         assert_eq!(rest["next"], Value::Null);
         let item = &rest["items"][0];
         assert_eq!(
-            [&item["seq"], &item["kind"], &item["delta"], &item["reference"]],
+            [
+                &item["seq"],
+                &item["kind"],
+                &item["delta"],
+                &item["reference"]
+            ],
             [&json!(1), &json!("receive"), &json!(10), &json!("DN-1")]
         );
         let refused = refusal(invoke(
@@ -447,7 +466,13 @@ fn a_claim_holds_commits_releases_and_returns_units_through_the_contract() {
         );
         let last = &movements(&engine, "anvil", json!({"limit": 1}))["items"][0];
         assert_eq!(
-            [&last["kind"], &last["delta"], &last["holder"], &last["hold"], &last["item"]],
+            [
+                &last["kind"],
+                &last["delta"],
+                &last["holder"],
+                &last["hold"],
+                &last["item"]
+            ],
             [
                 &json!("commit"),
                 &json!(-2),
@@ -494,8 +519,14 @@ fn a_claim_holds_commits_releases_and_returns_units_through_the_contract() {
             "holdFor",
             json!({"holder": {"schema": "Cart", "id": "c3"}, "hold": "lines", "item": 0, "quantity": 1}),
         ));
-        assert_eq!((behavior.as_str(), code.as_deref()), ("Stock", Some("not_requested")));
-        assert_eq!(reason, "item 0 of hold lines of Cart c3 is pending, and holdFor needs it held");
+        assert_eq!(
+            (behavior.as_str(), code.as_deref()),
+            ("Stock", Some("not_requested"))
+        );
+        assert_eq!(
+            reason,
+            "item 0 of hold lines of Cart c3 is pending, and holdFor needs it held"
+        );
         holds(&engine, false);
     }
 }
@@ -504,7 +535,12 @@ fn a_claim_holds_commits_releases_and_returns_units_through_the_contract() {
 fn a_hold_is_held_to_max_per_hold_and_to_what_is_available_unless_backorder() {
     for target in targets("stock_limits") {
         let engine = open(&target);
-        create(&engine, "Inventory", "rope", json!({"title": "Rope", "priceCents": 300}));
+        create(
+            &engine,
+            "Inventory",
+            "rope",
+            json!({"title": "Rope", "priceCents": 300}),
+        );
         invoke(
             &engine,
             &stocker(),
@@ -575,11 +611,8 @@ fn a_hold_is_held_to_max_per_hold_and_to_what_is_available_unless_backorder() {
         holds(&engine, true);
 
         // backorder turns off only while no instance holds past what it has.
-        let refused = publish(
-            &engine,
-            &inventory(json!({"permission": "stock.adjust"})),
-        )
-        .expect_err("backorder off while rope is below zero");
+        let refused = publish(&engine, &inventory(json!({"permission": "stock.adjust"})))
+            .expect_err("backorder off while rope is below zero");
         assert!(
             refused
                 .to_string()
@@ -587,8 +620,7 @@ fn a_hold_is_held_to_max_per_hold_and_to_what_is_available_unless_backorder() {
             "{refused}"
         );
         advance(&engine, "c1", "released").expect("release");
-        publish(&engine, &inventory(json!({"permission": "stock.adjust"})))
-            .expect("backorder off");
+        publish(&engine, &inventory(json!({"permission": "stock.adjust"}))).expect("backorder off");
         holds(&engine, false);
     }
 }
@@ -692,7 +724,11 @@ fn a_supply_holding_units_is_not_deleted_and_its_rows_go_with_it() {
             )
             .expect("receive");
         }
-        cart(&engine, "c1", json!([line("anvil", 0, 1), line("vice", 1, 1)]));
+        cart(
+            &engine,
+            "c1",
+            json!([line("anvil", 0, 1), line("vice", 1, 1)]),
+        );
         advance(&engine, "c1", "held").expect("hold");
         let (behavior, action, _, code, details) = veto(engine.instances().delete(
             &alice(),
@@ -708,19 +744,31 @@ fn a_supply_holding_units_is_not_deleted_and_its_rows_go_with_it() {
         holds(&engine, false);
 
         // Committed units are sold: the supply goes, and its rows.
-        invoke(&engine, &alice(), "Cart", "c1", "move", json!({"to": "committed", "hold": "lines", "item": 0})).expect("commit");
-        invoke(&engine, &alice(), "Cart", "c1", "move", json!({"to": "released", "hold": "lines", "item": 1})).expect("release");
+        invoke(
+            &engine,
+            &alice(),
+            "Cart",
+            "c1",
+            "move",
+            json!({"to": "committed", "hold": "lines", "item": 0}),
+        )
+        .expect("commit");
+        invoke(
+            &engine,
+            &alice(),
+            "Cart",
+            "c1",
+            "move",
+            json!({"to": "released", "hold": "lines", "item": 1}),
+        )
+        .expect("release");
         assert!(engine
             .instances()
             .delete(&alice(), "Inventory", "anvil", WriteOptions::default())
             .expect("delete"));
         assert_eq!(ids(&engine, "Inventory"), ["vice"]);
         let movements = commerce_support::behavior_table(&engine, "Stock", "movements");
-        let left = commerce_support::rows(
-            &engine,
-            &format!("SELECT id FROM {movements}"),
-            &[],
-        );
+        let left = commerce_support::rows(&engine, &format!("SELECT id FROM {movements}"), &[]);
         assert!(left.iter().all(|row| row["id"] == "vice"), "{left:?}");
         assert_ledger(&engine, "Inventory", false);
     }
@@ -735,29 +783,32 @@ fn a_config_is_held_to_the_type_and_a_currency_to_iso_4217() {
                 .expect_err("refused")
                 .to_string()
         };
-        assert!(refused(json!({"permission": "p", "price": {"field": "title", "currency": "GBP"}}))
-            .contains("price.field \"title\" is not an integer field of Inventory"));
-        assert!(refused(json!({"permission": "p", "price": {"field": "cost", "currency": "GBP"}}))
-            .contains("price.field \"cost\" is not a field of Inventory"));
+        assert!(refused(
+            json!({"permission": "p", "price": {"field": "title", "currency": "GBP"}})
+        )
+        .contains("price.field \"title\" is not an integer field of Inventory"));
+        assert!(
+            refused(json!({"permission": "p", "price": {"field": "cost", "currency": "GBP"}}))
+                .contains("price.field \"cost\" is not a field of Inventory")
+        );
         assert!(refused(json!({"permission": "p", "price": {"field": "priceCents", "currency": {"field": "reorderAt"}}}))
             .contains("price.currency.field \"reorderAt\" is not a string field of Inventory"));
-        assert!(refused(json!({"permission": "p", "lowAt": {"field": "title"}}))
-            .contains("lowAt.field \"title\" is not an integer field of Inventory"));
+        assert!(
+            refused(json!({"permission": "p", "lowAt": {"field": "title"}}))
+                .contains("lowAt.field \"title\" is not an integer field of Inventory")
+        );
         if superschematic_engine_commerce::currency::CHECKS_TABLE {
-            assert!(refused(json!({"permission": "p", "price": {"field": "priceCents", "currency": "ABC"}}))
-                .contains("price.currency \"ABC\" is not an active ISO 4217 currency code"));
+            assert!(refused(
+                json!({"permission": "p", "price": {"field": "priceCents", "currency": "ABC"}})
+            )
+            .contains("price.currency \"ABC\" is not an active ISO 4217 currency code"));
         }
         publish(
             &engine,
             &inventory(json!({"permission": "p", "price": {"field": "priceCents", "currency": {"field": "currency"}}})),
         )
         .expect("a currency field");
-        create(
-            &engine,
-            "Inventory",
-            "anvil",
-            json!({"title": "Anvil"}),
-        );
+        create(&engine, "Inventory", "anvil", json!({"title": "Anvil"}));
         // Stock leaves only a schema without instances.
         let mut bare = inventory(json!({}));
         bare["types"]["Inventory"]["behaviors"] = json!([]);

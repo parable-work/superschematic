@@ -5,11 +5,11 @@
 //! theirs. The text is plain ASCII and depends only on the config and the
 //! type.
 
+pub(crate) mod holds;
 pub(crate) mod stock;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};
 
-#[allow(dead_code)]
 /// Joins names as a sentence does: `a`; `a and b`; `a, b and c`.
 pub(crate) fn list<S: AsRef<str>>(names: &[S], conjunction: &str) -> String {
     match names {
