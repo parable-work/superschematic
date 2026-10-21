@@ -13,7 +13,9 @@ import (
 // (`superschematic stack queue`, docs/stack-model.md, section 8.8). The
 // migration runner runs them as the command's document carries them
 // (`superschematic-migrate queue`), so this function is their one writer.
-// Like the claims, they run on Postgres alone.
+// They run on Postgres alone: the claims run on SQLite too
+// (SQLiteQueueStatements), and `stack queue` on SQLite is not built (D53,
+// amended).
 //
 // Each statement that takes messages by ID takes them as one parameter, $1,
 // a text array of their IDs, which pgx and node-postgres both bind from a

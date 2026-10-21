@@ -389,8 +389,8 @@ func TestWorkersRefusals(t *testing.T) {
 		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
 		s.Expose = nil
 		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres in a loop that lasts as long as its process (D53), "+
-			"and a Worker runs only per request or per firing and reaches no Postgres; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
+		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), "+
+			"and a Worker runs only per request or per firing and reaches neither; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
 	})
 	t.Run("a name over 63 characters", func(t *testing.T) {
 		s := storefrontStack()
