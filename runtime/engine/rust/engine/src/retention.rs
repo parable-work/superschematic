@@ -24,7 +24,12 @@
 //!
 //! A namespace's floor (`engine_log_floors`) is the last cursor retention
 //! pruned of its events: a read from a cursor before it is
-//! `cursor_expired`. The floor moves first in a batch's transaction, and the
+//! `cursor_expired`. A batch is written only from the floor it was chosen
+//! at, read again under the namespace's lock, so a runner whose pass
+//! overlaps another process's at a lease's handover never moves the floor
+//! back nor prunes an event twice, and a namespace's count is taken again
+//! when the floor is not the one it was counted from. The floor moves
+//! first in a batch's transaction, never back, and the
 //! trigger that keeps the log append-only lets a delete through only at or
 //! before it. A pruned event takes its value holders with it; before it
 //! goes, each instance event folds into its instance's base
@@ -70,6 +75,9 @@ pub const DEFAULT_RETENTION_BATCH_SIZE: i64 = 1_000;
 /// The most events one transaction prunes.
 pub const MAX_RETENTION_BATCH_SIZE: i64 = 10_000;
 const MIN_RETENTION_EVERY_MS: i64 = 1_000;
+/// How many times a batch another process's pruning overtook is chosen
+/// again before the pass moves on.
+const REPLANS: usize = 3;
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 impl RetentionOptions {
@@ -211,10 +219,20 @@ pub(crate) fn floors_of(tx: &Tx<'_>) -> Result<Vec<LogFloor>> {
 }
 
 /// The engine's retention: its options and each namespace's count of kept
-/// events, through the last cursor counted.
+/// events, through the last cursor counted, at the floor it counted from.
 pub(crate) struct Retention {
     pub options: ResolvedRetention,
-    counts: Mutex<HashMap<String, (i64, i64)>>,
+    counts: Mutex<HashMap<String, Count>>,
+}
+
+/// A namespace's count of kept events: how many the log held after
+/// `floor`, through the cursor `through`. Another process's pruning moves
+/// the database's floor away from `floor`, and the count is taken again.
+#[derive(Clone, Copy, Debug)]
+struct Count {
+    kept: i64,
+    through: i64,
+    floor: i64,
 }
 
 impl Retention {
@@ -223,6 +241,16 @@ impl Retention {
             options,
             counts: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Forgets every namespace's count, so the next pass counts again: what
+    /// a runner does when it takes the lease, since another process's
+    /// runner may have pruned while it did not hold it.
+    pub fn forget_counts(&self) {
+        self.counts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// The namespaces the log holds events of, with one indexed seek each:
@@ -251,6 +279,26 @@ impl Retention {
     /// transaction, and returns how many: fewer than `batch_size` when it
     /// pruned all it may for now.
     pub fn batch(&self, engine: &Engine, namespace: &str, hold: NamespaceHold) -> Result<i64> {
+        // A batch another process's pruning overtook is chosen again from
+        // the floor it left, a few times at most; past that the next pass
+        // goes on.
+        for _ in 0..REPLANS {
+            if let Some(pruned) = self.try_batch(engine, namespace, hold)? {
+                return Ok(pruned);
+            }
+        }
+        Ok(0)
+    }
+
+    // try_batch is batch from the floor as it reads it now: None when
+    // another process's runner moved the floor before the batch could be
+    // written, and nothing was.
+    fn try_batch(
+        &self,
+        engine: &Engine,
+        namespace: &str,
+        hold: NamespaceHold,
+    ) -> Result<Option<i64>> {
         let options = self.options;
         let floor = engine.read(|tx| floor_of(tx, namespace))?;
         // Without max_hold_ms a subscription that does not advance holds as
@@ -262,14 +310,14 @@ impl Retention {
         };
         let limit = firm.unwrap_or(MAX_SAFE_INTEGER);
         if limit <= floor {
-            return Ok(0);
+            return Ok(Some(0));
         }
         let over = match options.max_events {
             None => 0,
             Some(max) => self.kept(engine, namespace, floor)? - max,
         };
         if options.max_age_ms.is_none() && over <= 0 {
-            return Ok(0);
+            return Ok(Some(0));
         }
         let count = if options.max_age_ms.is_none() {
             options.batch_size.min(over)
@@ -297,21 +345,30 @@ impl Retention {
         };
         let gone = self.gone(engine, events, over, stuck);
         if gone.is_empty() {
-            return Ok(0);
+            return Ok(Some(0));
         }
         let pruned = gone.len() as i64;
-        engine.write(Lock::Namespace(namespace), |tx| {
-            prune(engine, tx, namespace, floor, &gone)
+        let last = gone.last().map_or(floor, |event| event.cursor);
+        // The batch was chosen outside the namespace's lock: when another
+        // process's runner pruned meanwhile, as two can for a moment at a
+        // lease's handover, its floor moved, and this batch is not written.
+        let written = engine.write(Lock::Namespace(namespace), |tx| {
+            if floor_of(tx, namespace)? != floor {
+                return Ok(false);
+            }
+            prune(engine, tx, namespace, floor, &gone)?;
+            Ok(true)
         })?;
-        if let Some(count) = self
-            .counts
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_mut(namespace)
-        {
-            count.0 -= pruned;
+        let mut counts = self.counts.lock().unwrap_or_else(PoisonError::into_inner);
+        if !written {
+            counts.remove(namespace);
+            return Ok(None);
         }
-        Ok(pruned)
+        if let Some(count) = counts.get_mut(namespace) {
+            count.kept -= pruned;
+            count.floor = last;
+        }
+        Ok(Some(pruned))
     }
 
     // gone keeps the run of events, oldest first, that retention lets go:
@@ -348,15 +405,17 @@ impl Retention {
     // kept is how many events of a namespace the log holds after its
     // floor: the count it kept, plus the events appended since it last
     // counted. The first count reads every event the namespace keeps; each
-    // after, only the new ones.
+    // after, only the new ones, while the floor is the one it counted from:
+    // when another process's runner moved it, it counts again.
     fn kept(&self, engine: &Engine, namespace: &str, floor: i64) -> Result<i64> {
         let known = self
             .counts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(namespace)
-            .copied();
-        let since = known.map_or(floor, |(_, through)| through);
+            .copied()
+            .filter(|count| count.floor == floor);
+        let since = known.map_or(floor, |count| count.through);
         let (appended, last) = engine.read(|tx| {
             let row = tx.get(
                 "SELECT COUNT(*) AS count, MAX(cursor) AS last FROM engine_events WHERE namespace = ? AND cursor > ?",
@@ -367,7 +426,7 @@ impl Retention {
                 Some(row) => (row.i64("count")?, row.opt_i64("last")?),
             })
         })?;
-        let kept = known.map_or(0, |(kept, _)| kept) + appended;
+        let kept = known.map_or(0, |count| count.kept) + appended;
         let through = if appended > 0 {
             last.unwrap_or(since)
         } else {
@@ -376,7 +435,14 @@ impl Retention {
         self.counts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(namespace.to_owned(), (kept, through));
+            .insert(
+                namespace.to_owned(),
+                Count {
+                    kept,
+                    through,
+                    floor,
+                },
+            );
         Ok(kept)
     }
 }
@@ -401,8 +467,9 @@ fn floor_of(tx: &Tx<'_>, namespace: &str) -> Result<i64> {
 }
 
 // prune removes a namespace's oldest events, in cursor order, inside a
-// transaction: each instance event folds into its instance's base, the
-// events' value holders go, the floor moves past them, and then they do.
+// transaction under the namespace's lock, from the floor it holds: each
+// instance event folds into its instance's base, the events' value holders
+// go, the floor moves past them, never back, and then they do.
 fn prune(
     engine: &Engine,
     tx: &Tx<'_>,
@@ -446,10 +513,10 @@ fn prune(
     tx.run(
         Sql::per(
             "INSERT INTO engine_log_floors (namespace, floor, publish_floor, pruned) VALUES (?, ?, ?, ?)
-             ON CONFLICT (namespace) DO UPDATE SET floor = excluded.floor,
+             ON CONFLICT (namespace) DO UPDATE SET floor = MAX(engine_log_floors.floor, excluded.floor),
                publish_floor = MAX(engine_log_floors.publish_floor, excluded.publish_floor), pruned = engine_log_floors.pruned + excluded.pruned",
             "INSERT INTO engine_log_floors (namespace, floor, publish_floor, pruned) VALUES (?, ?, ?, ?)
-             ON CONFLICT (namespace) DO UPDATE SET floor = excluded.floor,
+             ON CONFLICT (namespace) DO UPDATE SET floor = GREATEST(engine_log_floors.floor, excluded.floor),
                publish_floor = GREATEST(engine_log_floors.publish_floor, excluded.publish_floor), pruned = engine_log_floors.pruned + excluded.pruned",
         ),
         &[

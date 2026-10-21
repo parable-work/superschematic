@@ -900,6 +900,63 @@ fn a_stream_the_started_runner_prunes_past_ends_and_its_resume_is_410_cursor_exp
 }
 
 #[test]
+fn a_behavior_this_engine_does_not_run_holds_at_its_start_for_max_hold_ms_before_it_has_run() {
+    for target in targets("retention_unregistered_hold") {
+        // A newer release published test.Ledger on Order; this engine, an
+        // older release's runner, does not run it, and its subscription
+        // has not run.
+        let start = {
+            let (first, _) = open(&target, |_| {});
+            publish(&first, &plain_document("Note"), None);
+            create(&first, "Note", "n1", json!({"title": "n1"}), None);
+            publish(&first, &ledger_document("Order"), None);
+            let start = head(&first);
+            create(&first, "Note", "n2", json!({"title": "n2"}), None);
+            create(&first, "Note", "n3", json!({"title": "n3"}), None);
+            start
+        };
+        let older = |max_hold_ms: Option<i64>| {
+            target.open_with(BehaviorSet::new(), |options| {
+                options.clock = Clock::Manual(1_010_000);
+                options.runner = Some(runner());
+                options.retention = Some(RetentionOptions {
+                    max_events: Some(1),
+                    max_hold_ms,
+                    ..RetentionOptions::default()
+                });
+            })
+        };
+        // Bounded by maxHoldMs, it holds the events after its start.
+        let engine = older(Some(60_000));
+        engine.runner().prune().unwrap();
+        assert_eq!(floor(&engine, None), start, "held at its start");
+        let held = status_of(&engine).namespaces[0].clone();
+        assert_eq!(held.held_at, Some(start));
+        assert_eq!(held.held_state, Some(SubscriptionState::Inactive));
+        // Past the bound it holds them no more.
+        engine.clock().set(1_100_000).unwrap();
+        engine.runner().prune().unwrap();
+        assert_eq!(floor(&engine, None), head(&engine) - 1);
+        drop(engine);
+    }
+    for target in targets("retention_unregistered_unbounded") {
+        {
+            let (first, _) = open(&target, |_| {});
+            publish(&first, &ledger_document("Order"), None);
+            publish(&first, &plain_document("Note"), None);
+            create(&first, "Note", "n1", json!({"title": "n1"}), None);
+        }
+        // With no bound it holds nothing, since no runner may ever run it.
+        let engine = target.open_with(BehaviorSet::new(), |options| {
+            options.runner = Some(runner());
+            options.retention = Some(count(1));
+        });
+        engine.runner().prune().unwrap();
+        assert_eq!(floor(&engine, None), head(&engine) - 1);
+    }
+}
+
+#[test]
 fn a_subscription_behind_its_floor_halts_with_cursor_expired_and_resume_with_skip_moves_it() {
     for target in targets("retention_behind_the_floor") {
         // A storage whose schema composes test.Ledger, pruned by an engine
