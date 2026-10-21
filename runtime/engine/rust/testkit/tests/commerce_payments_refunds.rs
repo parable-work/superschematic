@@ -130,8 +130,59 @@ fn refund_actions(engine: &Engine) -> Vec<Value> {
         .collect()
 }
 
+// label is a Refund's number, as Numbering prints it.
+fn label(engine: &Engine, id: &str) -> String {
+    read(engine, "Refund", id)
+        .behavior_field("Numbering", "label")
+        .and_then(Value::as_str)
+        .expect("a number")
+        .to_owned()
+}
+
 fn run_due(engine: &Engine) {
     engine.runner().run_due().expect("run due");
+}
+
+// refuses_forgeries_once_asked: a settlement without the adapter's
+// permission, about a refund rf-1 did not ask, or from another instance, is
+// refused, and rf-1's link and amount stay once it has asked.
+fn refuses_forgeries_once_asked(engine: &Engine, refund_id: &Value) {
+    // A forged settlement: without the adapter's permission, about a
+    // refund it did not ask, or from another instance.
+    let settle = |who: &Principal, of: &str, refund: &Value| {
+        invoke(
+            engine,
+            who,
+            "Refund",
+            "rf-1",
+            "settleRefundFor",
+            json!({"of": {"schema": "Checkout", "id": of}, "refund": refund, "status": "succeeded", "amount": 1000}),
+        )
+    };
+    assert_eq!(
+        code(settle(&alice(), "c-1", refund_id)),
+        EngineErrorCode::Forbidden
+    );
+    assert_eq!(
+        vetoed(settle(&adapter(), "c-1", &json!("rf_nope"))).as_deref(),
+        Some("no_attempt")
+    );
+    assert_eq!(
+        vetoed(settle(&adapter(), "c-9", refund_id)).as_deref(),
+        Some("not_linked")
+    );
+    // The Refund's link and amount stay once it has asked.
+    let moved = invoke(
+        engine,
+        &alice(),
+        "Refund",
+        "rf-1",
+        "link",
+        json!({"name": "order", "id": "c-1"}),
+    );
+    assert_eq!(vetoed(moved).as_deref(), Some("not_linked"));
+    let changed = update(engine, "Refund", "rf-1", json!({"amountCents": 2000}));
+    assert_eq!(vetoed(changed).as_deref(), Some("amount_locked"));
 }
 
 #[test]
@@ -139,13 +190,8 @@ fn a_refund_is_issued_after_two_sign_offs_and_settled_by_the_provider() {
     for target in targets("a_refund_is_issued_after_two_sign_offs") {
         let (engine, attempt) = shop(&target);
         ask(&engine, "rf-1", 1000);
-        let label = read(&engine, "Refund", "rf-1")
-            .behavior_field("Numbering", "label")
-            .and_then(Value::as_str)
-            .expect("a number")
-            .to_owned();
         let year = &superschematic_engine_testkit::iso_of(T0)[..4];
-        assert_eq!(label, format!("RF-{year}-00001"));
+        assert_eq!(label(&engine, "rf-1"), format!("RF-{year}-00001"));
         let fields = payments(&engine, "Refund", "rf-1");
         assert_eq!(fields["state"], json!("unpaid"));
         assert_eq!(fields["due"], json!(1000));
@@ -187,42 +233,7 @@ fn a_refund_is_issued_after_two_sign_offs_and_settled_by_the_provider() {
         );
         assert_eq!(payments(&engine, "Checkout", "c-1")["refunded"], json!(0));
 
-        // A forged settlement: without the adapter's permission, about a
-        // refund it did not ask, or from another instance.
-        let settle = |who: &Principal, of: &str, refund: &Value| {
-            invoke(
-                &engine,
-                who,
-                "Refund",
-                "rf-1",
-                "settleRefundFor",
-                json!({"of": {"schema": "Checkout", "id": of}, "refund": refund, "status": "succeeded", "amount": 1000}),
-            )
-        };
-        assert_eq!(
-            code(settle(&alice(), "c-1", &refund_id)),
-            EngineErrorCode::Forbidden
-        );
-        assert_eq!(
-            vetoed(settle(&adapter(), "c-1", &json!("rf_nope"))).as_deref(),
-            Some("no_attempt")
-        );
-        assert_eq!(
-            vetoed(settle(&adapter(), "c-9", &refund_id)).as_deref(),
-            Some("not_linked")
-        );
-        // The Refund's link and amount stay once it has asked.
-        let moved = invoke(
-            &engine,
-            &alice(),
-            "Refund",
-            "rf-1",
-            "link",
-            json!({"name": "order", "id": "c-1"}),
-        );
-        assert_eq!(vetoed(moved).as_deref(), Some("not_linked"));
-        let changed = update(&engine, "Refund", "rf-1", json!({"amountCents": 2000}));
-        assert_eq!(vetoed(changed).as_deref(), Some("amount_locked"));
+        refuses_forgeries_once_asked(&engine, &refund_id);
 
         // The provider refunds it.
         let done = record(
@@ -258,12 +269,7 @@ fn a_refund_is_issued_after_two_sign_offs_and_settled_by_the_provider() {
 
         // A second refund is numbered next.
         ask(&engine, "rf-2", 500);
-        let label = read(&engine, "Refund", "rf-2")
-            .behavior_field("Numbering", "label")
-            .and_then(Value::as_str)
-            .unwrap()
-            .to_owned();
-        assert_eq!(label, format!("RF-{year}-00002"));
+        assert_eq!(label(&engine, "rf-2"), format!("RF-{year}-00002"));
     }
 }
 

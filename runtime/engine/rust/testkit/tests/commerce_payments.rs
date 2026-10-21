@@ -28,6 +28,34 @@ fn code_of<T: std::fmt::Debug>(result: Result<T, superschematic_engine::Error>) 
     veto(result).3
 }
 
+// lists_the_waiting_actions: the adapter sees c-1's create action, with
+// the attempt and where the payer comes back to, beside a second
+// checkout's, a page at a time; listing needs its permission.
+fn lists_the_waiting_actions(engine: &superschematic_engine::Engine, attempt: &str) {
+    // The adapter sees the create action, with the attempt's id as its
+    // idempotency key's source and where the payer comes back to.
+    checkout(engine, "c-2", 900);
+    open_payment(engine, "c-2", "cart-9").expect("c-2's attempt");
+    let waiting = actions(engine, "Checkout");
+    assert_eq!(waiting.len(), 2);
+    assert_eq!(waiting[0]["kind"], json!("create"));
+    assert_eq!(waiting[0]["attempt"], json!(attempt));
+    assert_eq!(waiting[0]["amount"], json!(2500));
+    assert_eq!(waiting[0]["id"], json!("c-1"));
+    assert_eq!(waiting[0]["returnUrl"], json!("https://shop.test/back"));
+    assert!(waiting[0]["action"].as_str().unwrap().starts_with("act_"));
+    assert_eq!(waiting[1]["id"], json!("c-2"));
+    // Listing needs the adapter's permission.
+    let listed = engine.instances().invoke_schema(
+        &alice(),
+        "Checkout",
+        "listPaymentActions",
+        &json!({"provider": PROVIDER}),
+        None,
+    );
+    assert_eq!(code(listed), EngineErrorCode::Forbidden);
+}
+
 #[test]
 fn an_attempt_opens_once_per_key_and_its_create_action_waits_for_the_adapter() {
     for target in targets("an_attempt_opens_once_per_key") {
@@ -73,28 +101,7 @@ fn an_attempt_opens_once_per_key_and_its_create_action_waits_for_the_adapter() {
         assert_eq!(vetoed.as_deref(), Some("nothing_due"));
         assert_eq!(details.unwrap()["pending"], json!(2500));
 
-        // The adapter sees the create action, with the attempt's id as its
-        // idempotency key's source and where the payer comes back to.
-        checkout(&engine, "c-2", 900);
-        open_payment(&engine, "c-2", "cart-9").expect("c-2's attempt");
-        let waiting = actions(&engine, "Checkout");
-        assert_eq!(waiting.len(), 2);
-        assert_eq!(waiting[0]["kind"], json!("create"));
-        assert_eq!(waiting[0]["attempt"], json!(attempt));
-        assert_eq!(waiting[0]["amount"], json!(2500));
-        assert_eq!(waiting[0]["id"], json!("c-1"));
-        assert_eq!(waiting[0]["returnUrl"], json!("https://shop.test/back"));
-        assert!(waiting[0]["action"].as_str().unwrap().starts_with("act_"));
-        assert_eq!(waiting[1]["id"], json!("c-2"));
-        // Listing needs the adapter's permission.
-        let listed = engine.instances().invoke_schema(
-            &alice(),
-            "Checkout",
-            "listPaymentActions",
-            &json!({"provider": PROVIDER}),
-            None,
-        );
-        assert_eq!(code(listed), EngineErrorCode::Forbidden);
+        lists_the_waiting_actions(&engine, &attempt);
         // Nothing is due on an instance that owes nothing.
         checkout(&engine, "c-0", 0);
         assert_eq!(
@@ -967,7 +974,7 @@ fn a_literal_currency_is_checked_against_iso_4217_when_the_schema_is_defined() {
         let define = |config: Value| {
             engine.schemas().define(
                 &alice(),
-                &checkout_document(
+                checkout_document(
                     "Odd",
                     json!([checkout_flow(), {"name": "Payments", "config": config}]),
                 ),
@@ -1093,7 +1100,7 @@ fn a_claims_holds_total_is_what_it_owes() {
         // A Payments listed before Holds would read a total not yet written.
         let refused = engine.schemas().define(
             &alice(),
-            &checkout_document(
+            checkout_document(
                 "Early",
                 json!([checkout_flow(), {"name": "Payments", "config": payments_config(json!({"amount": {"holds": true}, "currency": null}))}, {"name": "Holds"}]),
             ),
