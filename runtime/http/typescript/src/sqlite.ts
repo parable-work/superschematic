@@ -1,6 +1,13 @@
 import { Database, type Statement } from 'bun:sqlite';
 import type { SqlDatabase, SqlExecResult, SqlMeta, SqlPreparedStatement, SqlResult, SqlValue } from './d1.js';
 
+// The queue client on SQLite (D53, amended): a worker's claims over the
+// file a sqlite-first database is under stack dev, and the statement that
+// enqueues a message in a batch.
+export { ClaimLostError } from './queue-core.js';
+export type { Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
+
 /*
 SqlDatabase over a SQLite file through bun:sqlite (D64, section 18.13 of
 docs/stack-model.md): under stack dev, a database whose DB service lists

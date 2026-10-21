@@ -294,6 +294,7 @@ func (r run) generateTSTypes() error {
 			Naming:             r.Options.Naming,
 			Registry:           r.Registry,
 			EngineDocument:     engineDocument,
+			SQLite:             r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -397,6 +398,7 @@ func (r run) generateRustTypes() error {
 		Naming:           r.Options.Naming,
 		Registry:         r.Registry,
 		EngineDocument:   engineDocument,
+		SQLite:           r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 		Clock:            r.Options.Clock,
 	})
 	if err != nil {
@@ -509,6 +511,7 @@ func (r run) generateORM() error {
 			Naming:        r.Options.Naming,
 			Dependencies:  deps,
 			ModuleClosure: closure,
+			SQLite:        r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			Clock:         r.Options.Clock,
 		})
 		return err

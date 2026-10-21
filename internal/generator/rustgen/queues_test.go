@@ -36,7 +36,7 @@ func testQueuesDescribeWhatTypeScriptWrites(t *testing.T, fixture string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queues, err := RustQueues(schema)
+	queues, err := RustQueues(schema, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +78,11 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	ping := schema.Types["Ping"]
 	ping.Fields = append(ping.Fields, &ir.FieldDef{Name: "every", TypeRef: ir.TypeRef{Name: "Temporal.Duration", IsArray: true}})
 
-	tsQueues, err := tsgen.TypeScriptQueues(schema)
+	tsQueues, err := tsgen.TypeScriptQueues(schema, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	queues, err := RustQueues(schema)
+	queues, err := RustQueues(schema, true)
 	if err != nil {
 		t.Fatal(err)
 	}

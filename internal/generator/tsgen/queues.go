@@ -51,6 +51,17 @@ type QueueInfo struct {
 	// Statements are the queue's statements on Postgres, the Go ORM's.
 	Statements sqlutil.QueueStatements
 
+	// SQLiteStatements are the queue's statements on SQLite
+	// (sqlutil.SQLiteQueueStatements), for a database whose DB service
+	// lists the sqlite dialect, or nil: one that does not, or a queue whose
+	// message SQLiteUnsupported says the SQLite client cannot hold.
+	SQLiteStatements *sqlutil.QueueStatements
+
+	// SQLiteUnsupported says why the queue has no statements on SQLite in
+	// a database that lists the sqlite dialect: a field the SQLite client
+	// cannot hold. Empty otherwise.
+	SQLiteUnsupported string
+
 	// Unsupported says why queues.ts leaves the queue out: a field whose
 	// value the TypeScript queue client cannot write and read back yet.
 	// Empty for a queue it writes.
@@ -84,6 +95,15 @@ type QueueFieldInfo struct {
 	// client writes as its whole microseconds, as the Go ORM writes a
 	// time.Duration through pgx.
 	Interval bool
+
+	// UUID, Timestamp and Boolean mark a column, or each element of a
+	// list, that holds a UUID, a timestamp or a boolean, which the client
+	// converts on SQLite (sqlutil.QueueKindOf): a UUID to its lowercase
+	// hyphenated text, a timestamp to RFC 3339 in UTC, and a boolean to 1
+	// or 0, read back as true or false.
+	UUID      bool
+	Timestamp bool
+	Boolean   bool
 }
 
 // QueuesEntry is the entry of a types package that exports its queues, as
@@ -95,8 +115,10 @@ const QueuesEntry = "/queues"
 func QueueConst(name string) string { return lowerFirst(name) + "Queue" }
 
 // TypeScriptQueues reads the queues of schema, sorted by name, each with
-// what queues.ts writes or why it leaves the queue out.
-func TypeScriptQueues(schema *ir.Schema) ([]QueueInfo, error) {
+// what queues.ts writes or why it leaves the queue out. sqlite is whether
+// the DB service lists the sqlite dialect, whose statements each queue then
+// carries beside Postgres's (D53, amended).
+func TypeScriptQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 	sqlTypes := sqlutil.ScalarSQLTypes(schema)
 	var queues []QueueInfo
 	for _, td := range schema.Queues() {
@@ -124,10 +146,19 @@ func TypeScriptQueues(schema *ir.Schema) ([]QueueInfo, error) {
 			if unsupported != "" && q.Unsupported == "" {
 				q.Unsupported = fmt.Sprintf("field %s %s", f.Name, unsupported)
 			}
+			if refusal := sqliteQueueRefusal(field, sqlTypes[f.TypeRef.Name]); refusal != "" && q.SQLiteUnsupported == "" {
+				q.SQLiteUnsupported = fmt.Sprintf("field %s %s", f.Name, refusal)
+			}
 			q.Fields = append(q.Fields, field)
 			columns = append(columns, field.Column)
 		}
 		q.Statements = sqlutil.PostgresQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+		if !sqlite {
+			q.SQLiteUnsupported = ""
+		} else if q.SQLiteUnsupported == "" {
+			statements := sqlutil.SQLiteQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+			q.SQLiteStatements = &statements
+		}
 		queues = append(queues, q)
 	}
 	return queues, nil
@@ -161,10 +192,26 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	}
 	field.Point = !field.JSON && !field.List && sqlType == "POINT"
 	field.Interval = !field.JSON && !field.List && sqlType == "INTERVAL"
+	if !field.JSON {
+		kind := sqlutil.QueueKindOf(sqlType)
+		field.UUID = kind == sqlutil.QueueKindUUID
+		field.Timestamp = kind == sqlutil.QueueKindTimestamp
+		field.Boolean = kind == sqlutil.QueueKindBoolean
+	}
 	if enum := schema.Enums[ref.Name]; enum != nil && f.Required && !ref.IsArray && !ref.IsMap && f.Default != nil {
 		field.Default = *f.Default
 	}
 	return field, ""
+}
+
+// sqliteQueueRefusal says why the SQLite queue client cannot hold a field
+// whose column, or each element, is of SQL type sqlType, or is "": a JSON
+// column holds any value as its text.
+func sqliteQueueRefusal(field QueueFieldInfo, sqlType string) string {
+	if field.JSON {
+		return ""
+	}
+	return sqlutil.SQLiteQueueRefusal(sqlType)
 }
 
 // queueDocLines splits a comment into lines, each with "*/" escaped so it
@@ -191,6 +238,17 @@ func (o *ModuleOutput) WrittenQueues() []QueueInfo {
 		}
 	}
 	return out
+}
+
+// QueuesOnSQLite reports whether a queue queues.ts writes carries its
+// statements on SQLite.
+func (o *ModuleOutput) QueuesOnSQLite() bool {
+	for _, q := range o.WrittenQueues() {
+		if q.SQLiteStatements != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // LeftOutQueues are the queues queues.ts leaves out, each with why.

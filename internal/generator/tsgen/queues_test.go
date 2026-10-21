@@ -45,7 +45,7 @@ func testQueuesWriteWhatTheGoORMWrites(t *testing.T, fixture string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queues, err := TypeScriptQueues(schema)
+	queues, err := TypeScriptQueues(schema, true)
 	if err != nil {
 		t.Fatal(err)
 	}

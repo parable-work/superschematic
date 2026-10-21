@@ -627,6 +627,11 @@ type Options struct {
 	// takes neither from the types module's go.mod.
 	ModuleClosure []string
 
+	// SQLite is whether the DB service lists the sqlite dialect: the ORM
+	// then writes queues_sqlite.go, each queue's claims on SQLite over
+	// database/sql (D53, amended).
+	SQLite bool
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -671,7 +676,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames)
+	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}

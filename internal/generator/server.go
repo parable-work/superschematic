@@ -821,7 +821,7 @@ func (r run) checkRustQueue(stackName string, w *ir.ResolvedDeployable, services
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
-	queues, err := rustgen.RustQueues(schema)
+	queues, err := rustgen.RustQueues(schema, false)
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
@@ -846,7 +846,7 @@ func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, se
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
-	queues, err := tsgen.TypeScriptQueues(schema)
+	queues, err := tsgen.TypeScriptQueues(schema, false)
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
