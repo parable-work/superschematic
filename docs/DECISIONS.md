@@ -8903,6 +8903,42 @@ Reactions, Numbering, StateRules and Approvals and load to the same IR,
 and `make cli-smoke` builds the JSON form. `fixture-commerce-currency`,
 whose currency is a `Finance.Currency` own field, and the Go runtime's
 test that `Finance.Currency` refuses `ABC`, skip until `superscalar.pin`
-carries the scalar. Nothing runs them yet: the crate, the behaviors, the
-plumbing, acme-shop and the cross-language proof follow. The names and
-rules are reversible until the first release.
+carries the scalar. The names and rules are reversible until the first
+release.
+
+Stock (M2) and Holds (M3) are built in `runtime/engine-commerce/rust`,
+registered by `commerce()` and carried by the core's addon. Each has a
+Rust suite in the test kit (`tests/commerce_stock.rs`,
+`tests/commerce_holds.rs`) on SQLite and Postgres, which checks after
+every step that `Stock.onHand` is the sum of the movements, `held` the
+sum of the records that hold, and that every held or committed item
+matches its supply's record. The suites cover all or none, expiry
+through the runner, the late-payment race and two claims racing for the
+last units on two engines over one Postgres. The race runs against a
+stand-in for Payments' guard until Payments is built. The package
+`@superschematic/engine-commerce` (`runtime/engine-commerce/typescript`)
+holds their names and types, and its suite records
+`commerce-{stock,holds,holds-timers}.json`, which the test kit replays.
+What the build settled:
+- `Holds.items` shows each item the claim's fields and links ask that it
+  has not taken as `pending`, so a cart shows what it would hold.
+- An update in a `takeOn` state that changes what a claim holding
+  nothing asks takes the holds, refused as an entry is.
+- `parse_config` refuses a transition from a `releaseOn` or `returnOn`
+  state into a `takeOn` state, since a supply records each item of a
+  claim once.
+- A supply takes `releaseFor` and `returnFor` for a holder that is gone,
+  which a claim's delete makes.
+- Stock refuses its delete while it holds units, not while claims have
+  committed some, which are sold.
+- `Stock.low` filters through a column each write sets, so after a new
+  version moves a literal `lowAt` the filter follows each instance's next
+  write while the field answers at once.
+- Under the default dotted permissions the permission covers its
+  `.override`.
+- A literal currency is checked against ISO 4217 through superscalar's
+  table once `superscalar.pin` carries `Finance.Currency`, and against its
+  pattern until then.
+
+Calendar, Payments, the plumbing, acme-shop and the cross-language proof
+follow.
