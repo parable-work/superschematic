@@ -111,8 +111,11 @@ func TestDispatch(t *testing.T) {
  if _, ok := member(t, valid).(NewMessageUnionTrigger); !ok { t.Fatal("new-message trigger misrouted") }
  if _, ok := member(t, existing).(ExistingMessageUnionTrigger); !ok { t.Fatal("existing-message trigger decoded as the first member") }
  if _, ok := member(t, "{\"messageId\":\"" + key + "\"}").(ExistingMessageUnionTrigger); !ok { t.Fatal("untagged existing-message trigger misrouted") }
- // A stated tag must match: a new-message shape tagged existing is not a new message.
- if got, ok := member(t, "{\"kind\":\"existing_message\",\"message\":{}}").(ExistingMessageUnionTrigger); !ok || got.Validate().HasErrors() == false { t.Fatalf("contradicted tag accepted as %T", got) }
+ // A stated tag must match: a new-message shape tagged existing is not a
+ // new message, and lacking messageId it is no existing message either, as
+ // serde refuses it for the Rust member.
+ var contradicted UnionTriggerWrapper
+ if err := contradicted.UnmarshalJSON([]byte("{\"kind\":\"existing_message\",\"message\":{}}")); err == nil { t.Fatalf("contradicted tag accepted as %T", contradicted.Value) }
  // Unknown keys are tolerated once no member declares them all.
  if _, ok := member(t, "{\"kind\":\"existing_message\",\"messageId\":\"" + key + "\",\"legacy\":true}").(ExistingMessageUnionTrigger); !ok { t.Fatal("unknown key broke tagged dispatch") }
  if got, ok := ref(t, "{\"kind\":\"pane\",\"pieceId\":\"" + key + "\"}").(PaneUnionRef); !ok || got.Kind != "pane" { t.Fatalf("pane ref decoded as %T", got) }
