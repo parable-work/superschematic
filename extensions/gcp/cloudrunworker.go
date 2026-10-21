@@ -69,3 +69,38 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}})
 	return out, nil
 }
+
+// lowerRunner lowers an engine's runner (D58) to what lowerWorkload makes
+// of it and a worker pool of its own, named after the deployable, with
+// manual scaling to the runner's instances: one, which runs the engine's
+// runner while it holds the runner's lock on the database, or none when
+// the environment turns it off. A Cloud Run service gives an instance CPU
+// only while it serves, which would starve the runner between requests;
+// a worker pool's CPU is always allocated. Its one edge is its database,
+// so its config is the connection alone.
+func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	v := valuesOf(ctx.Environment)
+	run := d.Runner
+	if run == nil {
+		return registry.Lowered{}, fmt.Errorf("runner %s has no engine database", d.Name)
+	}
+	out, w, err := lowerWorkload(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	template := w.template
+	template["containers"] = []any{w.container}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: map[string]any{
+		"project":            v.project,
+		"location":           v.region,
+		"name":               d.ResourceName,
+		"deletionProtection": false,
+		"scaling": map[string]any{
+			"scalingMode":         "MANUAL",
+			"manualInstanceCount": run.Instances,
+		},
+		"template": template,
+	}})
+	return out, nil
+}

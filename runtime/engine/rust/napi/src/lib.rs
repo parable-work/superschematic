@@ -28,6 +28,12 @@
 //!   `policy` written in TypeScript, which gets each question as the
 //!   TypeScript engine asks it, and a `permissionMatcher`, which gets
 //!   `[held, required]`; each answers `"true"` to allow.
+//! - `NativeEngine.openAsync(optionsJson)` opens one as `open` does, off
+//!   the JavaScript thread, and returns a promise of it: what a server on
+//!   Postgres opens with, since the open connects and migrates while the
+//!   thread serves, and the connection may be one the thread itself
+//!   carries (a Cloud SQL socket the host serves). Its options are data
+//!   alone: none hosts anything on the JavaScript thread.
 //! - `callSync(requestJson)` makes a call on the JavaScript thread and
 //!   returns its result as JSON text, `""` where the TypeScript method
 //!   returns `undefined`. A request is `{ op, principal?, args?, now? }`:
@@ -105,7 +111,9 @@ pub mod __private {
 
     #[cfg(feature = "js-behaviors")]
     pub use crate::bridge::bridge_call;
-    pub use crate::{engine_routes, CallTask, HostFunction, HttpAnswer, Native, StreamPull};
+    pub use crate::{
+        engine_routes, CallTask, HostFunction, HttpAnswer, Native, OpenTask, StreamPull,
+    };
 }
 
 pub use superschematic_engine::BehaviorSet;
@@ -124,7 +132,7 @@ impl Entry {
 /// The version of the contract between the addon and the facade: the
 /// request, host and error shapes above. The facade refuses an addon of
 /// another, which a checkout's stale `native/` would be.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// The addon an [`export_engine_napi!`] expansion builds: the crate's
 /// name, which its `project()` reports, and every behavior it is built
@@ -675,6 +683,21 @@ impl Native {
         Err(no_bridge())
     }
 
+    // holding is the Native of an engine opened off the JavaScript thread
+    // (openAsync), which hosts nothing.
+    fn holding(env: &Env, engine: Arc<Engine>) -> Result<Native> {
+        shut_down_with(env, &engine)?;
+        Ok(Native {
+            dialect: engine.dialect(),
+            engine: RwLock::new(Some(engine)),
+            hosted: AtomicBool::new(false),
+            host: None,
+            watching: Mutex::new(None),
+            #[cfg(feature = "js-behaviors")]
+            released: bridge::Released::default(),
+        })
+    }
+
     fn engine(&self) -> std::result::Result<Arc<Engine>, Failure> {
         self.engine
             .read()
@@ -776,6 +799,33 @@ fn pull_of(pulled: superschematic_engine::api::Pull) -> StreamPull {
     }
 }
 
+/// An open on libuv's pool (`openAsync`): the engine opens there, and the
+/// class that holds it, `T`, the addon's `NativeEngine`
+/// ([`export_engine_napi!`]), is made on the JavaScript thread by `wrap`.
+pub struct OpenTask<T> {
+    project: &'static Project,
+    options: String,
+    wrap: fn(Native) -> T,
+}
+
+impl<T: ToNapiValue + TypeName> Task for OpenTask<T> {
+    type Output = std::result::Result<Arc<Engine>, Failure>;
+    type JsValue = T;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let opened = catch_unwind(AssertUnwindSafe(|| {
+            let Opening { options, .. } = options_of(self.project, &self.options, None)?;
+            Engine::open_shared(options).map_err(|error| Failure::of(&error))
+        }));
+        Ok(opened.unwrap_or_else(|payload| Err(Failure::panic(payload.as_ref()))))
+    }
+
+    fn resolve(&mut self, env: Env, output: Self::Output) -> Result<T> {
+        let engine = output.map_err(|failure| failure.into_napi(&env))?;
+        Native::holding(&env, engine).map(self.wrap)
+    }
+}
+
 /// A call on libuv's pool.
 pub struct CallTask {
     engine: Arc<Engine>,
@@ -835,14 +885,30 @@ impl Native {
             Err(payload) => return Err(Failure::panic(payload.as_ref()).into_napi(&env)),
         };
         let engine = opened.engine().map_err(|failure| failure.into_napi(&env))?;
-        // A runtime that tears its environment down (a worker that ends,
-        // a process that exits) stops the engine's runner and streams.
-        env.add_env_cleanup_hook(Arc::downgrade(&engine), |engine| {
-            if let Some(engine) = engine.upgrade() {
-                engine.shutdown();
-            }
-        })?;
+        shut_down_with(&env, &engine)?;
         Ok(opened)
+    }
+
+    /// Opens an engine as `open` does, off the JavaScript thread, and
+    /// returns a promise of it, which `wrap` makes the addon's class of:
+    /// its storage created if absent and migrated, the core's behaviors
+    /// registered and the ones its `behaviors` name. Its options are data
+    /// alone: options that host something on the JavaScript thread are
+    /// refused, as they are without `open`'s host function.
+    pub fn open_async<T: ToNapiValue + TypeName>(
+        env: &Env,
+        project: &'static Project,
+        options: String,
+        wrap: fn(Native) -> T,
+    ) -> Result<AsyncTask<OpenTask<T>>> {
+        if IN_HOST.get() {
+            return Err(reentry().into_napi(env));
+        }
+        Ok(AsyncTask::new(OpenTask {
+            project,
+            options,
+            wrap,
+        }))
     }
 
     /// Whether the facade answers something of this engine on the
@@ -1286,6 +1352,17 @@ impl Native {
             engine.shutdown();
         }
     }
+}
+
+// shut_down_with stops the engine's runner and streams when the runtime
+// tears its environment down (a worker that ends, a process that exits).
+fn shut_down_with(env: &Env, engine: &Arc<Engine>) -> Result<()> {
+    env.add_env_cleanup_hook(Arc::downgrade(engine), |engine| {
+        if let Some(engine) = engine.upgrade() {
+            engine.shutdown();
+        }
+    })?;
+    Ok(())
 }
 
 // reentry is the refusal of a call that a behavior, a policy or a matcher

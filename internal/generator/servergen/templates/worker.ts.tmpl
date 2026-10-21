@@ -26,7 +26,10 @@
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
-import { connectPostgres, postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- if .Engines }}
+import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
+{{- end }}
 import { runWorker, workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 import type { Pool } from 'pg';
@@ -39,6 +42,9 @@ import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
+{{- range .Engines }}
+import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
+{{- end }}
 
 /** How long a stopping worker lets its running handlers finish. */
 const GRACE_MS = {{ .Worker.GraceSeconds }} * 1000;
@@ -49,9 +55,10 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, worker: {{ tsQuote .N
  * Builds the worker from the environment and claims and handles messages
  * until signal aborts, when SIGTERM or SIGINT arrives, then stops within
  * the grace. Each pool it opens goes in pools, which main ends, and so does
- * its telemetry, which main flushes.
+ * its telemetry, which main flushes.{{ if .Engines }} Each engine it opens goes in
+ * engines, which main closes.{{ end }}
  */
-async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .Engines }}, engines: { close(): void }[]{{ end }}): Promise<void> {
 {{- template "ts-background-connections" . }}
 
   // {{ $api.Service }}: its workers, built from its Deps.
@@ -87,6 +94,10 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
 {{ template "ts-construct" . }}
 
 {{ template "ts-connect" . }}
+{{- if .Engines }}
+
+{{ template "ts-engine" . }}
+{{- end }}
 {{- template "ts-clients" . }}
 
 main();

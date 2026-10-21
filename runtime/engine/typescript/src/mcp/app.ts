@@ -55,6 +55,11 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
    * opened with openEngineAsync serves without one.
    */
   tools?: ToolFilter;
+  /**
+   * Aborted when the host stops serving, which ends every response the
+   * endpoint streams, so a server's shutdown waits for none.
+   */
+  done?: AbortSignal;
 }
 
 /** The MCP endpoint's path, relative to where the app is mounted. */
@@ -62,8 +67,10 @@ export const MCP_PATH = '/namespaces/{namespace}/mcp';
 
 /**
  * engineMcp builds the Hono app that serves an engine's MCP endpoint,
- * openEngine's or openEngineAsync's. Mount it where the HTTP API is
- * mounted (`app.route('/api', engineMcp(engine, options))`), with the same
+ * openEngine's, openEngineAsync's or one opening in the background
+ * (openEngineInBackground), which answers 503 until it opens. Mount it
+ * where the HTTP API is mounted
+ * (`app.route('/api', engineMcp(engine, options))`), with the same
  * options.
  */
 export function engineMcp(engine: ServedEngine, options: EngineMcpOptions = {}): Hono {

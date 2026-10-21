@@ -19,6 +19,14 @@ commits from elsewhere arrive through a weak threadsafe function) or the
 heartbeat, and pulls again. A stream route's timeout covers its first page
 alone, since the handler returns once the stream starts.
 
+An engine a server opens in the background (openEngineInBackground, the
+./server entry) is served from the start: until it opens, every route
+answers 503 unavailable ("The engine is not available") before the
+runtime's steps, after the identity service's CORS, as the Go binding's
+enginehttp.Background answers, and once it opens, the open engine serves
+them. A host that stops serving aborts the mount's done signal, which ends
+every event stream, so its shutdown waits for none.
+
 A tool filter written in TypeScript (the mount's tools option) is asked on
 this thread, during the request. A behavior written in TypeScript that
 throws inside a request answers 500, as on the TypeScript engine; the
@@ -27,11 +35,12 @@ mount's onError is asked about what it threw first.
 
 import { readFileSync } from 'node:fs';
 
-import { HttpProblem, problemResponse, type OperationSpec, type ParamSpec, type RequestContext } from '@superschematic/http-runtime';
+import { HttpProblem, problemResponse, requestIdOf, type OperationSpec, type ParamSpec, type RequestContext } from '@superschematic/http-runtime';
 import {
   DEFAULT_BODY_LIMIT_BYTES,
   disconnectSignal,
   errorHandler,
+  honoPath,
   mountManualOperation,
   notFoundHandler,
   type RouterRuntimeOptions,
@@ -51,12 +60,39 @@ import { engineProblem } from '../http/problems.js';
 import { checkStreamOptions } from '../http/stream.js';
 import type { EngineMcpOptions } from '../mcp/app.js';
 import type { ToolFilter } from '../types/tools.js';
-import type { StreamPull } from './addon.js';
+import { EngineBackground } from '../server/background.js';
+import { loadAddon, type StreamPull } from './addon.js';
 import { AsyncEngine } from './async.js';
-import type { EngineRoute, Engine } from './engine.js';
+import type { Engine, EngineRoute } from './engine.js';
 
-/** An engine these adapters serve: the synchronous facade's, or openEngineAsync's. */
-export type ServedEngine = Engine | AsyncEngine;
+/** An engine these adapters serve: the synchronous facade's, openEngineAsync's, or one opening in the background. */
+export type ServedEngine = Engine | AsyncEngine | EngineBackground;
+
+/**
+ * The routes the engine serves (api::routes), for any engine: those of the
+ * addon the path names, else of the one SUPERSCHEMATIC_ENGINE_ADDON names,
+ * else of the core's, which are every addon's.
+ */
+export function engineRoutes(addon?: string): EngineRoute[] {
+  return JSON.parse(loadAddon(addon).engineRoutes()) as EngineRoute[];
+}
+
+/**
+ * The method and path of each of the engine's routes mounted at prefix,
+ * its path parameters in braces: what a host's CORS matches the engine's
+ * routes by, beside its APIs' operations (the HTTP runtime's
+ * matchOperations and corsMethods). addon names the addon, as
+ * engineRoutes's does.
+ */
+export function engineRouteSpecs(prefix: string, addon?: string): { readonly method: string; readonly path: string }[] {
+  const base = prefix.replace(/\/+$/u, '');
+  return engineRoutes(addon).map((route) => ({ method: route.method, path: base + route.path }));
+}
+
+/** What every route answers until a background engine opens. */
+export function engineUnavailable(): HttpProblem {
+  return new HttpProblem(503, 'The engine is not available', { code: 'unavailable' });
+}
 
 // What a route's handler needs of the engine: one request served, the
 // event stream pulled and ended, and its commits watched.
@@ -69,6 +105,8 @@ interface Serving {
   readonly waitsHere: boolean;
   close(id: number): void;
   watch(wake: () => void): (() => void) | undefined;
+  /** Whether the engine serves yet: false until a background engine opens. */
+  available(): boolean;
 }
 
 interface HttpAnswerLike {
@@ -79,6 +117,9 @@ interface HttpAnswerLike {
 }
 
 function servingOf(engine: ServedEngine): Serving {
+  if (engine instanceof EngineBackground) {
+    return backgroundServing(engine);
+  }
   if (engine instanceof AsyncEngine) {
     return {
       routes: () => engine.routes(),
@@ -93,6 +134,7 @@ function servingOf(engine: ServedEngine): Serving {
       waitsHere: false,
       close: (id) => engine.streamClose(id),
       watch: () => undefined,
+      available: () => true,
     };
   }
   return {
@@ -102,6 +144,38 @@ function servingOf(engine: ServedEngine): Serving {
     waitsHere: true,
     close: (id) => engine.streamClose(id),
     watch: (wake) => engine.events.watch({ committed: wake, closed: wake }),
+    available: () => true,
+  };
+}
+
+// backgroundServing serves a background engine's routes: 503 unavailable
+// until it opens, then the open engine's, through openEngineAsync's serving.
+function backgroundServing(background: EngineBackground): Serving {
+  let opened: { engine: AsyncEngine; serving: Serving } | undefined;
+  const current = (): Serving => {
+    const engine = background.current;
+    if (engine === undefined) {
+      throw engineUnavailable();
+    }
+    if (opened?.engine !== engine) {
+      opened = { engine, serving: servingOf(engine) };
+    }
+    return opened.serving;
+  };
+  return {
+    routes: () => background.routes(),
+    serve: (head, body, filter) => current().serve(head, body, filter),
+    pull: (id, heartbeatMs) => current().pull(id, heartbeatMs),
+    waitsHere: false,
+    close: (id) => {
+      try {
+        current().close(id);
+      } catch {
+        // Closed with the engine.
+      }
+    },
+    watch: () => undefined,
+    available: () => background.current !== undefined,
   };
 }
 
@@ -122,6 +196,8 @@ interface Mount {
   /** The engine's own options for the request: stream, mcp. */
   readonly options: Record<string, unknown>;
   readonly heartbeatMs: number;
+  /** Aborted when the host stops serving, which ends every event stream. */
+  readonly done?: AbortSignal;
 }
 
 /** nativeEngineApp is engineApp for an engine on the Rust engine. */
@@ -147,8 +223,9 @@ export function nativeEngineApp(engine: ServedEngine, options: EngineHttpOptions
     onError: deployed,
     options: { stream },
     heartbeatMs: stream.heartbeatMs,
+    ...(options.done !== undefined ? { done: options.done } : {}),
   });
-  if (identity) {
+  if (identity && options.identityRoutes?.sessions !== false) {
     const administration = options.identityRoutes?.administration ?? identity.store.hasRoles();
     const sets = {
       sessions: { register: options.identityRoutes?.register === true },
@@ -187,6 +264,7 @@ export function nativeEngineMcp(engine: ServedEngine, options: EngineMcpOptions 
     onError: deployed,
     options: { mcp: { serverInfo, ...(options.instructions ? { instructions: options.instructions } : {}) } },
     heartbeatMs: 5_000,
+    ...(options.done !== undefined ? { done: options.done } : {}),
   });
   app.notFound(notFoundHandler());
   app.onError(errorHandler((error) => engineProblem(error)));
@@ -211,6 +289,15 @@ function mountRoutes(app: Hono, engine: Serving, cors: (spec: OperationSpec) => 
       ...(mount.timeoutSeconds ? { timeoutSeconds: mount.timeoutSeconds } : {}),
     };
     cors(spec);
+    // Until a background engine opens, before the runtime's steps and
+    // after the identity service's CORS.
+    app.on(route.method, honoPath(route.path), async (c, next) => {
+      if (engine.available()) {
+        await next();
+        return;
+      }
+      return problemResponse(engineUnavailable(), requestIdOf(c.req.raw));
+    });
     const bodyLimitBytes = BODY_ROUTES.has(route.name) ? (mount.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES) : undefined;
     mountManualOperation(app, spec, (c, ctx) => serve(engine, route, mount, c, ctx), mount.runtime, bodyLimitBytes === undefined ? {} : { bodyLimitBytes });
   }
@@ -260,7 +347,8 @@ async function serve(engine: Serving, route: EngineRoute, mount: Mount, c: Conte
     responseHeaders.append(name, value);
   }
   if (answer.stream !== undefined && answer.stream !== null) {
-    return new Response(eventBody(engine, answer.stream, mount.heartbeatMs, disconnectSignal(c)), { status: answer.status, headers: responseHeaders });
+    const signal = mount.done === undefined ? disconnectSignal(c) : AbortSignal.any([disconnectSignal(c), mount.done]);
+    return new Response(eventBody(engine, answer.stream, mount.heartbeatMs, signal), { status: answer.status, headers: responseHeaders });
   }
   const bytes = answer.body ?? null;
   return new Response(bytes === null || answer.status === 204 || answer.status === 304 ? null : new Uint8Array(bytes), {

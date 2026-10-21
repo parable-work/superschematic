@@ -12,8 +12,17 @@
 //
 // apigen builds the catalog with the rest of an API's output, and each
 // server writer, Go, TypeScript and Rust, writes it as it writes
-// openapi.json. An API whose operations name no permission has no catalog,
-// and none of its outputs change.
+// openapi.json. An API whose operations name no permission, and whose
+// server mounts no engine that asks one, has no catalog, and none of its
+// outputs change.
+//
+// An API whose database holds engine types, which its server mounts the
+// engine over (D58), lists what the engine's permission policy asks of
+// each: <Type>.define, <Type>.publish, <Type>.read and <Type>.write, each
+// with the engine schema and action it is (Permission.Engine). Such a
+// catalog is version 2 (EngineVersion); every other is version 1, so a
+// reader that predates the engine's permissions reads every catalog it
+// read before.
 package permcatalog
 
 import (
@@ -28,8 +37,13 @@ import (
 // openapi.json.
 const FileName = "permissions.json"
 
-// Version is the catalog format this package writes.
+// Version is the catalog format this package writes for a catalog that
+// lists no engine permission.
 const Version = 1
+
+// EngineVersion is the catalog format of a catalog that lists an engine
+// permission: version 1 and each permission's engine member.
+const EngineVersion = 2
 
 // Catalog is an API's permission catalog.
 type Catalog struct {
@@ -50,8 +64,32 @@ type Permission struct {
 	// the administration permissions under identity_permission_prefix.
 	Identity bool `json:"identity"`
 	// Operations are the OpenAPI operation ids of the operations that name
-	// it, sorted in byte order.
+	// it, sorted in byte order: none for a permission the engine alone
+	// asks.
 	Operations []string `json:"operations"`
+	// Engine is the question of the engine's permission policy the
+	// permission answers, when the API's server mounts the engine over an
+	// engine type of its database (D58); nil otherwise.
+	Engine *EnginePermission `json:"engine,omitempty"`
+}
+
+// EnginePermission is what the engine's permission policy asks of an
+// engine type (D58): an action on the schema, in the database's
+// namespace. The permission's name is <Schema>.<Action>.
+type EnginePermission struct {
+	// Database is the DB service whose engine types the schema is.
+	Database string `json:"database"`
+	// Namespace is the engine namespace the schema is defined in.
+	Namespace string `json:"namespace"`
+	// Schema is the engine type.
+	Schema string `json:"schema"`
+	// Action is define, publish, read or write.
+	Action string `json:"action"`
+}
+
+// Name is the permission the engine's permission policy asks.
+func (e EnginePermission) Name() string {
+	return e.Schema + "." + e.Action
 }
 
 // Operation is what the catalog reads of one operation of the API.
@@ -67,9 +105,19 @@ type Operation struct {
 }
 
 // Build returns the catalog of the API named api, whose authDb is authDB,
-// from its operations, and false when no operation names a permission.
-func Build(api, authDB string, operations []Operation) (Catalog, bool) {
+// from its operations and what the engine its server mounts asks, engine,
+// and false when neither names a permission.
+func Build(api, authDB string, operations []Operation, engine ...EnginePermission) (Catalog, bool) {
 	byName := map[string]*Permission{}
+	version := Version
+	for _, e := range engine {
+		name := e.Name()
+		if byName[name] == nil {
+			copied := e
+			byName[name] = &Permission{Name: name, Operations: []string{}, Engine: &copied}
+			version = EngineVersion
+		}
+	}
 	for _, op := range operations {
 		for _, name := range op.Permissions {
 			p := byName[name]
@@ -86,7 +134,7 @@ func Build(api, authDB string, operations []Operation) (Catalog, bool) {
 	if len(byName) == 0 {
 		return Catalog{}, false
 	}
-	c := Catalog{Version: Version, API: api, AuthDB: authDB}
+	c := Catalog{Version: version, API: api, AuthDB: authDB}
 	for _, p := range byName {
 		slices.Sort(p.Operations)
 		c.Permissions = append(c.Permissions, *p)
@@ -108,8 +156,9 @@ func (c Catalog) JSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Parse reads a catalog. It refuses unknown members, a version other than
-// Version, and a catalog that names no API.
+// Parse reads a catalog of version 1 or 2. It refuses unknown members, an
+// engine member in a version 1 catalog, another version, and a catalog
+// that names no API.
 func Parse(data []byte) (Catalog, error) {
 	var c Catalog
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -117,8 +166,16 @@ func Parse(data []byte) (Catalog, error) {
 	if err := dec.Decode(&c); err != nil {
 		return Catalog{}, fmt.Errorf("permcatalog: %w", err)
 	}
-	if c.Version != Version {
-		return Catalog{}, fmt.Errorf("permcatalog: version %d, want %d", c.Version, Version)
+	switch c.Version {
+	case Version:
+		for _, p := range c.Permissions {
+			if p.Engine != nil {
+				return Catalog{}, fmt.Errorf("permcatalog: version %d, and permission %s has an engine member, which version %d adds", Version, p.Name, EngineVersion)
+			}
+		}
+	case EngineVersion:
+	default:
+		return Catalog{}, fmt.Errorf("permcatalog: version %d, want %d or %d", c.Version, Version, EngineVersion)
 	}
 	if c.API == "" {
 		return Catalog{}, fmt.Errorf("permcatalog: the catalog names no API")

@@ -174,6 +174,31 @@ ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker
 pool scaled by hand to the instances, sharing the Cloud Run service's
 lowering of the account, secrets, config, Cloud SQL volume and egress.
 
+A runner platform (`Kind: ir.DeployableRunner`) places an engine
+database's runner (D58): one per DB service whose types compose
+behaviors that an API of the stack connects to, named
+`<db>-engine-runner`, in the language of the first API on it. It declares
+`Languages` as a worker platform does, and its `AddressOf` may return nil.
+Its `Lower` reads the deployable's `Runner`, an `ir.ResolvedRunner`: the
+database, the API and the instances, one, or zero when the environment
+turns it off. Its one edge is a sql edge to its database, so the target
+registers a sql connector from the runner platform, and its one binding
+is the connection. On Postgres one instance runs the engine's runner at a
+time, under the runner's lock, so the platform runs one with CPU between
+requests: `stack/stacktest`'s `fake.runner` lowers it to a pool of one,
+the local target's `local.runner` to a process with no port, and gcp's
+`gcp.cloudrunrunner` to a Cloud Run worker pool of one instance. Its
+`Instances` is zero when a settings element turns the runner off
+(`{ of: ShopDb, runner: true, enabled: false }`), and the platform then
+runs none. A target with no runner platform cannot run a stack whose APIs
+open the engine unless a settings `platform` places the runner on
+another's. A target whose deployables reach Postgres each as a user of
+its own readies the engine's schema in its migration runner, as gcp's
+does: a `MigrationPlan` whose `Engine` is set is an engine database's,
+whose every server opens the engine, and the job document's
+`privileges.engine` gives them a role they share that owns the schema
+(`runtime/migrate/README.md`, "Jobs").
+
 A server, job or worker platform says what a deploy builds for the
 deployables it places in `Artifact` (D64): `ir.ArtifactImage`, the
 default, an image the target's `Builder` builds from the Dockerfile a

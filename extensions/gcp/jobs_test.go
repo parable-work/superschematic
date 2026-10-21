@@ -587,6 +587,79 @@ func TestMigrationJobOfAMember(t *testing.T) {
 	}
 }
 
+// engineShop is AcmeShop with shop-db an engine database (D58), which
+// gives the stack its runner, shop-db-engine-runner.
+func engineShop() []stack.Service {
+	services := stacktest.AcmeShop()
+	for i := range services {
+		if services[i].Name == "shop-db" {
+			services[i].Engine = true
+		}
+	}
+	return services
+}
+
+// TestMigrationJobGivesTheEngineItsSchema: on an engine database (D58) the
+// job document gives the deployables that connect, each of which opens the
+// engine, the engine's schema too: a role of the database's own owns it,
+// and each one's IAM database user, the runner's among them, is a member.
+// A member of the parameterized Preview has a role of its own database's.
+func TestMigrationJobGivesTheEngineItsSchema(t *testing.T) {
+	users := func(suffix string) []string {
+		var out []string
+		for _, d := range []string{"orders", "shop-api", "shop-db-engine-runner", "shop-orders-fulfil-orders", "shop-orders-ship-orders"} {
+			out = append(out, d+suffix+"@acme-staging.iam")
+		}
+		return out
+	}
+	for _, c := range []struct {
+		env, role, suffix string
+		params            map[string]string
+	}{
+		{env: "Staging", role: "shop_db_engine"},
+		{env: "Preview", role: "shop_db_pr7_engine", suffix: "-pr7", params: map[string]string{"pr": "7"}},
+	} {
+		t.Run(c.env, func(t *testing.T) {
+			f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
+			f.ready(t)
+			env := resolve(t, f.reg, shop(), engineShop(), c.env)
+			images := shopImages("acme-staging", 1)
+			images["shop-db-engine-runner"] = "us-east1-docker.pkg.dev/acme-staging/shop/shop-db-engine-runner@sha256:" + strings.Repeat("1", 64)
+			_, err := stack.Deploy(context.Background(), stack.DeployOptions{
+				Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env, Parameters: c.params}, Dir: t.TempDir()},
+				Images:  images,
+				Planner: firstPlanner,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, doc := f.jobDocument(t, f.cloud.runs[0])
+			got, _ := json.Marshal(doc["databases"].([]any)[0].(map[string]any)["privileges"])
+			readWrite, _ := json.Marshal(users(c.suffix))
+			want := `{"engine":{"members":` + string(readWrite) + `,"role":"` + c.role + `","schema":"engine"},"readWrite":` + string(readWrite) + `}`
+			if string(got) != want {
+				t.Errorf("the job's privileges: %s\nwant %s", got, want)
+			}
+		})
+	}
+
+	// A database that is no engine's gives no engine privileges.
+	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
+	f.ready(t)
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	if _, err := stack.Deploy(context.Background(), stack.DeployOptions{
+		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
+		Images:  shopImages("acme-staging", 1),
+		Planner: firstPlanner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, doc := f.jobDocument(t, f.cloud.runs[0])
+	if _, ok := doc["databases"].([]any)[0].(map[string]any)["privileges"].(map[string]any)["engine"]; ok {
+		t.Error("a database that is no engine's has engine privileges")
+	}
+}
+
 // TestMigrationJobNeedsARelease: a deploy with a migration to run needs
 // the runner's image before it changes anything. A binary built from a
 // checkout names no release, so it stops, saying how to name an image; an

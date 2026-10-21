@@ -37,12 +37,10 @@ var cloudSQLDialer struct {
 // dialer's Dial does.
 type cloudSQLDial func(ctx context.Context, instance string, opts ...cloudsqlconn.DialOption) (net.Conn, error)
 
-// connectCloudSQL builds the pool of the database field named field, which
-// the environment sets as field_CLOUD_SQL_INSTANCE, field_CLOUD_SQL_DATABASE
-// and field_CLOUD_SQL_USER. Building the dialer reads the server's
-// application default credentials, its service account's on Cloud Run;
-// the pool connects when it is first used.
-func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL) (*pgxpool.Pool, error) {
+// cloudSQLDialerOf builds the dialer once, reading the server's
+// application default credentials, its service account's on Cloud Run,
+// for the database field named field.
+func cloudSQLDialerOf(ctx context.Context, field string) (*cloudsqlconn.Dialer, error) {
 	cloudSQLDialer.once.Do(func() {
 		// The dialer outlives run's context, which SIGTERM cancels while
 		// the requests in flight still query.
@@ -52,7 +50,18 @@ func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL)
 	if cloudSQLDialer.err != nil {
 		return nil, fmt.Errorf("%s: the Cloud SQL connector: %w", field, cloudSQLDialer.err)
 	}
-	config, err := cloudSQLConfig(db, cloudSQLDialer.dialer.Dial)
+	return cloudSQLDialer.dialer, nil
+}
+
+// connectCloudSQL builds the pool of the database field named field, which
+// the environment sets as field_CLOUD_SQL_INSTANCE, field_CLOUD_SQL_DATABASE
+// and field_CLOUD_SQL_USER. The pool connects when it is first used.
+func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL) (*pgxpool.Pool, error) {
+	dialer, err := cloudSQLDialerOf(ctx, field)
+	if err != nil {
+		return nil, err
+	}
+	config, err := cloudSQLConfig(db, dialer.Dial)
 	if err != nil {
 		return nil, fmt.Errorf("%s: Cloud SQL instance %s: %w", field, db.Instance, err)
 	}

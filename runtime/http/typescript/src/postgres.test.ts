@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { connect, createServer, type Server } from 'node:net';
 import { Duplex } from 'node:stream';
 import type { Pool } from 'pg';
-import { CLOUD_SQL_CONNECTOR_PACKAGE, connectPostgres, ping, type CloudSqlConnectorModule } from './postgres';
+import { CLOUD_SQL_CONNECTOR_PACKAGE, cloudSqlSocket, connectPostgres, ping, type CloudSqlConnectorModule } from './postgres';
 
 /** The variable that names a Postgres the URL tests run against; they are skipped without it. */
 const databaseVariable = 'SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL';
@@ -123,6 +125,86 @@ describe('connectPostgres', () => {
     await expect(connectPostgres({ cloudSql }, { loadConnector: connector.load })).rejects.toThrow('Cloud SQL instance acme:us-central1:shop: instance not found');
     await Bun.sleep(0);
     expect(connector.record.closed).toBe(1);
+  });
+});
+
+/**
+ * A connector module whose local proxy listens where it is asked to and
+ * answers each connection with the instance's name, as the instance would
+ * answer over the connector's dial.
+ */
+function proxyConnector(options: { proxy?: boolean } = {}) {
+  const record = { built: 0, closed: 0, asked: [] as unknown[], servers: [] as Server[] };
+  class Connector {
+    constructor() {
+      record.built++;
+    }
+    async getOptions(): Promise<never> {
+      throw new Error('the socket uses the local proxy');
+    }
+    close() {
+      record.closed++;
+      for (const server of record.servers) server.close();
+    }
+  }
+  class Proxying extends Connector {
+    async startLocalProxy(given: { instanceConnectionName?: string; listenOptions: { path: string } }) {
+      record.asked.push(given);
+      const server = createServer(socket => socket.end(`hello from ${given.instanceConnectionName}`));
+      record.servers.push(server);
+      await new Promise<void>(resolve => server.listen(given.listenOptions.path, resolve));
+    }
+  }
+  const module: CloudSqlConnectorModule = {
+    Connector: options.proxy === false ? Connector : Proxying,
+    IpAddressTypes: { PUBLIC: 'PUBLIC' },
+    AuthTypes: { IAM: 'IAM' },
+  };
+  return { record, load: async () => module };
+}
+
+describe('cloudSqlSocket', () => {
+  test("serves the instance on a unix socket in a directory of its own, over the connector's local proxy with IAM authentication", async () => {
+    const connector = proxyConnector();
+    const socket = await cloudSqlSocket({ ...cloudSql, user: "o'neil@acme.iam" }, { loadConnector: connector.load });
+    expect(connector.record.asked).toEqual([
+      { instanceConnectionName: cloudSql.instance, ipType: 'PUBLIC', authType: 'IAM', listenOptions: { path: `${socket.directory}/.s.PGSQL.5432` } },
+    ]);
+    expect(socket.url).toBe(`host='${socket.directory}' port=5432 user='o\\'neil@acme.iam' dbname='shop_db' sslmode=disable`);
+    const answer = await new Promise<string>((resolve, reject) => {
+      let text = '';
+      const client = connect(`${socket.directory}/.s.PGSQL.5432`);
+      client.on('data', chunk => (text += String(chunk)));
+      client.on('end', () => resolve(text));
+      client.on('error', reject);
+    });
+    expect(answer).toBe(`hello from ${cloudSql.instance}`);
+    socket.close();
+    socket.close();
+    expect(connector.record.closed).toBe(1);
+    expect(existsSync(socket.directory)).toBe(false);
+  });
+
+  test('a connector without a local proxy rejects, naming the instance, and is closed', async () => {
+    const connector = proxyConnector({ proxy: false });
+    await expect(cloudSqlSocket(cloudSql, { loadConnector: connector.load })).rejects.toThrow(
+      `Cloud SQL instance ${cloudSql.instance}: the installed ${CLOUD_SQL_CONNECTOR_PACKAGE} has no startLocalProxy`
+    );
+    expect(connector.record.closed).toBe(1);
+  });
+
+  test('refuses clearly when the connector is not installed', async () => {
+    const missing = async () => {
+      throw new Error(`Cannot find package '${CLOUD_SQL_CONNECTOR_PACKAGE}'`);
+    };
+    await expect(cloudSqlSocket(cloudSql, { loadConnector: missing })).rejects.toThrow(`a Cloud SQL connection needs ${CLOUD_SQL_CONNECTOR_PACKAGE}`);
+  });
+
+  test('the installed connector has a local proxy', async () => {
+    const module = (await import(CLOUD_SQL_CONNECTOR_PACKAGE)) as CloudSqlConnectorModule;
+    const connector = new module.Connector();
+    expect(typeof connector.startLocalProxy).toBe('function');
+    connector.close();
   });
 });
 

@@ -13,6 +13,9 @@
 {{- if .Docker.VersionGraphGo }}
 {{ .Docker.VersionGraphGo }}/lib
 {{- end }}
+{{- if .Docker.Engine }}
+{{ .Docker.Engine.Go }}/lib
+{{- end }}
 **/node_modules
 **/target
 **/.git

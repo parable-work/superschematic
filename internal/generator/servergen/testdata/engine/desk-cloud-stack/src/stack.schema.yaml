@@ -1,0 +1,25 @@
+# desk-stack's server and runner in two environments: Staging on
+# stacktest's fake target, whose sql connector derives a Cloud SQL
+# connector configuration as the gcp target's does, and Local on the
+# local target, whose derives a connection string. desk-api's server and
+# desk-db's runner link the Cloud SQL connector, and the engine reaches
+# Cloud SQL through a socket the connector serves (D58).
+kind: Stack
+types:
+  DeskCloud:
+    name: DeskCloud
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: desk-api, kind: API }
+  Staging:
+    name: Staging
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

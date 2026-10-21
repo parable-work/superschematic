@@ -314,6 +314,12 @@ type APIOutput struct {
 	// directive, since a replace in the ORM's go.mod does not reach it.
 	UpstreamVersionGraph bool
 
+	// Engine is the API's engine database (D58), nil when its database
+	// holds no engine type: a server of the API opens the engine on it and
+	// mounts its routes, and the permission catalog lists the permissions
+	// the engine's permission policy asks of each engine type.
+	Engine *EngineInfo
+
 	// Auth is the provider's analysis of the upstream schema: it gates the
 	// ORM-backed auth store adapters in middleware.go on what the upstream
 	// schema actually declares.
@@ -422,6 +428,9 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
+	// EngineReplacePath replaces the engine's Go binding, which Deps holds
+	// an engine of when the API has an engine database (D58).
+	EngineReplacePath string
 
 	// Pins are the runtime modules go.mod takes from the module proxy, at
 	// the release that generates it (SetReleasePins).
@@ -739,6 +748,11 @@ type Options struct {
 	// type's fields use; nil means none. The registry's RawBodyChecks
 	// supplies it from the registered scalar catalog.
 	RawBodyChecks RawBodyChecks
+
+	// Engine is the API's engine database (D58), nil when its database
+	// holds no engine type. The generator package reads it from the
+	// database's IR and config.
+	Engine *EngineInfo
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -786,6 +800,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
 		UUIDTypeExpr:        resolveUUIDTypeExpr(schema),
+		Engine:              opts.Engine,
 	}
 
 	if opts.UpstreamSchema != "" && opts.UpstreamIR == nil {
@@ -876,7 +891,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 }
 
 // permissionCatalog is the API's permissions.json, from every endpoint, the
-// user model's included, or "" when no endpoint names a permission.
+// user model's included, and from the engine its server mounts, whose
+// permission policy asks <Type>.<action> of each engine type (D58), or ""
+// when neither names a permission.
 func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
@@ -886,7 +903,15 @@ func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}
-	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations)
+	var engine []permcatalog.EnginePermission
+	if output.Engine.PermissionPolicy() {
+		for _, typ := range output.Engine.Types {
+			for _, action := range EnginePermissionActions {
+				engine = append(engine, permcatalog.EnginePermission{Database: output.Engine.Database, Namespace: output.Engine.Namespace, Schema: typ, Action: action})
+			}
+		}
+	}
+	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations, engine...)
 	if !ok {
 		return "", nil
 	}

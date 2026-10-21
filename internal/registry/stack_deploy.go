@@ -317,6 +317,13 @@ type MigrationPlan struct {
 	// write, after the phase's steps, and takes them back from any server
 	// it gave them to that is no longer here.
 	Servers []string
+
+	// Engine reports that the DB service is an engine database (D58), the
+	// database of the environment's runner, whose engine every deployable
+	// in Servers opens, each as itself. A runner that owns the database's
+	// privileges gives them the engine's schema too: a role they share
+	// that owns it, which the engine acts as.
+	Engine bool
 }
 
 // MigrationRequest runs one phase of the migration plans of one database:

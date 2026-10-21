@@ -176,8 +176,11 @@ struct Route {
 
 impl Route {
     fn of(operation: &OperationInfo) -> Self {
-        let segments = operation
-            .path
+        Route::new(operation.method, operation.path)
+    }
+
+    fn new(method: &str, path: &str) -> Self {
+        let segments = path
             .split('/')
             .map(|part| {
                 if part.len() > 2 && part.starts_with('{') && part.ends_with('}') {
@@ -188,7 +191,7 @@ impl Route {
             })
             .collect();
         Route {
-            method: operation.method.to_ascii_uppercase(),
+            method: method.to_ascii_uppercase(),
             segments,
         }
     }
@@ -241,6 +244,26 @@ impl Api {
         Api {
             policy,
             routes: Some(operations.iter().map(Route::of).collect()),
+        }
+    }
+
+    /// The API of `policy`, taking the requests on `routes`, each a method
+    /// and a path with `{param}` captures: routes a server mounts beside
+    /// an API's operations, as the engine's are (D58), whose policy lists
+    /// their methods.
+    pub fn with_routes<M, P>(policy: Policy, routes: impl IntoIterator<Item = (M, P)>) -> Self
+    where
+        M: AsRef<str>,
+        P: AsRef<str>,
+    {
+        Api {
+            policy,
+            routes: Some(
+                routes
+                    .into_iter()
+                    .map(|(method, path)| Route::new(method.as_ref(), path.as_ref()))
+                    .collect(),
+            ),
         }
     }
 
@@ -419,6 +442,27 @@ mod tests {
         assert!(match_operations(&operations, "GET", "/api/products"));
         assert!(!match_operations(&operations, "GET", "/api/products/"));
         assert!(!match_operations(&operations, "GET", "/api"));
+    }
+
+    #[test]
+    fn an_api_of_routes_takes_their_methods_and_paths() {
+        let api = Api::with_routes(
+            Policy::default(),
+            [
+                ("GET", "/engine/shop/namespaces/{namespace}/schemas"),
+                (
+                    "post",
+                    "/engine/shop/namespaces/{namespace}/schemas/{name}/instances",
+                ),
+            ],
+        );
+        assert!(api.takes("GET", "/engine/shop/namespaces/shop/schemas"));
+        assert!(api.takes(
+            "POST",
+            "/engine/shop/namespaces/shop/schemas/Ticket/instances"
+        ));
+        assert!(!api.takes("POST", "/engine/shop/namespaces/shop/schemas"));
+        assert!(!api.takes("GET", "/api/products"));
     }
 
     #[test]

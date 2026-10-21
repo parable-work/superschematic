@@ -22,6 +22,9 @@
 # platform from SUPERSCHEMATIC_RELEASE, the release's page unless a build
 # argument names a mirror, checks them against the digests below and
 # points cgo's linker at them.
+{{- if .Engines }} The tarball holds the engine's archive too
+# (D58), which the {{ .Kind }} links to open the engine on an engine database.
+{{- end }}
 {{- else }}
 # The generated code links superscalar's static archive through cgo (D3 in
 # docs/DECISIONS.md), so the {{ .Kind }} cannot build with CGO_ENABLED=0. The
@@ -31,6 +34,24 @@
 {{- if .Docker.VersionGraphGo }}
 # The versiongraph stage does the same for the version graph's archive,
 # which a database the {{ .Kind }} connects to links.
+{{- end }}
+{{- if .Docker.Engine }}
+{{- if .Docker.Engine.Project }}
+# The engine stage does the same for the engine's archive (D58), which the
+# {{ .Kind }} links to open the engine on an engine database whose types compose
+# behaviors the core's archive leaves out: the archive of the project's
+# engine crate, which compiles them in, built from its ffi member beside the
+# engine's crates and the extensions' at their places in the checkout, its
+# lock file seeded from the engine workspace's:
+#
+#   {{ .Docker.Engine.Project }}
+#
+{{- else }}
+# The engine stage does the same for the engine's archive (D58), which the
+# {{ .Kind }} links to open the engine on an engine database: the core's, from the
+# Cargo workspace beside the engine's Go binding, with the crates it reaches
+# by path at their places in the checkout.
+{{- end }}
 {{- end }}
 {{- end }}
 # The build stage links the binary against Debian's glibc, and the image runs
@@ -77,6 +98,29 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --locked --release \
     && cp target/release/libsuperschematic_versiongraph.a /libsuperschematic_versiongraph.a
 {{- end }}
+{{- if .Docker.Engine }}
+
+FROM rust:${RUST_VERSION}-trixie AS engine
+WORKDIR /src
+COPY {{ .Docker.Engine.Workspace }} {{ .Docker.Engine.Workspace }}
+{{- range .Docker.Engine.Crates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+{{- if .Docker.Engine.Project }}
+COPY {{ .Docker.Engine.Project }} {{ .Docker.Engine.Project }}
+{{- range .Docker.Engine.ProjectCrates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    { test -f {{ .Docker.Engine.Project }}/Cargo.lock || cp {{ .Docker.Engine.Workspace }}/Cargo.lock {{ .Docker.Engine.Project }}/Cargo.lock; } \
+    && cargo build --release --manifest-path {{ .Docker.Engine.Project }}/ffi/Cargo.toml \
+    && cp {{ .Docker.Engine.Project }}/target/release/{{ .Docker.Engine.ProjectArchive }} /libsuperschematic_engine.a
+{{- else }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --locked --release --manifest-path {{ .Docker.Engine.Workspace }}/Cargo.toml -p superschematic-engine-ffi \
+    && cp {{ .Docker.Engine.Workspace }}/target/release/libsuperschematic_engine_ffi.a /libsuperschematic_engine.a
+{{- end }}
+{{- end }}
 
 FROM golang:${GO_VERSION}-trixie AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=1
@@ -86,11 +130,18 @@ COPY --from=superscalar /libsuperscalar_ffi.a /archives/
 {{- if .Docker.VersionGraphGo }}
 COPY --from=versiongraph /libsuperschematic_versiongraph.a /archives/
 {{- end }}
+{{- if .Docker.Engine }}
+COPY --from=engine /libsuperschematic_engine.a /archives/
+{{- end }}
 RUN lib="{{ .Docker.ScalarGo }}/lib/linux_$(go env GOARCH)" \
     && mkdir -p "$lib" && cp /archives/libsuperscalar_ffi.a "$lib/"
 {{- if .Docker.VersionGraphGo }}
 RUN lib="{{ .Docker.VersionGraphGo }}/lib/linux_$(go env GOARCH)" \
     && mkdir -p "$lib" && cp /archives/libsuperschematic_versiongraph.a "$lib/"
+{{- end }}
+{{- if .Docker.Engine }}
+RUN lib="{{ .Docker.Engine.Go }}/lib/linux_$(go env GOARCH)" \
+    && mkdir -p "$lib" && cp /archives/libsuperschematic_engine.a "$lib/"
 {{- end }}
 {{- end }}
 WORKDIR /src/{{ .Docker.Context }}

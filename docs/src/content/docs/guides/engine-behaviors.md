@@ -251,8 +251,8 @@ naming the first generator that would run
 A type of a DB schema that composes a behavior is an engine type (D58).
 Its instances are the engine's, kept in the engine's own tables: in a
 stack, the DB service's database, under a Postgres schema of the
-engine's (`engine` unless configured), once the generated servers open
-the engine, which they do not yet. So `sql` writes no table for it, `orm`
+engine's (`engine` unless configured), where the generated servers open
+the engine. So `sql` writes no table for it, `orm`
 no repository, and a migration plan (D27) never creates, alters or drops
 one. Tables and engine types share one schema:
 
@@ -348,8 +348,74 @@ for (const schema of engineDocument.schemas) engine.schemas.publish(system, sche
 ```
 
 Every document is defined before any is published, since a link may name
-a type the document defines after it. A generated server will do this
-itself before it reports ready, once the servers open the engine.
+a type the document defines after it.
+
+### In a generated server
+
+A generated Go, TypeScript or Rust server whose API's database is an
+engine database does this itself (D58): it opens the engine on the
+database in the background, deploys the document before `/readyz` reports
+the engine ready, and mounts the engine's routes, its event stream and its
+MCP endpoint at `/engine/<db>`, behind the API's identity and service
+callers. The API's `Deps` holds the engine: in Go an
+`*engine.Background`, whose `Wait(ctx)` returns it once it opens; in
+TypeScript an `EngineBackground` of `@superschematic/engine/server`, whose
+`wait()` resolves with it, every call a promise, the server opening it
+through the engine's Node-API addon and mounting `engineApp` and
+`engineMcp` on its Hono app; in Rust a
+`superschematic_engine::background::Background`, whose `wait().await`
+does, an engine to call off the async threads (`spawn_blocking`). Two
+more keys of the database's `outputs.engine` say how:
+
+```json
+{
+  "outputs": {
+    "engine": {
+      "namespace": "support",
+      "mount": "/engine/support",
+      "policy": "permission"
+    }
+  }
+}
+```
+
+- **`mount`** is where the servers of the APIs on the database mount the
+  engine's routes: one or more path segments, `/engine/<service>` unless
+  set, never under `/api` or at `/healthz` or `/readyz`.
+- **`policy`** is the access policy they open the engine with:
+  `"permission"` unless set, which allows an action on a type to a caller
+  holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
+  `Ticket.define`, `Ticket.publish`), the permissions the API's
+  `permissions.json` then lists; `"allowAll"`, for tests and local use; or
+  `{ "rules": [...] }`, the engine's ordered rules.
+
+The engine's runner, which runs reactions, schedules and Timers'
+deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
+in the language of the first API on the database: a Cloud Run worker pool
+on gcp, a process of its own under `stack dev`. It acts as its deployable's
+name, holding each engine type's name as a permission.
+
+Several APIs may share an engine database, each served in its own
+language. Their servers share the engine: each deploys the same document,
+which mints one version however many start at once, and each answers the
+engine's routes, its event stream and MCP as the others do, reading what
+another wrote and streaming what another commits. A Go, a Rust and a
+TypeScript server over one database answer one script alike, a test the
+release candidate runs.
+
+A Topcoat app (D44) whose API's database is an engine database keeps the
+engine in-process on SQLite: the crate the Topcoat extension writes has
+`engine::open(path)`, which opens the engine on a SQLite file and deploys
+the document, and its setup method takes the engine and mounts its
+routes at `/engine`, behind the API's `Authenticator`:
+
+```rust
+let engine = shop_orders_topcoat::engine::open("shop.engine.db")?;
+let app = Router::builder()
+    .discover()
+    .shop_orders(implementations, page_authenticator, engine)
+    .build();
+```
 
 ### The project's engine crate
 
@@ -357,7 +423,8 @@ The Rust engine (D58) runs an extension's behavior from a Rust crate
 that implements the engine's `Behavior` trait, which the extension's
 `BehaviorSpec` names (`Rust`: the crate, its path in the project and
 the expression that registers it). When a DB or General schema's types
-compose such a behavior, the `projectengine` generator writes the
+compose such a behavior, or one of the work queue's, which the core's
+engine archive leaves out, the `projectengine` generator writes the
 project's engine crate, `engine/rust/<service>`, named
 `<rust_crate_prefix><service>-engine`:
 
@@ -432,12 +499,19 @@ const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', 
 
 `openEngine({ path, ... })` opens the same addon on a SQLite file.
 
+A generated Go server and runner on the database link it so: the
+checkout's Dockerfile builds the `ffi` member in its engine stage, and
+the generated CI's `check` builds it before it compiles the server. A
+generated TypeScript server and runner load the `napi` member's addon:
+the checkout's Dockerfile builds it in its engine stage and names it with
+`SUPERSCHEMATIC_ENGINE_ADDON`.
+
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an
 extension's behavior whose registration names no crate gets none either:
-the build logs that no engine can run the schema's behaviors, and an
-engine refuses the schema. acme's `crates/behaviors` is the worked
-example (`examples/acme-schematic`).
+the build logs that no engine can run the schema's behaviors, an engine
+refuses the schema, and the build refuses a server on it. acme's
+`crates/behaviors` is the worked example (`examples/acme-schematic`).
 
 ## Display
 

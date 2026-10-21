@@ -504,7 +504,7 @@ TypeScript twin.
 | `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production }`, or `local: { postgresImage, postgresPort, storageImage, storagePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)) |
+| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -751,6 +751,29 @@ queue must be a queue of the database the API connects to, which the
 environment runs on Postgres. On gcp a worker is a Cloud Run worker
 pool, scaled by hand to its instances ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
+
+## The engine's runner
+
+A DB service whose types compose behaviors is an engine database: every
+server, job and worker of an API that connects to it opens the
+[engine](/superschematic/guides/engine/) on it. Its runner, which runs the
+reactions that follow a commit, the schedules, Timers' deadlines and the
+event log's retention, is a deployable of its own, `<db>-engine-runner`,
+in the language of the first API, by name, that connects to it. It runs
+one instance, which runs while it holds the runner's lock on Postgres, so
+a second would only wait. An element names it beside its database's
+handle:
+
+```ts
+settings: [{ of: ShopDb, runner: true, enabled: false }]
+```
+
+It takes `enabled`, a `platform` and the platform's settings, and no
+`instances` or `env`. A runner that is off runs no instance: no reaction,
+schedule, Timers deadline or retention pass runs until it is on again,
+when each reaction reads on from its cursor, a schedule that came due runs
+once and every overdue deadline fires. On gcp it is a Cloud Run worker
+pool of one instance, and on `local` a process with no port.
 
 ## Static sites
 
@@ -1312,9 +1335,10 @@ and the [generated CI](#generated-ci) signs in with.
 | job | a Cloud Run job with its own service account, named after the job (`shop-orders-ship-orders`), with its API's config, secrets and connections; one task, with the job's timeout for each try and its retries, at most 10 |
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | worker | a Cloud Run worker pool with its own service account, named after the worker (`shop-orders-fulfil-orders`), with its API's config, secrets and connections and `WORKER_CONCURRENCY`; no port and no URL, scaled by hand to the worker's `instances`, zero when it is off. A `grace` of ten seconds or more is refused, since Cloud Run stops an instance ten seconds after SIGTERM |
+| runner | a Cloud Run worker pool with its own service account, named after the runner (`shop-db-engine-runner`), with its database's connection as its one config; scaled by hand to one instance, zero when it is off |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user, which the migration job gives read and write privileges on the DB service's tables. On an engine database it also grants the user a role of the database's own, `<database>_engine`, which owns the engine's schema, `engine`, so each deployable that opens the engine, as its own user, may change what another created there; and it creates the `unaccent` extension the engine's Search needs. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback, with the server's own loopback credential ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)) |
 | bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
@@ -1334,6 +1358,7 @@ Settings and their defaults:
 | `gcp.cloudrun` | `cpuAlwaysAllocated` | false: CPU only while an instance handles a request |
 | `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrunworker` | `cpu`, `memory` | `1`, `512Mi` |
+| `gcp.cloudrunrunner` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
 | `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
@@ -1579,6 +1604,13 @@ Identity Federation, through the pool `stack bootstrap` creates for the
 GitHub repository of the git remote, as `<stack>-planner` or
 `<stack>-deployer`, with `google-github-actions/auth`, whose credentials
 file gives superschematic and Pulumi application default credentials.
+A job signs in last, right before its `stack` command: its installs and
+builds, which run the pull request's lockfiles and their packages'
+install scripts, run before any credential is on the runner, as they do
+in `check`. The job can still ask GitHub for an identity token from any
+step, and the `stack` command runs your TypeScript (its documents and
+each site's build) with the credentials, so treat a pull request from
+the repository as able to act as the job's account.
 The provider's name holds the project's number, `projectNumber` in the
 environment's `gcp` values, which bootstrap records and you may enter by
 hand. An environment that extends another inherits it. Until it is set,

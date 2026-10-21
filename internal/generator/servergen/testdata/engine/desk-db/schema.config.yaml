@@ -1,0 +1,11 @@
+# The engine fixture's database (D58): its Account and Ticket compose
+# behaviors, so they are engine types, beside the user model's tables
+# (D50). outputs.engine leaves the namespace, the mount and the policy to
+# their defaults: desk-db, /engine/desk-db and permission.
+name: desk-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    rust: { enabled: true }

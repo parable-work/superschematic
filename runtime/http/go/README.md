@@ -8,7 +8,7 @@ depends on a generated type.
 | Package | Holds |
 |---|---|
 | `apperror` | the error taxonomy generated handlers return and the response writer maps to status codes |
-| `response` | JSON response and problem writers |
+| `response` | JSON response and problem writers, each answer `Cache-Control: no-store` unless its handler set one, as the TypeScript and Rust runtimes answer |
 | `requestctx` | request-scoped values (request id, database handle) with typed accessors |
 | `middleware` | request logging, recovery, AES-GCM payload decryption and the `PayloadDecryptor` seam |
 | `routing` | route registration and handler adapter scaffolding |

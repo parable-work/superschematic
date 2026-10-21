@@ -122,6 +122,10 @@ type ResolvedDeployable struct {
 	// every other kind (D53).
 	Worker *ResolvedWorker `json:"worker,omitempty"`
 
+	// Runner is the engine database an engine's runner runs over, and the
+	// API whose language it is written in; nil for every other kind (D58).
+	Runner *ResolvedRunner `json:"runner,omitempty"`
+
 	// Exposed is true for a server reachable from outside the environment,
 	// and for every site.
 	Exposed bool `json:"exposed,omitempty"`
@@ -238,6 +242,21 @@ type ResolvedWorker struct {
 	// GraceSeconds is how long a stopping instance lets its running
 	// handlers finish before it gives their messages back.
 	GraceSeconds int `json:"graceSeconds"`
+}
+
+// ResolvedRunner is what an engine's runner runs over (D58): the engine
+// database, a DB service whose types compose behaviors, and the API, the
+// first by name that connects to it, whose language the runner is written
+// in, with the engine archive that API's servers link.
+type ResolvedRunner struct {
+	// Database is the DB service; API is the API service.
+	Database string `json:"database"`
+	API      string `json:"api"`
+
+	// Instances is how many instances the environment runs: one, which
+	// runs while it holds the runner's lock, or zero when its settings
+	// turn the runner off.
+	Instances int `json:"instances"`
 }
 
 // UnmarshalJSON decodes a deployable and turns the references in its name

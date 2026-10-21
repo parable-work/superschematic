@@ -69,9 +69,17 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
    * Which of the user model's routes the app serves beside login, logout,
    * me, capabilities and changePassword: register (off by default), and
    * the administration routes under /auth/admin (on when the store has
-   * roles).
+   * roles). sessions false serves none of them: the server that mounts
+   * the app serves the user model's routes itself (an API's, D58), and
+   * the identity service authenticates the app's routes and answers their
+   * CORS alone.
    */
-  identityRoutes?: { register?: boolean; administration?: boolean };
+  identityRoutes?: { register?: boolean; administration?: boolean; sessions?: boolean };
+  /**
+   * Aborted when the host stops serving: every event stream ends then, as
+   * when its client goes away, so a server's shutdown waits for none.
+   */
+  done?: AbortSignal;
   /**
    * Narrows the tools document each caller gets, as the MCP endpoint's
    * `tools` option does (EngineMcpOptions.tools): a tool it leaves out is
@@ -91,8 +99,10 @@ export const MERGE_PATCH_MEDIA_TYPE = 'application/merge-patch+json';
 export const PRECONDITIONS_HEADER = 'Preconditions';
 
 /**
- * engineApp builds the Hono app that serves an engine, openEngine's or
- * openEngineAsync's. Mount it where the deployment wants it
+ * engineApp builds the Hono app that serves an engine, openEngine's,
+ * openEngineAsync's or one opening in the background
+ * (openEngineInBackground, @superschematic/engine/server), which answers
+ * 503 until it opens. Mount it where the deployment wants it
  * (`app.route('/api', engineApp(engine, options))`); on its own it answers
  * unknown paths and failures with problem documents.
  */

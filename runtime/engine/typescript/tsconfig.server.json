@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noCheck": true,
+    "declaration": false,
+    "types": []
+  },
+  "comment": "The ./server entry's JavaScript alone, for a server's image (D58): it emits without checking types, so the image need not install the package's own dependencies (hono, @types/node and the HTTP runtime's declarations) beside the workspace that runs the server. verbatimModuleSyntax keeps every import as the source writes it, so the emitted modules are the checked build's. The package's own build checks them.",
+  "include": ["src/server/**/*.ts"]
+}

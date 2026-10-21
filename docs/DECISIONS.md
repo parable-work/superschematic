@@ -5661,8 +5661,10 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: built but for the generated servers that mount the engine
-(milestones 18 to 20). `runtime/engine/rust` holds the workspace;
+Status: built, the cutover (milestone 14) and the generated servers
+that mount the engine (milestones 18 to 20, the amendment below)
+included; what is not built yet is the amendment's status's last
+paragraph. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -5713,7 +5715,7 @@ frames, woken by one thread per router that waits on the notifier,
 closed when the client goes away, the engine never reached or dropped on
 an async thread, since the Postgres client blocks on a runtime of its
 own; `[paths] engine_rust` names the crate for the Rust servers that
-will mount it (milestone 19); `superschematic-engine-behaviors`, the
+mount it (milestone 19); `superschematic-engine-behaviors`, the
 core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
 its options (`core()`) since the engine cannot depend on them, all
@@ -5788,7 +5790,9 @@ as the TypeScript engine's version graph draws them). `openEngineAsync`,
 exported from the package's root for a server on Postgres, gives the
 same API with every call a promise made off that thread (an `AsyncTask`,
 or on Postgres a future on tokio's blocking pool that owns the engine),
-its options data alone. Milestone 7b adds the test addon's bridge (the
+its options data alone; it opens off that thread too (the addon's
+`openAsync`, contract 3), and its members are typed as the synchronous
+engine's, each returning a promise. Milestone 7b adds the test addon's bridge (the
 `js-behaviors` feature, never in a shipped addon), which runs a behavior
 written in TypeScript on the JavaScript thread through the engine's
 dynamic behaviors, an engine with one called there alone and its runner
@@ -5829,8 +5833,11 @@ compiles with. acme's smoke builds and tests the one its binary writes,
 its members with it, and loads its addon in Node.js, where an engine on
 it publishes shop-ratings' Product and rates one, acme.Rating in Rust. A
 schema of the core's behaviors alone gets none, and the release's engine
-runs it; one whose extension behavior names no crate, or one the project
-does not hold, gets none either, and the build says no engine can run it.
+runs it; one that composes the work queue's behaviors and no extension's
+gets one too (milestone 18), since the core's archive, which a Go server
+links, leaves the work queue out; and one whose extension behavior names
+no crate, or one the project does not hold, gets none, and the build
+says no engine can run it.
 
 The cutover (milestone 14) is built. `@superschematic/engine` is the Rust
 engine's addon: `openEngine` opens it synchronously on SQLite, `Engine`
@@ -5922,8 +5929,10 @@ build-archives job on all four platforms, whose tarballs now carry the
 engine's archive and header. The ABI reads its config's `project` and
 hands the rest to `EngineOptions::from_json`, and writes an error as
 `Error::thrown` makes it, as the Node-API addon does, so the two bindings
-take one config and throw one error. No generated server mounts the
-engine yet (milestone 18).
+take one config and throw one error. Generated Go, TypeScript and Rust
+servers mount the engine (milestones 18 and 19, the amendment below), and
+one script run against all three over one engine database answers alike
+(milestone 20, the amendment's status).
 
 Several instances of a server on one Postgres database (milestone 13b)
 are tested as two engines, each with a pool of its own, on one schema
@@ -5975,6 +5984,189 @@ engine-rust CI job, the scenario and HTTP corpora replaying their files
 on parallel threads.
 
 The rule is reversible until the first release.
+
+### D58, amended: what a generated server reads of its engine database, the runner as a deployable, and Cloud SQL in each language
+
+Milestone 18 puts the engine in the generated servers. A server learns of
+its engine database from the API it serves, and the stack gains the
+runner as a deployable.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API's engine database is the DB service it connects to, its `authDb` or its one DB dependency, when a type of it composes a behavior. The generator reads it once, from the database's IR and its config's `outputs.engine`, into the API's shared output (`apigen.EngineInfo`): the namespace, the engine types, the behaviors with their packages, `mount` (`/engine/<db>` unless set) and `policy` (`"permission"` unless set; `"allowAll"`, or `{"rules": [...]}`, the engine's rules). Every server writer, Go, TypeScript and Rust, reads that one notion. `servedRun` still refuses an API that imports an engine type. | The settings on the API's config, which two APIs on one database would set apart, when the engine mounts one namespace's routes; the stack's settings, which a server built outside a stack has none of |
+| An API whose server mounts the engine lists, in its permission catalog, what the engine's permission policy asks of each engine type, `<Type>.define`, `publish`, `read` and `write`, each with an `engine` member, `{database, namespace, schema, action}`, and the operations that name it too, none for one the engine alone asks. Such a catalog is version 2; every other stays version 1, byte for byte, and `Parse` reads both and refuses an `engine` member in a version 1 catalog. With any other policy the catalog lists none: rules name what they require. | Version 2 for every catalog, which a reader that predates the engine refuses though nothing it reads changed; the engine's permissions in a file of their own, which a role editor would read beside every catalog |
+| The engine's runner is a deployable of kind `runner`, one per engine database an API of the stack connects to, named `<db>-engine-runner`. It is written in the language of the first API, by name, that connects to the database, runs that API's engine archive, and has one edge, a sql edge to its database, whose derived field is its whole config: it reads no API's config. It runs one instance, which runs the runner while it holds the runner's lock, so a second would only wait. gcp runs it as a Cloud Run worker pool of one instance, manually scaled; `local` as a process of its own with no port, as a worker, which takes the lock on the environment's Postgres as it would on Cloud SQL; the fake target as a pool. A database the environment places on another dialect is refused: SQLite is a file one process writes, whose engine that process runs. | A runner thread in every server instance, idle on Cloud Run between requests; the server running it on `local` alone, which would leave `local` unlike gcp; a worker of the API, whose kind means a queue's messages |
+| A settings element names the runner beside its database's handle, `{ of: ShopDb, runner: true }`, as `job` and `worker` beside an API's handle name its jobs and workers. It takes `enabled`, a `platform` and that platform's settings (gcp's are a worker pool's, `cpu` and `memory`); `instances`, `concurrency`, a schedule and `env` are refused, since one instance runs at a time and the runner's config is its database's connection. Any runner may be turned off: it then runs no instance, so no reaction, schedule, Timers deadline or retention pass runs until it is on again, when each reaction reads on from its cursor, a schedule that came due runs once and every overdue deadline fires. A database that is no engine's, or that no API connects to, has no runner to name, and resolution says which. `@superschematic/stack` types the element, and `stack init` writes each target's `runner` settings. | Turning the runner off by itself when no behavior the engine composes schedules or reacts, which a publish could change without a deploy; `instances`, which only a second waiting instance would use; a retention setting now, which the runner's entrypoint in each language would read from a config it does not have yet |
+| On Cloud SQL each deployable that opens the engine is an IAM database user of its own, the first to open the engine runs its migrations, and a later release's migrations or a publish that adds a behavior's storage change its tables from whichever opens it. So the engine acts as its schema's owner: it looks the schema up before it creates one (Postgres checks CREATE on the database before IF NOT EXISTS, and the IAM users hold none), and when another role owns it, one the session's user is a member of, every connection takes that role (`SET ROLE`; a startup option after the first). The migration job readies the schema: a migration plan says its DB service is an engine database (`MigrationPlan.Engine`, the environment runs its runner), every deployable that connects opens its engine (a sql edge reaches the database of an API it serves), and the job document's `privileges.engine` names the schema, `engine`, a role of the database's own, `<database>_engine` (a hash in its name past 63 bytes), and the members, each connecting deployable's IAM database user. The job creates the role, which cannot log in, as `cloudsqlsuperuser` when its own user may not create roles, makes its user a member that may act as the role, creates the schema owned by the role, grants the role to each member and takes it back from one that no longer connects, as it does the table grants. It creates `unaccent`, which Search needs and only a `cloudsqlsuperuser` member may create there, in `superschematic_extensions`, and gives the role USAGE on it; a database that refuses it is reported, not a failure. The table grants leave both schemas out. `local` connects every process as the container's one superuser, so it needs none of this. | `ALTER DEFAULT PRIVILEGES` for every member, which the migrator may set only for roles it is a member of and which would still leave a table owned by its creator, whose columns no other member may add; one IAM user for every engine connection, which each server would impersonate; the role in the engine's URL, which each language's server would have to build; `CREATE` on the database for every member, so the engine creates the schema itself as whichever opens first |
+| A server reaches Cloud SQL as its pools do, and hands the engine a URL. Go: the Cloud SQL Go connector, with IAM authentication, behind a unix socket in a directory of the process's own, each connection to it carried over a connection the connector dials; the engine's URL names the socket's directory as its host, the IAM user and the database, with no password and no TLS of its own, as `cloudSQLConfig` builds a pool's. TypeScript (milestone 19): the Node connector's local proxy (`startLocalProxy` over a unix socket, IAM authentication), the engine's URL naming the socket the same way. Rust: the socket Cloud Run mounts at `/cloudsql/<instance>`, as D57's pool reaches it, and an IAM access token as the password, which the engine's `PostgresOptions::password`, a `PasswordProvider`, asks for each new connection (the pool's, the listener's, a lease's) on the thread that opens it; the HTTP runtime's `postgres::sync_connection` gives the key-value URL of the socket and fetches a fresh token from the metadata server for each, blocking on the runtime the server made it on. | A password in the environment, which IAM authentication does away with; the Cloud SQL Auth Proxy as a sidecar, a second container in every service and pool |
+| A Go server or runner whose engine database composes a behavior the core's engine archive leaves out, the work queue's or an extension's, links the archive of the project's engine crate (13a's `projectengine`, `<out>/engine/rust/<db>`), which the database's build writes for the work queue's behaviors alone too; the checkout's Dockerfile builds its `ffi` member in the engine stage, its lock file seeded from the engine workspace's, and the generated CI's `check` builds it before it compiles the server. The build refuses only what no Rust engine runs, an extension's behavior whose registration names no Rust crate or one the project does not hold, and a binary that would link two projects' archives. | The work queue in the core's archive, which every Go server would link whether its database composes it or not, and which leaves an extension's behavior unserved anyway |
+| `[paths] engine_go` names the Go binding's module, which a Go server whose API has an engine database requires and replaces, as `versiongraph_go` names the version graph's, and the release pins when it is unset (`engine_go_module` names the module). A checkout's Dockerfile builds the engine's archive from the Cargo workspace beside it (`../rust`). Beside `engine_rust`, the project's engine crate (13a) reads `engine_behaviors_rust`, `engine_workqueue_rust`, `engine_abi_rust` and `engine_napi_rust`, the core's behaviors, the work queue's crate, the C ABI's library and the Node-API addon's (A3), the first two of which a Rust server's manifest reads too. `[paths] engine_typescript` names the engine's npm package, which a TypeScript server, job, worker or runner depends on and the output root's Bun workspace overrides with the checkout; a checkout's Dockerfile builds the core's Node-API addon from the Cargo workspace beside it (`../rust`), or the project's engine crate's `napi` member. | Overriding the version graph's package beside the engine's, which the engine's package depended on by a path until the cutover |
+| A Go server opens the engine in the background (`engine.OpenInBackground`), retrying until its database answers, so it starts while the database is down, as its pools do; it deploys the engine document before it reports the engine ready, and `/readyz` names `<db> engine` until then. Its routes answer 503 `unavailable` until the engine opens (`enginehttp.Background`), so the router and CORS see them from the start. The API's `Deps` holds the `*engine.Background`, whose `Wait` returns the engine. At shutdown the server ends every event stream as it stops taking requests (`enginehttp.Options.Done`), then closes the engine after the requests in flight. A job and a worker open the engine for their `Deps` and deploy nothing; the runner deploys nothing either. | Opening before the server listens, which fails a server whose database is not up yet, or holds Cloud Run's startup on it; an `*engine.Engine` in `Deps`, which an engine that opens later cannot fill |
+| A TypeScript server opens the engine through the engine's `./server` entry, which loads the addon's facade and the HTTP runtime: `openEngineInBackground`, the twin of `engine.OpenInBackground`, over `AsyncEngine.openAsync`, the addon's open off the JavaScript thread (`NativeEngine.openAsync`, which `export_engine_napi!` emits, so the core's addon and every project's have it; the contract's version 3), since the open waits on the network and, on Cloud SQL, on a socket the thread itself serves. `deploy` (`Engine::deploy`) and `health` are calls of the engine, which the C ABI and the addon both make. The core's addon carries the core's behaviors and the work queue's, which `main.ts` names when it opens the engine; an engine database that composes an extension's behavior gets the project's engine crate's addon, its `napi` member, which `main.ts` names the extension's behaviors for too and the image's engine stage builds in the core's addon's place, its lock file seeded from the engine workspace's, keeping it at `/engine/<crate>-napi.node`, which `SUPERSCHEMATIC_ENGINE_ADDON` names. The build refuses only what no engine runs and an entrypoint that would load two projects' addons. `engineApp` and `engineMcp` take the background engine and answer 503 `unavailable` until it opens, after the identity service's CORS and before any authentication; with the API's identity service, `identityRoutes.sessions` false, since the API serves the user model's routes, and the API's service authenticator they admit the caller Go's `engineCaller` does. A mount's `done` signal ends its event streams at shutdown. `Deps.engine` is the `EngineBackground`. | Opening on the JavaScript thread, which stalls every request for each connect timeout while the database is down and deadlocks on a Cloud SQL socket the thread serves; the package's root, which loaded the TypeScript engine and its dependencies (the schema runtime, the version graph) into every server until the cutover, and still loads the types and config readers a server does not need; the engine option `addon` in each `main.ts`, which would name a path the image chooses; a caller written in each `main.ts`, a second copy of the identity runtime's rules |
+| A Rust server, job, worker and runner open the engine as a Go one does, through the engine's crate linked into the binary (the `postgres` feature, `axum` for a server) with the core's behaviors or the project's engine crate's: `src/engine.rs` beside `main.rs` opens it in the background with `superschematic_engine::background::Background`, a task of the server's runtime whose every attempt, the open and its setup, runs on the blocking pool, retrying a second apart and doubling to thirty, as `engine.OpenInBackground` does; a server's setup deploys the database's Rust types' `ENGINE_DOCUMENT` (`Engine::deploy`, which the C ABI's `deploy` now calls), and `/readyz` names `<db> engine` until it is open, not poisoned and its database answers. `axum::background_router` registers the engine's routes from the start, merged before the API router's fallback, each 503 `unavailable` until the engine opens; its `Callers` are the API's identity runtime's session and its `JwtServiceAuthenticator`'s caller, a refusal answered as the runtime's `ApiError`, with the identity config's trusted origins' CORS on its routes and a calling site's CORS (`cors::Api::with_routes`). At SIGTERM `axum::Options::done` ends every event stream as the server stops taking requests, then the engine shuts down and goes off the runtime. The API's `Deps.engine` is the `Background`. A Rust runner's `main.rs` reads its database's field alone. | A synchronous open on the runtime's threads, which blocks them while the database is down and drops the Postgres client on an async thread, which it refuses |
+| A Topcoat app (D44) on an engine database opens the engine in-process on SQLite: the crate's `engine::open` opens it on a file with the database's engine document and the policy its config sets and deploys the document, and the setup method takes the engine, keeps it in the app context for a page's in-process calls, and mounts its routes at `/engine/{*rest}` behind the API's `Authenticator`. | Postgres for an app that runs as one process, whose SQLite file the engine writes alone |
+| The engine's end user is the identity runtime's (D50), with the claims the TypeScript identity authenticator gives (`sessionId`, `login`, `name`, `transport`, `roles`): a request with no session has none, so a verified service stands in (D37), and any other refusal of the session is the identity runtime's 401 `unauthorized` or 403 `cross_origin`. A service credential the API's service authenticator refuses is its 401 or 403 in the engine's place. An API that authenticates with an auth middleware of its own gives the engine no end user, and the build says so. | Running the API's auth middleware in front of the engine, which would refuse a service standing in |
+
+Status: built: milestone 18's plumbing, the Go, Rust and TypeScript servers (milestone 19), and the end-to-end proof (milestone 20), each in a paragraph below, with what is not built yet. An API's
+engine database, its permission catalog's engine permissions, the runner
+deployable on gcp, `local` and the fake target, `[paths] engine_go`, and the
+Go entrypoints: a server opens, deploys and mounts the engine
+(`engine.go`), a job and a worker open it for their `Deps`, and the runner
+runs it; the checkout's Dockerfile builds the engine's archive in a stage
+of its own, and a release's image takes it from the archives tarball.
+`TestEngineEntrypointServes` builds desk-api's server and desk-db's runner
+over `servergen/testdata/engine` and runs them offline (`/readyz` names the
+engine, its routes are 503, a trusted origin's preflight gets the identity
+runtime's CORS) and on Postgres: a member refused a write their roles lack,
+then granted Account and Ticket, creates an account and reads it back and
+opens a ticket; a service stands in and is refused by the permission
+policy; a forged service credential is 401 `service_unauthorized`; and the
+runner fires the ticket's Timers deadline, which escalates it as the
+runner. `TestTheEngineReachesCloudSQLThroughASocket` carries a client
+through the Cloud SQL socket to a fake Postgres. A Go server and a runner
+on an engine database that composes the work queue's behaviors or an
+extension's link the project's engine archive: `projectengine` writes the
+crate for the work queue's alone too, and the checkout's Dockerfile builds
+its `ffi` member; `TestEngineProjectArchiveServes` builds queue-db's
+archive (Lease and Queue) with `scripts/engine-archive.sh --crate`, links
+queue-api's server and queue-db's runner against it, and on Postgres
+deploys the document and creates and reads a job as a verified service;
+`TestAnEngineNoRustEngineRunsIsRefused` refuses an extension behavior that
+names no Rust crate. The Rust servers are built (milestone 19, its Rust
+half): `TestRustEngineEntrypointServes` builds desk-rs-api's server, its
+job and desk-db's Rust runner over `servergen/testdata/engine`, passes
+clippy and rustfmt, and runs TestEngineEntrypointServes's script offline
+and on Postgres, the runner firing the Timers deadline as itself;
+`tests/password.rs` and the HTTP runtime's `sync_connection` test hold
+the Cloud SQL password provider, `tests/background.rs` the background
+open and its router, and a Topcoat app mounts the engine on SQLite
+(`TestTheEngineServesInATopcoatApp`). `TestTheRustEngineDockerfileBuildsAnImageThatServes`
+and `TestTheEngineProjectDockerfileBuildsAnImageThatServes` build
+desk-rs-api's image and queue-api's, whose engine stage builds the
+project crate's archive, and run them with no database up.
+
+The engine's schema on Cloud SQL and the runner's settings element are
+built. `replicas_open`'s
+`members_of_the_role_that_owns_the_schema_open_it_as_that_role` opens one
+schema, which an administrator made a role's, as two users with no
+privilege on the database: the first migrates it and publishes Search
+and Comments, the second writes, publishes a version and a type of its
+own, and all the engine made in the schema is the role's.
+`TestJobGivesTheEngineItsSchemaOnCloudSQL` runs the migration job on a
+database set up as Cloud SQL's, with a migrator that may not create
+roles, and two members acting as the role each change what the other
+created; `TestMigrationJobGivesTheEngineItsSchema` reads the job document
+gcp writes for an engine database, and `TestRunnerSettings` and
+`TestRunnerRefusals` resolve the runner's element.
+
+The TypeScript servers are built (milestone 19, its TypeScript half): a
+TypeScript server, job, worker and runner open the engine through
+`@superschematic/engine/server`, the server deploys, reports, mounts and
+shuts it down as the Go server does, `Deps.engine` holds it, the HTTP
+runtime's `cloudSqlSocket` serves it Cloud SQL over the Node connector's
+local proxy, and the image's engine stage builds the core's addon
+(`superschematic-engine-addon`), or, on an engine database that composes
+an extension's behavior, the project's engine crate's `napi` member,
+which `SUPERSCHEMATIC_ENGINE_ADDON` names in the image.
+`TestTypeScriptEngineEntrypointServes` builds desk-ts-api's server,
+desk-db's runner in TypeScript and the job over `servergen/testdata/engine`,
+type-checks them, and runs the server offline (`/readyz` names the engine,
+its routes are 503, a trusted origin's preflight gets the identity
+service's CORS) and on Postgres: the Go test's member, account, ticket,
+service stand-in and forged credential, an MCP `initialize`, the runner
+firing the ticket's Timers deadline as the runner, and a clean stop with an
+event stream open. `TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes`
+builds the image through its engine stage, and the engine package's
+`test/server.test.ts` runs the background open, deploy, health, the 503s
+and `done` on SQLite and Postgres.
+`TestATypeScriptEntrypointLoadsTheProjectsEngineAddon` composes
+acme.Rating on desk-db: the server, the job and the runner name it among
+the engine's behaviors, and each image builds the project crate's `napi`
+member and names it; `TestTypeScriptEngineProjectAddonServes` builds the
+crate's addon with `scripts/engine-napi.sh --crate`, and desk-ts-api's
+server, opening the engine on it through `SUPERSCHEMATIC_ENGINE_ADDON`,
+serves offline and on Postgres deploys the document, which only an addon
+built with acme.Rating accepts, and creates and rates an account;
+`TestATypeScriptEntrypointRefusesAnExtensionsBehaviorNoEngineRuns`
+refuses one whose registration names no crate.
+
+The end-to-end proof is built (milestone 20).
+`TestEngineServersAnswerOneScriptAlike` builds desk-trio-stack, which
+deploys desk-db's three APIs, desk-api in Go, desk-rs-api in Rust and
+desk-ts-api in TypeScript, each on its default server, beside one runner
+of desk-db in the Go of desk-api, the first by name. Offline, the three
+answer alike: `/readyz` names the engine, the engine's routes and MCP are
+503 `unavailable`, and a trusted origin's preflight gets the identity
+runtime's CORS. On Postgres the three open one database at once, so each
+deploys the same document into the one `engine` schema, as replicas of
+one API in three languages would, and one script runs against each in
+turn, each run's ids, slug, titles and login carrying a tag of its own,
+since they share the namespace: a member registers and signs in, is
+refused with no credential (401) and for a write their roles lack (403)
+and, granted Account and Ticket out of band, lists the deployed schemas,
+creates an account, reads it, looks it up by its unique slug and is
+refused a second holder of it (409); a ticket whose title is too long is
+422 and one with no account 400, Links' required link; three tickets
+open linked to the account; one moves to waiting with `If-Match`, is
+refused at a stale sequence (412) and a transition the workflow does not
+allow (409 `vetoed`), takes a comment and lists its comments; another is
+patched as a merge patch and resolved; the run's tickets list filtered on
+their titles in pages of two and on `Workflow.status`, and a filter on a
+field no list filters on is 400; the ticket's events read as a JSON page,
+then as an event stream from `after=head`, which a comment committed
+while it is open reaches, then resumed from its `Last-Event-ID`; MCP
+answers `initialize`, the initialized notification (202), `tools/list`
+and a `tools/call` of `ticket_get`, and a transition the workflow refuses
+is a tool error with the 409 problem; a service with no session stands in
+for an end user and is refused (403 `service:ops`), one acting for the
+member reads as the member, and a forged credential is 401
+`service_unauthorized`; then the runner, started beside them, fires the
+deadline of the ticket left open, which reads back escalated by the
+runner, with the escalation in the ticket's events. Each run's
+transcript, its method, path, status, the headers the HTTP corpus
+records, and its body parsed, with the run's tag, the member's id, UUIDs,
+tokens, event cursors and list cursors written as symbols in order of
+appearance and every time as `{{time}}`, must be the others' step for
+step; every normalisation is the test's, and a step the HTTP corpus
+records keeps the shape of the corpus's exchange (its headers by name,
+Content-Type and Cache-Control, a problem's type, title, status and code,
+the members of an envelope, an instance, a list, an event page and a
+JSON-RPC answer, and an event stream's frames in order). The three
+interoperate: each reads what the others wrote alike, with its own
+member's session and with the writer's, since the sessions are the user
+model's in the one database; a stream one server holds open carries the
+comment another commits, as the writer's log holds it; and the three
+deploys at once published one version of Account and Ticket. The script
+found two bugs, fixed: a Go server's event-log routes answered
+`X-Request-Id` twice, the request log's and the engine's (enginehttp now
+lets the engine's headers replace the host's), and the Go HTTP runtime
+answered without `Cache-Control: no-store`, a sign-in's token included,
+where the Rust and TypeScript runtimes mark every answer `no-store`. Two
+differences are the hosts' and normalised: a Go server's request log
+writes `X-Request-Id` on an MCP answer, which the engine's MCP endpoint
+and the other two servers leave without one, and the identity runtimes
+write a session's `expiresAt` to the millisecond (TypeScript), the
+microsecond (Rust) and the nanosecond, trailing zeros dropped (Go). A
+request with no credential, which the TypeScript runtime refuses before
+the engine, answers as the engine does. CI's `engine-servers` job runs it
+with the engine entrypoint tests in the full tier, on Postgres
+(`make engine-servers`). Not proved by it: a Rust server's engine routes
+have no timeout, which no transcript shows, and the TypeScript runtime's
+1 MiB body limit on the engine's body routes, which the script's bodies
+stay under.
+
+Not built yet: a project's engine archive and addon for the local
+target, which builds a Go server with the environment's `CGO_LDFLAGS`
+and runs a TypeScript one on the checkout's core addon, and for a
+release's image, which gets no Dockerfile; a timeout on a Rust server's
+engine routes, which the Go and TypeScript servers' have; a retention
+policy for the event log, which the runner keeps whole, and retention
+settings on the runner's element; the generated CI's type-check of a
+TypeScript entrypoint against an engine package that `[paths]
+engine_typescript` names, which needs the package's `dist/` in the CI
+checkout; an image test of a TypeScript server on the project's addon;
+and a live run: no server has run on Cloud Run against Cloud SQL, nor has
+the migration job readied an engine's schema there.
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 
@@ -7834,6 +8026,44 @@ Not built:
 - Claims on SQLite and D1.
 
 The rule is reversible until the first release.
+
+### D47, amended: a cloud job signs in after its installs and builds
+
+The plan, preview and deploy jobs signed in to Google Cloud right after
+their setup, and the preview and deploy jobs then built the services and
+installed the output root's workspace with `bun install
+--frozen-lockfile`. `google-github-actions/auth` writes a credentials file
+into the workspace and exports `GOOGLE_APPLICATION_CREDENTIALS`, the
+gcloud credential override and the project to every later step, so the
+install of a pull request's lockfile, and every script its packages run,
+found the deployer's credentials ready to use, as a credential stealer
+looks for them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A cloud job signs in last, right before its stack commands. The checkout, superschematic, the schemas root's install, Bun, the provisioner's tools, the build, the Rust setup and the workspace's frozen install come first, with no credentials, as they run in `check`, which shows none of them needs Google Cloud; the stack commands alone, which reach Cloud Build, Artifact Registry, the state bucket and Pulumi, run after the sign-in. `TestCloudJobsSignInLast` holds every golden's cloud jobs to it. | An access token in place of the credentials file (`create_credentials_file: false`, `token_format: access_token`) passed to the stack command's step alone: the token lasts an hour, which a deploy that builds images and waits on Cloud SQL can outlive, while the file refreshes; superschematic's Google clients and Pulumi's state backend read application default credentials and would each need the token; and the step's children inherit the token's variable as they inherit the file's path. A job that builds with no `id-token` and hands its output to one that signs in, which needs `stack deploy` to take a site's files built elsewhere, and still runs the project's TypeScript in the job that signs in. |
+
+Two exposures remain, and the job is the boundary for both. GitHub
+grants `id-token: write` to a whole job, so any step can ask for an
+identity token and exchange it at the pool, whose bindings admitted any
+workflow of the repository as either account until D69 scoped them to the
+jobs that sign in as each. And `stack plan`, `deploy`
+and `destroy` run the project's TypeScript with the credentials: the
+loader runs its sidecar documents with Bun, and a deploy installs the
+workspace again and builds each site. A fork's pull request has no cloud
+job, and a pull request from the repository runs the workflow it
+carries, which its author could change anyway, so the order guards the
+credentials against the code a pull request's dependencies bring, not
+against its author.
+
+Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
+the builds; actionlint passes on them. No generated workflow has run on
+GitHub Actions.
+
+Not built: a deploy that runs the project's TypeScript with no
+credentials in its environment. The bindings scoped by claim, so a pull
+request's job cannot act as the deployer of an environment without
+parameters, are D69's.
 
 ## D69. Each CI account admits only the runs of the jobs that sign in as it (D47 amended)
 

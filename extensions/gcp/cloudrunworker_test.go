@@ -153,3 +153,52 @@ func TestWorkerRefusals(t *testing.T) {
 	long.Name = "ReconcileWarehouseStock"
 	refused(t, withWorker(long), "give the worker's class or its API a shorter name")
 }
+
+// TestRunnerPlatform checks the Cloud Run worker pool an engine's runner
+// lowers to (D58): one instance under manual scaling, which runs the
+// engine's runner while it holds the runner's lock, no port and no probe,
+// an account of its own with a database user the migration job grants
+// privileges to, and its engine database's Cloud SQL connection as its one
+// config, through the runner platform's connector.
+func TestRunnerPlatform(t *testing.T) {
+	services := stacktest.AcmeShop()
+	for i := range services {
+		if services[i].Name == "shop-db" {
+			services[i].Engine = true
+		}
+	}
+	const runner = "shop-db-engine-runner"
+	env := resolve(t, assemble(t), shop(), services, "Staging")
+	d := env.Deployable(runner)
+	if d == nil || d.Kind != ir.DeployableRunner || d.Platform != gcp.CloudRunRunner || d.Runner.Instances != 1 || d.Runner.API != "shop-api" {
+		t.Fatalf("the runner is %+v", d)
+	}
+	for _, e := range env.Edges {
+		if e.From == runner && (e.Kind != ir.EdgeSQL || e.Connector != gcp.RunnerSQLConnector) {
+			t.Errorf("edge %s is connected by %s, want only a sql edge by %s", e.ID, e.Connector, gcp.RunnerSQLConnector)
+		}
+	}
+	pool := node(t, env, runner+".worker-pool")
+	if pool.Type != gcp.TypeWorkerPool || pool.Properties["name"] != runner {
+		t.Errorf("the worker pool node: %s %v", pool.Type, pool.Properties)
+	}
+	wantJSON(t, "the pool's scaling", pool.Properties["scaling"], `{"manualInstanceCount":1,"scalingMode":"MANUAL"}`)
+	template := pool.Properties["template"].(map[string]any)
+	container := template["containers"].([]any)[0].(map[string]any)
+	if container["image"] != "us-east1-docker.pkg.dev/acme-staging/shop/"+runner {
+		t.Errorf("the runner runs %v, want its repository path, which the deploy pins", container["image"])
+	}
+	for _, key := range []string{"ports", "startupProbe", "livenessProbe"} {
+		if _, ok := container[key]; ok {
+			t.Errorf("the runner's container has %s", key)
+		}
+	}
+	var names []string
+	for _, v := range container["envs"].([]any) {
+		names = append(names, v.(map[string]any)["name"].(string))
+	}
+	if got := strings.Join(names, " "); got != "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE SHOP_DB_DATABASE_CLOUD_SQL_USER" {
+		t.Errorf("the runner's variables = %s, want its database's connection alone", got)
+	}
+	wantJSON(t, "the runner's database user", node(t, env, runner+".database-user.shop-db").Properties["name"], `"shop-db-engine-runner@acme-staging.iam"`)
+}

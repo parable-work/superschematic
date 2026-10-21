@@ -10,16 +10,36 @@ package main
 // token the connector fetches, so no password exists. A field set to a
 // connection string connects as main.go's connect does, so one binary runs
 // in every environment.
+{{- if .Engines }}
+//
+// The engine (D58), whose Postgres client takes a URL, reaches Cloud SQL
+// through a unix socket in a directory of the process's own, each
+// connection to which the connector carries to the instance, as a pool's
+// connections are carried.
+{{- end }}
 
 import (
 	"context"
 	"fmt"
+{{- if .Engines }}
+	"io"
+{{- end }}
 	"net"
+{{- if .Engines }}
+	"os"
+	"path/filepath"
+	"strings"
+{{- end }}
 	"sync"
 
 	"cloud.google.com/go/cloudsqlconn"
+{{- if .Databases }}
 	"github.com/jackc/pgx/v5/pgxpool"
+{{- end }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
+{{- if .Engines }}
+	"go.uber.org/zap"
+{{- end }}
 )
 
 // cloudSQLDialer is the {{ .Kind }}'s one Cloud SQL dialer, shared by every
@@ -37,12 +57,10 @@ var cloudSQLDialer struct {
 // dialer's Dial does.
 type cloudSQLDial func(ctx context.Context, instance string, opts ...cloudsqlconn.DialOption) (net.Conn, error)
 
-// connectCloudSQL builds the pool of the database field named field, which
-// the environment sets as field_CLOUD_SQL_INSTANCE, field_CLOUD_SQL_DATABASE
-// and field_CLOUD_SQL_USER. Building the dialer reads the {{ .Kind }}'s
-// application default credentials, its service account's on Cloud Run;
-// the pool connects when it is first used.
-func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL) (*pgxpool.Pool, error) {
+// cloudSQLDialerOf builds the dialer once, reading the {{ .Kind }}'s
+// application default credentials, its service account's on Cloud Run,
+// for the database field named field.
+func cloudSQLDialerOf(ctx context.Context, field string) (*cloudsqlconn.Dialer, error) {
 	cloudSQLDialer.once.Do(func() {
 		// The dialer outlives run's context, which SIGTERM cancels while
 		// the requests in flight still query.
@@ -52,7 +70,19 @@ func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL)
 	if cloudSQLDialer.err != nil {
 		return nil, fmt.Errorf("%s: the Cloud SQL connector: %w", field, cloudSQLDialer.err)
 	}
-	config, err := cloudSQLConfig(db, cloudSQLDialer.dialer.Dial)
+	return cloudSQLDialer.dialer, nil
+}
+{{- if .Databases }}
+
+// connectCloudSQL builds the pool of the database field named field, which
+// the environment sets as field_CLOUD_SQL_INSTANCE, field_CLOUD_SQL_DATABASE
+// and field_CLOUD_SQL_USER. The pool connects when it is first used.
+func connectCloudSQL(ctx context.Context, field string, db stackconfig.CloudSQL) (*pgxpool.Pool, error) {
+	dialer, err := cloudSQLDialerOf(ctx, field)
+	if err != nil {
+		return nil, err
+	}
+	config, err := cloudSQLConfig(db, dialer.Dial)
 	if err != nil {
 		return nil, fmt.Errorf("%s: Cloud SQL instance %s: %w", field, db.Instance, err)
 	}
@@ -85,3 +115,77 @@ func cloudSQLConfig(db stackconfig.CloudSQL, dial cloudSQLDial) (*pgxpool.Config
 	}
 	return config, nil
 }
+{{- end }}
+{{- if .Engines }}
+
+// cloudSQLEngineURL serves the Cloud SQL database the field named field
+// sets, db, to the engine on a socket of its own (cloudSQLEngineSocket),
+// over the connector's dialer, and returns the engine's URL; release
+// closes the socket. A connection the connector cannot dial is logged.
+func cloudSQLEngineURL(ctx context.Context, logger *zap.Logger, field string, db stackconfig.CloudSQL) (url string, release func(), err error) {
+	dialer, err := cloudSQLDialerOf(ctx, field)
+	if err != nil {
+		return "", nil, err
+	}
+	url, release, err = cloudSQLEngineSocket(db, dialer.Dial, logger)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: Cloud SQL instance %s: %w", field, db.Instance, err)
+	}
+	return url, release, nil
+}
+
+// cloudSQLEngineSocket listens on a unix socket, .s.PGSQL.5432 in a
+// directory of its own, and carries each connection to it over one dial
+// makes to db.Instance, which logs in as the connector's IAM
+// authentication lets it. It returns the engine's URL, which names the
+// directory as its host, db.User and db.Database, with no password and no
+// TLS of its own, as cloudSQLConfig's pool has none; release closes the
+// socket and removes its directory.
+func cloudSQLEngineSocket(db stackconfig.CloudSQL, dial cloudSQLDial, logger *zap.Logger) (url string, release func(), err error) {
+	dir, err := os.MkdirTemp("", "cloudsql-")
+	if err != nil {
+		return "", nil, err
+	}
+	listener, err := net.Listen("unix", filepath.Join(dir, ".s.PGSQL.5432"))
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	go cloudSQLProxy(listener, db.Instance, dial, logger)
+	release = func() {
+		_ = listener.Close()
+		_ = os.RemoveAll(dir)
+	}
+	return fmt.Sprintf("host=%s port=5432 user=%s dbname=%s sslmode=disable", keywordValue(dir), keywordValue(db.User), keywordValue(db.Database)), release, nil
+}
+
+// cloudSQLProxy accepts connections on listener until it closes, carrying
+// each to instance over a connection dial makes, both ways, until either
+// side closes.
+func cloudSQLProxy(listener net.Listener, instance string, dial cloudSQLDial, logger *zap.Logger) {
+	for {
+		local, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer local.Close()
+			remote, err := dial(context.Background(), instance)
+			if err != nil {
+				logger.Warn("the engine's Cloud SQL connection", zap.String("instance", instance), zap.Error(err))
+				return
+			}
+			defer remote.Close()
+			done := make(chan struct{}, 2)
+			go func() { _, _ = io.Copy(remote, local); done <- struct{}{} }()
+			go func() { _, _ = io.Copy(local, remote); done <- struct{}{} }()
+			<-done
+		}()
+	}
+}
+
+// keywordValue quotes a value of a libpq keyword/value connection string.
+func keywordValue(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+{{- end }}

@@ -57,6 +57,7 @@ type filterProblemDetail struct {
 // writeProblemJSON writes an RFC 9457 Problem Details response.
 func writeProblemJSON(w http.ResponseWriter, v any, status int) {
 	w.Header().Set("Content-Type", "application/problem+json")
+	noStore(w)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -66,6 +67,7 @@ func writeProblemJSON(w http.ResponseWriter, v any, status int) {
 func JSON(w http.ResponseWriter, status int, data any) {
 	if data == nil {
 		w.Header().Set("Content-Type", "application/json")
+		noStore(w)
 		w.WriteHeader(status)
 		return
 	}
@@ -77,9 +79,20 @@ func JSON(w http.ResponseWriter, status int, data any) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	noStore(w)
 	w.WriteHeader(status)
 	_, _ = w.Write(payload)
 	_, _ = w.Write([]byte("\n"))
+}
+
+// noStore marks an API's answer Cache-Control: no-store, unless its handler
+// set a Cache-Control of its own, as the TypeScript and Rust runtimes mark
+// every answer of theirs: an answer holds what a caller may read, a
+// session's token among them, which no cache should keep.
+func noStore(w http.ResponseWriter) {
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 }
 
 // ErrorWithDetails sends an RFC 9457 Problem Details error response with a

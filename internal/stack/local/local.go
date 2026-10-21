@@ -69,6 +69,12 @@ const (
 	// starts, beside the servers (D53).
 	WorkerPlatform = "local.worker"
 
+	// RunnerPlatform runs an engine's runner as a process with no port,
+	// ready once it starts, as a worker is (D58): its own process, which
+	// takes the runner's lock on the environment's Postgres, as it does on
+	// gcp.
+	RunnerPlatform = "local.runner"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -89,6 +95,10 @@ const (
 	WorkerSQLConnector    = "local.worker-postgres"
 	WorkerHTTPConnector   = "local.worker-process"
 	WorkerBucketConnector = "local.worker-gcs"
+
+	// RunnerSQLConnector connects an engine's runner to its engine
+	// database, its one edge (D58).
+	RunnerSQLConnector = "local.runner-postgres"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -127,8 +137,9 @@ const (
 
 	// TypeProcess is a process run from its entrypoint: built from its
 	// module or its crate, or run by Bun. A server's listens on its port
-	// and is ready once its readiness path answers; a worker's has no port
-	// and is ready once it starts (ReadinessStarted, D53).
+	// and is ready once its readiness path answers; a worker's, and an
+	// engine's runner's, has no port and is ready once it starts
+	// (ReadinessStarted, D53, D58).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -213,6 +224,15 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 		{
+			Name: RunnerPlatform,
+			Kind: ir.DeployableRunner,
+			// In its API's language, as a worker is (D58).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
+			NameOf:    processName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerRunner,
+		},
+		{
 			Name:      DatabasePlatform,
 			Kind:      ir.DeployableDatabase,
 			Dialects:  []string{registry.SQLDialectPostgres},
@@ -244,6 +264,7 @@ func Register(r *registry.Registry) error {
 		{Name: WorkerSQLConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: RunnerSQLConnector, Edge: ir.EdgeSQL, From: RunnerPlatform, To: DatabasePlatform, Connect: connectSQL},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -265,6 +286,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableSite:     SitePlatform,
 			ir.DeployableBucket:   BucketPlatform,
 			ir.DeployableWorker:   WorkerPlatform,
+			ir.DeployableRunner:   RunnerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		Provisioner:   ProvisionerName,
@@ -370,7 +392,7 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript", "rust"]},
-	    "kind": {"enum": ["worker"]},
+	    "kind": {"enum": ["worker", "runner"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
 	    "env": {"type": "array", "items": {
