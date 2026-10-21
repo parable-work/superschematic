@@ -8,6 +8,7 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -458,6 +459,55 @@ type JobRunner interface {
 	RunJob(ctx context.Context, req JobRunRequest) error
 }
 
+// QueueRequest is one operation on a queue's dead messages in a deployed
+// run (`superschematic stack queue`, docs/stack-model.md, section 8.8,
+// D68): the queue document internal/queueops writes, which the migration
+// runner runs on the database that hosts the queue's DB service.
+type QueueRequest struct {
+	Run Run
+
+	// Database is the database deployable that hosts Service, the DB
+	// service that declares the queue.
+	Database string
+	Service  string
+
+	// Document is the queue document, which carries its statements.
+	Document []byte
+
+	// Log receives progress. Nothing of the result is written to it.
+	Log io.Writer
+}
+
+// Check refuses a request with no valid run, no database of the run's
+// environment that hosts the service, or no document.
+func (r QueueRequest) Check() error {
+	if err := r.Run.Check(); err != nil {
+		return err
+	}
+	d := r.Run.Environment.Deployable(r.Database)
+	switch {
+	case d == nil || d.Kind != ir.DeployableDatabase:
+		return fmt.Errorf("queue: environment %s has no database %q", r.Run.Environment.Environment, r.Database)
+	case !slices.ContainsFunc(d.Services, func(ref ir.ServiceRef) bool { return ref.Name == r.Service }):
+		return fmt.Errorf("queue: database %s of environment %s hosts no DB service %q", r.Database, r.Run.Environment.Environment, r.Service)
+	case len(r.Document) == 0:
+		return fmt.Errorf("queue %s: no queue document", r.Service)
+	}
+	return nil
+}
+
+// QueueRunner runs a queue document on a deployed run's database, where
+// the migration runner reaches it, and returns the runner's result: the
+// JSON `superschematic-migrate queue` writes (D68, amended). A listing's
+// result holds the dead messages' bodies, which may hold personal data, so
+// a runner brings it back to the caller alone and writes none of it to a
+// log: on gcp an execution of the migration job writes it to an object of
+// the state bucket that the runner reads once and deletes. It returns the
+// runner's own error when the operation fails or is refused.
+type QueueRunner interface {
+	RunQueue(ctx context.Context, req QueueRequest) ([]byte, error)
+}
+
 // SitePublishRequest is one publish of a site's files for a run
 // (docs/stack-model.md, section 8.10, D55): the files a site's build wrote,
 // named by their digest, and the site's config for the run.
@@ -608,6 +658,9 @@ func checkDeploySeams(spec TargetSpec) error {
 	if spec.Jobs != nil {
 		named = append(named, "Jobs")
 	}
+	if spec.Queues != nil {
+		named = append(named, "Queues")
+	}
 	if spec.Sites != nil {
 		named = append(named, "Sites")
 	}
@@ -625,6 +678,9 @@ func checkDeploySeams(spec TargetSpec) error {
 	}
 	if spec.Sites != nil && spec.State == nil {
 		return fmt.Errorf("registry: target %q has Sites but no State: a deploy records the digest of each site's files in it (D55)", spec.Name)
+	}
+	if spec.Queues != nil && spec.State == nil {
+		return fmt.Errorf("registry: target %q has Queues but no State: a queue operation runs on a deployed run, which its deploy manifest records (D68, amended)", spec.Name)
 	}
 	if spec.Bundles != nil && spec.State == nil {
 		return fmt.Errorf("registry: target %q has Bundles but no State: a deploy records the digest of each bundle's files in it, which a rollback and a plan fetch (D64)", spec.Name)

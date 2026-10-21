@@ -27,7 +27,7 @@ schema's instances into claimable work, are another thing.
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
-| `stack queue dead`, `retry` and `drop` on a local environment's queues | the same on a cloud environment's |
+| `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
 
 D53 and D68 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
@@ -363,8 +363,33 @@ operation with the migration runner, `superschematic-migrate`, which holds
 the database drivers, as `stack dev`'s migrations do. On the `local`
 target it reaches the Postgres container `stack dev` runs, so run it from
 another terminal while the environment runs. It runs on Postgres alone,
-as the claims do, and it does not reach a cloud environment's database
-yet: an environment on gcp is refused.
+as the claims do.
+
+On gcp it reaches the deployed run's Cloud SQL database the way a
+deploy's migrations do, as one execution of the stack's migration job,
+and takes a member of a parameterized environment by `--param`:
+
+```sh
+superschematic stack queue dead Staging shop-db.OrderPlaced
+superschematic stack queue retry Preview shop-db.OrderPlaced --all --param pr=123
+```
+
+A dead message's columns may hold personal data, so the runner never
+prints them where Cloud Logging would keep them: it writes its result to
+an object of the state bucket, under a random name, which the command
+reads once and deletes. If the command dies before it does, the bucket's
+lifecycle deletes the object a day after it was written. A deleted
+result stays restorable, by an account that may restore objects, for the
+bucket's soft-delete window, seven days unless your project set another.
+The `migrator` account may create objects there and read none.
+
+The command runs the job as your last deploy left it and never changes
+it, since your deploys share it: deploy with the release you run `stack
+queue` from first, or it says the job's runner is too old. A project
+bootstrapped before this needs `superschematic stack bootstrap` once
+more, which lets the migrator write the result; without it the runner
+stops before it changes the queue, and says so. `--timeout`, 30 minutes
+unless set, bounds the wait.
 
 ## Change it per environment
 

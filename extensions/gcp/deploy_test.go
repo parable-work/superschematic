@@ -42,8 +42,8 @@ type fakeCloud struct {
 	generations map[string]int64
 	gen         int64
 
-	// lifecycle holds each bucket's lifecycle rule.
-	lifecycle map[string]gcp.LifecycleRule
+	// lifecycle holds each bucket's lifecycle rules.
+	lifecycle map[string][]gcp.LifecycleRule
 
 	// images holds each pushed image's digest by `<repository>:<tag>`;
 	// builds and jobs what RunBuild and EnsureJob were last given;
@@ -69,6 +69,19 @@ type fakeCloud struct {
 	failBuild  map[string]string
 	failWait   error
 	failStderr error
+
+	// runner, when set, stands in for what a successful run of the
+	// migration job does in the state bucket, given its arguments: the
+	// objects it returns are written as the run ends. deletes records
+	// each object version DeleteObjectVersion deleted, and failDelete
+	// fails it.
+	runner     func(args []string) map[string][]byte
+	deletes    []string
+	failDelete error
+
+	// lifecycleConflicts fails that many of the next lifecycle writes as
+	// another writer's change to the bucket would.
+	lifecycleConflicts int
 
 	// numbers holds each project's number.
 	numbers map[string]string
@@ -112,7 +125,7 @@ var _ gcp.Cloud = (*fakeCloud)(nil)
 
 func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
-		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string]gcp.LifecycleRule{},
+		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string][]gcp.LifecycleRule{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{}, generations: map[string]int64{},
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
 		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
@@ -218,6 +231,11 @@ func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args 
 			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: fail.message}, nil
 		}
 	}
+	if c.runner != nil && args != nil {
+		for key, data := range c.runner(args) {
+			c.write(key, data)
+		}
+	}
 	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
 }
 
@@ -280,10 +298,23 @@ func (c *fakeCloud) EnsureLifecycleRule(_ context.Context, bucket string, rule g
 	if _, ok := c.buckets[bucket]; !ok {
 		return false, fmt.Errorf("no bucket %s", bucket)
 	}
-	if prev, ok := c.lifecycle[bucket]; ok && slices.Equal(prev.Prefixes, rule.Prefixes) && prev.AgeDays == rule.AgeDays {
+	if c.lifecycleConflicts > 0 {
+		c.lifecycleConflicts--
+		return false, fmt.Errorf("set the lifecycle of bucket %s: %w", bucket, gcp.ErrBucketChanged)
+	}
+	// A rule takes the place of the bucket's rule over the same prefixes,
+	// as Cloud Storage's does (withLifecycleRule).
+	rules := c.lifecycle[bucket]
+	i := slices.IndexFunc(rules, func(r gcp.LifecycleRule) bool { return slices.Equal(r.Prefixes, rule.Prefixes) })
+	if i >= 0 && rules[i].AgeDays == rule.AgeDays {
 		return false, nil
 	}
-	c.lifecycle[bucket] = gcp.LifecycleRule{Prefixes: slices.Clone(rule.Prefixes), AgeDays: rule.AgeDays}
+	rule = gcp.LifecycleRule{Prefixes: slices.Clone(rule.Prefixes), AgeDays: rule.AgeDays}
+	if i >= 0 {
+		rules[i] = rule
+	} else {
+		c.lifecycle[bucket] = append(rules, rule)
+	}
 	c.change("lifecycle of bucket %s: delete %s after %d days", bucket, strings.Join(rule.Prefixes, ", "), rule.AgeDays)
 	return true, nil
 }
@@ -357,6 +388,22 @@ func (c *fakeCloud) DeleteObjectGeneration(_ context.Context, bucket, object str
 	delete(c.generations, key)
 	c.change("delete gs://%s/%s", bucket, object)
 	return true, nil
+}
+
+func (c *fakeCloud) DeleteObjectVersion(_ context.Context, bucket, object string, generation int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failDelete != nil {
+		return c.failDelete
+	}
+	key := bucket + "/" + object
+	if _, ok := c.objects[key]; !ok || c.generations[key] != generation {
+		return nil
+	}
+	delete(c.objects, key)
+	delete(c.generations, key)
+	c.deletes = append(c.deletes, fmt.Sprintf("gs://%s/%s#%d", bucket, object, generation))
+	return nil
 }
 
 func (c *fakeCloud) WriteSiteObject(_ context.Context, bucket, object string, data []byte, contentType, cacheControl string) error {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,12 +12,14 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/parable-work/superschematic/internal/queueops"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack/local"
+	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -26,8 +29,10 @@ import (
 // migration runner runs each operation on the queue's database, since it
 // holds the drivers (D27), from a document that carries the statements
 // sqlutil writes for the queue's table (internal/queueops). On the local
-// target it runs against the Postgres container stack dev runs; a cloud
-// target's databases are not reached yet.
+// target it runs against the Postgres container stack dev runs; on a cloud
+// target, through the target's queue runner, on the deployed run's
+// database (D68, amended): on gcp an execution of the migration job, which
+// hands the result back through the state bucket.
 
 func init() { registerStackCommands(newStackQueueCmd) }
 
@@ -42,15 +47,24 @@ type queueFlags struct {
 	stackDir   string
 	namingPath string
 	format     string
+	params     []string
+	timeout    time.Duration
 	limit      int
 	all        bool
 	yes        bool
 }
 
+// defaultQueueTimeout is how long a queue command waits for its operation:
+// on a cloud target, an execution of the migration job, which may first
+// build the runner's image.
+const defaultQueueTimeout = 30 * time.Minute
+
 func (f *queueFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.stackDir, "stack", "", "the Stack service directory (default: the working directory when it is one, else the one Stack service under ./schemas/services)")
 	cmd.Flags().StringVar(&f.namingPath, "naming", "", "naming config file (default <stack>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&f.format, "format", "text", "print what the command did as text or json")
+	cmd.Flags().StringArrayVar(&f.params, "param", nil, "a parameter's value for this run of a parameterized environment: <name>=<value> (repeatable)")
+	cmd.Flags().DurationVar(&f.timeout, "timeout", defaultQueueTimeout, "give up waiting for the operation after this long")
 }
 
 const stackQueueLong = `The queue commands read and repair the dead messages of a queue a DB
@@ -69,8 +83,22 @@ the environment places on another dialect is refused.
 
 On the local target the operation runs against the Postgres container
 stack dev runs the environment in, at the URL the environment resolves for
-the queue's database, from another terminal. A cloud target's databases
-are not reached yet: an environment on any other target is refused.`
+the queue's database, from another terminal.
+
+On a cloud target it runs on the database of the deployed run, --param
+naming a member of a parameterized environment, through the target's
+queue runner. On gcp that is an execution of the stack's migration job,
+as the last deploy left it, which the command does not change: deploy
+with this release first. The runner reaches Cloud SQL as the migrator and
+writes what it did to an object of the state bucket under a name no one
+can guess, which it reserves before the queue changes, which the command
+reads once and deletes, and which the bucket's lifecycle deletes after a
+day when the command does not. A deleted result stays restorable for the
+bucket's soft-delete window, seven days by default. A listing's messages
+may hold personal data, so they are never written to the execution's
+logs. A target with no queue runner is refused, as is a
+run that was never deployed. --timeout bounds the wait; an execution it
+stops waiting for may still finish.`
 
 func newStackQueueCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
@@ -218,7 +246,14 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 	if flags.format != "text" && flags.format != "json" {
 		return fmt.Errorf("--format %q: want text or json", flags.format)
 	}
+	if flags.timeout <= 0 {
+		return fmt.Errorf("--timeout %s: wait for some time", flags.timeout)
+	}
 	service, queue, err := queueRef(ref)
+	if err != nil {
+		return err
+	}
+	params, err := parseParams(flags.params)
 	if err != nil {
 		return err
 	}
@@ -227,7 +262,8 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	defer c.close()
-	if err := c.checkQueue(service, queue); err != nil {
+	database, err := c.checkQueue(service, queue)
+	if err != nil {
 		return err
 	}
 	req := request(service, queue)
@@ -235,18 +271,25 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 	if err != nil {
 		return err
 	}
-	spec, ok := c.reg.Provisioner(c.env.Provisioner)
-	if !ok {
-		return fmt.Errorf("environment %s names provisioner %q, which is not registered", c.env.Environment, c.env.Provisioner)
-	}
-	runner, ok := spec.Provisioner.(localQueueRunner)
-	if !ok {
-		return fmt.Errorf("provisioner %s runs no queue operation", c.env.Provisioner)
-	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	out, err := runner.Queue(ctx, registry.ProvisionRequest{Environment: c.env, Dir: c.dir, OutputRoot: c.project.outputRoot}, service, doc)
+	ctx, cancel := context.WithTimeout(ctx, flags.timeout)
+	defer cancel()
+	var out []byte
+	if c.env.Target == local.Target {
+		out, err = runLocalQueue(ctx, c, service, doc)
+	} else {
+		out, err = stackdeploy.RunQueue(ctx, stackdeploy.RunQueueOptions{
+			Options:  c.options(cmd, params),
+			Database: database,
+			Service:  service,
+			Document: doc,
+		})
+	}
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("stack queue stopped waiting after --timeout %s: %w", flags.timeout, err)
+		}
 		return err
 	}
 	result, err := queueops.ReadResult(req, out)
@@ -261,11 +304,25 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 	return writeQueueText(w, environment, ref, result)
 }
 
+// runLocalQueue runs a queue document with the local provisioner, against
+// the Postgres container stack dev runs.
+func runLocalQueue(ctx context.Context, c *deployContext, service string, doc []byte) ([]byte, error) {
+	spec, ok := c.reg.Provisioner(c.env.Provisioner)
+	if !ok {
+		return nil, fmt.Errorf("environment %s names provisioner %q, which is not registered", c.env.Environment, c.env.Provisioner)
+	}
+	runner, ok := spec.Provisioner.(localQueueRunner)
+	if !ok {
+		return nil, fmt.Errorf("provisioner %s runs no queue operation", c.env.Provisioner)
+	}
+	return runner.Queue(ctx, registry.ProvisionRequest{Environment: c.env, Dir: c.dir, OutputRoot: c.project.outputRoot}, service, doc)
+}
+
 // checkQueue refuses a queue the environment cannot run the operation on:
-// one no DB service of the stack declares, one on a database of another
-// dialect than Postgres, and one in an environment on a target other than
-// local, whose databases the command does not reach yet.
-func (c *deployContext) checkQueue(service, queue string) error {
+// one no DB service of the stack declares, and one on a database of
+// another dialect than Postgres. It returns the database deployable that
+// hosts the queue's DB service.
+func (c *deployContext) checkQueue(service, queue string) (string, error) {
 	var refs []string
 	var declared []string
 	found := false
@@ -286,9 +343,9 @@ func (c *deployContext) checkQueue(service, queue string) error {
 	}
 	switch {
 	case !found:
-		return fmt.Errorf("stack %s reaches no DB service %s (its queues: %s)", c.project.stack.Name, service, queues)
+		return "", fmt.Errorf("stack %s reaches no DB service %s (its queues: %s)", c.project.stack.Name, service, queues)
 	case !slices.Contains(declared, queue):
-		return fmt.Errorf("%s declares no queue %s (the stack's queues: %s)", service, queue, queues)
+		return "", fmt.Errorf("%s declares no queue %s (the stack's queues: %s)", service, queue, queues)
 	}
 	var host *ir.ResolvedDeployable
 	for _, d := range c.env.Deployables {
@@ -298,15 +355,12 @@ func (c *deployContext) checkQueue(service, queue string) error {
 	}
 	switch {
 	case host == nil:
-		return fmt.Errorf("environment %s hosts no database of %s", c.env.Environment, service)
+		return "", fmt.Errorf("environment %s hosts no database of %s", c.env.Environment, service)
 	case host.Dialect != "" && host.Dialect != registry.SQLDialectPostgres:
-		return fmt.Errorf("environment %s places %s on database %s, a %s database; a queue's messages are claimed on Postgres alone, and so are its dead ones read, retried and dropped (D53, amended)",
+		return "", fmt.Errorf("environment %s places %s on database %s, a %s database; a queue's messages are claimed on Postgres alone, and so are its dead ones read, retried and dropped (D53, amended)",
 			c.env.Environment, service, host.Name, host.Dialect)
-	case c.env.Target != local.Target:
-		return fmt.Errorf("environment %s is on the %s target, whose databases stack queue does not reach yet: it runs on the %s target alone, against the Postgres stack dev runs. Reaching a cloud database, through the migration runner's job as a deploy's migrations reach it, is not built",
-			c.env.Environment, c.env.Target, local.Target)
 	}
-	return nil
+	return host.Name, nil
 }
 
 // writeQueueText prints what a queue operation did for a person.

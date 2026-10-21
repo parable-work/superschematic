@@ -332,6 +332,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
 | `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
+| `Queues` | `QueueRunner` | runs a queue document, `stack queue`'s operation on a queue's dead messages, on a deployed run's database where `superschematic-migrate` reaches it, and returns the runner's result; a `QueueRequest` names the run, the database, the DB service and the document. The result may hold personal data, so it never goes to a log (D68, amended) |
 | `Sites` | `SitePublisher` | puts a site's files under their digest, and its config for a run, where its platform serves them (D55) |
 | `Bundles` | `BundlePublisher` | keeps the files of a server's, job's or worker's bundle under their digest, `Publish(ctx, run, deployable, dir, digest)` (D64) |
 | `PreDestroy` | `DestroyPreparer` | readies a run's resources before `stack destroy` hands them to the provisioner, such as emptying a member's buckets; an error stops the destroy (D64) |
@@ -342,7 +343,8 @@ but `State` and `Secrets` without `State`. With no `Migrations`, a deploy
 that has a migration to run is refused; with no `Builder`, every image
 comes from `--image` or the deploy manifest; with no `Jobs`, `stack run`
 refuses the target's environments, and so does a deploy of one that runs
-a job on every deploy; with no `Sites` or `Bundles`, an
+a job on every deploy; with no `Queues`, `stack queue` refuses them; with
+no `Sites` or `Bundles`, an
 environment with a site, or with a deployable that runs a bundle, does not
 deploy.
 

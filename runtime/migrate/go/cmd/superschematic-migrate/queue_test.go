@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,16 +45,11 @@ const (
 	noID    = "00000000-0000-4000-8000-0000000000ff"
 )
 
-// TestQueueOnPostgres runs each golden queue document on fixture-queue-db's
-// tables, as sqlgen writes them, on a database of its own: two dead
-// messages and a ready one. It lists the dead, the oldest death first up to
-// the limit, with the total, each message's attempts, last error, time of
-// death and columns; refuses a retry that names a ready message and one the
-// queue does not hold, and retries nothing; retries one, which is ready,
-// due now, with no attempts and no claim, its last error kept; drops the
-// other, then refuses to drop it again; and retries and drops every dead
-// message, leaving the ready one as it was.
-func TestQueueOnPostgres(t *testing.T) {
+// queueTable creates fixture-queue-db's tables, as sqlgen writes them, on
+// a database of its own, with two dead messages and a ready one, and
+// returns its URL. It skips without a server.
+func queueTable(t *testing.T) string {
+	t.Helper()
 	dbURL := testdb.NewPostgres(t)
 	createSQL, err := os.ReadFile(filepath.Join(repoRoot, "internal", "generator", "sqlgen", "testdata", "golden", "fixture-queue-db", "create.sql"))
 	if err != nil {
@@ -61,6 +61,34 @@ VALUES
   ('`+deadID+`', gen_random_uuid(), 'high', 2, 'gift', '{"line1":"1 Main St","city":"Leeds"}', '{a,b}', 'dead', 4, 'the card was refused', now() - interval '3 hours', now() - interval '2 hours'),
   ('`+dead2ID+`', gen_random_uuid(), 'low', 1, NULL, '{"line1":"2 Side St","city":"York"}', '{}', 'dead', 1, NULL, now() - interval '2 hours', now() - interval '1 hour'),
   ('`+readyID+`', gen_random_uuid(), 'low', 1, NULL, '{"line1":"3 High St","city":"Hull"}', '{}', 'ready', 0, NULL, now() + interval '1 hour', now())`)
+	return dbURL
+}
+
+// private are values of the dead messages' bodies and errors, which no
+// output of a run with --result may hold.
+var private = []string{"gift", "Main St", "Leeds", "York", "the card was refused"}
+
+// noPrivate fails the test when out holds a value of a message.
+func noPrivate(t *testing.T, what, out string) {
+	t.Helper()
+	for _, value := range private {
+		if strings.Contains(out, value) {
+			t.Errorf("%s holds %q:\n%s", what, value, out)
+		}
+	}
+}
+
+// TestQueueOnPostgres runs each golden queue document on fixture-queue-db's
+// tables, as sqlgen writes them, on a database of its own: two dead
+// messages and a ready one. It lists the dead, the oldest death first up to
+// the limit, with the total, each message's attempts, last error, time of
+// death and columns; refuses a retry that names a ready message and one the
+// queue does not hold, and retries nothing; retries one, which is ready,
+// due now, with no attempts and no claim, its last error kept; drops the
+// other, then refuses to drop it again; and retries and drops every dead
+// message, leaving the ready one as it was.
+func TestQueueOnPostgres(t *testing.T) {
+	dbURL := queueTable(t)
 	row := func(id string) string {
 		t.Helper()
 		got := testdb.Strings(t, dbURL, `SELECT state || ' attempts=' || attempts || ' due=' || CASE WHEN due_at <= now() THEN 'now' ELSE 'later' END
@@ -169,16 +197,231 @@ VALUES
 }
 
 // TestQueueRefuses refuses a queue document on a database that is not
-// Postgres, a command without one, and a document it cannot read.
+// Postgres, a command without one, or with a URL and a Cloud SQL instance,
+// an instance without its user and database, and a document it cannot
+// read.
 func TestQueueRefuses(t *testing.T) {
 	doc := queueDocument(t, "dead")
 	invoke(t, nil, "queue", "--queue", doc, "--database-url", testdb.NewSQLite(t)).
 		expect(t, exitFailed, "queue OrderPlaced of fixture-queue-db: a queue's messages are claimed on Postgres alone, and the database URL selects sqlite")
 	invoke(t, nil, "queue", "--database-url", "postgres://localhost/x").expect(t, exitUsage, "queue needs --queue")
 	invoke(t, nil, "queue", "--queue", doc).expect(t, exitUsage, "no database: pass --database-url or set DATABASE_URL")
+	invoke(t, nil, "queue", "--queue", doc, "--database-url", "postgres://localhost/x", "--cloud-sql", "acme:us-east1:db").
+		expect(t, exitUsage, "queue takes --database-url or --cloud-sql, not both")
+	invoke(t, nil, "queue", "--queue", doc, "--cloud-sql", "acme:us-east1:db", "--database", "shop").
+		expect(t, exitUsage, "--cloud-sql needs --cloud-sql-user and --database")
+	invoke(t, nil, "queue", "--queue", doc, "--cloud-sql", "acme", "--cloud-sql-user", "m@acme.iam", "--database", "shop").
+		expect(t, exitUsage, `the Cloud SQL instance "acme" is not a connection name`)
+	invoke(t, nil, "queue", "--queue", doc, "--database", "shop").
+		expect(t, exitUsage, "--cloud-sql-user and --database name a database on the instance --cloud-sql names")
 	bad := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(bad, []byte(`{"version": 2}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	invoke(t, nil, "queue", "--queue", bad, "--database-url", "postgres://localhost/x").expect(t, exitFailed, "queue document version 2; this runner reads version 1")
+}
+
+// fakeResults is a resultWriter that keeps what it is given, or fails to
+// reserve or to write.
+type fakeResults struct {
+	written     map[string][]byte
+	reserved    []string
+	abandoned   []string
+	failReserve error
+	failWrite   error
+}
+
+func (r *fakeResults) Reserve(_ context.Context, ref string) (resultReservation, error) {
+	if r.failReserve != nil {
+		return nil, r.failReserve
+	}
+	r.reserved = append(r.reserved, ref)
+	return fakeReservation{r: r, ref: ref}, nil
+}
+
+type fakeReservation struct {
+	r   *fakeResults
+	ref string
+}
+
+func (f fakeReservation) Write(_ context.Context, data []byte) error {
+	if f.r.failWrite != nil {
+		return f.r.failWrite
+	}
+	f.r.written[f.ref] = data
+	return nil
+}
+
+func (f fakeReservation) Abandon() { f.r.abandoned = append(f.r.abandoned, f.ref) }
+
+// TestQueueWritesItsResult runs golden documents with --result, as the gcp
+// target's queue job does (D68, amended): the place is reserved before the
+// operation runs, the result goes there, all of it, and stdout says only
+// where it went. A place the runner may not reserve fails the run before
+// the queue changes; a write that fails after a retry says the retry was
+// applied. Neither stdout nor stderr holds a message's body or error. A
+// file as --result is created with mode 0600 before the operation runs,
+// one that exists is refused, and a failed operation removes it.
+func TestQueueWritesItsResult(t *testing.T) {
+	dbURL := queueTable(t)
+	state := func(id string) string {
+		t.Helper()
+		got := testdb.Strings(t, dbURL, "SELECT state FROM order_placed_queue WHERE id = $1::uuid", id)
+		if len(got) == 0 {
+			return "gone"
+		}
+		return got[0]
+	}
+	const ref = "gs://state/superschematic/queue/shop/Staging/0123456789abcdef0123456789abcdef.json"
+	results := &fakeResults{written: map[string][]byte{}}
+	var stdout, stderr bytes.Buffer
+	o := options{stdout: &stdout, stderr: &stderr, getenv: func(string) string { return "" }, results: results}
+	queue := func(name string, code int) string {
+		t.Helper()
+		stdout.Reset()
+		stderr.Reset()
+		args := []string{"queue", "--queue", queueDocument(t, name), "--database-url", dbURL, "--result", ref}
+		if got := runWith(context.Background(), args, o); got != code {
+			t.Fatalf("%s: exit %d, want %d: %s", name, got, code, stderr.String())
+		}
+		noPrivate(t, "the output of "+name, stdout.String()+stderr.String())
+		return stdout.String() + stderr.String()
+	}
+
+	if got, want := queue("dead", exitOK), "queue OrderPlaced of fixture-queue-db: wrote the result of dead to "+ref+"\n"; got != want {
+		t.Errorf("stdout %q, want %q", got, want)
+	}
+	var r migrate.QueueResult
+	if err := json.Unmarshal(results.written[ref], &r); err != nil {
+		t.Fatalf("the result: %v\n%s", err, results.written[ref])
+	}
+	if r.Total != 2 || len(r.Messages) != 1 || !strings.Contains(string(r.Messages[0].Message), "gift") || r.Messages[0].LastError != "the card was refused" {
+		t.Errorf("the result is %s", results.written[ref])
+	}
+
+	// A place it may not reserve: the retry does not run.
+	results.failReserve = errors.New(ref + ".reserved: 403 Forbidden: shop-migrator does not have storage.objects.create access")
+	out := queue("retry", exitFailed)
+	if want := "superschematic-migrate: queue OrderPlaced of fixture-queue-db: " + results.failReserve.Error() + "; the queue was not changed"; !strings.Contains(out, want) {
+		t.Errorf("a refused reservation says %q, want %q", out, want)
+	}
+	if got := state(deadID); got != "dead" {
+		t.Fatalf("a retry whose result had no place ran: %s is %s", deadID, got)
+	}
+
+	// A write that fails after the retry committed says so.
+	results.failReserve = nil
+	results.failWrite = errors.New("write the result to " + ref + ": 503 Service Unavailable")
+	out = queue("retry", exitFailed)
+	if want := "superschematic-migrate: queue OrderPlaced of fixture-queue-db: the retry was applied, and its result was not written: " + results.failWrite.Error() +
+		"; superschematic stack queue dead lists the dead messages as they are now"; !strings.Contains(out, want) {
+		t.Errorf("a failed write says %q, want %q", out, want)
+	}
+	if got := state(deadID); got != "ready" {
+		t.Errorf("the retried message is %s", got)
+	}
+
+	// A refused operation abandons its place.
+	results.failWrite = nil
+	queue("retry-refused", exitFailed)
+	if !slices.Equal(results.abandoned, []string{ref}) {
+		t.Errorf("abandoned %q", results.abandoned)
+	}
+
+	file := filepath.Join(t.TempDir(), "result.json")
+	doc := queueDocument(t, "dead")
+	i := invoke(t, nil, "queue", "--queue", doc, "--database-url", dbURL, "--result", file).expect(t, exitOK, "wrote the result of dead to "+file)
+	noPrivate(t, "the output", i.stdout+i.stderr)
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("the result's mode is %v", info.Mode().Perm())
+	}
+	invoke(t, nil, "queue", "--queue", doc, "--database-url", dbURL, "--result", file).
+		expect(t, exitFailed, "reserve "+file+" for the result: open "+file+": file exists; the queue was not changed")
+	refused := filepath.Join(t.TempDir(), "refused.json")
+	invoke(t, nil, "queue", "--queue", queueDocument(t, "retry-refused"), "--database-url", dbURL, "--result", refused).expect(t, exitFailed, "none was retried")
+	if _, err := os.Stat(refused); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused operation left its result's file: %v", err)
+	}
+}
+
+// TestQueueOnCloudSQL runs a queue document as the gcp target's queue job
+// does: the document read from a bucket, the result's object reserved by
+// an empty marker beside it and then written, through Cloud Storage's API,
+// here a fake one, only where no object is, and the database reached
+// through the Cloud SQL connector, here a dialer of the local server. A
+// second run to the same object fails at its reservation and leaves the
+// result as it was.
+func TestQueueOnCloudSQL(t *testing.T) {
+	dbURL := queueTable(t)
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if password, ok := u.User.Password(); ok {
+		t.Setenv("PGPASSWORD", password)
+	}
+	doc, err := os.ReadFile(queueDocument(t, "dead"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		docObject    = "superschematic/migrations/shop/Staging/queue/0123.json"
+		resultObject = "superschematic/queue/shop/Staging/0123456789abcdef0123456789abcdef.json"
+	)
+	storage := &fakeStorage{objects: map[string][]byte{"state/" + docObject: doc}}
+	server := httptest.NewServer(storage)
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	dialer := &localDialer{addr: u.Host}
+	o := options{
+		stdout: &stdout, stderr: &stderr,
+		getenv: func(key string) string {
+			if key == storageEmulatorEnv {
+				return server.URL
+			}
+			return ""
+		},
+		cloudSQL: func(_ context.Context, instance string) (sqlDialer, error) {
+			dialer.instance = instance
+			return dialer, nil
+		},
+	}
+	args := []string{"queue", "--queue", "gs://state/" + docObject,
+		"--cloud-sql", "acme-staging:us-east1:shop-db", "--cloud-sql-user", u.User.Username(), "--database", strings.TrimPrefix(u.Path, "/"),
+		"--result", "gs://state/" + resultObject}
+	if code := runWith(context.Background(), args, o); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if dialer.instance != "acme-staging:us-east1:shop-db" {
+		t.Errorf("dialed %q", dialer.instance)
+	}
+	noPrivate(t, "the output", stdout.String()+stderr.String())
+	var r migrate.QueueResult
+	if err := json.Unmarshal(storage.objects["state/"+resultObject], &r); err != nil {
+		t.Fatalf("the result object: %v", err)
+	}
+	if r.Total != 2 || len(r.Messages) != 1 || r.Messages[0].ID != deadID {
+		t.Errorf("the result is %s", storage.objects["state/"+resultObject])
+	}
+	want := []string{"/storage/v1/b/state/o/superschematic%2Fmigrations%2Fshop%2FStaging%2Fqueue%2F0123.json", "POST state/" + resultObject + ".reserved", "POST state/" + resultObject}
+	if !slices.Equal(storage.asked, want) {
+		t.Errorf("asked %q, want %q", storage.asked, want)
+	}
+	if marker, ok := storage.objects["state/"+resultObject+".reserved"]; !ok || len(marker) != 0 {
+		t.Errorf("the marker is %q (%v)", marker, ok)
+	}
+
+	written := slices.Clone(storage.objects["state/"+resultObject])
+	stdout.Reset()
+	stderr.Reset()
+	if code := runWith(context.Background(), args, o); code != exitFailed || !strings.Contains(stderr.String(), "reserve gs://state/"+resultObject+" for the result: gs://state/"+resultObject+".reserved: file already exists; the queue was not changed") {
+		t.Errorf("a second run: exit %d, %s", code, stderr.String())
+	}
+	if !bytes.Equal(storage.objects["state/"+resultObject], written) {
+		t.Error("a second run replaced the result")
+	}
 }

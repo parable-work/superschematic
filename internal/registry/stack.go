@@ -324,6 +324,11 @@ type TargetSpec struct {
 	// refuses the target's environments.
 	Jobs JobRunner
 
+	// Queues runs an operator's operation on a queue's dead messages in a
+	// deployed run (`stack queue`, D68, amended). Nil runs none, and `stack
+	// queue` refuses the target's environments.
+	Queues QueueRunner
+
 	// Sites publishes the files a site's build writes, and its config
 	// for each run, where the site's platform serves them (section 8.10,
 	// D55). Nil publishes none, and a deploy of an environment with a site

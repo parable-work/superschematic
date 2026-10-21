@@ -1514,8 +1514,11 @@ again: each step creates what is missing and leaves the rest.
    never reads one again: it compares a context's digest with the one the
    manifest records, and the builder finds an image by its tag and
    uploads a context again for a build it runs (section 11.2), so a
-   deleted context costs nothing. Pulumi's state and the manifests have no
-   rule, and the bucket's other rules stay as they are.
+   deleted context costs nothing. A second rule deletes the results of
+   `stack queue` under `superschematic/queue/` a day after they were
+   written, which the command deletes itself once it has read one
+   (section 8.8). Pulumi's state and the manifests have no rule, and the
+   bucket's other rules stay as they are.
 3. It applies a bootstrap graph through the provisioner, in a Pulumi
    project of its own, `<stack>-bootstrap`, with a Pulumi stack per GCP
    project:
@@ -1546,7 +1549,9 @@ again: each step creates what is missing and leaves the rest.
    - a `migrator` account, `<stack>-migrator`, that the migration job runs
      as (section 8.4): it holds the Cloud SQL client and instance user
      roles, and reads the job documents and plans in the state bucket,
-     under `superschematic/migrations/`, and nothing else of it. Its IAM
+     under `superschematic/migrations/`, and nothing else of it; it may
+     create objects under `superschematic/queue/<stack>/`, the results
+     of `stack queue` (section 8.8), and neither read nor replace them. Its IAM
      database user is a node of the environment's graph, on each Cloud
      SQL instance, since an instance is not there at bootstrap;
    - Workload Identity Federation for the GitHub repository the git remote
@@ -3307,17 +3312,35 @@ export abstract class FulfilOrders {}
   `superschematic-migrate queue`, in one transaction, and prints its
   result as JSON. On the local target the runner reaches the database at
   the URL the environment resolves, on the Postgres container `stack dev`
-  runs; the command refuses a queue on another dialect, and an
-  environment on any other target, whose databases it does not reach yet.
+  runs; the command refuses a queue on another dialect.
+  On a cloud target the command runs the document on the deployed run's
+  database through the target's queue runner (`TargetSpec.Queues`,
+  `registry.QueueRunner`), and refuses a target with none and a run never
+  deployed. On gcp it is one execution of the migration job (section
+  8.4): the document under the run's migration documents, and
+  `superschematic-migrate queue --cloud-sql <instance> --cloud-sql-user
+  <migrator> --database <name> --result gs://<state>/superschematic/queue/<stack>/<run>/<id>.json`,
+  `<id>` 128 random bits. The job runs as the last deploy left it: the
+  command never changes it, since the stack's deploys share it, and
+  refuses a stack with no job yet. The runner reserves that object with an
+  empty `<id>.json.reserved` marker before the queue changes, so a
+  migrator that may not write it stops first, then writes its result there
+  in place of stdout, since a listing's columns may hold personal data and
+  the job's output goes to Cloud Logging; the command reads it once and
+  deletes its version and the marker's. A deleted result stays
+  restorable for the bucket's soft-delete window, seven days by default. Bootstrap lets `migrator` create objects under its
+  stack's `superschematic/queue/<stack>/` alone, which it cannot read or
+  replace, and gives the state bucket a rule that deletes what is under
+  `superschematic/queue/` a day after it was written; the command sets
+  that rule too before it runs. A failed execution reports the runner's
+  error from Cloud Logging, as a failed migration does (D68, amended).
 
 Not built:
 
 - A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
   in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- `stack queue` on a cloud environment: on gcp, the queue document run as
-  an execution of the migration job, which reaches Cloud SQL, with its
-  result read back from Cloud Logging as a failed migration's error is.
+- `stack queue` on a cloud target other than gcp.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
@@ -4309,8 +4332,8 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 `unlock`. Targets and provisioners plug into it; they add no commands of
 their own. `stack dev` runs a local environment (section 8.3), `stack run`
 runs a job once on demand, locally or in the cloud (section 8.7), and
-`stack queue` lists, retries and drops a queue's dead messages, locally for
-now (section 8.8), in `cli/stack_queue.go`.
+`stack queue` lists, retries and drops a queue's dead messages, locally or
+on gcp (section 8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
@@ -4385,7 +4408,7 @@ whose public face is in `stack`; the reference page "CLI" lists their
 flags. `build` builds the images a deploy would build (section 11.2) and
 deploys nothing: it prints each as an `--image` flag and writes no
 manifest. A target plugs into them, and into the generated CI, through
-seven seams on its `TargetSpec` (D45, D46, D47, D52):
+eight seams on its `TargetSpec` (D45, D46, D47, D52, D68):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest. A store that is also a
@@ -4410,7 +4433,13 @@ seven seams on its `TargetSpec` (D45, D46, D47, D52):
   when the run ends, with the last try's error when it fails (section
   8.7). Without it, `stack run` refuses the target's environments. On
   gcp, an execution of the job's Cloud Run job, whose error the runner
-  reads from Cloud Logging as the migration job's.
+  reads from Cloud Logging as the migration job's;
+- `Queues`, a queue runner (`QueueRunner`): a request is a run, a
+  database, its DB service and a queue document, and the runner runs the
+  document where `superschematic-migrate` reaches the database and returns
+  its result, which it keeps out of every log (section 8.8). Without it,
+  `stack queue` refuses the target's environments. On gcp, an execution
+  of the migration job whose result comes back through the state bucket.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,

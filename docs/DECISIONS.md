@@ -8012,15 +8012,10 @@ failed or hung prune and a `0s` retention. The migration runner's
 `TestStackQueueRefuses` and `TestStackQueueOnALocalEnvironment` drive the
 command.
 
+`stack queue` on gcp is built (D68, amended, below).
+
 Not built:
-- `stack queue` on a cloud environment. On gcp the document would run as
-  an execution of the migration job, which reaches Cloud SQL through its
-  dialer, behind a target seam, with its result read back. Reading it
-  from Cloud Logging, as a failed migration's error is, would write the
-  dead messages' bodies, which may hold personal data, into logs every
-  holder of Logs Viewer reads; a result object in the state bucket needs
-  a write path the migrator does not have (D46, amended). Which way is
-  open.
+- `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
 
@@ -8185,5 +8180,67 @@ job's metadata server give the token as a service's does.
 
 Not built: headers for a collector, from a secret; a collector the target
 runs; metrics and logs (D67).
+
+The rule is reversible until the first release.
+
+### D68, amended: `stack queue` runs on gcp as an execution of the migration job, and its result comes back through the state bucket
+
+D68 left `stack queue` on a cloud environment open: the runner could
+reach Cloud SQL as the migration job does, but its result, the dead
+messages' columns among it, had no way back but Cloud Logging, where
+every holder of Logs Viewer reads it. The result now comes back as an
+object in the state bucket, which no log holds.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A seam on `TargetSpec`, `Queues` (`registry.QueueRunner`, `RunQueue(ctx, QueueRequest) ([]byte, error)`): a run, the database deployable, the DB service and the queue document; it returns the runner's result. `stackdeploy.RunQueue` refuses a target with none and a run never deployed. The CLI keeps the local target's path through its provisioner, and takes `--param` and `--timeout` (30 minutes). | An optional interface of the `MigrationRunner`, which a test target cannot leave out without a wrapper and a reader cannot find on the spec. A command per target. |
+| On gcp one execution of the stack's migration job, `<stack>-migrate`, as the migrator: the document is written under the run's migration documents, `superschematic/migrations/<stack>/<run>/queue/<id>.json`, which the migrator reads already, and the job runs `superschematic-migrate queue --cloud-sql <instance> --cloud-sql-user <migrator> --database <name> --result gs://<state>/superschematic/queue/<stack>/<run>/<id>.json`. `<id>` is 128 bits from `crypto/rand`, so no one names a run's object before it exists. | A job of its own, a second image and account to keep in step with the migration job's. The Cloud Run Tasks API or the execution's logs, which carry no output but stderr. |
+| The queue operation never changes the job: it runs it as the last deploy left it, and refuses a stack with no job yet. The job is shared by every run of the stack in the project, and a deploy updates its image between its `EnsureJob` and its `RunJob` under its own run's lock alone, so an operation that set the job to its CLI's release could put that runner under a deploy's migration phase. A job an older release left, whose runner lacks `--cloud-sql` or `--result`, fails with a usage error before it reads anything, and the command says to deploy with this release. | Updating the job to the CLI's release under the run's deploy lock: the lock is per run, and a Preview member's deploy updates the same job. Refusing while any deploy holds a lock, which reads every run's lock and still races a deploy that takes one after the check. |
+| The runner gains `--cloud-sql`, `--cloud-sql-user` and `--database`, which reach Cloud SQL as a job document's databases do, and `--result`: it writes its JSON there, a Cloud Storage object with `ifGenerationMatch=0` or a file created with mode 0600, either only where none is, and prints one line naming where. Before the operation runs it reserves the place: an empty marker object, `<object>.reserved`, written the same way, or the file's creation. A runner that may not write there, as on a project not bootstrapped again, fails saying the queue was not changed, and the command says to run `stack bootstrap`. A write that fails after a retry or a drop committed says the operation was applied and that `stack queue dead` shows the queue as it is. Its stdout and stderr hold no message: an error names IDs, never columns. | Fields of the queue document, which the compiler writes and would then carry the target's instance. A result document the runner reads its location from, which an unreadable document could not report. |
+| The CLI reads the object once and deletes its generation, and the marker's, for good: the bucket keeps versions, and a delete of the live object alone would leave it noncurrent (`Cloud.DeleteObjectVersion`). A failed execution reports the runner's error from Cloud Logging, as a failed migration does; one that succeeded and wrote nothing says so; a wait that failed, a timeout among them, says the execution may still write its result. A delete that fails is a line in the log, and the result still comes back. | Failing a read whose delete failed, which loses the operator's answer and leaves the object anyway. |
+| Bootstrap gives the state bucket a second lifecycle rule, which deletes what is under `superschematic/queue/` a day after it was written, live and noncurrent alike, and the command sets it too before it runs, reading the lifecycle again, up to five times, when another writer changed the bucket in between (`ErrBucketChanged`), so a project bootstrapped earlier has it before any result is written. A result a crashed command never read is gone within a day or so. | A rule of hours, which Cloud Storage's lifecycle does not have: its age is in days, applied once a day. Relying on the command's delete alone. |
+
+Status: built. The runner's `TestQueueWritesItsResult` runs golden
+documents with `--result` through a fake writer and to a file: a refused
+reservation leaves the dead message dead, a write that fails after a
+retry says it was applied, a refused operation removes its file, and
+stdout and stderr hold none of a message's columns or error;
+`TestQueueOnCloudSQL` reads the document from and writes the marker and
+the result to a fake Cloud Storage, only where no object is, over a
+dialer of the local Postgres. gcp's `TestQueueOperationOnGCP` deploys
+Staging on the fake cloud and runs a listing through `stack.RunQueue`,
+and a Preview member's through the seam; `TestQueueOperationFailsOnGCP`
+covers a failed execution, no result, a failed wait, a failed delete and
+a bucket with no rule; `TestQueueOperationLeavesTheJob` runs the job a
+deploy left without changing it, refuses a stack with no job, and
+reports an older runner and a missing grant; and
+`TestQueueOperationRereadsTheLifecycle` the lifecycle's conflicts. `internal/stackdeploy`'s `TestRunQueue` and `cli`'s
+`TestStackQueueOnACloudEnvironment` drive the seam on the fake target. No
+queue operation has run on Google Cloud. Cloud Storage's soft delete,
+seven days by default on a bucket that sets none, keeps a deleted result
+restorable by a holder of `storage.objects.restore`, an admin, for that
+long; the state bucket sets no soft delete policy of its own.
+
+The rule is reversible until the first release.
+
+### D46, amended: the migrator creates the results of queue operations in the state bucket
+
+D46's amendment that reads a failed job's error from Cloud Logging
+declined a result document the runner writes beside the job document: it
+gave the migrator a write path, which every runner image before it
+refused, for structure the error did not need. A queue listing does need
+it: its result holds the dead messages' columns, which must not go to
+Cloud Logging (D68, amended).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Bootstrap gives the migrator `roles/storage.objectCreator` on the state bucket, on the condition that the object's name begins `superschematic/queue/<stack>/`: it creates objects there and nothing else, reads none, and replaces none, since a write over an object needs delete and the runner writes with `ifGenerationMatch=0`. It is a node of the bootstrap graph, `migrator.queue-results`, beside its read of the migration documents. | `roles/storage.objectUser` or `objectAdmin`, which read and delete too. A grant over all of `superschematic/queue/`, which lets one stack's migrator write another's results. |
+| It is acceptable now because what it writes is bounded and what it could harm is not there: the only objects under the prefix are results, each named by 128 random bits the runner is handed, which a run reads once and deletes, and which the bucket's lifecycle deletes after a day. A migrator that wrote there unasked could at most make a run report a result it did not produce, which needs the migrator's own credentials, and those already let it change the databases. The migration job's error still comes from Cloud Logging: the write path serves queue results alone. | Keeping the migrator read-only, and the queue result in Cloud Logging, which puts personal data where Logs Viewer reads it. |
+
+Status: built. gcp's bootstrap golden holds the grant, and
+`TestStateBucketLifecycle` the second rule. A project bootstrapped before
+this needs `stack bootstrap` again for the grant; without it the runner's
+write fails with Cloud Storage's 403, which the command reports. No grant
+has been applied on Google Cloud.
 
 The rule is reversible until the first release.
