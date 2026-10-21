@@ -190,6 +190,28 @@ const storageEmulatorEnv = "STORAGE_EMULATOR_HOST"
 // readOnlyScope is the OAuth scope a gs:// read needs.
 const readOnlyScope = "https://www.googleapis.com/auth/devstorage.read_only"
 
+// storage returns where Cloud Storage's JSON API is, without a trailing
+// slash, and a token for scope: $STORAGE_EMULATOR_HOST, with none, when it
+// is set, else Google's, with application default credentials (on Cloud
+// Run, the account the job runs as).
+func (o options) storage(ctx context.Context, scope string) (base, token string, err error) {
+	if host := o.getenv(storageEmulatorEnv); host != "" {
+		if !strings.Contains(host, "://") {
+			host = "http://" + host
+		}
+		return strings.TrimSuffix(host, "/"), "", nil
+	}
+	creds, err := credentials.DetectDefault(&credentials.DetectOptions{Scopes: []string{scope}})
+	if err != nil {
+		return "", "", fmt.Errorf("application default credentials: %w", err)
+	}
+	t, err := creds.Token(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("a token: %w", err)
+	}
+	return "https://storage.googleapis.com", t.Value, nil
+}
+
 // read returns a document: a file, or a Cloud Storage object a gs:// URL
 // names, read with application default credentials (on Cloud Run, the
 // account the job runs as).
@@ -202,25 +224,11 @@ func (o options) read(ctx context.Context, ref string) ([]byte, error) {
 	if bucket == "" || object == "" {
 		return nil, fmt.Errorf("%s: want gs://<bucket>/<object>", ref)
 	}
-	base := "https://storage.googleapis.com"
-	token := ""
-	if host := o.getenv(storageEmulatorEnv); host != "" {
-		base = host
-		if !strings.Contains(base, "://") {
-			base = "http://" + base
-		}
-	} else {
-		creds, err := credentials.DetectDefault(&credentials.DetectOptions{Scopes: []string{readOnlyScope}})
-		if err != nil {
-			return nil, fmt.Errorf("read %s: application default credentials: %w", ref, err)
-		}
-		t, err := creds.Token(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: a token: %w", ref, err)
-		}
-		token = t.Value
+	base, token, err := o.storage(ctx, readOnlyScope)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", ref, err)
 	}
-	u := strings.TrimSuffix(base, "/") + "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object) + "?alt=media"
+	u := base + "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object) + "?alt=media"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err

@@ -34,6 +34,11 @@ type resolvedImports struct {
 	// objectValidators maps each imported object type its dependency crate
 	// generates with validators to that crate's validators module.
 	objectValidators map[string]string
+
+	// unionValidators maps each imported union its dependency crate
+	// validates (every member a struct of that crate with validators) to
+	// that crate's validators module.
+	unionValidators map[string]string
 }
 
 // DependencyServiceName extracts the service name from a schema import
@@ -51,7 +56,7 @@ func DependencyServiceName(pkg string) string {
 // aliases re-exported from types.rs; scalars are skipped because their
 // aliases are regenerated locally.
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
-	result := &resolvedImports{enumNames: map[string]bool{}, objectValidators: map[string]string{}}
+	result := &resolvedImports{enumNames: map[string]bool{}, objectValidators: map[string]string{}, unionValidators: map[string]string{}}
 	if len(schema.Imports) == 0 {
 		return result, nil
 	}
@@ -112,6 +117,18 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			case depSchema.Unions[symbol] != nil:
 				unionDef := depSchema.Unions[symbol]
 				doc = codegen.DocText(unionDef.Description, unionDef.Comment)
+				// The dependency crate validates a union whose members it
+				// emits as structs with validators.
+				validated := len(unionDef.Types) > 0
+				for _, member := range unionDef.Types {
+					typeDef := depSchema.Types[member]
+					if typeDef == nil || typeDef.IsTrait || (!slices.Contains(localObjectRoles, typeDef.Role) && typeDef.Role != ir.RoleAPIInput) {
+						validated = false
+					}
+				}
+				if validated {
+					result.unionValidators[symbol] = rustutil.CrateNameToModulePath(crateName) + "::validators"
+				}
 			case depSchema.Types[symbol] != nil:
 				typeDef := depSchema.Types[symbol]
 				// Traits are flattened into tables and are not emitted as

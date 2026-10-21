@@ -560,3 +560,64 @@ func TestRunJob(t *testing.T) {
 		t.Errorf("RunJob on a target with no job runner = %v", err)
 	}
 }
+
+// TestRunQueue runs a queue document on a deployed run's database through
+// the target's queue runner (D68, amended), and covers its refusals: a
+// run never deployed, a database that does not host the DB service, and a
+// target with no queue runner. The log names the operation and holds none
+// of its result.
+func TestRunQueue(t *testing.T) {
+	f := newFixture(t)
+	env := f.env(t, "Staging")
+	f.ready(t, env)
+	ctx := context.Background()
+	doc := []byte(`{"version": 1, "service": "shop-db", "queue": "OrderPlaced", "operation": "dead", "limit": 10}`)
+	run := func(database, service string) ([]byte, error) {
+		return stackdeploy.RunQueue(ctx, stackdeploy.RunQueueOptions{Options: f.options(t, env, nil), Database: database, Service: service, Document: doc})
+	}
+	if _, err := run("shop-db", "shop-db"); err == nil || err.Error() != "Staging was never deployed, so its database shop-db holds no queue yet; deploy it first" {
+		t.Errorf("RunQueue before a deploy = %v", err)
+	}
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(1))); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "a private note"
+	f.ext.Queues.Results = map[string][]byte{"dead": []byte(`{"messages": [{"note": "` + secret + `"}]}`)}
+	from := len(f.calls(0))
+	f.log.Reset()
+	out, err := run("shop-db", "shop-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), secret) {
+		t.Errorf("the result is %s", out)
+	}
+	if calls := f.calls(from); !slices.Equal(calls, []string{"queue shop-db: shop-db.OrderPlaced dead"}) {
+		t.Errorf("calls %v", calls)
+	}
+	if docs := f.ext.Queues.Documents(); len(docs) != 1 || string(docs[0]) != string(doc) {
+		t.Errorf("the runner was handed %q", docs)
+	}
+	if got := f.log.String(); got != "run a queue operation on shop-db, in database shop-db of Staging\n" {
+		t.Errorf("the log:\n%s", got)
+	}
+	f.ext.Queues.Fail = errors.New("the operation failed")
+	if _, err := run("shop-db", "shop-db"); err == nil || err.Error() != "the operation failed" {
+		t.Errorf("RunQueue of a failing operation = %v", err)
+	}
+	if _, err := run("shop-db", "shop-api"); err == nil || err.Error() != "queue: database shop-db of environment Staging hosts no DB service \"shop-api\"" {
+		t.Errorf("RunQueue of a service the database does not host = %v", err)
+	}
+
+	none := &stacktest.Extension{NoQueueRunner: true}
+	reg, err := registry.Assemble(registry.DefaultNaming(), none)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := f.options(t, env, nil)
+	o.Registry = reg
+	if _, err := stackdeploy.RunQueue(ctx, stackdeploy.RunQueueOptions{Options: o, Database: "shop-db", Service: "shop-db", Document: doc}); err == nil ||
+		err.Error() != "target fake runs no queue operation, so `stack queue` does not reach the databases of environment Staging" {
+		t.Errorf("RunQueue on a target with no queue runner = %v", err)
+	}
+}

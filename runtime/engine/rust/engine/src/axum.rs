@@ -24,10 +24,15 @@
 //! the body under anyway. A request on a route's path with a method none
 //! of its routes take is the engine's 404, as its own routing answers it
 //! (not axum's 405); a path under the prefix that names no route at all is
-//! not the router's, and reaches the host's fallback. Rate limits,
-//! timeouts and CORS stay the host's layers (D58): [`route_of_request`]
-//! names the engine route a request is for, whose `stream` and `mcp` say
-//! whether a layer that bounds a response's body would cut it.
+//! not the router's, and reaches the host's fallback. It keeps the host's
+//! timeout too, when [`Options::timeout`] gives one: every route but the
+//! event stream's and MCP's, whose responses last as long as their
+//! clients, answers 504 `gateway_timeout` once the request has taken
+//! longer, as the Go binding's `enginehttp` and the TypeScript `engineApp`
+//! answer it. Rate limits and CORS stay the host's layers (D58):
+//! [`route_of_request`] names the engine route a request is for, whose
+//! `stream` and `mcp` say whether a layer that bounds a response's body
+//! would cut it.
 //!
 //! An event stream is pulled without a thread of its own: each pull reads
 //! the log from the stream's cursor on the blocking pool and returns at
@@ -200,6 +205,16 @@ pub struct Options {
     /// server's graceful shutdown waits for none, as the Go binding's
     /// `enginehttp.Options.Done` ends them.
     pub done: Option<watch::Receiver<bool>>,
+    /// When set, how long a request to any route but the event stream's
+    /// and MCP's may take, from the router's first step to its answer:
+    /// past it the router answers 504 `gateway_timeout`, as the HTTP
+    /// runtimes' `@timeout` answers, and drops the request's future. A call
+    /// still waiting for a thread of the blocking pool then never starts;
+    /// one already running there runs to its end, its answer let go, as a
+    /// Go handler past `enginehttp`'s timeout does, so a write answered 504
+    /// may have committed, and a client reads before it tries again. None
+    /// unless set.
+    pub timeout: Option<Duration>,
 }
 
 impl Default for Options {
@@ -211,6 +226,7 @@ impl Default for Options {
             serves: Serves::All,
             body_limit: api::DEFAULT_BODY_LIMIT_BYTES,
             done: None,
+            timeout: None,
         }
     }
 }
@@ -222,6 +238,7 @@ impl fmt::Debug for Options {
             .field("api", &self.api)
             .field("serves", &self.serves)
             .field("body_limit", &self.body_limit)
+            .field("timeout", &self.timeout)
             .finish_non_exhaustive()
     }
 }
@@ -263,6 +280,14 @@ impl Options {
     /// shutdown.
     pub fn done(mut self, done: watch::Receiver<bool>) -> Self {
         self.done = Some(done);
+        self
+    }
+
+    /// How long a request to any route but the event stream's and MCP's
+    /// may take before the router answers 504 `gateway_timeout`: the
+    /// server's timeout.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 }
@@ -437,6 +462,7 @@ impl Mount {
             body_limit: options.body_limit,
             heartbeat,
             done: options.done,
+            timeout: options.timeout,
         })
     }
 }
@@ -452,6 +478,7 @@ struct Mount {
     heartbeat: Duration,
     wakes: Arc<Wakes>,
     done: Option<watch::Receiver<bool>>,
+    timeout: Option<Duration>,
 }
 
 /// The engine a router holds, let go of off the async runtime when the
@@ -511,6 +538,46 @@ async fn serve(mount: Arc<Mount>, request: AxumRequest) -> AxumResponse {
             &mount,
         );
     };
+    // The host's timeout bounds every route but the event stream's and
+    // MCP's, whose responses last as long as their clients: the body's
+    // read, the caller and the engine's call.
+    match mount.timeout.filter(|_| !route.stream && !route.mcp) {
+        Some(limit) => {
+            let served = serve_route(
+                Arc::clone(&mount),
+                parts,
+                body,
+                route,
+                request_id.clone(),
+                prefix,
+                path,
+                Instant::now().checked_add(limit),
+            );
+            match tokio::time::timeout(limit, served).await {
+                Ok(response) => response,
+                Err(_) => answer(timed_out(&request_id), &mount),
+            }
+        }
+        None => serve_route(mount, parts, body, route, request_id, prefix, path, None).await,
+    }
+}
+
+// serve_route serves a request one of the router's routes takes: its body
+// under the limit, its caller, then the engine on the blocking pool. A call
+// still waiting for a blocking thread at the deadline, which the host's
+// timeout has answered, never starts, as a Go call waiting for its slot
+// past its context's deadline never does.
+#[allow(clippy::too_many_arguments)]
+async fn serve_route(
+    mount: Arc<Mount>,
+    parts: Parts,
+    body: AxumBody,
+    route: Route,
+    request_id: String,
+    prefix: String,
+    path: String,
+    deadline: Option<Instant>,
+) -> AxumResponse {
     let body = if route.takes_body() {
         if declared_length(&parts.headers).is_some_and(|length| length > mount.body_limit as u64) {
             return answer(too_large(&request_id), &mount);
@@ -542,9 +609,13 @@ async fn serve(mount: Arc<Mount>, request: AxumRequest) -> AxumResponse {
         request_id: request_id.clone(),
     };
     let worker = Arc::clone(&mount);
-    let served =
-        tokio::task::spawn_blocking(move || api::handle(&worker.engine, &worker.api, &request))
-            .await;
+    let served = tokio::task::spawn_blocking(move || {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return timed_out(&request.request_id);
+        }
+        api::handle(&worker.engine, &worker.api, &request)
+    })
+    .await;
     match served {
         Ok(response) => answer(response, &mount),
         // A panic the engine's own boundary did not catch.
@@ -635,6 +706,11 @@ fn too_large(request_id: &str) -> api::Response {
         "payload_too_large",
     )
     .response(request_id)
+}
+
+// timed_out is the host's timeout's answer, as the HTTP runtimes write it.
+fn timed_out(request_id: &str) -> api::Response {
+    Problem::new(504, "Gateway Timeout", "gateway_timeout").response(request_id)
 }
 
 fn unreadable(request_id: &str) -> api::Response {

@@ -6,14 +6,15 @@
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
-//	superschematic-migrate queue --queue queue.json [--database-url URL]
+//	superschematic-migrate queue --queue queue.json|gs://bucket/queue.json [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME] [--result gs://bucket/result.json|result.json]
 //	superschematic-migrate version
 //
 // A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
 // document runs a phase of several plans and gives the servers that
 // connect their privileges, on Cloud SQL through the Cloud SQL Go
 // connector. A queue document lists, retries or drops a queue's dead
-// messages on Postgres.
+// messages on Postgres, at a URL or on Cloud SQL, and its result goes to
+// stdout or, with --result, to an object no log reads.
 // Exit codes: 0 done, 1 refused or failed, 2 usage.
 package main
 
@@ -48,7 +49,8 @@ const usage = `usage:
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--database-url URL]
   superschematic-migrate job --job job.json|gs://bucket/job.json
-  superschematic-migrate queue --queue queue.json [--database-url URL]
+  superschematic-migrate queue --queue queue.json [--database-url URL | --cloud-sql INSTANCE
+      --cloud-sql-user USER --database NAME] [--result result.json|gs://bucket/result.json]
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -66,7 +68,11 @@ $STORAGE_EMULATOR_HOST when it is set.
 
 queue runs a queue document, which superschematic stack queue writes: it
 lists a queue's dead messages, makes them ready again or deletes them, on
-a Postgres database, and prints what it did as JSON.
+a Postgres database, and prints what it did as JSON. With --cloud-sql the
+database is one on a Cloud SQL instance, reached as a job's are. With
+--result it writes what it did to that object or file, which must not
+exist yet, in place of stdout, and prints only where it went: a listing
+holds the messages' bodies, which stay out of logs.
 `
 
 func main() {
@@ -89,6 +95,9 @@ type options struct {
 	// cloudSQL dials a job's Cloud SQL instance; nil is the Cloud SQL Go
 	// connector's. Tests dial a local server.
 	cloudSQL func(ctx context.Context, instance string) (sqlDialer, error)
+	// results writes a queue operation's result where --result names it;
+	// nil is storageWriter. Tests fake it.
+	results resultWriter
 }
 
 // run runs one command and returns its exit code.

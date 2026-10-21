@@ -102,6 +102,7 @@ async fn run() -> Result<(), Failure> {
         &desk_rs_api_config.desk_db_database,
         desk_db_types::ENGINE_DOCUMENT,
         r#""permission""#,
+        Some(r#"{"maxAgeMs":2592000000}"#),
     )?;
 
     // desk-rs-api: its jobs, built from its Deps.

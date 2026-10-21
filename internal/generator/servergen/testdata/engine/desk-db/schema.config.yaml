@@ -1,10 +1,13 @@
 # The engine fixture's database (D58): its Account and Ticket compose
 # behaviors, so they are engine types, beside the user model's tables
 # (D50). outputs.engine leaves the namespace, the mount and the policy to
-# their defaults: desk-db, /engine/desk-db and permission.
+# their defaults: desk-db, /engine/desk-db and permission, and keeps the
+# event log's events for 30 days, which the runner prunes.
 name: desk-db
 kind: DB
 outputs:
+  engine:
+    retention: { maxAgeMs: 2592000000 }
   types:
     go: { enabled: true }
     typescript: { enabled: true }

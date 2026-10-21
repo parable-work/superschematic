@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
@@ -8,6 +9,12 @@ import path from "node:path";
 const sdkDir = process.env.SDK_DIR;
 if (!sdkDir) {
   throw new Error("SDK_DIR env var required");
+}
+// UNION_REQUESTS is union_requests.json, the requests every server and SDK
+// runs against ShapeMutations.
+const unionRequestsPath = process.env.UNION_REQUESTS;
+if (!unionRequestsPath) {
+  throw new Error("UNION_REQUESTS env var required");
 }
 
 const { UnionListsApiSDK } = await import(pathToFileURL(path.join(sdkDir, "index.ts")).href);
@@ -131,8 +138,8 @@ describe("TypeScript SDK union responses", () => {
   });
 
   test("a @strictJSON member the payload breaks, and an unknown kind, are refused", async () => {
-    expect((await refusal(sdkWith().shape.getMarker("m-3"))).reason).toBe("unknown fields: note");
-    expect((await refusal(sdkWith().shape.getMarker("m-4"))).reason).toBe("unknown discriminator");
+    expect((await refusal(sdkWith().shape.getMarker("m-3"))).reason).toBe("does not match the declared type");
+    expect((await refusal(sdkWith().shape.getMarker("m-4"))).reason).toBe("does not match the declared type");
   });
 
   test("a map of a union", async () => {
@@ -154,9 +161,9 @@ describe("TypeScript SDK union responses", () => {
 
   test("a map of a union whose value no member reads is refused", async () => {
     const shapes = sdkWith({ "/api/shape-index": { a: circle, b: "triangle" } }).shape.shapesByName();
-    expect((await refusal(shapes)).reason).toBe("expected an object");
+    expect((await refusal(shapes)).reason).toBe("does not match the declared type");
     const groups = sdkWith({ "/api/shape-groups": { round: [circle, 3] } }).shape.shapeGroups();
-    expect((await refusal(groups)).reason).toBe("expected an object");
+    expect((await refusal(groups)).reason).toBe("does not match the declared type");
   });
 
   test("one value of a union that may be null", async () => {
@@ -191,4 +198,57 @@ describe("TypeScript SDK object maps and nulls", () => {
     expectCircle(await sdkWith().shape.findCircle("c-1"));
     expect(await sdkWith().shape.findCircle("none")).toBeNull();
   });
+});
+
+// flatten reads field errors as union_requests.json writes them: each path
+// to its sorted validators, a nested object's errors at the dotted path.
+function flatten(errors, prefix = "", into = {}) {
+  for (const [key, value] of Object.entries(errors)) {
+    const at = prefix ? `${prefix}.${key}` : key;
+    if (Array.isArray(value)) {
+      into[at] = value.map((error) => error.validator).sort();
+    } else {
+      flatten(value, at, into);
+    }
+  }
+  return into;
+}
+
+describe("TypeScript SDK union arguments", () => {
+  const { requests } = JSON.parse(readFileSync(unionRequestsPath, "utf8"));
+  for (const request of requests) {
+    test(request.name, async () => {
+      const sent = [];
+      const sdk = new UnionListsApiSDK({
+        baseUrl: "https://api.example.com",
+        fetch: async (input, init) => {
+          const body = JSON.parse(init.body);
+          sent.push({ method: init.method, path: new URL(String(input)).pathname, body });
+          // The route's answer for a request it takes, as union_requests.json
+          // gives it.
+          const data = request.status === 200 ? request.data : null;
+          return new Response(JSON.stringify({ data, meta: { requestId: "req-1" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        },
+      });
+      // Every operation takes its arguments, or its input, as one object.
+      const call = sdk.shape[request.operation](request.body);
+      if (request.sdk === "sends") {
+        await call;
+        expect(sent).toEqual([{ method: "POST", path: request.path, body: request.body }]);
+        return;
+      }
+      let refused;
+      try {
+        await call;
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused?.name).toBe("ValidationError");
+      expect(flatten(refused.errors)).toEqual(request.sdk.errors);
+      expect(sent).toEqual([]);
+    });
+  }
 });

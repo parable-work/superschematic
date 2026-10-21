@@ -405,8 +405,14 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
 
+	var readModel *codegen.ReadModel
+	if len(output.Unions) > 0 {
+		if readModel, err = codegen.BuildReadModel(schema, opts.Dependencies); err != nil {
+			return nil, err
+		}
+	}
 	validatedTypes := append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...)
-	if len(codegenScalars) > 0 || len(validatedTypes) > 0 || len(output.Enums) > 0 {
+	if len(codegenScalars) > 0 || len(validatedTypes) > 0 || len(output.Enums) > 0 || len(output.Unions) > 0 {
 		output.Validators = buildValidators(validatorInputs{
 			schema:          schema,
 			scalars:         codegenScalars,
@@ -414,6 +420,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 			localEnums:      output.Enums,
 			importedEnums:   imported.enums,
 			importedObjects: imported.objectValidators,
+			unions:          output.Unions,
+			importedUnions:  imported.unionValidators,
+			readModel:       readModel,
 			enumLookup:      enumLookup,
 			naming:          opts.Naming,
 		})

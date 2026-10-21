@@ -347,8 +347,9 @@ exports that does nothing at run time, so the author gets completion and
 
 A document is an input that does not belong in a schema file: a sidecar
 next to `schema.config.*` that the loader reads and stores on the schema.
-Deployment values are the usual case; `extensions/deploy` is a
-document-only extension.
+A region table or anything a different team edits is the usual case;
+acme's `catalog.config.yaml` is one. With `Kinds` nil, a document may be
+an extension's only registration.
 
 | Field | Meaning |
 | --- | --- |
@@ -423,7 +424,7 @@ The core generators:
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
 | `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`), qualifies the tables the views read (`sourceSchema`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
-| `enginedoc` | `engine` | the engine document of a DB schema whose types compose behaviors, its engine types: `engine/<schema>.json` in the Go types module, which the types hold as a constant too (section 3.16); last in the DB kind's pipeline, and `outputs.engine.namespace` names the engine namespace, `mount` where the servers of the APIs on the database mount the engine, and `policy` its access policy (D58) |
+| `enginedoc` | `engine` | the engine document of a DB schema whose types compose behaviors, its engine types: `engine/<schema>.json` in the Go types module, which the types hold as a constant too (section 3.16); last in the DB kind's pipeline, and `outputs.engine.namespace` names the engine namespace, `mount` where the servers of the APIs on the database mount the engine, `policy` its access policy, and `retention` how long its event log keeps events, which the database's runner prunes (D58) |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
 | `envConfig` | none | the environment loader for a schema with an `@envVars` class |
@@ -862,6 +863,13 @@ roots, so they build from one lock file:
 | --- | --- | --- |
 | `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
 | `napi/` | `<crate>-napi` | The engine's Node-API addon over `behaviors()` (`superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors)`, the twin of `export_engine_c_abi!`, the addon's library at `[paths] engine_napi_rust`), a cdylib a TypeScript server loads in place of the core's addon: `scripts/engine-napi.sh --crate <crate>/napi --out <dir>` prints the `.node` file, which the engine option `addon` or `SUPERSCHEMATIC_ENGINE_ADDON` names. An engine registers the core's behaviors when it opens, then each other one its options' `behaviors` name. Node-API symbols resolve only when Node.js or Bun loads it, so it has no Rust test; acme's smoke loads it in Node.js and rates a product on it |
+
+A generated Go or TypeScript server, job, worker or runner on such a
+database takes its member without anything set by hand: the entrypoint's
+`engine-project.json` names the crate and the member, which its image's
+engine stage and `stack dev` build, `stack dev` handing the archive to the
+Go build's `CGO_LDFLAGS` and the addon to the process's
+`SUPERSCHEMATIC_ENGINE_ADDON` (D58, amended).
 
 A schema that composes the
 core's behaviors alone gets no crate: the release's engine runs them. An
@@ -1803,7 +1811,7 @@ that way. Two scripts check it, and the `acme` job in
   smoke, checks the new payload reached the IR, and fails if any path
   outside `examples/acme-schematic/` changed.
 
-Inside the core module, four extensions test the seams against the real
+Inside the core module, two extensions test the seams against the real
 loader, generators and resolver:
 
 - `internal/registry/registrytest` is an in-tree fixture extension with a
@@ -1819,13 +1827,13 @@ loader, generators and resolver:
   connectors, DNS platform and provisioner, through the public packages
   alone, and resolves a stack over the acme-shop services into golden
   `environment.json` files (`docs/stack-model.md`, section 6.7).
-- `extensions/deploy` registers a document and nothing else. Its test loads
-  `testdata/services/example` and compares the generated values files byte
-  for byte. See the [deploy guide](https://parable-work.github.io/superschematic/guides/deploy/).
-- `extensions/platform` registers a kind with `NoSentinel`, a `Verify` rule,
-  a type decorator and a generator. Its tests load a TypeScript fixture, a
-  YAML twin and a fixture that must fail verify. See the
-  [platform guide](https://parable-work.github.io/superschematic/guides/platform/).
+
+`extensions/deploy` and `extensions/platform`, a document-only extension
+and a grouping kind, were retired once the stack targets replaced them
+(D30, amended: the reference deploy and platform extensions are retired).
+The core Stack kind sets `NoSentinel` and a `Verify` rule, and
+`internal/loader/verify` registers a test-local kind whose decorator
+package other kinds cannot import.
 
 ## 11. Known gaps
 

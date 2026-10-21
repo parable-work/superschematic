@@ -63,6 +63,8 @@ func assemble(t *testing.T) *registry.Registry {
 // demand in Preview, whose members run no schedule they do not turn on.
 // shop-api's bucket shop-media (D54) deletes objects after 30 days in
 // Staging and its Preview members, and keeps versions in Production.
+// Production exports a quarter of its traces to Cloud Trace, but from
+// ShipOrders, which turns its export off (D67, amended).
 func shop() *ir.Stack {
 	return &ir.Stack{
 		Name:   "Shop",
@@ -89,13 +91,13 @@ func shop() *ir.Stack {
 			{
 				Name:   "Production",
 				Target: gcp.Target,
-				Values: map[string]any{"project": "acme-prod", "region": "us-east1", "production": true},
+				Values: map[string]any{"project": "acme-prod", "region": "us-east1", "production": true, "telemetry": map[string]any{"sampleRatio": 0.25}},
 				Domain: "acme.dev",
 				Settings: []*ir.DeployableSettings{
 					{Of: stacktest.Of(stacktest.ShopDB), Values: map[string]any{"tier": "db-custom-2-7680", "highAvailability": true}},
 					{Of: stacktest.Of(stacktest.ShopAPI), Values: map[string]any{"minInstances": float64(1)}, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}},
 					{Of: ir.DeployableRef{Deployable: "Orders"}, Values: map[string]any{"memory": "1Gi"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}},
-					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2", "memory": "1Gi"}},
+					{Of: stacktest.JobOf(stacktest.ShopOrders, "ShipOrders"), Values: map[string]any{"cpu": "2", "memory": "1Gi", "telemetry": false}},
 					{Of: stacktest.Of(stacktest.ShopMedia), Values: map[string]any{"versioning": true}},
 				},
 			},
@@ -259,14 +261,14 @@ func TestDeployOrder(t *testing.T) {
 	}
 	want := []string{
 		"infrastructure (Orders.account, Orders.cloudsql-client.shop-db, Orders.cloudsql-login.shop-db, Orders.database-user.shop-db, " +
-			"Orders.reads.PaymentsSecrets.STRIPE_KEY, Orders.trace-agent, network, network.nat, network.router, network.subnet, " +
+			"Orders.reads.PaymentsSecrets.STRIPE_KEY, network, network.nat, network.router, network.subnet, " +
 			"secret.PaymentsSecrets.STRIPE_KEY, shop-api.account, shop-api.cloudsql-client.shop-db, shop-api.cloudsql-login.shop-db, " +
-			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sign-as-self, shop-api.storage.shop-media, shop-api.trace-agent, " +
+			"shop-api.database-user.shop-db, shop-api.reads.PaymentsSecrets.STRIPE_KEY, shop-api.sign-as-self, shop-api.storage.shop-media, " +
 			"shop-db.database.shop-db, shop-db.instance, shop-db.migrator, shop-media.bucket, " +
 			"shop-orders-fulfil-orders.account, shop-orders-fulfil-orders.cloudsql-client.shop-db, shop-orders-fulfil-orders.cloudsql-login.shop-db, " +
-			"shop-orders-fulfil-orders.database-user.shop-db, shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-fulfil-orders.trace-agent, " +
+			"shop-orders-fulfil-orders.database-user.shop-db, shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY, " +
 			"shop-orders-ship-orders.account, shop-orders-ship-orders.cloudsql-client.shop-db, shop-orders-ship-orders.cloudsql-login.shop-db, " +
-			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY, shop-orders-ship-orders.trace-agent)",
+			"shop-orders-ship-orders.database-user.shop-db, shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY)",
 		"migrate expand (shop-db)",
 		"rollout 1 (shop-api, Orders.run-invoker.shop-api, shop-api.service, shop-orders-fulfil-orders.run-invoker.shop-api, shop-orders-ship-orders.run-invoker.shop-api)",
 		"rollout 2 (Orders, shop-orders-fulfil-orders, shop-orders-ship-orders, Orders.service, shop-orders-fulfil-orders.worker-pool, " +

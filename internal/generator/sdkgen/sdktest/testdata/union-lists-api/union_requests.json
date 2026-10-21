@@ -1,0 +1,938 @@
+{
+  "comment": "The requests every generated server and SDK runs against union-lists-api's ShapeMutations (sdktest.LoadUnionRequests). drawShape takes Shape, a union its members' keys, tags and types pick, as its body argument shape; drawShapes, shapeGrid and shapesByKey take it in a list, a list of lists and a map; pay takes Payment, a union its kind discriminates, as its body argument payment; checkout takes Checkout, an input whose payment holds a Payment and whose shapes hold Shapes; probe takes Probe, an input whose fields hold unions whose members tell the structural predicate's rules apart (D31, amended). A server answers status. A 200's data is what the implementation answers: drawShape the shape it received, pay the payment's kind, checkout the payment's kind, a colon and the number of shapes, the list, grid and map operations the number of shapes, and probe ok. A 400 is refused before the implementation runs. With input, it is the refusal of the input body every server answers: detail \"Request body does not match the declared input\", details.reason reason, and the field errors errors, each path to the rules it breaks, sorted, with a nested object's errors at the dotted path (payment.number); none means the problem has none. Without input, it is the refusal of the body argument parameter, as each server refuses an object argument: the TypeScript and Rust routers answer details.parameter parameter, details.reason reason and, inside a list or map, details.path at; the Go route answers the field errors errors, the argument's own type error or its member's errors under the value's path. sdk is what an SDK does with the body's arguments before it sends them: \"sends\" sends the body as it is, and an object refuses the call with the SDK's validation error, its field errors as errors are. A typed SDK (Go, Rust, Python) cannot hold a value no member reads, and may skip or refuse the requests whose sdk is \"sends\" and whose status is 400.",
+  "requests": [
+    {
+      "name": "a circle",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "radius": 1
+        }
+      },
+      "status": 200,
+      "data": {
+        "radius": 1
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a square",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "side": 2
+        }
+      },
+      "status": 200,
+      "data": {
+        "side": 2
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a shape no member reads",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "edges": 3
+        }
+      },
+      "status": 400,
+      "parameter": "shape",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shape": [
+          "type"
+        ]
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a circle without its radius, which no member reads",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "radius": null
+        }
+      },
+      "status": 400,
+      "parameter": "shape",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shape": [
+          "type"
+        ]
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a circle whose radius is text, which no member reads",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "radius": "1"
+        }
+      },
+      "status": 400,
+      "parameter": "shape",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shape": [
+          "type"
+        ]
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a circle that breaks its own rule",
+      "operation": "drawShape",
+      "path": "/api/shapes",
+      "body": {
+        "shape": {
+          "radius": -1
+        }
+      },
+      "status": 400,
+      "parameter": "shape",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shape.radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "shape.radius": [
+            "min"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a card",
+      "operation": "pay",
+      "path": "/api/payments",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": "4242424242424242"
+        }
+      },
+      "status": 200,
+      "data": "card",
+      "sdk": "sends"
+    },
+    {
+      "name": "a payment of a kind no member has",
+      "operation": "pay",
+      "path": "/api/payments",
+      "body": {
+        "payment": {
+          "kind": "cash"
+        }
+      },
+      "status": 400,
+      "parameter": "payment",
+      "reason": "does not match the declared type",
+      "errors": {
+        "payment": [
+          "type"
+        ]
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a card whose number is not a string, which no member reads",
+      "operation": "pay",
+      "path": "/api/payments",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": 42
+        }
+      },
+      "status": 400,
+      "parameter": "payment",
+      "reason": "does not match the declared type",
+      "errors": {
+        "payment": [
+          "type"
+        ]
+      },
+      "sdk": "sends"
+    },
+    {
+      "name": "a card that breaks its own rule",
+      "operation": "pay",
+      "path": "/api/payments",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": "12"
+        }
+      },
+      "status": 400,
+      "parameter": "payment",
+      "reason": "does not match the declared type",
+      "errors": {
+        "payment.number": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "payment.number": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a list of shapes",
+      "operation": "drawShapes",
+      "path": "/api/shapes/batch",
+      "body": {
+        "shapes": [
+          {
+            "radius": 1
+          },
+          {
+            "side": 2
+          }
+        ]
+      },
+      "status": 200,
+      "data": "2",
+      "sdk": "sends"
+    },
+    {
+      "name": "a list whose second shape no member reads",
+      "operation": "drawShapes",
+      "path": "/api/shapes/batch",
+      "body": {
+        "shapes": [
+          {
+            "radius": 1
+          },
+          {
+            "edges": 3
+          }
+        ]
+      },
+      "status": 400,
+      "parameter": "shapes",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shapes[1]": [
+          "type"
+        ]
+      },
+      "sdk": "sends",
+      "at": "shapes[1]"
+    },
+    {
+      "name": "a list whose circle breaks its own rule",
+      "operation": "drawShapes",
+      "path": "/api/shapes/batch",
+      "body": {
+        "shapes": [
+          {
+            "radius": -1
+          }
+        ]
+      },
+      "status": 400,
+      "parameter": "shapes",
+      "reason": "does not match the declared type",
+      "errors": {
+        "shapes[0].radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "shapes[0].radius": [
+            "min"
+          ]
+        }
+      },
+      "at": "shapes[0]"
+    },
+    {
+      "name": "rows of shapes",
+      "operation": "shapeGrid",
+      "path": "/api/shapes/grid",
+      "body": {
+        "rows": [
+          [
+            {
+              "radius": 1
+            }
+          ],
+          []
+        ]
+      },
+      "status": 200,
+      "data": "1",
+      "sdk": "sends"
+    },
+    {
+      "name": "rows whose circle breaks its own rule",
+      "operation": "shapeGrid",
+      "path": "/api/shapes/grid",
+      "body": {
+        "rows": [
+          [
+            {
+              "side": 2
+            }
+          ],
+          [
+            {
+              "radius": -1
+            }
+          ]
+        ]
+      },
+      "status": 400,
+      "parameter": "rows",
+      "reason": "does not match the declared type",
+      "errors": {
+        "rows[1][0].radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "rows[1][0].radius": [
+            "min"
+          ]
+        }
+      },
+      "at": "rows[1][0]"
+    },
+    {
+      "name": "named shapes",
+      "operation": "shapesByKey",
+      "path": "/api/shapes/named",
+      "body": {
+        "byKey": {
+          "a": {
+            "radius": 1
+          },
+          "b": {
+            "side": 2
+          }
+        }
+      },
+      "status": 200,
+      "data": "2",
+      "sdk": "sends"
+    },
+    {
+      "name": "named shapes, one no member reads",
+      "operation": "shapesByKey",
+      "path": "/api/shapes/named",
+      "body": {
+        "byKey": {
+          "a": {
+            "edges": 3
+          }
+        }
+      },
+      "status": 400,
+      "parameter": "byKey",
+      "reason": "does not match the declared type",
+      "errors": {
+        "byKey[a]": [
+          "type"
+        ]
+      },
+      "sdk": "sends",
+      "at": "byKey[a]"
+    },
+    {
+      "name": "named shapes whose circle breaks its own rule",
+      "operation": "shapesByKey",
+      "path": "/api/shapes/named",
+      "body": {
+        "byKey": {
+          "a": {
+            "radius": -1
+          }
+        }
+      },
+      "status": 400,
+      "parameter": "byKey",
+      "reason": "does not match the declared type",
+      "errors": {
+        "byKey[a].radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "byKey[a].radius": [
+            "min"
+          ]
+        }
+      },
+      "at": "byKey[a]"
+    },
+    {
+      "name": "a checkout by invoice of two shapes",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "invoice",
+          "reference": "INV-1"
+        },
+        "shapes": [
+          {
+            "radius": 1
+          },
+          {
+            "side": 2
+          }
+        ]
+      },
+      "status": 200,
+      "data": "invoice:2",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout whose invoice's note is null",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "invoice",
+          "reference": "INV-1",
+          "note": null
+        }
+      },
+      "status": 200,
+      "data": "invoice:0",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout paid in a kind no member has",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "cash"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout of a shape no member reads",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": "4242424242424242"
+        },
+        "shapes": [
+          {
+            "edges": 3
+          }
+        ]
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout of a circle whose radius is null",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": "4242424242424242"
+        },
+        "shapes": [
+          {
+            "radius": null
+          }
+        ]
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout by card whose number is not a string",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": 42
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout by card without its number",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "card"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "a checkout whose card breaks its own rule",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "card",
+          "number": "12"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "payment.number": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "payment.number": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a checkout whose invoice and second shape break their own rules",
+      "operation": "checkout",
+      "path": "/api/checkout",
+      "body": {
+        "payment": {
+          "kind": "invoice",
+          "reference": "ab"
+        },
+        "shapes": [
+          {
+            "side": 2
+          },
+          {
+            "radius": -1
+          }
+        ]
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "payment.reference": [
+          "minLength"
+        ],
+        "shapes[1].radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "payment.reference": [
+            "minLength"
+          ],
+          "shapes[1].radius": [
+            "min"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an enum member's status",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "enumCase": {
+          "status": "open"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a status the enum lacks, which the text member reads and its rule refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "enumCase": {
+          "status": "bogus"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "enumCase.status": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "enumCase.status": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a status the enum lacks, which the text member reads",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "enumCase": {
+          "status": "zed"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a UUID",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "uuidCase": {
+          "id": "60000000-0000-4000-8000-000000000001"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a malformed UUID, which the slug member reads and its rule refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "uuidCase": {
+          "id": "not a uuid"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "uuidCase.id": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "uuidCase.id": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a place without the address's street, which the spot member reads",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "nestedCase": {
+          "place": {}
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a place the spot member reads and its rule refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "nestedCase": {
+          "place": {
+            "label": "long"
+          }
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "nestedCase.place.label": [
+          "maxLength"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "nestedCase.place.label": [
+            "maxLength"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an inner shape no Shape member reads, which the spot member reads",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "innerCase": {
+          "shape": {
+            "edges": 3
+          }
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "an inner circle that breaks its own rule, in the Shape member",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "innerCase": {
+          "shape": {
+            "radius": -1
+          }
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "innerCase.shape.radius": [
+          "min"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "innerCase.shape.radius": [
+            "min"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a @strictJSON member's inner spot",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "strictCase": {
+          "inner": {
+            "label": "x"
+          }
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "inner text of another kind than the @strictJSON member's, which the text member reads",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "strictCase": {
+          "inner": "abc"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "strictCase.inner": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "strictCase.inner": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a @strictJSON member's unknown key, which the text member does not read either",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "strictCase": {
+          "inner": {
+            "label": "x"
+          },
+          "extra": 1
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "an untagged email, the first member",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "tagCase": {
+          "address": "abc"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "an sms its tag picks, whose rule refuses it",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "tagCase": {
+          "kind": "sms",
+          "address": "abc"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "tagCase.address": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "tagCase.address": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an sms, the only member its tag allows",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "tagCase": {
+          "kind": "sms",
+          "address": "123"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a tag no member has",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "tagCase": {
+          "kind": "fax",
+          "address": "1"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "does not match the declared type",
+      "sdk": "sends"
+    },
+    {
+      "name": "the smaller member, whose fields hold every key",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "superset": {
+          "a": "x"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "the superset member, whose fields alone hold every key, and its rule",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "superset": {
+          "a": "x",
+          "b": "y"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "superset.b": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "superset.b": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "an unknown key: the first member that reads it, tolerating the key",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "superset": {
+          "a": "x",
+          "extra": 1
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "an unknown key beside the superset's: the first member that reads it",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "superset": {
+          "a": "x",
+          "b": "y",
+          "extra": 1
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    }
+  ]
+}

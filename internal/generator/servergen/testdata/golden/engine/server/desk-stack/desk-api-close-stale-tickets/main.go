@@ -89,7 +89,7 @@ func run(logger *zap.Logger) error {
 	// The engine of desk-db, an engine database (D58), opened on the same
 	// database in the background, as the pool connects when first used: the
 	// job deploys nothing, which the servers do.
-	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskApiConfig.DeskDbDatabase, deskdbtypes.EngineDocument, `"permission"`, nil, nil)
+	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskApiConfig.DeskDbDatabase, deskdbtypes.EngineDocument, `"permission"`, `{"maxAgeMs":2592000000}`, nil, nil)
 	if err != nil {
 		return fmt.Errorf("engine of desk-db: %w", err)
 	}

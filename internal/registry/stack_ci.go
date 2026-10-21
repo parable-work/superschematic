@@ -102,6 +102,27 @@ type CIStack struct {
 	// each one's archive after the build and compiles each Go server on
 	// the database against it, in place of the core's the release ships.
 	EngineArchives map[string]string
+
+	// EngineCheckout is the superschematic checkout the naming file's
+	// [paths] engine keys name (D58), relative to the repository root,
+	// when some environment of the stack runs an engine and the checkout
+	// lies in the repository; empty otherwise. The checkout's engine
+	// crates reach superscalar's core by path, in a checkout of its own
+	// under the checkout's third_party/, which git does not hold, and its
+	// TypeScript packages export a dist/ no checkout holds either. So a
+	// check job stands up that superscalar checkout before it builds a
+	// project's engine archive, and, for a stack with TypeScript
+	// deployables, builds the checkout's superscalar binding, HTTP runtime
+	// and engine packages, which the output root's workspace takes in
+	// place of the published ones, before it type-checks against them: what
+	// make setup builds on a developer's machine.
+	EngineCheckout string
+
+	// EngineCheckoutTypeScript is true when the naming file's [paths]
+	// engine_typescript names the engine package of EngineCheckout, so the
+	// output root's workspace takes the checkout's packages: only then does
+	// a check job build their dist/.
+	EngineCheckoutTypeScript bool
 }
 
 // CISite is a static site a CI job builds: its package's directory,

@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	ir "github.com/parable-work/superschematic/ir"
@@ -250,6 +251,13 @@ type TypeScriptServer struct {
 	// engine's package and the database's TypeScript types, whose
 	// engineDocument it opens the engine with.
 	Engines []*TypeScriptEngine
+
+	// EngineLink names the napi member of the project's engine crate whose
+	// addon the engine opens on in the core addon's place, nil when the
+	// core's addon runs every behavior its engines compose: WriteTypeScript
+	// writes it as projectengine.LinkFile, from which the local target
+	// builds the addon and names it with projectengine.AddonEnv (D58).
+	EngineLink *projectengine.Link
 
 	// RustVersion and BunVersion are the toolchain pins.
 	RustVersion string
@@ -852,6 +860,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.NapiDir); err != nil {
+		return nil, err
+	}
 	s.Docker, s.NoDocker, err = planTypeScriptDocker(in, s, dir)
 	if err != nil {
 		return nil, err
@@ -1367,6 +1378,11 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	}
 	for _, f := range files {
 		if err := render(f.template, filepath.Join(dir, f.name), s); err != nil {
+			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
+		}
+	}
+	if s.EngineLink != nil {
+		if err := projectengine.WriteLink(dir, *s.EngineLink); err != nil {
 			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 		}
 	}

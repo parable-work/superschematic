@@ -45,9 +45,10 @@ is what the repository's checks build to prove the core works alone.
 
 `examples/acme-schematic` is a complete downstream example. The
 [write an extension](/superschematic/extending/write-an-extension/) guide walks
-the same surfaces. `extensions/deploy` and `extensions/platform` are smaller
-worked examples; see [deploy](/superschematic/extending/deploy/) and
-[platform](/superschematic/extending/platform/).
+the same surfaces. The official extensions, `extensions/gcp`,
+`extensions/cloudflare` and `extensions/pulumi`, are the worked examples of
+a deploy target, a DNS platform and a provisioner; see
+[stack targets](/superschematic/extending/stack-targets/).
 
 Names of generated packages come from `superschematic.toml` at the schemas
 root. The [naming-file reference](/superschematic/reference/naming/) lists

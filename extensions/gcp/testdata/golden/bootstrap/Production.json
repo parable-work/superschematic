@@ -1,0 +1,888 @@
+{
+  "version": 1,
+  "stack": "ShopBootstrap",
+  "environment": "acme-prod",
+  "target": "gcp",
+  "provisioner": "pulumi",
+  "values": {
+    "project": "acme-prod",
+    "region": "us-east1"
+  },
+  "deployables": [],
+  "resources": {
+    "resources": [
+      {
+        "id": "builder",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-builder",
+          "displayName": "Shop builder",
+          "project": "acme-prod"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.repository",
+        "type": "gcp:artifactregistry/repositoryIamMember:RepositoryIamMember",
+        "properties": {
+          "location": "us-east1",
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "repository": {
+            "$output": {
+              "resource": "repository",
+              "name": "name"
+            }
+          },
+          "role": "roles/artifactregistry.writer"
+        },
+        "dependsOn": [
+          "builder",
+          "repository"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.role.logging-logWriter",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/logging.logWriter"
+        },
+        "dependsOn": [
+          "builder"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "builder.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-prod-superschematic-state",
+          "condition": {
+            "expression": "resource.name.startsWith(\"projects/_/buckets/acme-prod-superschematic-state/objects/superschematic/builds/\")",
+            "title": "Objects under superschematic/builds/"
+          },
+          "member": {
+            "$output": {
+              "resource": "builder",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "builder"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-deployer",
+          "displayName": "Shop deployer",
+          "project": "acme-prod"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.github.environment.production",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$concat": [
+              "principalSet://iam.googleapis.com/",
+              {
+                "$output": {
+                  "resource": "github",
+                  "name": "name"
+                }
+              },
+              "/attribute.deploy_environment/Production"
+            ]
+          },
+          "role": "roles/iam.workloadIdentityUser",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "deployer",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "deployer",
+          "github"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.artifactregistry-writer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/artifactregistry.writer"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.certificatemanager-owner",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/certificatemanager.owner"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.cloudbuild-builds-editor",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/cloudbuild.builds.editor"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.cloudscheduler-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/cloudscheduler.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.cloudsql-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/cloudsql.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.compute-loadBalancerAdmin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/compute.loadBalancerAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.compute-networkAdmin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/compute.networkAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.dns-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/dns.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.iam-serviceAccountAdmin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/iam.serviceAccountAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.iam-serviceAccountUser",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/iam.serviceAccountUser"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.logging-viewer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/logging.viewer"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.resourcemanager-projectIamAdmin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/resourcemanager.projectIamAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.run-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/run.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.secretmanager-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/secretmanager.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.serviceusage-serviceUsageConsumer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/serviceusage.serviceUsageConsumer"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.storage-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/storage.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-prod-superschematic-state",
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.state-key",
+        "type": "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember",
+        "properties": {
+          "cryptoKeyId": "projects/acme-prod/locations/us-east1/keyRings/superschematic/cryptoKeys/pulumi-state",
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "role": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "github",
+        "type": "gcp:iam/workloadIdentityPool:WorkloadIdentityPool",
+        "properties": {
+          "description": "The CI of acme/shop",
+          "displayName": "GitHub Actions",
+          "project": "acme-prod",
+          "workloadIdentityPoolId": "shop-github"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "github.provider",
+        "type": "gcp:iam/workloadIdentityPoolProvider:WorkloadIdentityPoolProvider",
+        "properties": {
+          "attributeCondition": "assertion.repository == 'acme/shop'",
+          "attributeMapping": {
+            "attribute.deploy_environment": "(assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch') && assertion.ref == 'refs/heads/main' ? assertion.sub.extract(':environment:{environment}') : ''",
+            "attribute.event_name": "assertion.event_name",
+            "attribute.ref": "assertion.ref",
+            "attribute.repository": "assertion.repository",
+            "google.subject": "assertion.sub"
+          },
+          "displayName": "GitHub",
+          "oidc": {
+            "issuerUri": "https://token.actions.githubusercontent.com"
+          },
+          "project": "acme-prod",
+          "workloadIdentityPoolId": {
+            "$output": {
+              "resource": "github",
+              "name": "workloadIdentityPoolId"
+            }
+          },
+          "workloadIdentityPoolProviderId": "github"
+        },
+        "dependsOn": [
+          "github"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-migrator",
+          "displayName": "Shop migrator",
+          "project": "acme-prod"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.role.cloudsql-client",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.role.cloudsql-instanceUser",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "migrator.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-prod-superschematic-state",
+          "condition": {
+            "expression": "resource.name.startsWith(\"projects/_/buckets/acme-prod-superschematic-state/objects/superschematic/migrations/\")",
+            "title": "Objects under superschematic/migrations/"
+          },
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "shop-planner",
+          "displayName": "Shop planner",
+          "project": "acme-prod"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.github.pull-request",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$concat": [
+              "principalSet://iam.googleapis.com/",
+              {
+                "$output": {
+                  "resource": "github",
+                  "name": "name"
+                }
+              },
+              "/attribute.event_name/pull_request"
+            ]
+          },
+          "role": "roles/iam.workloadIdentityUser",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "planner",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "github",
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.role.iam-securityReviewer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/iam.securityReviewer"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.role.secretmanager-viewer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/secretmanager.viewer"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.role.serviceusage-serviceUsageConsumer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/serviceusage.serviceUsageConsumer"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.role.viewer",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/viewer"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.state",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-prod-superschematic-state",
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectUser"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "planner.state-key",
+        "type": "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember",
+        "properties": {
+          "cryptoKeyId": "projects/acme-prod/locations/us-east1/keyRings/superschematic/cryptoKeys/pulumi-state",
+          "member": {
+            "$output": {
+              "resource": "planner",
+              "name": "member"
+            }
+          },
+          "role": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+        },
+        "dependsOn": [
+          "planner"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "repository",
+        "type": "gcp:artifactregistry/repository:Repository",
+        "properties": {
+          "description": "The images of stack Shop",
+          "format": "DOCKER",
+          "location": "us-east1",
+          "project": "acme-prod",
+          "repositoryId": "shop"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "builder",
+        "builder.repository",
+        "builder.role.logging-logWriter",
+        "builder.state",
+        "deployer",
+        "deployer.github.environment.production",
+        "deployer.role.artifactregistry-writer",
+        "deployer.role.certificatemanager-owner",
+        "deployer.role.cloudbuild-builds-editor",
+        "deployer.role.cloudscheduler-admin",
+        "deployer.role.cloudsql-admin",
+        "deployer.role.compute-loadBalancerAdmin",
+        "deployer.role.compute-networkAdmin",
+        "deployer.role.dns-admin",
+        "deployer.role.iam-serviceAccountAdmin",
+        "deployer.role.iam-serviceAccountUser",
+        "deployer.role.logging-viewer",
+        "deployer.role.resourcemanager-projectIamAdmin",
+        "deployer.role.run-admin",
+        "deployer.role.secretmanager-admin",
+        "deployer.role.serviceusage-serviceUsageConsumer",
+        "deployer.role.storage-admin",
+        "deployer.state",
+        "deployer.state-key",
+        "github",
+        "github.provider",
+        "migrator",
+        "migrator.role.cloudsql-client",
+        "migrator.role.cloudsql-instanceUser",
+        "migrator.state",
+        "planner",
+        "planner.github.pull-request",
+        "planner.role.iam-securityReviewer",
+        "planner.role.secretmanager-viewer",
+        "planner.role.serviceusage-serviceUsageConsumer",
+        "planner.role.viewer",
+        "planner.state",
+        "planner.state-key",
+        "repository"
+      ]
+    }
+  ]
+}

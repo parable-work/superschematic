@@ -668,12 +668,13 @@ const (
 // the generated strict parser of that type. A map body argument is
 // Record<string, T> (Record<string, T[]>); apigen admits a map only in the
 // body. A body argument of a JSON-valued scalar
-// (Generic.JSON) is taken as the JSON value it is. param fails for a body
-// argument of any other type that is not a scalar or an enum: a union has
-// parse<Union>FromJSON, but no strict decoder (parse<T>Json) that checks
-// the member it picks, as an object argument is checked. A union field of
-// an object argument or of the input is read by the object's
-// parse<T>FromJSON. A scalar-typed parameter carries the scalar's own lengths,
+// (Generic.JSON) is taken as the JSON value it is. A body argument whose
+// type is a union is an object too: parse<Union>Json checks the member the
+// union picks by the member's rules, and parse<Union>FromJSON reads it, so
+// a value no member reads, or whose member breaks a rule, is refused as an
+// object argument that breaks one is, as the Go and Rust routers refuse
+// it. param fails for a body argument of any other type that is not
+// declared. A scalar-typed parameter carries the scalar's own lengths,
 // pattern and range, which the runtime checks on every value.
 func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	info := ParamInfo{
@@ -737,7 +738,7 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 				if p.IsArray {
 					what = "element type"
 				}
-				return info, fmt.Errorf("%s %s is not a scalar, enum or object type", what, p.Type)
+				return info, fmt.Errorf("%s %s is not a scalar, enum, object type or union", what, p.Type)
 			}
 			info.Kind, info.TSType = "object", p.Type
 			b.addImport(b.typeImports, pkg, p.Type)
@@ -898,28 +899,24 @@ func (b *builder) outputType(ep apigen.EndpointInfo) (string, error) {
 	return tsListType(tsType, ep.OutputArrayDepth()), nil
 }
 
-// ownerPackage returns the generated types package that declares a type or
-// enum: the schema's own package, or a dependency's.
+// ownerPackage returns the generated types package that declares a type,
+// an enum or a union: the schema's own package, or a dependency's.
 func (b *builder) ownerPackage(name string) (string, bool) {
-	if _, ok := b.schema.Types[name]; ok {
-		return b.opts.Naming.NpmTypesPackage(b.opts.SchemaName), true
-	}
-	if _, ok := b.schema.Enums[name]; ok {
+	if declares(b.schema, name) {
 		return b.opts.Naming.NpmTypesPackage(b.opts.SchemaName), true
 	}
 	for _, depName := range b.depNames {
-		dep := b.opts.Dependencies[depName]
-		if dep == nil {
-			continue
-		}
-		if _, ok := dep.Types[name]; ok {
-			return b.opts.Naming.NpmTypesPackage(depName), true
-		}
-		if _, ok := dep.Enums[name]; ok {
+		if dep := b.opts.Dependencies[depName]; dep != nil && declares(dep, name) {
 			return b.opts.Naming.NpmTypesPackage(depName), true
 		}
 	}
 	return "", false
+}
+
+// declares reports whether schema declares name as a type, an enum or a
+// union.
+func declares(schema *ir.Schema, name string) bool {
+	return schema.Types[name] != nil || schema.Enums[name] != nil || schema.Unions[name] != nil
 }
 
 func (b *builder) findEnum(name string) (*ir.EnumDef, string, bool) {

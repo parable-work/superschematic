@@ -442,11 +442,19 @@ func nestedImports(names []string, modules map[string]string) []NestedImport {
 	return imports
 }
 
-// typeValidatesNestedObjects reports whether validate<Type> of a type that is
-// not @strictJSON validates a nested object field: one whose type is a local
+// typeValidatesNestedObjects reports whether validate<Type> nests a field's
+// errors under its path: a union field's, in any type, and in a type that is
+// not @strictJSON a nested object field's, one whose type is a local
 // generated type (parserNestedTypes) or the type itself. A @strictJSON type
-// validates its nested fields through validate<Nested>Required instead.
+// validates its nested object fields through validate<Nested>Required
+// instead.
 func typeValidatesNestedObjects(t *TypeInfo, parserNestedTypes []string) bool {
+	for _, f := range t.Fields {
+		if f.IsUnion {
+			// A union field nests its member's errors, strict or not.
+			return true
+		}
+	}
 	if t.StrictJSON {
 		return false
 	}

@@ -20,6 +20,10 @@ func terminate(cmd *exec.Cmd) error { return kill(cmd) }
 // dev and stack run are not kept apart there.
 func tryLock(*os.File) (bool, error) { return true, nil }
 
+// lockFile takes no lock where flock is missing: stack dev's and stack
+// run's staging of a project engine's members are not kept apart there.
+func lockFile(*os.File) error { return nil }
+
 // kill kills the process.
 func kill(cmd *exec.Cmd) error {
 	if cmd.Process == nil {

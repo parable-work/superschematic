@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/release"
 )
 
@@ -47,11 +48,13 @@ type Engine struct {
 	Service string
 	Var     string
 
-	// Namespace, Mount and Policy are what apigen.EngineInfo holds of it;
-	// Policy is the access policy's JSON.
+	// Namespace, Mount, Policy and Retention are what apigen.EngineInfo
+	// holds of it; Policy is the access policy's JSON, and Retention the
+	// event log's, empty when it keeps every event.
 	Namespace string
 	Mount     string
 	Policy    string
+	Retention string
 
 	// Types are the engine types, sorted, which the runner's principal
 	// holds as its permissions: a permission covers the actions under it.
@@ -80,6 +83,15 @@ func (e *Engine) PolicyLiteral() string {
 		return strconv.Quote(e.Policy)
 	}
 	return "`" + e.Policy + "`"
+}
+
+// RetentionLiteral is the event log's retention as a Go string literal,
+// "" when it keeps every event.
+func (e *Engine) RetentionLiteral() string {
+	if e.Retention == "" || strings.Contains(e.Retention, "`") {
+		return strconv.Quote(e.Retention)
+	}
+	return "`" + e.Retention + "`"
 }
 
 // planEngines gives each database an API of s connects to whose engine
@@ -138,6 +150,7 @@ func newEngine(d *Database, info *apigen.EngineInfo, taken names) *Engine {
 		Namespace: info.Namespace,
 		Mount:     info.Mount,
 		Policy:    string(info.Policy),
+		Retention: string(info.Retention),
 		Types:     slices.Clone(info.Types),
 		Database:  d,
 	}
@@ -193,6 +206,11 @@ type EngineProject struct {
 	// Crates are the directories of the extensions' crates the crate
 	// reaches by path, which an image builds with it.
 	Crates []string
+
+	// Lockfile is the lock file of the engine's Cargo workspace, which a
+	// crate with no lock file of its own starts from: the workspace of the
+	// engine's crate a [paths] key names, empty when none does.
+	Lockfile string
 }
 
 // engineCrates are the paths, relative to the checkout's root, that the
@@ -344,6 +362,9 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 	if err := s.planModule(input, dir); err != nil {
 		return nil, err
 	}
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
+		return nil, err
+	}
 	s.Docker, s.NoDocker, err = planDocker(input, dir)
 	if err != nil {
 		return nil, err
@@ -374,4 +395,35 @@ func writeEngine(s *Server, dir string) error {
 		return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 	}
 	return nil
+}
+
+// engineLink is the projectengine.Link of an entrypoint at dir whose engine
+// is built from project, the project's engine crate, nil when project is
+// nil: member is the crate's member the entrypoint takes, and the crate
+// starts from the engine workspace's lock file the project names.
+func engineLink(project *EngineProject, dir, member string) (*projectengine.Link, error) {
+	if project == nil {
+		return nil, nil
+	}
+	l, err := projectengine.LinkOf(dir, project.Database, project.Dir, member, project.Lockfile)
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// EngineLockfile is the lock file of the engine's Cargo workspace the
+// naming file's [paths] keys locate, empty when none does: the workspace
+// holding the engine's crate (engine_rust), or the one beside its Go
+// binding or npm package (engine_go, engine_typescript), runtime/engine/rust.
+func EngineLockfile(paths naming.LocalPaths) string {
+	switch {
+	case paths.EngineRust != "":
+		return filepath.Join(filepath.Dir(paths.EngineRust), "Cargo.lock")
+	case paths.EngineGo != "":
+		return filepath.Join(filepath.Dir(paths.EngineGo), "rust", "Cargo.lock")
+	case paths.EngineTypeScript != "":
+		return filepath.Join(filepath.Dir(paths.EngineTypeScript), "rust", "Cargo.lock")
+	}
+	return ""
 }

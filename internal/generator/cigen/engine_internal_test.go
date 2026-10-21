@@ -35,3 +35,22 @@ func TestProjectEngine(t *testing.T) {
 		t.Error("projectEngine with no loader found a project engine")
 	}
 }
+
+// TestEngineCheckout: the checkout's root is three directories above the
+// engine's Go binding or npm package, four above its crate, and nothing
+// without an engine key.
+func TestEngineCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		paths naming.LocalPaths
+		want  string
+	}{
+		{naming.LocalPaths{EngineGo: "/repo/vendor/ss/runtime/engine/go", EngineTypeScript: "/elsewhere/runtime/engine/typescript"}, "/repo/vendor/ss"},
+		{naming.LocalPaths{EngineTypeScript: "/repo/runtime/engine/typescript"}, "/repo"},
+		{naming.LocalPaths{EngineRust: "/repo/runtime/engine/rust/engine"}, "/repo"},
+		{naming.LocalPaths{ScalarGo: "/repo/third_party/superscalar/go"}, ""},
+	} {
+		if got := engineCheckout(tc.paths); got != tc.want {
+			t.Errorf("engineCheckout(%+v) = %q, want %q", tc.paths, got, tc.want)
+		}
+	}
+}

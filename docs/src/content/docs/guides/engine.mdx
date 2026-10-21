@@ -647,7 +647,10 @@ that addon in place of the core's, with the engine option `addon` or
 `SUPERSCHEMATIC_ENGINE_ADDON`, names the behavior in `behaviors`
 (`behaviors: ['acme.Rating']`), and passes the extension binary's
 `json-schema` output, which declares it, as `metaSchema`, and its
-invocation policy and vendor keys as `tools`. `acme.Rating`
+invocation policy and vendor keys as `tools`. A generated TypeScript
+server does all of it itself: its image's engine stage builds the addon
+and names it, and `stack dev` builds it and names it for the server's
+process, with nothing set by hand. `acme.Rating`
 in `examples/acme-schematic` is the worked example, and
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 walks through it. A behavior written in TypeScript, with

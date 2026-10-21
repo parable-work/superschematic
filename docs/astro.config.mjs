@@ -10,6 +10,13 @@ import starlightLinksValidator from 'starlight-links-validator';
 export default defineConfig({
   site: 'https://parable-work.github.io',
   base: '/superschematic',
+  // Pages that were removed, so their old links land somewhere. The source
+  // is written without the base and the destination with it.
+  redirects: {
+    // extensions/deploy and extensions/platform were retired (D30, amended).
+    '/extending/deploy': '/superschematic/extending/stack-targets/',
+    '/extending/platform': '/superschematic/extending/write-an-extension/#a-kind',
+  },
   integrations: [
     starlight({
       title: 'superschematic',

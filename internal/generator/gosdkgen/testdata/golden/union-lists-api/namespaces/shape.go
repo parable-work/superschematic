@@ -10,12 +10,19 @@ import (
 // ShapeNamespace contains API methods for the shape namespace.
 //
 // Endpoints:
+// - Checkout: Checks out an order, whose input holds a payment and shapes, and answers the payment's kind.
+// - DrawShape: Draws one shape, the whole body argument, and answers it.
+// - DrawShapes: Draws shapes, a list body argument, and answers how many.
 // - FindShape: The shape with a name, or null when no shape has it (Nullable<Shape>).
 // - FindShapes: The shapes found, or null when the search found none (Nullable<Shape[]>).
 // - GetShape: One shape, by its id.
 // - ListShapes: Every shape, circles and squares mixed, in one list that does not page.
+// - Pay: Takes a payment, the whole body argument, and answers its kind.
+// - Probe: Reads one probe, whose input holds the probe unions, and answers ok.
+// - ShapeGrid: Draws rows of shapes, a list of lists body argument, and answers how many.
 // - ShapeGroups: The shapes in named groups, a map of lists (Record<string, Shape[]>).
 // - ShapeRows: The shapes in rows, a list of lists.
+// - ShapesByKey: Draws named shapes, a map body argument, and answers how many.
 // - ShapesByName: Every shape by its name, a map (Record<string, Shape>).
 type ShapeNamespace struct {
 	client jsonClient
@@ -28,6 +35,119 @@ func NewShapeNamespace(
 	return &ShapeNamespace{
 		client: client,
 	}
+}
+
+// Checkout Checks out an order, whose input holds a payment and shapes, and answers the payment's kind.
+func (n *ShapeNamespace) Checkout(
+	ctx context.Context,
+	input types.Checkout,
+) (string, error) {
+	path := "/api/checkout"
+	validationErrors := types.NewValidationErrors()
+	appendInputValidationErrors(validationErrors, any(&input))
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
+}
+
+type ShapeDrawShapeInput struct {
+	Shape types.Shape `json:"shape"`
+}
+
+// DrawShape Draws one shape, the whole body argument, and answers it.
+func (n *ShapeNamespace) DrawShape(
+	ctx context.Context,
+	input ShapeDrawShapeInput,
+) (types.Shape, error) {
+	path := "/api/shapes"
+	validationErrors := types.NewValidationErrors()
+	// shape holds a union: its value is validated as the member it
+	// holds, through types.ShapeWrapper, its errors nested under shape, as
+	// the route reports them.
+	appendUnionValidationErrors(validationErrors, "shape", input.Shape == nil, types.ShapeWrapper{Value: input.Shape})
+	if validationErrors.HasErrors() {
+		var zero types.Shape
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out types.ShapeWrapper
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero types.Shape
+		return zero, err
+	}
+	if out.Value == nil {
+		var zero types.Shape
+		return zero, fmt.Errorf("decode DrawShape response: Shape union value is nil")
+	}
+	return out.Value, nil
+}
+
+type ShapeDrawShapesInput struct {
+	Shapes []types.Shape `json:"shapes"`
+}
+
+// DrawShapes Draws shapes, a list body argument, and answers how many.
+func (n *ShapeNamespace) DrawShapes(
+	ctx context.Context,
+	input ShapeDrawShapesInput,
+) (string, error) {
+	path := "/api/shapes/batch"
+	validationErrors := types.NewValidationErrors()
+	// shapes holds a union: each element is validated as the member it
+	// holds, through types.ShapeWrapper, its errors nested under shapes[i], as
+	// the route reports them.
+	if input.Shapes == nil {
+		validationErrors.AddFieldError("shapes", "required", "required field")
+	}
+	for i, item := range input.Shapes {
+		appendUnionValidationErrors(validationErrors, fmt.Sprintf("shapes[%d]", i), item == nil, types.ShapeWrapper{Value: item})
+	}
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
 }
 
 // FindShape The shape with a name, or null when no shape has it (Nullable<Shape>).
@@ -153,6 +273,121 @@ func (n *ShapeNamespace) ListShapes(
 	return items, nil
 }
 
+type ShapePayInput struct {
+	Payment types.Payment `json:"payment"`
+}
+
+// Pay Takes a payment, the whole body argument, and answers its kind.
+func (n *ShapeNamespace) Pay(
+	ctx context.Context,
+	input ShapePayInput,
+) (string, error) {
+	path := "/api/payments"
+	validationErrors := types.NewValidationErrors()
+	// payment holds a union: its value is validated as the member it
+	// holds, through types.PaymentWrapper, its errors nested under payment, as
+	// the route reports them.
+	appendUnionValidationErrors(validationErrors, "payment", input.Payment == nil, types.PaymentWrapper{Value: input.Payment})
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
+}
+
+// Probe Reads one probe, whose input holds the probe unions, and answers ok.
+func (n *ShapeNamespace) Probe(
+	ctx context.Context,
+	input types.Probe,
+) (string, error) {
+	path := "/api/probe"
+	validationErrors := types.NewValidationErrors()
+	appendInputValidationErrors(validationErrors, any(&input))
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
+}
+
+type ShapeShapeGridInput struct {
+	Rows [][]types.Shape `json:"rows"`
+}
+
+// ShapeGrid Draws rows of shapes, a list of lists body argument, and answers how many.
+func (n *ShapeNamespace) ShapeGrid(
+	ctx context.Context,
+	input ShapeShapeGridInput,
+) (string, error) {
+	path := "/api/shapes/grid"
+	validationErrors := types.NewValidationErrors()
+	// rows is an array of arrays: an inner list is never nil, reported
+	// at rows[i]; an empty one is valid. Each element runs its own validation,
+	// reported at rows[i][j].
+	if input.Rows == nil {
+		validationErrors.AddFieldError("rows", "required", "required field")
+	}
+	for i, row := range input.Rows {
+		if row == nil {
+			validationErrors.AddFieldError(fmt.Sprintf("rows[%d]", i), "required", "required field")
+			continue
+		}
+		for j := range row {
+			appendUnionValidationErrors(validationErrors, fmt.Sprintf("rows[%d][%d]", i, j), row[j] == nil, types.ShapeWrapper{Value: row[j]})
+		}
+	}
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
+}
+
 // ShapeGroups The shapes in named groups, a map of lists (Record<string, Shape[]>).
 func (n *ShapeNamespace) ShapeGroups(
 	ctx context.Context,
@@ -224,6 +459,47 @@ func (n *ShapeNamespace) ShapeRows(
 		}
 	}
 	return rows, nil
+}
+
+type ShapeShapesByKeyInput struct {
+	ByKey map[string]types.Shape `json:"byKey"`
+}
+
+// ShapesByKey Draws named shapes, a map body argument, and answers how many.
+func (n *ShapeNamespace) ShapesByKey(
+	ctx context.Context,
+	input ShapeShapesByKeyInput,
+) (string, error) {
+	path := "/api/shapes/named"
+	validationErrors := types.NewValidationErrors()
+	// byKey is a map, sent as a JSON object; {} is a value.
+	// Each value runs its own validation, reported at byKey[key].
+	if input.ByKey == nil {
+		validationErrors.AddFieldError("byKey", "required", "required field")
+	}
+	for key, value := range input.ByKey {
+		appendUnionValidationErrors(validationErrors, fmt.Sprintf("byKey[%s]", key), value == nil, types.ShapeWrapper{Value: value})
+	}
+	if validationErrors.HasErrors() {
+		var zero string
+		return zero, NewValidationError(validationErrors)
+	}
+
+	var requestBody any
+	requestBody = input
+	var out string
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero string
+		return zero, err
+	}
+	return out, nil
 }
 
 // ShapesByName Every shape by its name, a map (Record<string, Shape>).

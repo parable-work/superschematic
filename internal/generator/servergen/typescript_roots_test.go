@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -26,8 +27,9 @@ import (
 
 // tsRootServices are the services of the TypeScript fixture a build of
 // ts-stack reaches, in build order: ts-db's TypeScript types export the
-// queue ts-shop's worker claims (D53).
-var tsRootServices = append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack")...)
+// queue ts-shop's worker claims (D53), and ts-stack deploys the site
+// ts-web (D55).
+var tsRootServices = append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsSite, "ts-stack")...)
 
 // buildTSInto builds services of the TypeScript fixture into the output
 // root out of the repository at repoRoot, naming its schemas root as every
@@ -46,14 +48,19 @@ func buildTSInto(f fixture, repoRoot string, paths naming.LocalPaths, out string
 }
 
 // projectLinks are the symbolic links under the node_modules of each
-// package under the repository's typescript/, by path, each with the
-// directory it names: where an install linked the project's own packages.
+// package under the repository's typescript/ and web/, the
+// implementations' and the sites', by path, each with the directory it
+// names: where an install linked the project's own packages.
 func projectLinks(t *testing.T, repoRoot string) map[string]string {
 	t.Helper()
 	links := map[string]string{}
-	packages, err := filepath.Glob(filepath.Join(repoRoot, "typescript", "*", "node_modules"))
-	if err != nil {
-		t.Fatal(err)
+	var packages []string
+	for _, group := range []string{"typescript", "web"} {
+		dirs, err := filepath.Glob(filepath.Join(repoRoot, group, "*", "node_modules"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		packages = append(packages, dirs...)
 	}
 	for _, dir := range packages {
 		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -87,10 +94,13 @@ func projectLinks(t *testing.T, repoRoot string) map[string]string {
 // frozen to its lockfile, the second from the first's, its servers, job
 // and worker type-check, and each resolves its implementations to the
 // root's own mirrors and runs them, a change to the package reaching a
-// root with its next build and not before. No install in either root
-// touches the links in the project's own node_modules, which name the
-// default root alone, as they did before; without the mirror, each
-// root's install would take them over.
+// root with its next build and not before. The site ts-web, whose package
+// the default root's build scaffolds, is mirrored the same way, and builds
+// in each root's mirror (tsgen.SiteDir), where the stack's builds keep
+// it, and never in its package. No install in either root touches the
+// links in the project's own node_modules, which name the default root
+// alone, as they did before; without the mirror, each root's install
+// would take them over.
 func TestTypeScriptServersBuildInAnyOutputRoot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the TypeScript installs in -short mode")
@@ -146,6 +156,38 @@ func TestTypeScriptServersBuildInAnyOutputRoot(t *testing.T) {
 		if !strings.HasPrefix(target, def+string(filepath.Separator)) && !strings.HasPrefix(target, modules+string(filepath.Separator)) {
 			t.Fatalf("the default output root's install linked %s to %s, outside %s", link, target, def)
 		}
+	}
+
+	site := names.SiteImplementationDir(repoRoot, tsSite)
+	if dir, err := tsgen.SiteDir(def, repoRoot, tsSite, names.SiteImplementationPath(tsSite)); err != nil || dir != site {
+		t.Fatalf("in the default output root, ts-web builds in %s (%v), want its package %s", dir, err, site)
+	}
+	// buildsSite builds ts-web where out's install builds it: in its
+	// mirror, which holds the package's files, and not in the package.
+	buildsSite := func(out string) error {
+		dir, err := tsgen.SiteDir(out, repoRoot, tsSite, names.SiteImplementationPath(tsSite))
+		if err != nil {
+			return err
+		}
+		if mirror := servergen.MirrorDir(out, tsSite); dir != mirror {
+			return fmt.Errorf("in %s, ts-web builds in %s, not its mirror %s", out, dir, mirror)
+		}
+		for _, file := range []string{"index.html", "config.generated.ts"} {
+			mirrored, err := os.ReadFile(filepath.Join(dir, file))
+			if source, serr := os.ReadFile(filepath.Join(site, file)); err != nil || serr != nil || string(mirrored) != string(source) {
+				return fmt.Errorf("%s's mirror of ts-web does not hold its %s: %v, %v", out, file, err, serr)
+			}
+		}
+		if err := command(dir, bun, "run", "build"); err != nil {
+			return err
+		}
+		if _, err := os.Stat(filepath.Join(dir, "dist", "index.html")); err != nil {
+			return fmt.Errorf("ts-web's build in %s wrote no page: %w", dir, err)
+		}
+		if _, err := os.Stat(filepath.Join(site, "dist")); !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("ts-web's build for %s wrote into its package: %v", out, err)
+		}
+		return nil
 	}
 
 	roots := []string{filepath.Join(testpaths.TempDir(t), "a"), filepath.Join(testpaths.TempDir(t), "b")}
@@ -255,6 +297,9 @@ func TestTypeScriptServersBuildInAnyOutputRoot(t *testing.T) {
 		if err := typecheck(out); err != nil {
 			t.Fatal(err)
 		}
+		if err := buildsSite(out); err != nil {
+			t.Fatal(err)
+		}
 		untouched("after " + out + "'s install")
 	}
 
@@ -276,6 +321,7 @@ func TestTypeScriptServersBuildInAnyOutputRoot(t *testing.T) {
 	together(func(out string) error { return buildTSInto(f, repoRoot, paths, out, "ts-stack") })
 	together(func(out string) error { return command(out, bun, "install", "--frozen-lockfile") })
 	together(resolves)
+	together(buildsSite)
 	edit("id,region,unbuilt")
 	for _, out := range roots {
 		if got := lockfile(out); got != lock {

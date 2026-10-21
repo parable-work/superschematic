@@ -1435,6 +1435,12 @@ bucket (D57).
   writes into the managed zone that holds the domain. The zone is named
   after the domain with its dots as hyphens unless `zone` names it, and
   lives in the environment's project unless `project` names another;
+- `telemetry`, which is optional and turns trace export on for every
+  server, job and worker (section 8.11, D67, amended): `{}` exports to
+  Cloud Trace, `endpoint` names an OTLP/HTTP collector instead, and
+  `sampleRatio` samples that share of the traces that start in a
+  deployable. A server's, job's or worker's `telemetry: false` or `true`
+  turns its own export off or on;
 - secret values, through `stack secrets set`.
 
 Bootstrap reads the GitHub repository from the git remote.
@@ -1444,12 +1450,12 @@ Bootstrap reads the GitHub repository from the git remote.
 | Stack concept | gcp |
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role when the server exports its traces to Cloud Trace (section 8.11); the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the job exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
-| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
+| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the worker exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account, which holds the Cloud Trace agent role when the runner exports its traces to Cloud Trace, and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
@@ -1508,7 +1514,10 @@ again: each step creates what is missing and leaves the rest.
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
    resource types need them, Cloud Run with any database for its migration
-   job, and Cloud Scheduler for a job's schedule (D52). An API
+   job, Cloud Scheduler for a job's schedule (D52), and, with Cloud Run,
+   the Telemetry and Cloud Trace APIs, which a deployable that exports to
+   Cloud Trace uses (section 8.11), whether or not this environment
+   exports, since another in the same project may. An API
    enabled moments ago can refuse calls as one the project has not
    enabled, so each later step retries such a refusal for up to five
    minutes.
@@ -1527,8 +1536,11 @@ again: each step creates what is missing and leaves the rest.
    never reads one again: it compares a context's digest with the one the
    manifest records, and the builder finds an image by its tag and
    uploads a context again for a build it runs (section 11.2), so a
-   deleted context costs nothing. Pulumi's state and the manifests have no
-   rule, and the bucket's other rules stay as they are.
+   deleted context costs nothing. A second rule deletes the results of
+   `stack queue` under `superschematic/queue/` a day after they were
+   written, which the command deletes itself once it has read one
+   (section 8.8). Pulumi's state and the manifests have no rule, and the
+   bucket's other rules stay as they are.
 3. It applies a bootstrap graph through the provisioner, in a Pulumi
    project of its own, `<stack>-bootstrap`, with a Pulumi stack per GCP
    project:
@@ -1559,14 +1571,37 @@ again: each step creates what is missing and leaves the rest.
    - a `migrator` account, `<stack>-migrator`, that the migration job runs
      as (section 8.4): it holds the Cloud SQL client and instance user
      roles, and reads the job documents and plans in the state bucket,
-     under `superschematic/migrations/`, and nothing else of it. Its IAM
+     under `superschematic/migrations/`, and nothing else of it; it may
+     create objects under `superschematic/queue/<stack>/`, the results
+     of `stack queue` (section 8.8), and neither read nor replace them. Its IAM
      database user is a node of the environment's graph, on each Cloud
      SQL instance, since an instance is not there at bootstrap;
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
-     that repository, and the right of both accounts to be used from it.
-     Without a GitHub remote it is left out, `--repository` names one,
-     and `--repository ""` leaves it out.
+     that repository, and the right of each account to be used from the
+     jobs of the generated CI that sign in as it (section 11.3), and from
+     no other run of the repository (D69). The provider maps the token's
+     `event_name`, and `deploy_environment`: the GitHub environment a
+     `push` or `workflow_dispatch` run of the CI branch runs in, read from
+     the end of GitHub's default subject for a job in an environment,
+     `repo:<owner>/<repo>:environment:<name>`, and empty for every other
+     run. The branch is the stack's `outputs.ci.github` branch, `main`
+     unless set. Bootstrap reads the stack's environments on gcp that
+     share the project: `planner` admits a pull request's runs when one
+     of them has no parameter, for its `plan` job; `deployer` admits the
+     branch's runs in the GitHub environment of each one without
+     parameters, for its `deploy` job, and a pull request's runs when one
+     has a single parameter, for its `preview` job. An environment with
+     more parameters has no CI job and admits nothing. A pull request's
+     run can so act as `deployer` only in a project a preview deploys to,
+     and bootstrap refuses a `production` environment in such a project.
+     A repository whose OIDC subject template GitHub was told to change
+     gives `deploy_environment` another value, and its deploys sign in to
+     nothing until it is the default again. Without a GitHub remote it is
+     left out, `--repository` names one, and `--repository ""` leaves it
+     out. A project bootstrapped before D69 lets any run of the
+     repository act as either account: run bootstrap again, for any
+     environment in the project, to replace those bindings.
 4. It creates the secret of each platform credential the environment
    needs (a DNS platform's API token, section 6.9) in Secret Manager,
    where only `deployer` and `planner` can read it, and asks for each
@@ -1583,11 +1618,13 @@ again: each step creates what is missing and leaves the rest.
    compiler's syntax tree; for a JSON or YAML schema it prints the value to
    add (D47).
 
-The bootstrap graph is checked in as a golden,
-`extensions/gcp/testdata/golden/bootstrap/Staging.json`, and validates
-against the pinned schemas like any graph. The network a calling server's
-Direct VPC egress needs is not in it: it is in the environment's graph,
-which lowers it only when an edge needs it (section 7.2).
+The bootstrap graphs of Staging's project, which Preview shares, and of
+Production's are checked in as goldens,
+`extensions/gcp/testdata/golden/bootstrap/Staging.json` and
+`Production.json`, and validate against the pinned schemas like any
+graph. The network a calling server's Direct VPC egress needs is not in
+them: it is in the environment's graph, which lowers it only when an edge
+needs it (section 7.2).
 
 Environments that share a project share its bootstrap, so they share a
 region. The core drives bootstrap through the target's `Bootstrap` seam,
@@ -1639,10 +1676,9 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
-- logs to Cloud Logging. Each account may write to Cloud Trace, but no
-  entrypoint exports traces there yet: each exports over OTLP when its
-  environment names a collector (section 8.11, D67), and the gcp target
-  does not set one.
+- logs to Cloud Logging, and no trace export unless the environment's
+  `telemetry` or the deployable's turns it on (section 8.11, D67,
+  amended).
 
 Cloud Run allocates a service's CPU only while it handles a request, and
 bills its instances for that time and their starts and stops, unless the
@@ -1767,7 +1803,10 @@ database's engine document (`EngineDocument` of its Go types) in the
 document's namespace, under the engine's lock, writing nothing when the
 live versions have its hash. `/readyz` names `<db> engine` until it has.
 The access policy is `outputs.engine.policy` of the database's config,
-`permission` unless set. The first API on the database, by name, mounts
+`permission` unless set, and the event log's retention
+`outputs.engine.retention`, none unless set, which every entrypoint on the
+database opens the engine with and the database's runner alone prunes
+with. The first API on the database, by name, mounts
 the engine's routes, its event stream and its MCP endpoint at
 `outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
 its own routes and behind its middleware: the request log, and the
@@ -2063,6 +2102,31 @@ run by hand takes the same flags from `superschematic env`, which
 fetches the archives as `stack dev` does and prints `export
 CGO_LDFLAGS=...` for a POSIX shell to evaluate, or with the variable's
 name its value alone (D47, amended).
+
+A Go or TypeScript server, job, worker or engine runner on an engine
+database that composes the work queue's or an extension's behavior opens
+the engine built from the project's engine crate, `<out>/engine/rust/<db>`
+(D58), and its entrypoint holds `engine-project.json`, which names the
+crate, the member it takes, `ffi` for Go and `napi` for TypeScript, and
+the engine workspace's lock file. Before it builds or starts the
+entrypoint, the local provisioner builds that member with `cargo build
+--release` into the program's Cargo target directory, the Rust
+deployables' (section 8.6), on `tools.env`'s Rust release unless
+`RUSTUP_TOOLCHAIN` is set, the crate's lock file seeded from the engine
+workspace's when it has none, and copies what cargo built into
+`engine/<db>/<member>/<digest>/` under the program directory, named for
+its SHA-256 so a changed archive relinks a Go binary, under the member's
+lock file, which a `stack run` staging at once waits on. `stack dev`
+removes what earlier runs staged but the digest used last before its own,
+which a process may still name; `stack run` removes nothing. A Go build's
+`CGO_LDFLAGS` search the archive's directory first, before the release's
+archives, which hold the core's under the same name; a TypeScript
+process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`.
+Nothing is set by hand. A Rust entrypoint depends on the crate and builds
+it with its own. A crate that depends on one of the engine's crates by
+version, as a build with that crate's `[paths]` key unset writes it, is
+refused, naming the key: no
+registry serves them, and a release ships none (D58, amended).
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
@@ -2384,14 +2448,14 @@ as they are, with no build step (D51). The pieces mirror Go's:
   workspace alone, `<schemas-root>/dist`, where every command writes
   without `--out`: an install links each member's `node_modules` into the
   root that installs it, so a second root that listed them would take
-  their links over. Any other output root lists the implementations'
-  mirrors, `impl/*`, in their place (below). The default root holds only
-  the packages of the services built into it, as a stack's build leaves
-  it, and Bun refuses a whole install when one member's `workspace:`
-  dependency is missing, so the root leaves out, with a `!` pattern, each
-  implementation or site whose `workspace:` dependencies are neither on
-  disk nor other members (D51, amended); once every service is built it
-  leaves out nothing. Where
+  their links over. Any other output root lists the mirrors of the
+  implementations and the sites, `impl/*`, in their place (below). The
+  default root holds only the packages of the services built into it, as
+  a stack's build leaves it, and Bun refuses a whole install when one
+  member's `workspace:` dependency is missing, so the root leaves out,
+  with a `!` pattern, each implementation or site whose `workspace:`
+  dependencies are neither on disk nor other members (D51, amended); once
+  every service is built it leaves out nothing. Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
   version-graph runtime, or the behavior engine (D58), the root's
   `overrides` point every dependency on it at the checkout with a `file:`
@@ -2469,9 +2533,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
   server, job or worker package under the output root depends on, and,
   in the default root, every copy. A change to the package reaches another
   root's servers with that root's next build of the stack, which `stack
-  dev` runs first. A site is copied into no root: it is no member of
-  another root's workspace, and its build there runs in its own package
-  against the default root's install.
+  dev` runs first. A site's build into another root copies its package
+  the same way, to `<output-root>/impl/<site>/`, with a notice that names
+  it a site, and a build of a stack there keeps the copy of each site the
+  project has a package for (D65, amended). Wherever a site builds, `stack
+  dev`, a deploy or `stack build`, it builds in the copy when the output
+  root's workspace lists `impl/*`, after that root's install, against the
+  root's own SDKs, and in its own package otherwise; a root that lists the
+  copies and holds none of the site stops the build. A `build-all --cache`
+  into another root builds each site every time, since its inputs do not
+  cover the copy.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`
@@ -2801,9 +2872,11 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   routes (`axum::background_router`, 503 `unavailable` until it opens) at
   `outputs.engine.mount` before the API router's fallback, behind the
   API's identity session and service caller, with the identity config's
-  trusted origins' CORS and a calling site's. At SIGTERM it ends every
-  event stream as it stops taking connections, then shuts the engine down
-  off the runtime. A job and a worker open the engine for their `Deps`
+  trusted origins' CORS and a calling site's; each route but the event
+  stream's and MCP's takes a 30-second timeout (`ENGINE_TIMEOUT`, 504
+  `gateway_timeout` past it), as a Go or a TypeScript server's do. At
+  SIGTERM it ends every event stream as it stops taking connections, then
+  shuts the engine down off the runtime. A job and a worker open the engine for their `Deps`
   and deploy nothing; the database's runner, when the first API on it is
   Rust, is a crate of its own whose `main.rs` reads the database's field
   alone and runs the engine's runner as its deployable.
@@ -3332,17 +3405,35 @@ export abstract class FulfilOrders {}
   `superschematic-migrate queue`, in one transaction, and prints its
   result as JSON. On the local target the runner reaches the database at
   the URL the environment resolves, on the Postgres container `stack dev`
-  runs; the command refuses a queue on another dialect, and an
-  environment on any other target, whose databases it does not reach yet.
+  runs; the command refuses a queue on another dialect.
+  On a cloud target the command runs the document on the deployed run's
+  database through the target's queue runner (`TargetSpec.Queues`,
+  `registry.QueueRunner`), and refuses a target with none and a run never
+  deployed. On gcp it is one execution of the migration job (section
+  8.4): the document under the run's migration documents, and
+  `superschematic-migrate queue --cloud-sql <instance> --cloud-sql-user
+  <migrator> --database <name> --result gs://<state>/superschematic/queue/<stack>/<run>/<id>.json`,
+  `<id>` 128 random bits. The job runs as the last deploy left it: the
+  command never changes it, since the stack's deploys share it, and
+  refuses a stack with no job yet. The runner reserves that object with an
+  empty `<id>.json.reserved` marker before the queue changes, so a
+  migrator that may not write it stops first, then writes its result there
+  in place of stdout, since a listing's columns may hold personal data and
+  the job's output goes to Cloud Logging; the command reads it once and
+  deletes its version and the marker's. A deleted result stays
+  restorable for the bucket's soft-delete window, seven days by default. Bootstrap lets `migrator` create objects under its
+  stack's `superschematic/queue/<stack>/` alone, which it cannot read or
+  replace, and gives the state bucket a rule that deletes what is under
+  `superschematic/queue/` a day after it was written; the command sets
+  that rule too before it runs. A failed execution reports the runner's
+  error from Cloud Logging, as a failed migration does (D68, amended).
 
 Not built:
 
 - A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
   in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- `stack queue` on a cloud environment: on gcp, the queue document run as
-  an execution of the migration job, which reaches Cloud SQL, with its
-  result read back from Cloud Logging as a failed migration's error is.
+- `stack queue` on a cloud target other than gcp.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
@@ -3646,9 +3737,40 @@ once it drains, a job after its run, and a worker after its grace.
 `stack dev` and `stack run` give each process the `OTEL_` variables of the
 developer's shell but `OTEL_SERVICE_NAME`, which would name every
 deployable alike, so a shell that points at a collector traces the whole
-environment (section 8.3). The gcp target sets none of them: an
-environment's `env` settings bind `@envVars` fields alone, and a gcp
-deployable exports nothing yet. D67 records what the target would need.
+environment (section 8.3).
+
+On gcp an environment's `telemetry` value turns export on for each
+server, job and worker, and a deployable's `telemetry` setting turns its
+own off or on (section 7.1, D67, amended). The target sets on its
+container:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: Cloud Trace's OTLP endpoint,
+  `https://telemetry.googleapis.com`, unless `telemetry.endpoint` names a
+  collector's;
+- `OTEL_SERVICE_NAME`: the deployable's name, as the entrypoint's default
+  is;
+- `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name`, the
+  environment, a preview member's name with its parameters;
+  `gcp.project_id`, which Cloud Trace reads the spans' project from;
+  `cloud.provider` and `cloud.region`; and `service.version`, the image,
+  which the deploy pins to its digest as it pins the container's;
+- with `telemetry.sampleRatio`, `OTEL_TRACES_SAMPLER=parentbased_traceidratio`
+  and the ratio as its argument.
+
+Cloud Trace's endpoint takes an OAuth access token, which expires within
+the hour, so no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries it. Each
+runtime sends one itself to an `https` endpoint whose host is
+`googleapis.com` or under it, and to that host alone, unless a headers
+variable names an `authorization` header: the
+access token of the workload's own account, from the metadata server
+(`GCE_METADATA_HOST` when set), fetched again five minutes before it
+expires. A deployable that exports to Cloud Trace gets the Cloud Trace
+agent role on the project for its account, which holds
+`telemetry.traces.write`; one that exports to a collector gets no role,
+and reaches the collector as it reaches the internet, or through the VPC
+when it calls another server. An account that does not export holds no
+trace role, so code that calls Cloud Trace itself turns its deployable's
+`telemetry` on. An `http` endpoint under `googleapis.com` is refused.
 Metrics and logs are not exported.
 
 
@@ -4314,8 +4436,8 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 `unlock`. Targets and provisioners plug into it; they add no commands of
 their own. `stack dev` runs a local environment (section 8.3), `stack run`
 runs a job once on demand, locally or in the cloud (section 8.7), and
-`stack queue` lists, retries and drops a queue's dead messages, locally for
-now (section 8.8), in `cli/stack_queue.go`.
+`stack queue` lists, retries and drops a queue's dead messages, locally or
+on gcp (section 8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
@@ -4390,7 +4512,7 @@ whose public face is in `stack`; the reference page "CLI" lists their
 flags. `build` builds the images a deploy would build (section 11.2) and
 deploys nothing: it prints each as an `--image` flag and writes no
 manifest. A target plugs into them, and into the generated CI, through
-seven seams on its `TargetSpec` (D45, D46, D47, D52):
+eight seams on its `TargetSpec` (D45, D46, D47, D52, D68):
 
 - `State`, a state store: the provisioner's state backend for an
   environment, and each run's deploy manifest. A store that is also a
@@ -4415,7 +4537,13 @@ seven seams on its `TargetSpec` (D45, D46, D47, D52):
   when the run ends, with the last try's error when it fails (section
   8.7). Without it, `stack run` refuses the target's environments. On
   gcp, an execution of the job's Cloud Run job, whose error the runner
-  reads from Cloud Logging as the migration job's.
+  reads from Cloud Logging as the migration job's;
+- `Queues`, a queue runner (`QueueRunner`): a request is a run, a
+  database, its DB service and a queue document, and the runner runs the
+  document where `superschematic-migrate` reaches the database and returns
+  its result, which it keeps out of every log (section 8.8). Without it,
+  `stack queue` refuses the target's environments. On gcp, an execution
+  of the migration job whose result comes back through the state bucket.
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -4648,6 +4776,16 @@ The GitHub workflow:
     `<schemas-root>/dist/engine/rust/<db>/ffi`, staging it as
     `libsuperschematic_engine.a`, and compiles the module with it searched
     before the release's.
+  - For a stack whose naming file's `[paths]` engine keys name a
+    superschematic checkout in the repository (D58, amended), `check`
+    stands up the superscalar checkout the engine's crates reach by path
+    (`scripts/superscalar-dep.sh --checkout` in it) before the build when
+    it builds a project's engine archive or type-checks a TypeScript
+    entrypoint, seeds a project's engine crate's lock file from the engine
+    workspace's, and, when `[paths] engine_typescript` names the
+    checkout's engine package, before the workspace's install builds the
+    `dist/` of the checkout's superscalar binding, HTTP runtime and engine
+    packages, which the workspace takes in place of the published ones.
   - For a stack with a TypeScript server, job, worker or engine runner,
     `check` then installs the output root's Bun workspace from the
     lockfile the project commits (section 8.6), `bun install
@@ -4725,8 +4863,18 @@ The GitHub workflow:
 
 Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
 on gcp, Workload Identity Federation through the pool bootstrap creates,
-as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
-project's number, `projectNumber` (section 7.1), which bootstrap records.
+as `<stack>-planner` or `<stack>-deployer`. Each account admits only the
+runs of the jobs that sign in as it (section 7.3, D69): a `plan` job's
+pull request as `planner`; a `deploy` job's push to the branch, or manual
+run of it, as the `deployer` of its project only in the GitHub
+environment of its name, so that environment's required reviewers stand
+between a pull request and the account; and a `preview` job's pull
+request as the `deployer` of the preview's project. `plan` and `preview`
+jobs run in no GitHub environment. A pull request that edits the workflow
+to name a GitHub environment or another account still runs as a pull
+request, which only the planners and the deployer of a preview's project
+admit. The provider's name holds the project's number, `projectNumber`
+(section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
 bootstrap to run. `google-github-actions/auth` signs in, and its
 credentials file gives superschematic and Pulumi application default
@@ -4959,8 +5107,8 @@ Not taken:
   between processes, and section 2 of `docs/extension-model.md` rules out
   loading code at run time. Revisit it only if third parties need to ship
   a target without rebuilding the binary.
-`extensions/deploy` and `extensions/platform` are rewritten over the stack
-model, or retired, when it lands.
+`extensions/deploy` and `extensions/platform` are retired (D30, amended):
+the stack targets replaced them.
 
 ## 14. Milestones
 

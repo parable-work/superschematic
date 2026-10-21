@@ -115,6 +115,45 @@ func TestEngineDocumentFixture(t *testing.T) {
 	}
 }
 
+// outputs.engine.retention is the engine's RetentionOptions, checked when
+// the build reads the config as the engine checks them when it opens, so
+// that no entrypoint opens an engine that refuses its retention: an age, a
+// count or both, every member an integer in its range, no other member.
+// The servergen goldens carry desk-db's into every entrypoint.
+func TestEngineRetentionSetting(t *testing.T) {
+	schema, cfg, err := loader.LoadServiceWithConfig(engineFixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retention := range []map[string]any{
+		{"maxAgeMs": 2592000000},
+		{"maxEvents": 1},
+		{"maxAgeMs": 86400000, "maxEvents": 100000, "maxHoldMs": 3600000, "everyMs": 1000, "batchSize": 10000},
+	} {
+		cfg.Outputs["engine"] = map[string]any{"retention": retention}
+		if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()}); err != nil {
+			t.Errorf("retention %v: %v", retention, err)
+		}
+	}
+	for _, retention := range []any{
+		map[string]any{},
+		map[string]any{"maxHoldMs": 1000},
+		map[string]any{"maxAgeMs": 0},
+		map[string]any{"maxAgeMs": 1.5},
+		map[string]any{"maxEvents": "100"},
+		map[string]any{"maxEvents": 10, "everyMs": 999},
+		map[string]any{"maxEvents": 10, "batchSize": 10001},
+		map[string]any{"maxEvents": 10, "keep": "all"},
+		"30d",
+	} {
+		cfg.Outputs["engine"] = map[string]any{"retention": retention}
+		if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()}); err == nil || !strings.Contains(err.Error(), "outputs.engine") {
+			t.Errorf("retention %v: err = %v, want outputs.engine refused", retention, err)
+		}
+	}
+	delete(cfg.Outputs, "engine")
+}
+
 // outputs.engine.namespace names the namespace; a namespace the engine
 // would refuse fails the build before any generator runs, naming the
 // setting; a build that no longer has engine types removes the document.

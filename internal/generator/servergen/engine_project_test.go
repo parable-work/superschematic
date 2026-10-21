@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -34,7 +35,9 @@ import (
 // queue-db's runner are not refused: the engine stage of each checkout
 // Dockerfile builds the archive of the crate's ffi member in the core's
 // place, its lock file seeded from the engine workspace's, and the build
-// context holds the crate. Regenerate with:
+// context holds the crate. Each module's projectengine.LinkFile names the
+// crate's ffi member and the engine workspace's lock file, from which the
+// local target builds the archive. Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestEngineProjectArchiveGolden -update
 func TestEngineProjectArchiveGolden(t *testing.T) {
@@ -55,7 +58,7 @@ func TestEngineProjectArchiveGolden(t *testing.T) {
 	}
 	files := map[string]string{}
 	for _, d := range []string{queueServer, queueRunner} {
-		for _, file := range []string{servergen.DockerFile, servergen.DockerIgnoreFile} {
+		for _, file := range []string{servergen.DockerFile, servergen.DockerIgnoreFile, projectengine.LinkFile} {
 			files[filepath.Join("server", queueStack, d, file)] = filepath.Join(servergen.ServerDir(out, queueStack, d), file)
 		}
 	}
@@ -319,5 +322,58 @@ func TestTheEngineProjectDockerfileBuildsAnImageThatServes(t *testing.T) {
 	docker(t, "stop", container)
 	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
 		t.Errorf("the container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
+	}
+}
+
+// TestAReleaseImageRefusesAProjectsEngine: a project with no [paths] keys,
+// built by a release, gets queue-db's engine crate on the engine's crates
+// by version, which no release ships (D58, amended): queue-api's server
+// gets no Dockerfile, and the build says what to set; its link file names
+// the crate with no lock file, and the local target refuses the crate.
+func TestAReleaseImageRefusesAProjectsEngine(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadEngineFixture(t)
+	var log strings.Builder
+	for _, name := range queueOrder {
+		opts := f.options(repoRoot, naming.LocalPaths{})
+		opts.Release, opts.Log = &testRelease, &log
+		if _, err := generator.Run(f.schemas[name], f.configs[name], opts); err != nil {
+			t.Fatalf("build %s: %v", name, err)
+		}
+	}
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	manifest, err := os.ReadFile(filepath.Join(generator.EngineDir(out, generator.LangRust, "queue-db"), projectengine.ManifestFile))
+	if err != nil || !strings.Contains(string(manifest), "\nsuperschematic-engine = { version = \"0.0.0\", default-features = false }") {
+		t.Fatalf("queue-db's crate does not depend on the engine by version (%v):\n%s", err, manifest)
+	}
+	dir := servergen.ServerDir(out, queueStack, queueServer)
+	if _, err := os.Stat(filepath.Join(dir, servergen.DockerFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the build wrote a Dockerfile: %v", err)
+	}
+	if want := "server queue-api: no Dockerfile, since the engine of queue-db composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate"; !strings.Contains(log.String(), want) || !strings.Contains(log.String(), "no release ships (D58, amended)") {
+		t.Errorf("the log does not say why:\n%s", log.String())
+	}
+	link, err := projectengine.ReadLink(dir)
+	if err != nil || link == nil || link.Lockfile != "" || link.Member != projectengine.FFIDir {
+		t.Errorf("queue-api's link file is %+v (%v), want the ffi member with no lock file", link, err)
+	}
+}
+
+// TestEngineLockfile: the engine workspace's lock file comes from whichever
+// [paths] key locates the workspace, engine_rust alone included, and from
+// none without one.
+func TestEngineLockfile(t *testing.T) {
+	for _, tc := range []struct {
+		paths naming.LocalPaths
+		want  string
+	}{
+		{naming.LocalPaths{EngineRust: "/ss/runtime/engine/rust/engine"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{EngineGo: "/ss/runtime/engine/go"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{EngineTypeScript: "/ss/runtime/engine/typescript"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{ScalarGo: "/ss/third_party/superscalar/go"}, ""},
+	} {
+		if got := servergen.EngineLockfile(tc.paths); got != filepath.FromSlash(tc.want) {
+			t.Errorf("EngineLockfile(%+v) = %q, want %q", tc.paths, got, tc.want)
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -248,6 +249,10 @@ type fakeStorage struct {
 }
 
 func (s *fakeStorage) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if bucket, ok := strings.CutPrefix(r.URL.EscapedPath(), "/upload/storage/v1/b/"); ok && r.Method == http.MethodPost {
+		s.upload(w, r, strings.TrimSuffix(bucket, "/o"))
+		return
+	}
 	s.asked = append(s.asked, r.URL.EscapedPath())
 	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), "/storage/v1/b/")
 	bucket, object, _ := strings.Cut(rest, "/o/")
@@ -258,6 +263,30 @@ func (s *fakeStorage) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(data)
+}
+
+// upload writes an object as a media upload with ifGenerationMatch=0
+// does: only where none is, else 412, as Cloud Storage does. It records
+// `POST <object>`.
+func (s *fakeStorage) upload(w http.ResponseWriter, r *http.Request, bucket string) {
+	q := r.URL.Query()
+	name := q.Get("name")
+	s.asked = append(s.asked, "POST "+bucket+"/"+name)
+	if q.Get("uploadType") != "media" || q.Get("ifGenerationMatch") != "0" || name == "" || r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, `{"error": {"code": 400, "message": "bad upload"}}`, http.StatusBadRequest)
+		return
+	}
+	if _, ok := s.objects[bucket+"/"+name]; ok {
+		http.Error(w, `{"error": {"code": 412, "message": "At least one of the pre-conditions you specified did not hold."}}`, http.StatusPreconditionFailed)
+		return
+	}
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.objects[bucket+"/"+name] = data
+	_, _ = w.Write([]byte(`{"kind": "storage#object"}`))
 }
 
 // localDialer dials a local Postgres server in place of a Cloud SQL

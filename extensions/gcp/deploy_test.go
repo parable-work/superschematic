@@ -42,8 +42,8 @@ type fakeCloud struct {
 	generations map[string]int64
 	gen         int64
 
-	// lifecycle holds each bucket's lifecycle rule.
-	lifecycle map[string]gcp.LifecycleRule
+	// lifecycle holds each bucket's lifecycle rules.
+	lifecycle map[string][]gcp.LifecycleRule
 
 	// images holds each pushed image's digest by `<repository>:<tag>`;
 	// builds and jobs what RunBuild and EnsureJob were last given;
@@ -69,6 +69,19 @@ type fakeCloud struct {
 	failBuild  map[string]string
 	failWait   error
 	failStderr error
+
+	// runner, when set, stands in for what a successful run of the
+	// migration job does in the state bucket, given its arguments: the
+	// objects it returns are written as the run ends. deletes records
+	// each object version DeleteObjectVersion deleted, and failDelete
+	// fails it.
+	runner     func(args []string) map[string][]byte
+	deletes    []string
+	failDelete error
+
+	// lifecycleConflicts fails that many of the next lifecycle writes as
+	// another writer's change to the bucket would.
+	lifecycleConflicts int
 
 	// numbers holds each project's number.
 	numbers map[string]string
@@ -112,7 +125,7 @@ var _ gcp.Cloud = (*fakeCloud)(nil)
 
 func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
-		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string]gcp.LifecycleRule{},
+		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string][]gcp.LifecycleRule{},
 		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{}, generations: map[string]int64{},
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
 		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
@@ -218,6 +231,11 @@ func (c *fakeCloud) RunJob(_ context.Context, project, region, job string, args 
 			return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Message: fail.message}, nil
 		}
 	}
+	if c.runner != nil && args != nil {
+		for key, data := range c.runner(args) {
+			c.write(key, data)
+		}
+	}
 	return &gcp.JobRun{Name: name, LogURI: "https://console.cloud.google.com/logs/x", Succeeded: true}, nil
 }
 
@@ -280,10 +298,23 @@ func (c *fakeCloud) EnsureLifecycleRule(_ context.Context, bucket string, rule g
 	if _, ok := c.buckets[bucket]; !ok {
 		return false, fmt.Errorf("no bucket %s", bucket)
 	}
-	if prev, ok := c.lifecycle[bucket]; ok && slices.Equal(prev.Prefixes, rule.Prefixes) && prev.AgeDays == rule.AgeDays {
+	if c.lifecycleConflicts > 0 {
+		c.lifecycleConflicts--
+		return false, fmt.Errorf("set the lifecycle of bucket %s: %w", bucket, gcp.ErrBucketChanged)
+	}
+	// A rule takes the place of the bucket's rule over the same prefixes,
+	// as Cloud Storage's does (withLifecycleRule).
+	rules := c.lifecycle[bucket]
+	i := slices.IndexFunc(rules, func(r gcp.LifecycleRule) bool { return slices.Equal(r.Prefixes, rule.Prefixes) })
+	if i >= 0 && rules[i].AgeDays == rule.AgeDays {
 		return false, nil
 	}
-	c.lifecycle[bucket] = gcp.LifecycleRule{Prefixes: slices.Clone(rule.Prefixes), AgeDays: rule.AgeDays}
+	rule = gcp.LifecycleRule{Prefixes: slices.Clone(rule.Prefixes), AgeDays: rule.AgeDays}
+	if i >= 0 {
+		rules[i] = rule
+	} else {
+		c.lifecycle[bucket] = append(rules, rule)
+	}
 	c.change("lifecycle of bucket %s: delete %s after %d days", bucket, strings.Join(rule.Prefixes, ", "), rule.AgeDays)
 	return true, nil
 }
@@ -357,6 +388,22 @@ func (c *fakeCloud) DeleteObjectGeneration(_ context.Context, bucket, object str
 	delete(c.generations, key)
 	c.change("delete gs://%s/%s", bucket, object)
 	return true, nil
+}
+
+func (c *fakeCloud) DeleteObjectVersion(_ context.Context, bucket, object string, generation int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failDelete != nil {
+		return c.failDelete
+	}
+	key := bucket + "/" + object
+	if _, ok := c.objects[key]; !ok || c.generations[key] != generation {
+		return nil
+	}
+	delete(c.objects, key)
+	delete(c.generations, key)
+	c.deletes = append(c.deletes, fmt.Sprintf("gs://%s/%s#%d", bucket, object, generation))
+	return nil
 }
 
 func (c *fakeCloud) WriteSiteObject(_ context.Context, bucket, object string, data []byte, contentType, cacheControl string) error {
@@ -531,7 +578,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		steps = append(steps, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 56 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
+	want := []string{"render 52 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("ran %q, want %q", steps, want)
 	}
@@ -680,44 +727,60 @@ func TestBootstrap(t *testing.T) {
 	}
 }
 
-// TestBootstrapGraph checks the bootstrap graph against the golden file,
+// shopCI is the shop's workflow as bootstrap admits it: every
+// environment of the stack, from acme/shop's main branch.
+func shopCI(t *testing.T, reg *registry.Registry, s *ir.Stack) gcp.GitHubCI {
+	t.Helper()
+	ci := gcp.GitHubCI{Repository: "acme/shop", Branch: "main"}
+	for _, env := range s.Environments {
+		ci.Environments = append(ci.Environments, resolve(t, reg, s, stacktest.AcmeShop(), env.Name))
+	}
+	return ci
+}
+
+// TestBootstrapGraph checks the bootstrap graphs of Staging's project,
+// which Preview shares, and Production's against their golden files,
 // validates every node against the pinned schema of its type, and checks
 // what a graph without a repository leaves out.
 func TestBootstrapGraph(t *testing.T) {
 	reg := assemble(t)
-	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
-	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, res := range graph.Resources.Resources {
-		ok, err := reg.ValidateResource(res)
-		if !ok || err != nil {
-			t.Errorf("node %s (%s): pinned %v, %v", res.ID, res.Type, ok, err)
-		}
-	}
-	got, err := stack.Marshal(graph)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join("testdata", "golden", "bootstrap", "Staging.json")
-	if *update {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	s := shop()
+	ci := shopCI(t, reg, s)
+	for _, name := range []string{"Staging", "Production"} {
+		graph, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), name), ci)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, got, 0o644); err != nil {
+		for _, res := range graph.Resources.Resources {
+			ok, err := reg.ValidateResource(res)
+			if !ok || err != nil {
+				t.Errorf("%s node %s (%s): pinned %v, %v", name, res.ID, res.Type, ok, err)
+			}
+		}
+		got, err := stack.Marshal(graph)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run go test -update to write it)", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("the bootstrap graph differs from %s; run go test -update and review the diff", path)
+		path := filepath.Join("testdata", "golden", "bootstrap", name+".json")
+		if *update {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, got, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%v (run go test -update to write it)", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("the bootstrap graph differs from %s; run go test -update and review the diff", path)
+		}
 	}
 
-	bare, err := gcp.BootstrapEnvironment(env, "")
+	env := resolve(t, reg, s, stacktest.AcmeShop(), "Staging")
+	bare, err := gcp.BootstrapEnvironment(env, gcp.GitHubCI{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,8 +796,88 @@ func TestBootstrapGraph(t *testing.T) {
 
 	long := *env
 	long.Stack = "AVeryLongStackNameForAnAccount"
-	if _, err := gcp.BootstrapEnvironment(&long, "acme/shop"); err == nil || !strings.Contains(err.Error(), "GCP allows 30") {
+	if _, err := gcp.BootstrapEnvironment(&long, gcp.GitHubCI{Repository: "acme/shop"}); err == nil || !strings.Contains(err.Error(), "GCP allows 30") {
 		t.Errorf("a stack name too long for an account id: %v", err)
+	}
+}
+
+// TestBootstrapAdmitsEachJob: each CI account admits only the runs of the
+// jobs that sign in as it to an environment in its project (D69). In
+// Staging's project, which Preview shares, planner admits pull requests,
+// for Staging's plan, and deployer admits pull requests, for Preview's
+// members, and the branch's deploys in the GitHub environment Staging.
+// Production's deployer admits only the branch's deploys in Production,
+// so no pull request acts as it. The provider maps the claims the
+// bindings name, deploy_environment only for a push or a manual run of
+// the branch. A production environment that shares a project with one a
+// pull request deploys is refused, as is a branch the CEL cannot quote.
+func TestBootstrapAdmitsEachJob(t *testing.T) {
+	reg := assemble(t)
+	s := shop()
+	ci := shopCI(t, reg, s)
+	ci.Branch = "release/1"
+	pool := "principalSet://iam.googleapis.com/<pool>"
+	admitted := func(name string) (map[string][]string, map[string]any) {
+		t.Helper()
+		graph, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), name), ci)
+		if err != nil {
+			t.Fatal(err)
+		}
+		members := map[string][]string{}
+		var mapping map[string]any
+		for _, res := range graph.Resources.Resources {
+			if res.ID == "github.provider" {
+				mapping, _ = res.Properties["attributeMapping"].(map[string]any)
+			}
+			if res.Type != gcp.TypeServiceAccountIAMMember {
+				continue
+			}
+			account := res.Properties["serviceAccountId"].(ir.Output).Resource
+			concat := res.Properties["member"].(ir.Concat)
+			if pool, ok := concat[1].(ir.Output); !ok || pool.Resource != "github" {
+				t.Fatalf("%s's member is %v", res.ID, concat)
+			}
+			members[account] = append(members[account], fmt.Sprint(concat[0], "<pool>", concat[2]))
+		}
+		return members, mapping
+	}
+
+	staging, mapping := admitted("Staging")
+	want := map[string][]string{
+		"deployer": {pool + "/attribute.deploy_environment/Staging", pool + "/attribute.event_name/pull_request"},
+		"planner":  {pool + "/attribute.event_name/pull_request"},
+	}
+	for account, members := range want {
+		if got := staging[account]; !slices.Equal(slices.Sorted(slices.Values(got)), members) {
+			t.Errorf("Staging's %s admits %v, want %v", account, got, members)
+		}
+	}
+	if got := mapping["attribute.event_name"]; got != "assertion.event_name" {
+		t.Errorf("event_name maps %v", got)
+	}
+	deploy, _ := mapping["attribute.deploy_environment"].(string)
+	if !strings.Contains(deploy, "assertion.ref == 'refs/heads/release/1'") || !strings.Contains(deploy, "assertion.event_name == 'push'") || strings.Contains(deploy, "pull_request") {
+		t.Errorf("deploy_environment maps %q", deploy)
+	}
+
+	production, _ := admitted("Production")
+	if got, want := production["deployer"], []string{pool + "/attribute.deploy_environment/Production"}; !slices.Equal(got, want) {
+		t.Errorf("Production's deployer admits %v, want %v", got, want)
+	}
+	if got, want := production["planner"], []string{pool + "/attribute.event_name/pull_request"}; !slices.Equal(got, want) {
+		t.Errorf("Production's planner admits %v, want %v", got, want)
+	}
+
+	shared := shop()
+	shared.Environments[2].Extends = "Production"
+	if _, err := gcp.BootstrapEnvironment(resolve(t, reg, shared, stacktest.AcmeShop(), "Production"), shopCI(t, reg, shared)); err == nil || !strings.Contains(err.Error(), "production environment Production shares project acme-prod with Preview") {
+		t.Errorf("a production project a pull request deploys to: %v", err)
+	}
+
+	bad := shopCI(t, reg, s)
+	bad.Branch = "main' || true || '"
+	if _, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), "Staging"), bad); err == nil {
+		t.Error("a branch with a quote was admitted")
 	}
 }
 
@@ -743,7 +886,7 @@ func TestBootstrapGraph(t *testing.T) {
 func TestBootstrapGraphNoDeprecatedProperties(t *testing.T) {
 	reg := assemble(t)
 	env := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
-	graph, err := gcp.BootstrapEnvironment(env, "acme/shop")
+	graph, err := gcp.BootstrapEnvironment(env, gcp.GitHubCI{Repository: "acme/shop"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -236,24 +236,9 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 		return err
 	}
 
-	image, err := r.ext.migrateImage(ctx, env, v, log)
+	name, err := r.ensureMigrationJob(ctx, req.Run, v, log)
 	if err != nil {
 		return err
-	}
-	name := migrationJobName(env.Stack)
-	changed, err := cloud.EnsureJob(ctx, v.project, v.region, JobSpec{
-		Name:           name,
-		Container:      migrateContainer,
-		Image:          image,
-		ServiceAccount: accountEmail(v, env.Stack, "migrator"),
-		Timeout:        migrateTimeout,
-		Labels:         map[string]string{"superschematic-stack": kebab(env.Stack)},
-	})
-	if err != nil {
-		return err
-	}
-	if changed {
-		logf("job %s runs %s", name, image)
 	}
 	ref := "gs://" + bucket + "/" + object
 	logf("run job %s: %s", name, ref)
@@ -266,6 +251,33 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 	}
 	logf("execution %s finished", run.Name)
 	return nil
+}
+
+// ensureMigrationJob finds or builds the runner's image, creates or
+// updates the stack's migration job to run it as the migrator, and
+// returns the job's name.
+func (r migrationRunner) ensureMigrationJob(ctx context.Context, run registry.Run, v values, log io.Writer) (string, error) {
+	env := run.Environment
+	image, err := r.ext.migrateImage(ctx, env, v, log)
+	if err != nil {
+		return "", err
+	}
+	name := migrationJobName(env.Stack)
+	changed, err := r.ext.cloud().EnsureJob(ctx, v.project, v.region, JobSpec{
+		Name:           name,
+		Container:      migrateContainer,
+		Image:          image,
+		ServiceAccount: accountEmail(v, env.Stack, "migrator"),
+		Timeout:        migrateTimeout,
+		Labels:         map[string]string{"superschematic-stack": kebab(env.Stack)},
+	})
+	if err != nil {
+		return "", err
+	}
+	if changed {
+		_, _ = fmt.Fprintf(log, "  job %s runs %s\n", name, image)
+	}
+	return name, nil
 }
 
 // runnerLogWait is how long a failed execution's stderr may take to reach

@@ -927,27 +927,6 @@
         ]
       },
       {
-        "id": "Orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "Orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "Orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "Orders"
-        ]
-      },
-      {
         "id": "dns.shop-api.a",
         "type": "gcp:dns/recordSet:RecordSet",
         "properties": {
@@ -1685,27 +1664,6 @@
         ]
       },
       {
-        "id": "shop-api.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-api.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-api.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-api"
-        ]
-      },
-      {
         "id": "shop-api.url-map",
         "type": "gcp:compute/uRLMap:URLMap",
         "properties": {
@@ -1979,27 +1937,6 @@
         "phase": "rollout",
         "owners": [
           "http:shop-orders-fulfil-orders->shop-api"
-        ]
-      },
-      {
-        "id": "shop-orders-fulfil-orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-orders-fulfil-orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-orders-fulfil-orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-orders-fulfil-orders"
         ]
       },
       {
@@ -2523,27 +2460,6 @@
         ]
       },
       {
-        "id": "shop-orders-ship-orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-orders-ship-orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-orders-ship-orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-orders-ship-orders"
-        ]
-      },
-      {
         "id": "shop-web.address",
         "type": "gcp:compute/globalAddress:GlobalAddress",
         "properties": {
@@ -2906,7 +2822,6 @@
         "Orders.cloudsql-login.shop-db",
         "Orders.database-user.shop-db",
         "Orders.reads.PaymentsSecrets.STRIPE_KEY",
-        "Orders.trace-agent",
         "network",
         "network.nat",
         "network.router",
@@ -2919,7 +2834,6 @@
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sign-as-self",
         "shop-api.storage.shop-media",
-        "shop-api.trace-agent",
         "shop-db.database.shop-db",
         "shop-db.instance",
         "shop-db.migrator",
@@ -2929,13 +2843,11 @@
         "shop-orders-fulfil-orders.cloudsql-login.shop-db",
         "shop-orders-fulfil-orders.database-user.shop-db",
         "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
-        "shop-orders-fulfil-orders.trace-agent",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.cloudsql-client.shop-db",
         "shop-orders-ship-orders.cloudsql-login.shop-db",
         "shop-orders-ship-orders.database-user.shop-db",
         "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
-        "shop-orders-ship-orders.trace-agent",
         "shop-web.address",
         "shop-web.anchor",
         "shop-web.backend",

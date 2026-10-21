@@ -122,14 +122,22 @@ reads as `Some(Value::Null)` and is written back as `null`, and an absent
 key is `None`, which is left out
 ([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
 
-A union is an enum with one variant per member. When every member marks
-the same field `@internalMetadata`, serde reads that field as the enum's
-tag. Otherwise the enum is untagged and decodes by shape, as the Go types
-do: the first member whose fields include every payload key wins, unless
-the payload contradicts one of the member's tags, a field that two or more
-members declare with distinct string or enum defaults. When no member
-declares every key, the first member whose tags the payload allows wins.
-Either way the payload must be a JSON object.
+A union is an enum with one variant per member. Its `Deserialize` picks
+the member every language picks, by one structural predicate
+(`validators::pick_union_member`), and serde decodes the payload once as
+that member. When every member marks the same field `@internalMetadata`,
+that field's value names the only candidate. Otherwise the candidates are
+the members whose fields include every payload key and whose tags the
+payload does not contradict, a tag being a field that two or more members
+declare with distinct string or enum defaults; when none of them reads the
+payload, the members whose tags the payload allows. The first candidate
+that reads the payload is the member. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part.
 
 ### Validate
 
@@ -157,6 +165,16 @@ fn read(value: serde_json::Value) -> Result<Money, ParseError> {
 
 A `ParseError` says which step refused the value: `NotAnObject`,
 `UnknownFields`, `Invalid` with the errors, or `Decode` with serde's.
+
+A union whose members all have validators gets `validate_<union>`,
+`prepare_<union>` and `parse_<union>`. `validate_<union>` picks the member
+its `Deserialize` picks, by the discriminator or by shape, and validates
+the value as that member, its defaults filled in, so the errors are at the
+member's paths. A value that is not an object, or that no member reads,
+validates: decoding refuses it. A type's validator checks each union field
+with it, the member's errors nested under the field's path at each list
+level and key (`payment.number`, `shapes[1].radius`), as the Go and
+TypeScript validators report them.
 `prepare_<type>` runs the same steps and returns the checked JSON value
 instead of decoding it.
 Each scalar the schema uses has `validators::scalars::validate_<scalar>`
@@ -221,6 +239,12 @@ the route's own schema for it: the scalar's and the argument's rules, and
 an object type's fields. Every failure is reported at once, at its path, in
 one `SDKError::Config`:
 `argument validation failed: linksByLocale[en][1]: invalid format; pointByName[a].x: must be at least 0`.
+
+A union argument, alone or in a list, and a union field of an input are
+validated before the request by the types crate's `validate_<union>`, as
+the member the union holds. Every rule a member breaks is reported at
+once, at its path, by the rule's name, in one `SDKError::Config`:
+`input validation failed: payment.reference: minLength; shapes[1].radius: min`.
 
 ## Serve a generated API
 
@@ -306,14 +330,21 @@ value against its scalar's and its own `Validate<>` rules. A value that
 fails is a 400 problem whose `details` name it: `location` (`path`,
 `query` or `body`), `parameter`, `path` inside a list or map, `reason`, and
 `errors` with the rule it broke. An integer is an `i64`, as in the Go
-server.
+server. A union argument, alone, in a list or in a map, is prepared by the
+types crate's `prepare_<union>`, which validates the member the union
+picks, and decoded by serde; a value that is not an object is `type`, and
+one no member reads or whose member breaks a rule is refused as an object
+argument is, "does not match the declared type".
 
 An input is parsed by its type's `parse_<type>` with undeclared top-level
 keys refused, as the Go and TypeScript servers refuse them. A body the type
 refuses is a 400 problem, "Request body does not match the declared
 input", whose `details.reason` says why and whose top-level `errors`
 holds each field's errors by path, the member the Go server writes and
-every SDK reads:
+every SDK reads. A union field is validated as the member the union picks,
+its errors under the field's path, and one no member reads is refused with
+the reason "does not match the declared type", as the Go and TypeScript
+servers refuse it:
 
 ```json
 {"type": "about:blank", "title": "Bad Request", "status": 400, "code": "bad_request",

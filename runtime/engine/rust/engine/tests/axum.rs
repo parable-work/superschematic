@@ -3,7 +3,9 @@
 //! (tower's `oneshot`) under the router's prefix and under a host's nest,
 //! the caller from the host's function, from one that awaits, from the
 //! request's extensions and as a refusal, the body limit and MCP's own
-//! cap, a method the path does not take, an event stream as a body that
+//! cap, the host's timeout on every route but the event stream's and
+//! MCP's (a call still queued for a blocking thread at it never runs), a
+//! method the path does not take, an event stream as a body that
 //! pulls frames, wakes for a commit, beats and ends at shutdown, and the
 //! same stream over a TCP listener, which a client that goes away, or a
 //! shutdown, lets the server drain.
@@ -388,6 +390,148 @@ fn a_body_past_the_limit_is_413_and_mcp_refuses_past_its_own_cap() {
             let (status, _, body) = send(&routes, huge).await;
             assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
             assert_eq!(body["jsonrpc"], "2.0", "{body}");
+        });
+    }
+}
+
+// Slow establishes the caller as `bearer` does, after a wait: a request
+// that takes that long in the router's steps.
+struct Slow(Duration);
+
+impl Callers for Slow {
+    fn caller<'a>(&'a self, request: &'a Parts) -> CallerFuture<'a> {
+        Box::pin(async move {
+            tokio::time::sleep(self.0).await;
+            bearer(request)
+        })
+    }
+}
+
+fn mcp_tools_list() -> Request<Body> {
+    let rpc = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+    }});
+    let mut listed = post("/namespaces/default/mcp", &rpc);
+    listed.headers_mut().insert(
+        header::ACCEPT,
+        "application/json, text/event-stream".parse().unwrap(),
+    );
+    listed
+        .headers_mut()
+        .insert("mcp-protocol-version", "2026-07-28".parse().unwrap());
+    listed
+}
+
+#[test]
+fn a_route_past_the_hosts_timeout_is_504_but_the_event_stream_and_mcp_run_on() {
+    for target in targets("axum_timeout") {
+        let engine = engine(&target);
+        runtime().block_on(async {
+            let slow = Duration::from_millis(400);
+            let routes = router(
+                Arc::clone(&engine),
+                Options::default()
+                    .callers(Slow(slow))
+                    .timeout(Duration::from_millis(100)),
+            )
+            .unwrap();
+            // A route of the HTTP API past the timeout: the HTTP runtimes'
+            // 504, as Go's enginehttp and TypeScript's engineApp answer it.
+            let (status, headers, body) = send(&routes, get("/namespaces")).await;
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+            assert_eq!(headers[header::CONTENT_TYPE], "application/problem+json");
+            assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+            assert_eq!(
+                body,
+                json!({
+                    "type": "about:blank",
+                    "title": "Gateway Timeout",
+                    "status": 504,
+                    "detail": "Gateway Timeout",
+                    "code": "gateway_timeout",
+                    "requestId": headers["x-request-id"].to_str().unwrap(),
+                })
+            );
+            let (status, _, body) =
+                send(&routes, post("/namespaces", &json!({"name": "late"}))).await;
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+
+            // The event stream and MCP, whose responses last as long as
+            // their clients, are not the timeout's.
+            let response = routes.clone().oneshot(events()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "text/event-stream"
+            );
+            let mut chunks = response.into_body().into_data_stream();
+            assert_eq!(next_text(&mut chunks).await.as_deref(), Some(": open\n\n"));
+            drop(chunks);
+            let (status, _, body) = send(&routes, mcp_tools_list()).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert!(body["result"]["tools"].is_array(), "{body}");
+
+            // Within the timeout, and with none, the route answers.
+            for options in [
+                Options::default()
+                    .callers(Slow(slow))
+                    .timeout(Duration::from_secs(10)),
+                Options::default().callers(Slow(slow)),
+            ] {
+                let routes = router(Arc::clone(&engine), options).unwrap();
+                let (status, _, body) = send(&routes, get("/namespaces")).await;
+                assert_eq!(status, StatusCode::OK, "{body}");
+            }
+        });
+    }
+}
+
+#[test]
+fn a_call_still_waiting_for_a_blocking_thread_at_its_timeout_never_runs() {
+    for target in targets("axum_timeout_queued") {
+        let engine = engine(&target);
+        // One blocking thread, which a host's own work then holds.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let timed = router(
+                Arc::clone(&engine),
+                Options::default()
+                    .callers(bearer)
+                    .timeout(Duration::from_millis(100)),
+            )
+            .unwrap();
+            let untimed = router(Arc::clone(&engine), Options::default().callers(bearer)).unwrap();
+            define(&untimed, "").await;
+            let busy =
+                tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(600)));
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let (status, _, body) = send(
+                &timed,
+                post(
+                    "/namespaces/default/schemas/Order/instances",
+                    &json!({"id": "queued", "data": {"title": "queued"}}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+            busy.await.unwrap();
+            // The pool is free again, and the call that waited past its
+            // deadline wrote nothing.
+            let (status, _, body) = send(
+                &untimed,
+                get("/namespaces/default/schemas/Order/instances/queued"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
         });
     }
 }

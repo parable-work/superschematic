@@ -343,7 +343,29 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- if .HasScalarArgs}}
 	{{- range .ScalarArgs}}
-	{{- if .IsMap}}
+	{{- if and .UnionWrapper (not .IsMap) (not .IsArrayOfArrays)}}
+	// {{.Name}} holds a union: {{if .IsArray}}each element{{else}}its value{{end}} is validated as the member it
+	// holds, through {{.UnionWrapper}}, its errors nested under {{if .IsArray}}{{.Name}}[i]{{else}}{{.Name}}{{end}}, as
+	// the route reports them.
+	{{- if .IsArray}}
+	{{- if .Required}}
+	if input.{{.GoName}} == nil {
+		validationErrors.AddFieldError("{{.Name}}", "required", "required field")
+	}
+	{{- end}}
+	for i, item := range input.{{.GoName}} {
+		appendUnionValidationErrors(validationErrors, fmt.Sprintf("{{.Name}}[%d]", i), item == nil, {{.UnionWrapper}}{Value: item})
+	}
+	{{- else if .Pointer}}
+	// An optional union whose pointer holds no member is absent, as the
+	// route takes a null optional argument.
+	if input.{{.GoName}} != nil && *input.{{.GoName}} != nil {
+		appendUnionValidationErrors(validationErrors, "{{.Name}}", false, {{.UnionWrapper}}{Value: *input.{{.GoName}}})
+	}
+	{{- else}}
+	appendUnionValidationErrors(validationErrors, "{{.Name}}", input.{{.GoName}} == nil, {{.UnionWrapper}}{Value: input.{{.GoName}}})
+	{{- end}}
+	{{- else if .IsMap}}
 	// {{.Name}} is a map, sent as a JSON object; {} is a value.
 	{{- if .IsArray}}
 	// A list value is never nil, reported at {{.Name}}[key].
@@ -365,11 +387,11 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		}
 		{{- if not .IsGoPrimitive}}
 		for i := range value {
-			validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%s][%d]", key, i), &value[i])
+			{{elementCheck . "[%s][%d]" "key, i" "value[i]"}}
 		}
 		{{- end}}
 		{{- else}}
-		validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%s]", key), &value)
+		{{elementCheck . "[%s]" "key" "value"}}
 		{{- end}}
 	}
 	{{- end}}
@@ -393,7 +415,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		}
 		{{- if not .IsGoPrimitive}}
 		for j := range row {
-			validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%d][%d]", i, j), &row[j])
+			{{elementCheck . "[%d][%d]" "i, j" "row[j]"}}
 		}
 		{{- end}}
 	}

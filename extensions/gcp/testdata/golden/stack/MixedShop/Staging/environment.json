@@ -1161,27 +1161,6 @@
         ]
       },
       {
-        "id": "Orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "Orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "Orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "Orders"
-        ]
-      },
-      {
         "id": "dns.shop-api.a",
         "type": "gcp:dns/recordSet:RecordSet",
         "properties": {
@@ -2012,27 +1991,6 @@
         ]
       },
       {
-        "id": "shop-api.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-api.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-api.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-api"
-        ]
-      },
-      {
         "id": "shop-api.url-map",
         "type": "gcp:compute/uRLMap:URLMap",
         "properties": {
@@ -2649,27 +2607,6 @@
         ]
       },
       {
-        "id": "shop-orders-ship-orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-orders-ship-orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-staging",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-orders-ship-orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-orders-ship-orders"
-        ]
-      },
-      {
         "id": "shop-pricing.account",
         "type": "fake:iam/account:Account",
         "properties": {
@@ -2993,7 +2930,6 @@
         "Orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
         "Orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
         "Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
-        "Orders.trace-agent",
         "network",
         "network.nat",
         "network.router",
@@ -3006,7 +2942,6 @@
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sign-as-self",
         "shop-api.storage.shop-media",
-        "shop-api.trace-agent",
         "shop-db.database.shop-db",
         "shop-db.instance",
         "shop-db.migrator",
@@ -3020,7 +2955,6 @@
         "shop-orders-ship-orders.reads.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
         "shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
         "shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY",
-        "shop-orders-ship-orders.trace-agent",
         "shop-pricing.account",
         "shop-storefront.account",
         "shop-storefront.calls.shop-api.key",

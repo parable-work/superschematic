@@ -40,6 +40,11 @@ _JSON_VALUE_TYPES = frozenset({ {{- range $i, $type := .Namespace.JSONValueTypes
 _UNION_OUTPUT_TYPES = frozenset({ {{- range $i, $type := .Namespace.UnionOutputTypes}}{{if $i}}, {{end}}"{{$type}}"{{end -}} })
 _UNION_ADAPTERS: dict[str, Any] = {}
 {{- end}}
+{{- if .Namespace.UnionArgumentTypes}}
+# The unions this namespace's arguments hold. _validate_scalar_argument
+# reads one as the member the union picks and checks the member's rules.
+_UNION_ARGUMENT_TYPES = frozenset({ {{- range $i, $type := .Namespace.UnionArgumentTypes}}{{if $i}}, {{end}}"{{$type}}"{{end -}} })
+{{- end}}
 
 
 def _load_types_package() -> Any | None:
@@ -61,10 +66,14 @@ def _union_reader(type_name: str, union_type: Any) -> Any | None:
     """Return the function that reads a value as the union union_type, or
     None without pydantic.
 
-    It validates in lax mode, as from_dict_non_strict reads a model, so the
-    value is the member the union picks: by its discriminator when it has
-    one (Field(discriminator=...)), else the member the value fits.
+    A dict is read as the member the types package's structural predicate
+    picks (unions.read_union_value, D31 amended), as the Go, TypeScript and
+    Rust unions pick it, without coercion. A types package without the
+    predicate reads it through the alias in lax mode.
     """
+    read_union_value = getattr(getattr(_load_types_package(), "unions", None), "read_union_value", None)
+    if callable(read_union_value):
+        return lambda value: read_union_value(type_name, value)
     adapter = _UNION_ADAPTERS.get(type_name)
     if adapter is None:
         try:
@@ -290,7 +299,8 @@ class {{.Namespace.ClassName}}:
         model_validate to coerce stringified enum values. A model is read
         with the generated from_dict_non_strict helper instead, which is the
         type library's contract for parsing API payloads{{if .Namespace.UnionOutputTypes}}, and a union in
-        the same lax mode through its alias (_union_reader){{end}}.
+        the member the types package's structural predicate picks
+        (_union_reader){{end}}.
         """
         output_type = self._resolve_validation_type(type_name)
         if output_type is None:
@@ -349,6 +359,34 @@ class {{.Namespace.ClassName}}:
         return {{.Namespace.PageType}}(items=items, next=next_cursor)
 {{- end}}
 
+{{- if .Namespace.UnionArgumentTypes}}
+
+    def _validate_union_argument(self, value: Any, union_name: str, field_name: str) -> Any:
+        """Read one value of a union argument as the member the union picks
+        and return it as it is sent, by wire name.
+
+        A dict is read as the member the types package's structural
+        predicate picks (unions.read_union_value, D31 amended), as the Go,
+        TypeScript and Rust unions pick it, so nothing is coerced: a value
+        no member reads raises ValidationError at field_name. The member's
+        rules are then checked by its validate_all, each error under
+        field_name (payment.number), as the route reports them.
+        """
+        read_union_value = getattr(getattr(_load_types_package(), "unions", None), "read_union_value", None)
+        if not callable(read_union_value):
+            return value
+        try:
+            member = read_union_value(union_name, value)
+        except ValueError as err:
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": str(err)}]},
+            ) from err
+        rule_errors = self._rule_errors(member, field_name)
+        if rule_errors:
+            raise ValidationError(rule_errors)
+        return self._client.to_dict(member)
+{{- end}}
+
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
         """Validate one value of an argument and return it as it is sent.
 
@@ -368,6 +406,10 @@ class {{.Namespace.ClassName}}:
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
+{{- if .Namespace.UnionArgumentTypes}}
+        if scalar_type_name in _UNION_ARGUMENT_TYPES:
+            return self._validate_union_argument(value, scalar_type_name, field_name)
+{{- end}}
 
         from_dict_non_strict = getattr(scalar_type, "from_dict_non_strict", None)
         if callable(from_dict_non_strict) and isinstance(value, (dict, scalar_type)):

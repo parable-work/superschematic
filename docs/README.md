@@ -41,7 +41,7 @@ docs/
     first-project/        the tutorial over examples/acme-shop
     guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, its behaviors, work queues and Topcoat
     install/              per-language pages (the "Languages" group)
-    extending/            write an extension, deploy, platform, stack targets
+    extending/            write an extension, stack targets
     reference/            naming file, CLI, one page per feature
     404.md                not-found page, emitted as dist/404.html for GitHub Pages
   src/components/Snippet.astro  quotes a file of examples/acme-shop, examples/engine-notes, examples/engine-jobs or examples/migrations

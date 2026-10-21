@@ -92,8 +92,10 @@ func (p *Provisioner) jobEnviron(req registry.ProvisionRequest, prog *Program, j
 // one, or builds a Rust one's crate into the program's Cargo target
 // directory, and returns the job with its command and its environment. A
 // Rust job's binary is the one its Cargo.toml names, which no other Rust
-// deployable of the environment may name too (rustBinaries).
-func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionRequest, prog *Program, j *Job) (*builtJob, error) {
+// deployable of the environment may name too (rustBinaries). prune is
+// projectEngine's: stack dev's rollout prunes the project engine's staged
+// members, and stack run, from another process, does not.
+func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionRequest, prog *Program, j *Job, prune bool) (*builtJob, error) {
 	if req.OutputRoot == "" {
 		return nil, errors.New("local: the request names no output root, where the build wrote each job's entrypoint module")
 	}
@@ -105,6 +107,11 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 	if err != nil {
 		return nil, err
 	}
+	engine, err := p.projectEngine(ctx, req, module, "job", j.Deployable, prune)
+	if err != nil {
+		return nil, err
+	}
+	env = engine.processEnv(env)
 	if j.Language == LanguageTypeScript {
 		bun, err := p.lookPath("bun")
 		if err != nil {
@@ -139,7 +146,7 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 		return nil, err
 	}
 	p.printf("build %s: go build %s", j.Deployable, j.Module)
-	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
+	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: engine.buildEnv(req)}); err != nil {
 		return nil, fmt.Errorf("local: build job %s: %w", j.Deployable, err)
 	}
 	return &builtJob{job: j, binary: binary, module: module, env: env}, nil
@@ -151,7 +158,7 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 func (p *Provisioner) buildJobs(ctx context.Context, req registry.ProvisionRequest, prog *Program, jobs []*Job) error {
 	k := key(req.Environment)
 	for _, j := range jobs {
-		b, err := p.buildJob(ctx, req, prog, j)
+		b, err := p.buildJob(ctx, req, prog, j, true)
 		if err != nil {
 			return err
 		}
@@ -424,7 +431,7 @@ func (p *Provisioner) RunJob(ctx context.Context, req registry.ProvisionRequest,
 		return fmt.Errorf("local: a run of job %s goes on, from stack dev's schedule; run it again once that run ends", j.Deployable)
 	}
 	defer unlock(lock)
-	b, err := p.buildJob(ctx, req, prog, j)
+	b, err := p.buildJob(ctx, req, prog, j, false)
 	if err != nil {
 		return err
 	}

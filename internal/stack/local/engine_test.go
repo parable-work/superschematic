@@ -1,0 +1,273 @@
+package local_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
+	"github.com/parable-work/superschematic/internal/stack/local"
+)
+
+// engineCrate writes a stand-in of the project's engine crate of db under
+// the fixture's output root, its manifest depending on the engine by spec,
+// and a built member file of each binding beside it, and returns the
+// crate's directory and the cargo messages each member's build answers.
+func engineCrate(t *testing.T, f *fixture, db, spec string) (string, map[string]string) {
+	t.Helper()
+	crate := filepath.Join(f.req.OutputRoot, "engine", "rust", db)
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(crate, "Cargo.toml"), "[package]\nname = \"shop-db-engine\"\n\n[dependencies]\nsuperschematic-engine = "+spec+"\n")
+	messages := map[string]string{}
+	for member, built := range map[string]struct{ kind, file, content string }{
+		projectengine.FFIDir:  {"staticlib", "libshop_db_engine_ffi.a", "the archive"},
+		projectengine.NapiDir: {"cdylib", "libshop_db_engine_napi.so", "the addon"},
+	} {
+		manifest := filepath.Join(crate, member, "Cargo.toml")
+		write(manifest, "[package]\nname = \"shop-db-engine-"+member+"\"\n")
+		file := filepath.Join(f.req.Dir, local.RustTargetDir, "release", built.file)
+		write(file, built.content)
+		data, err := json.Marshal(map[string]any{
+			"reason":        "compiler-artifact",
+			"manifest_path": manifest,
+			"target":        map[string]any{"kind": []string{built.kind}},
+			"filenames":     []string{file},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages[member] = `{"reason":"build-script-executed"}` + "\n" + string(data) + "\n" + `{"reason":"build-finished","success":true}` + "\n"
+	}
+	return crate, messages
+}
+
+// link writes the projectengine.LinkFile of the deployable name's module,
+// which takes member of crate.
+func link(t *testing.T, f *fixture, name, crate, member, lockfile string) {
+	t.Helper()
+	module := filepath.Join(f.req.OutputRoot, local.ModulePath(f.env.Stack, name))
+	l, err := projectengine.LinkOf(module, "shop-db", crate, member, lockfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectengine.WriteLink(module, l); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheProjectsEngineBuildsForItsEntrypoints applies Dev of the shop with
+// its TypeScript storefront, shop-api's module and the storefront's naming
+// the project's engine crate of shop-db (D58): cargo builds the crate's ffi
+// member for shop-api, whose go build searches the staged archive's
+// directory before the request's CGO_LDFLAGS, and its napi member for the
+// storefront, whose process names the staged addon with
+// SUPERSCHEMATIC_ENGINE_ADDON; the engine workspace's lock file seeds the
+// crate's. Every other build and process is as before.
+func TestTheProjectsEngineBuildsForItsEntrypoints(t *testing.T) {
+	t.Setenv("RUSTUP_TOOLCHAIN", "")
+	f := newFixtureOf(t, storefront(), "Dev")
+	crate, messages := engineCrate(t, f, "shop-db", `{ path = "../../../../runtime/engine/rust/engine", default-features = false }`)
+	lockfile := filepath.Join(t.TempDir(), "Cargo.lock")
+	if err := os.WriteFile(lockfile, []byte("# the engine's lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link(t, f, "shop-api", crate, projectengine.FFIDir, lockfile)
+	link(t, f, "shop-storefront", crate, projectengine.NapiDir, lockfile)
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+		{prefix: "/bin/cargo build --release --quiet --manifest-path " + filepath.Join(crate, "ffi", "Cargo.toml"), out: messages[projectengine.FFIDir]},
+		{prefix: "/bin/cargo build --release --quiet --manifest-path " + filepath.Join(crate, "napi", "Cargo.toml"), out: messages[projectengine.NapiDir]},
+	}
+	f.req.BuildEnv = map[string]string{"CGO_LDFLAGS": "-L/cache/archives/lib"}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+
+	if data, err := os.ReadFile(filepath.Join(crate, "Cargo.lock")); err != nil || string(data) != "# the engine's lock\n" {
+		t.Errorf("the crate's lock file is %q (%v), want the engine's", data, err)
+	}
+	cargos := 0
+	for _, cmd := range f.runner.commands {
+		if cmd.Path != "/bin/cargo" {
+			continue
+		}
+		cargos++
+		if !strings.Contains(strings.Join(cmd.Args, " "), "--target-dir "+filepath.Join(f.req.Dir, local.RustTargetDir)+" ") {
+			t.Errorf("cargo %s builds outside the program's target directory", strings.Join(cmd.Args, " "))
+		}
+		if got := envValue(cmd.Env, "RUSTUP_TOOLCHAIN"); got != "1.99.0" {
+			t.Errorf("cargo builds the engine crate with RUSTUP_TOOLCHAIN=%q, want tools.env's release", got)
+		}
+	}
+	if cargos != 2 {
+		t.Errorf("cargo ran %d times, want once for shop-api's archive and once for the storefront's addon", cargos)
+	}
+
+	archive := filepath.Join(f.req.Dir, local.EngineDir, "shop-db", "ffi")
+	for _, cmd := range f.runner.commands {
+		if !strings.HasSuffix(cmd.Path, "/go") {
+			continue
+		}
+		got := envValue(cmd.Env, "CGO_LDFLAGS")
+		if filepath.Base(cmd.Dir) != "shop-api" {
+			if got != "-L/cache/archives/lib" {
+				t.Errorf("go build in %s with CGO_LDFLAGS=%q, want the request's alone", cmd.Dir, got)
+			}
+			continue
+		}
+		dir, rest, _ := strings.Cut(strings.TrimPrefix(got, "-L"), " ")
+		if filepath.Dir(dir) != archive || rest != "-L/cache/archives/lib" {
+			t.Fatalf("shop-api builds with CGO_LDFLAGS=%q, want the staged archive's directory under %s, then the request's", got, archive)
+		}
+		if data, err := os.ReadFile(filepath.Join(dir, "libsuperschematic_engine.a")); err != nil || string(data) != "the archive" {
+			t.Errorf("the staged archive is %q (%v), want the ffi member's", data, err)
+		}
+	}
+
+	for _, p := range f.runner.started {
+		addon := envValue(p.cmd.Env, projectengine.AddonEnv)
+		if filepath.Base(p.cmd.Dir) != "shop-storefront" {
+			if addon != "" {
+				t.Errorf("%s runs with %s=%q", p.cmd.Dir, projectengine.AddonEnv, addon)
+			}
+			continue
+		}
+		if filepath.Dir(filepath.Dir(addon)) != filepath.Join(f.req.Dir, local.EngineDir, "shop-db", "napi") || filepath.Base(addon) != "shop-db-napi.node" {
+			t.Fatalf("the storefront runs with %s=%q, want the staged addon", projectengine.AddonEnv, addon)
+		}
+		if data, err := os.ReadFile(addon); err != nil || string(data) != "the addon" {
+			t.Errorf("the staged addon is %q (%v), want the napi member's", data, err)
+		}
+	}
+	if !strings.Contains(f.out.String(), "build shop-api: cargo build --release of the engine crate of shop-db, its ffi member") {
+		t.Errorf("output does not say it builds the engine crate:\n%s", f.out)
+	}
+}
+
+// TestAnEngineCrateByVersionIsRefused: a crate that depends on the engine
+// by version, as a build with no [paths] engine keys writes it, is refused
+// before cargo runs, since no registry serves the engine's crates; so is
+// one whose member's binding crate is by version, as a build that sets
+// engine_rust and leaves engine_abi_rust unset writes it.
+func TestAnEngineCrateByVersionIsRefused(t *testing.T) {
+	f := newFixture(t, "Dev")
+	crate, _ := engineCrate(t, f, "shop-db", `{ version = "0.0.0", default-features = false }`)
+	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	err := f.applyAll(t)
+	if err == nil || !strings.Contains(err.Error(), "local: server shop-api: the engine crate of shop-db depends on superschematic-engine ([paths] engine_rust) by version") {
+		t.Fatalf("apply = %v, want the crate refused", err)
+	}
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" {
+			t.Errorf("cargo ran: %s", cmd)
+		}
+	}
+}
+
+// TestARebuiltEngineCrateRelinks: applied again after the archive changed,
+// shop-api builds against a directory of the new archive's own, which
+// changes the flags Go's build cache keys the link on. The rollout keeps
+// the directory used last before it, which a process may still name, and
+// removes older ones: after a third archive, the first's is gone.
+func TestARebuiltEngineCrateRelinks(t *testing.T) {
+	f := newFixture(t, "Dev")
+	crate, messages := engineCrate(t, f, "shop-db", `{ path = "../engine", default-features = false }`)
+	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
+	var built string
+	for _, line := range strings.Split(messages[projectengine.FFIDir], "\n") {
+		var m struct{ Filenames []string }
+		if json.Unmarshal([]byte(line), &m) == nil && len(m.Filenames) > 0 {
+			built = m.Filenames[0]
+		}
+	}
+	runs := 0
+	apply := func(content string) string {
+		t.Helper()
+		runs++
+		if err := os.WriteFile(built, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f.runner.rules = []rule{
+			{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+			{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+			{prefix: "/bin/cargo build", out: messages[projectengine.FFIDir]},
+		}
+		if err := f.applyAll(t); err != nil {
+			t.Fatalf("%v\n%s", err, f.out)
+		}
+		got := ""
+		for _, cmd := range f.runner.commands {
+			if strings.HasSuffix(cmd.Path, "/go") && filepath.Base(cmd.Dir) == "shop-api" {
+				got = envValue(cmd.Env, "CGO_LDFLAGS")
+			}
+		}
+		dir, _, _ := strings.Cut(strings.TrimPrefix(got, "-L"), " ")
+		if data, err := os.ReadFile(filepath.Join(dir, "libsuperschematic_engine.a")); err != nil || string(data) != content {
+			t.Fatalf("shop-api builds against %q, whose archive is %q (%v), want %q", dir, data, err, content)
+		}
+		// Each later run is later by the clock the prune reads.
+		then := time.Now().Add(time.Duration(runs-10) * time.Minute)
+		if err := os.Chtimes(dir, then, then); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	first := apply("the archive, the first build of it")
+	second := apply("the archive, rebuilt")
+	if first == second {
+		t.Fatalf("shop-api built against %s twice, want a directory per archive", first)
+	}
+	if _, err := os.Stat(first); err != nil {
+		t.Errorf("the archive used last before, at %s, is gone: %v", first, err)
+	}
+	third := apply("the third")
+	for _, kept := range []string{second, third} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s is gone: %v", kept, err)
+		}
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Errorf("the first archive's directory %s is left: %v", first, err)
+	}
+}
+
+// TestAPartlySetEngineCrateIsRefused: engine_rust set and engine_abi_rust
+// not, the crate depends on the engine by path and its ffi member on the C
+// ABI's crate by version, which is refused, naming the key to set.
+func TestAPartlySetEngineCrateIsRefused(t *testing.T) {
+	f := newFixture(t, "Dev")
+	crate, _ := engineCrate(t, f, "shop-db", `{ path = "../engine", default-features = false }`)
+	if err := os.WriteFile(filepath.Join(crate, "ffi", "Cargo.toml"), []byte("[package]\nname = \"shop-db-engine-ffi\"\n\n[dependencies]\nsuperschematic-engine-abi = { version = \"0.0.0\", default-features = false }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	err := f.applyAll(t)
+	if err == nil || !strings.Contains(err.Error(), "the engine crate of shop-db depends on superschematic-engine-abi ([paths] engine_abi_rust) by version") {
+		t.Fatalf("apply = %v, want the member's dependency refused", err)
+	}
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" {
+			t.Errorf("cargo ran: %s", cmd)
+		}
+	}
+}

@@ -63,7 +63,7 @@ func TestCIIdentity(t *testing.T) {
 
 	// The pool, its provider and the accounts are the ones bootstrap
 	// creates.
-	boot, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), "Staging"), "acme/shop")
+	boot, err := gcp.BootstrapEnvironment(resolve(t, reg, s, stacktest.AcmeShop(), "Staging"), gcp.GitHubCI{Repository: "acme/shop"})
 	if err != nil {
 		t.Fatal(err)
 	}

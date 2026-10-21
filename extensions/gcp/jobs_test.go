@@ -191,7 +191,7 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 		"cloud build " + shopRepo + "shop-api:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-fulfil-orders:context-<hex>",
 		"cloud build " + shopRepo + "shop-orders-ship-orders:context-<hex>",
-		"render 56 nodes",
+		"render 52 nodes",
 		"apply infrastructure",
 		"cloud run job job --job gs://" + stateBucket + "/superschematic/migrations/shop/Staging/shop-db/expand-<hex>.json",
 		"apply rollout 1",
@@ -304,9 +304,10 @@ func TestDeployBuildsAndMigratesOnGCP(t *testing.T) {
 
 // TestStateBucketLifecycle: bootstrap gives the state bucket, one that
 // exists already too, a rule that deletes the build contexts and the
-// migration documents after 30 days, once; every other object a deploy
-// writes there is a manifest, which the rule leaves, as it leaves Pulumi's
-// state. A deploy after the rule deleted every object it covers builds
+// migration documents after 30 days, and one that deletes the queue
+// operations' results after a day (D68, amended), once; every other object
+// a deploy writes there is a manifest, which the rules leave, as they
+// leave Pulumi's state. A deploy after the rule deleted every object it covers builds
 // nothing and runs, since the images are found by their tags.
 func TestStateBucketLifecycle(t *testing.T) {
 	f := newJobFixture(t, gcp.Extension{MigrateVersion: "1.2.3"})
@@ -330,9 +331,14 @@ func TestStateBucketLifecycle(t *testing.T) {
 		t.Errorf("the second bootstrap changed %v", again[len(first):])
 	}
 
-	rule := f.cloud.lifecycle[stateBucket]
+	rules := f.cloud.lifecycle[stateBucket]
+	if len(rules) != 2 || !slices.Equal(rules[1].Prefixes, []string{"superschematic/queue/"}) || rules[1].AgeDays != 1 {
+		t.Errorf("the state bucket's rules are %+v", rules)
+	}
 	pruned := func(object string) bool {
-		return slices.ContainsFunc(rule.Prefixes, func(p string) bool { return strings.HasPrefix(object, p) })
+		return slices.ContainsFunc(rules, func(rule gcp.LifecycleRule) bool {
+			return slices.ContainsFunc(rule.Prefixes, func(p string) bool { return strings.HasPrefix(object, p) })
+		})
 	}
 	for _, kept := range []string{".pulumi/stacks/shop/Staging.json", ".pulumi/history/shop/Staging/x.history.json", "superschematic/manifests/shop/Staging.json"} {
 		if pruned(kept) {

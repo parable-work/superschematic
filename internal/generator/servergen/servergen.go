@@ -36,6 +36,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -283,6 +284,13 @@ type Server struct {
 	// database it connects to (D58). With one, engine.go opens each, and
 	// go.mod requires the engine's Go binding.
 	Engines []*Engine
+
+	// EngineLink names the ffi member of the project's engine crate whose
+	// archive the binary links in the core's place, nil when the core's
+	// archive runs every behavior its engines compose: Write writes it as
+	// projectengine.LinkFile, which the local target builds the archive
+	// from (D58).
+	EngineLink *projectengine.Link
 
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
@@ -824,6 +832,9 @@ func Plan(in Input) (*Server, error) {
 		return nil, err
 	}
 	in.opensEngine = len(s.Engines) > 0
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
+		return nil, err
+	}
 	s.Docker, s.NoDocker, err = planDocker(in, dir)
 	if err != nil {
 		return nil, err
@@ -952,7 +963,7 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		// The release's archives hold the core's engine archive beside
 		// superscalar's and the version graph's (D58), not a project's.
 		if p := in.EngineProject; p != nil {
-			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds, and the naming file's [paths] scalar_go is unset; set scalar_go and engine_go to a checkout's runtimes", p.Database, p.Dir), nil
+			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds and no release ships (D58, amended), and the naming file's [paths] scalar_go is unset; set scalar_go, engine_go and the engine crates' keys (engine_rust, engine_behaviors_rust, engine_workqueue_rust, engine_abi_rust) to a checkout's runtimes", p.Database, p.Dir), nil
 		}
 		d.Archives = archives
 		if in.VersionGraphGo != "" {
@@ -1115,6 +1126,11 @@ func Write(s *Server, dir string) error {
 	}
 	if err := writeEngine(s, dir); err != nil {
 		return err
+	}
+	if s.EngineLink != nil {
+		if err := projectengine.WriteLink(dir, *s.EngineLink); err != nil {
+			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
+		}
 	}
 	return writeCORS(s, dir)
 }

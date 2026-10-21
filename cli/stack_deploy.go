@@ -23,6 +23,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/generator/cigen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
@@ -127,6 +128,12 @@ type deployContext struct {
 	services []stack.Service
 	dir      string
 	cleanup  []func()
+
+	// stack and config are the stack's declaration and its service's
+	// config, and schemasRoot the canonical checkout it resolves in.
+	stack       *ir.Stack
+	config      *schemaconfig.SchemaConfig
+	schemasRoot string
 }
 
 func (c *deployContext) close() {
@@ -194,6 +201,7 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 	if c.env, err = stack.Resolve(p.reg, stack.Input{Stack: st, Services: c.services, Environment: environment, SchemasRoot: schemasRoot}); err != nil {
 		return fail(err)
 	}
+	c.stack, c.config, c.schemasRoot = st, cfg, schemasRoot
 	if c.env.Target == local.Target && !allowLocal {
 		return fail(fmt.Errorf("environment %s is on the %s target, which `stack %s` does not deploy: run it with `superschematic stack dev --environment %s`",
 			environment, local.Target, cmd.Name(), environment))
@@ -203,6 +211,40 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 		c.dir = programDir(p.outputRoot, st.Name, environment)
 	}
 	return c, nil
+}
+
+// environmentsOn resolves every environment of the stack on target, in
+// declaration order: the environments bootstrap scopes the CI's
+// identities by (D69).
+func (c *deployContext) environmentsOn(target string) ([]*ir.ResolvedEnvironment, error) {
+	var out []*ir.ResolvedEnvironment
+	for _, e := range c.stack.Environments {
+		env := c.env
+		if e.Name != c.env.Environment {
+			var err error
+			if env, err = stack.Resolve(c.reg, stack.Input{Stack: c.stack, Services: c.services, Environment: e.Name, SchemasRoot: c.schemasRoot}); err != nil {
+				return nil, err
+			}
+		}
+		if env.Target == target {
+			out = append(out, env)
+		}
+	}
+	return out, nil
+}
+
+// ciBranch is the branch the stack's generated GitHub Actions workflow
+// deploys from: its outputs.ci.github branch, registry.DefaultCIBranch
+// when it names none or has no workflow.
+func (c *deployContext) ciBranch() (string, error) {
+	outputs, err := registry.ParseOutputs(c.config.Outputs, c.reg)
+	if err != nil {
+		return "", err
+	}
+	if branch := outputs.CI[cigen.GitHubRenderer].Branch; branch != "" {
+		return branch, nil
+	}
+	return registry.DefaultCIBranch, nil
 }
 
 func stackHasEnvironment(st *ir.Stack, name string) bool {
@@ -387,6 +429,9 @@ the APIs, creates the state bucket and its KMS key, applies the Artifact
 Registry repository, the deployer and planner accounts and Workload
 Identity Federation for the GitHub repository the git remote names, and
 creates the secret of each platform credential the environment needs.
+Each account admits only the generated CI's jobs that sign in as it, by
+the stack's environments in the project and its CI branch: run bootstrap
+again after adding an environment to a project or changing the branch.
 
 Then it records what only the cloud knows in the stack's schema: on gcp,
 the project's number, as projectNumber in the gcp values of the
@@ -419,13 +464,23 @@ Last, it asks for each credential that has no value, without echoing it.`,
 			if !cmd.Flags().Changed("repository") {
 				repository = gitHubRepository(cmd.Context(), filepath.Dir(c.version.servicesRoot))
 			}
+			envs, err := c.environmentsOn(c.env.Target)
+			if err != nil {
+				return err
+			}
+			branch, err := c.ciBranch()
+			if err != nil {
+				return err
+			}
 			recorded, err := stackdeploy.Bootstrap(cmd.Context(), stackdeploy.BootstrapOptions{
-				Options:    c.options(cmd, nil),
-				Repository: repository,
-				Prompter:   terminalPrompter(cmd),
-				Source:     &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir, EditTypeScript: editTypeScript},
-				GitHub:     github,
-				Reveal:     cmd.OutOrStdout(),
+				Options:      c.options(cmd, nil),
+				Repository:   repository,
+				Branch:       branch,
+				Environments: envs,
+				Prompter:     terminalPrompter(cmd),
+				Source:       &stackdeploy.SchemaSource{Schema: c.schema, Dir: c.project.dir, EditTypeScript: editTypeScript},
+				GitHub:       github,
+				Reveal:       cmd.OutOrStdout(),
 			})
 			// A value recorded before a credential's prompt failed is
 			// in the schema all the same, so its line is printed.
