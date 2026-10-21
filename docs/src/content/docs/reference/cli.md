@@ -772,6 +772,7 @@ is section 8.8 of
 superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
 superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
 superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
 ```
 
 - `dead` lists the dead messages, the oldest death first, up to
@@ -794,16 +795,33 @@ without a build, and runs the operation with the migration runner, from
 On the `local` target it reaches the database at the URL the environment
 resolves, on the Postgres container `stack dev` runs; run it from another
 terminal, and when the database does not answer it says to start `stack
-dev`. It refuses a queue no DB service of the stack declares, a queue
-whose database the environment places on another dialect than Postgres,
-on which no queue is claimed, and an environment on any target but
-`local`, whose databases it does not reach yet.
+dev`.
+
+On a cloud target it runs on the deployed run's database through the
+target's queue runner, and refuses a target that has none and a run that
+was never deployed. On gcp the operation is one execution of the stack's
+migration job, `<stack>-migrate`, which a deploy's migrations run as: the
+runner reaches Cloud SQL as the `migrator` and writes its result to the
+state bucket, under `superschematic/queue/<stack>/<run>/` with a random
+128-bit id, in place of its stdout. The command reads that object once and
+deletes it, and the bucket's lifecycle deletes one it did not after a day.
+A listing's messages may hold personal data, so they never reach the
+execution's logs; an execution that fails reports the runner's error, read
+from Cloud Logging as a failed migration's is. The `deployer` account, or
+an owner, runs it; a project bootstrapped before this needs `stack
+bootstrap` again, which grants the `migrator` its write.
+
+It refuses a queue no DB service of the stack declares, and a queue whose
+database the environment places on another dialect than Postgres, on
+which no queue is claimed.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
 | `--naming` | `<stack>/../../superschematic.toml` | naming config file |
 | `--format` | `text` | `text`, or `json` for the runner's result: the operation, and the `total` and `messages` it listed or the `ids` it changed |
+| `--param` | none | `<name>=<value>`, repeatable: a parameter's value, for a member of a parameterized environment on a cloud target |
+| `--timeout` | `30m` | give up waiting for the operation after this long; on gcp an execution it stops waiting for may still finish, and its result is deleted a day later |
 | `--limit` | `100` | `dead`: list at most this many |
 | `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
 | `--yes` | off | `drop`: confirm `--all` |
