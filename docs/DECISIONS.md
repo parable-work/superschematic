@@ -8784,3 +8784,36 @@ lease as it should, not a delay in the handover. The test now ends the
 holder's new session too until the other takes the lease
 (`hand_over`), and held in 20 runs of 20 beside a release build, the
 first taking its lease again in two of them.
+
+### D47, amended: no project code runs where deploy credentials are: a `prepare` job builds what the cloud jobs deploy, the stack commands read it, and a child process for project code gets an environment without credentials
+
+D47's amendment signed each cloud job in after its installs and builds,
+and left two exposures. GitHub grants `id-token: write` to the whole job,
+so the build and the installs before the sign-in could still ask for an
+identity token; and `stack plan`, `deploy` and `destroy` ran the
+project's TypeScript after it: the loader's sidecar documents through
+Bun, and a deploy's frozen install of the output root's workspace, each
+site's build and each bundle's. Every such child process inherited
+`GOOGLE_APPLICATION_CREDENTIALS`, the gcloud override, the credentials
+file in the workspace, `CLOUDFLARE_API_TOKEN`,
+`PULUMI_CONFIG_PASSPHRASE` and GitHub's own
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN`, so a dependency's install script, a
+build plugin or a sidecar document could read them. A developer's own
+credentials were exposed the same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic stack prepare [environment...]` writes, with no credentials, everything a deploy of the environments runs project code to make, into a directory (`--dir`, `<output-root>/prepared/<stack>` unless set): each service's sidecar documents, evaluated; each server's, job's and worker's build context, as `contexts/<deployable>.tar.gz`; each site's files, built, as `sites/<site>.tar`; and each bundle, built, as `bundles/<deployable>.tar`; with `prepared.json`, which names each and its digest. A site's or a bundle's archive is the tar stream its digest is of (D55, D64), so an upload that drops file modes cannot change it, and a reader checks it against the digest before it extracts it. With no environment named it prepares every one off the local target, since a context, a site's files and a bundle do not depend on the environment. `--no-build` writes the documents alone. | `stack build`, which uploads through the target and needs its credentials. Uploading the output root and the repository, and building the contexts in the cloud job, which needs `build-all` there. The files of a site as a directory, whose executable bits an artifact upload drops, changing the digest. |
+| Every cloud stack command takes `--prepared <dir>`. With it the loader takes each sidecar document a module runs from `prepared.json` and never starts Bun: a document it lacks, or one whose file or imports changed since, is refused, naming `stack prepare`. `stack deploy` and `stack build` take each context, site and bundle from the directory and install and build nothing: a deployable it holds nothing for keeps the manifest's, or `--image`'s, `--site`'s or `--bundle`'s, as one with no Dockerfile does. | Refusing a TypeScript sidecar document in CI, which no target registers today but an extension may. Evaluating the documents in the cloud job before it signs in, which still holds the job's `id-token`. |
+| The generated workflow has a `prepare` job, with no `id-token` and no secret, on every event a cloud job runs on: a pull request from the repository, its closing too when the stack has a preview, and a push. It runs the build, the Rust setup and the workspace's install, as the cloud jobs did, then `stack prepare` into the runner's temporary directory, and uploads it as the artifact `prepared`. On a closing pull request it builds nothing and prepares the documents alone (`--no-build`), which the preview's destroy reads. Each cloud job needs `prepare`, downloads the artifact, installs the schemas root's packages with `--ignore-scripts`, which the loader reads the types of, signs in last and runs its stack commands with `--prepared`. It runs no build, no Bun and no script of the project's: `TestCloudJobsSignInLast` holds every golden's cloud jobs to the steps that may run there. | The build in the cloud job before the sign-in, D47's last amendment, whose steps the job's `id-token` reached. `prepare` folded into `check`, which does not run when a pull request closes, when the destroy still needs the documents. One prepare job per environment, which builds the same contexts, sites and bundles again. |
+| Every child process the stack commands, the document harness and `stack prepare` start to run project code (the harness, the workspace's install, a site's build, a bundle's) gets an allowlisted environment (`internal/childenv`): the path, home, user, shell, temporary directories, locale, terminal, `CI`, the proxy and certificate variables, `XDG_*`'s directories, Bun's install and cache directories, `NODE_ENV`, and Windows' system variables. `SUPERSCHEMATIC_CHILD_ENV` names more, a registry token's for a private package, but never one of a credential's prefix: `GOOGLE_`, `CLOUDSDK_`, `CLOUDFLARE_`, `PULUMI_`, `AWS_`, `AZURE_`, `ARM_`, `ACTIONS_`, nor `GITHUB_TOKEN`, `GH_TOKEN` or a superschematic passphrase. Locally this is the boundary: `stack deploy` builds as before, with the children scrubbed. | A denylist of known credentials, which misses the next one: `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and its URL mint identity tokens, and an install script reads whatever a shell exports. The shell's environment with a few names removed, for the same reason. |
+| A credentials file stays where it is. In CI the file `google-github-actions/auth` writes lies in the workspace, where no project code runs after the sign-in, so nothing reads it; and the `prepare` job holds none. On a developer's machine, gcloud's application default credentials or a key file stay readable to every process of the user, a child included: the scrubbed environment no longer points at them, which stops a script that reads the variables, not one that reads the well-known path. A developer who wants no project code beside them runs `stack prepare` in a shell with no credentials and `stack deploy --prepared`. | Moving the file, or a copy deleted before the builds: superschematic does not own gcloud's file, and a deploy needs it after the builds. Another `HOME` for the children, which breaks Bun's and git's caches and stops nothing that names the path. A sandbox per child, which no platform the CLI runs on gives without privileges. |
+
+What stays out. `stack dev`'s local builds and servers keep the shell's
+environment: the local target holds no deploy credentials, and its
+servers read the developer's settings. Cloud Build runs a Dockerfile
+with its own account, on the target. The `prepare` job runs the pull
+request's code, which makes what deploys, as the cloud jobs' builds did.
+The artifact holds the repository's own sources and the files built from
+them, no secret, and anyone who can read the repository's Actions runs
+can download it.
