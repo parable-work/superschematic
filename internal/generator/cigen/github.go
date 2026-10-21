@@ -870,10 +870,10 @@ func setupNode() step {
 	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}}}
 }
 
-// hasSite reports whether env deploys a static site, which `stack deploy`
-// builds on the runner with Bun after a frozen install of the output
-// root's workspace (D55): its deploy and preview jobs set up Bun and
-// install the workspace from the committed lockfile first. A job, a
+// hasSite reports whether env deploys a static site, which `stack
+// prepare` builds on the runner with Bun after a frozen install of the
+// output root's workspace (D55; D47, amended): the prepare job sets up Bun
+// and installs the workspace from the committed lockfile first. A job, a
 // worker or a bucket needs nothing of the workflow: the deploy builds
 // their images on the target, as a server's, and a bucket is a node of
 // the graph.
@@ -882,16 +882,16 @@ func hasSite(env registry.CIEnvironment) bool {
 }
 
 // hasBundle reports whether env places a server, a job or a worker on a
-// platform whose artifact is a bundle (D64), which `stack deploy` builds
+// platform whose artifact is a bundle (D64), which `stack prepare` builds
 // on the runner with `bun bundle.ts` after a frozen install of the output
 // root's workspace, as it builds a site.
 func hasBundle(env registry.CIEnvironment) bool {
 	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.HasBundle() })
 }
 
-// buildsWithBun reports whether a deploy of env builds a site or a bundle
-// on the runner with Bun, so its deploy and preview jobs set up Bun and
-// install the workspace from the committed lockfile first.
+// buildsWithBun reports whether a deploy of env needs a site or a bundle
+// built on the runner with Bun, so the prepare job sets up Bun and
+// installs the workspace from the committed lockfile first.
 func buildsWithBun(env registry.CIEnvironment) bool { return hasSite(env) || hasBundle(env) }
 
 // bundled are the stack's servers, jobs and workers some environment
