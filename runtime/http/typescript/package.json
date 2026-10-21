@@ -57,7 +57,7 @@
   "scripts": {
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json",
-    "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "build": "node scripts/link-local-deps.mjs && node ../../../scripts/build-dist.mjs tsc -p tsconfig.json",
     "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src && bun run build && node scripts/identity-node-check.mjs && node scripts/workers-check.mjs && node scripts/workerd-test.mjs",
     "workers-check": "node scripts/workers-check.mjs",
     "workerd-test": "node scripts/workerd-test.mjs"
