@@ -82,8 +82,13 @@ func RunDocument(servicePath, file string, opts ...Option) (result *Document, er
 	cmd := exec.Command(bunPath, "run", harnessPath, abs)
 	cmd.Dir = servicePath
 	// A document is the project's code: it runs with no credential in its
-	// environment (D47, amended).
-	cmd.Env = childenv.Environ()
+	// environment, and a scratch home (D47, amended).
+	env, cleanup, err := childenv.Environ()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

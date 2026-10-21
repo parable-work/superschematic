@@ -971,9 +971,16 @@ superschematic stack deploy Staging --prepared schemas/dist/prepared/shop-stack
 
 Every process a `stack` command starts to run your project's code, here
 or in a deploy without `--prepared`, gets an environment with no
-credential in it; `SUPERSCHEMATIC_CHILD_ENV` names more variables to pass,
-such as a private registry's token, and never passes a `GOOGLE_*`,
-`CLOUDSDK_*`, `CLOUDFLARE_*`, `PULUMI_*`, `AWS_*` or `ACTIONS_*` variable.
+credential in it and a scratch home of its own, with your caches;
+`SUPERSCHEMATIC_CHILD_ENV` names more variables to pass, such as a private
+registry's token (`HOME` keeps your home), and never passes a
+`GOOGLE_*`, `CLOUDSDK_*`, `GCLOUD_*`, `GCP_*`, `CLOUDFLARE_*`, `CF_*`,
+`WRANGLER_*`, `PULUMI_*`, `AWS_*` or `ACTIONS_*` variable, nor
+`SSH_AUTH_SOCK`, `KUBECONFIG` or `VAULT_TOKEN`. A file under your real
+home stays readable to a process that names its path, so run `stack
+prepare` before you sign in. In CI, `--prepared` refuses a directory
+prepared at another commit or in another run (`GITHUB_SHA`,
+`GITHUB_RUN_ID`).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

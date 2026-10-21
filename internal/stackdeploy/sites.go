@@ -206,11 +206,16 @@ func (s *session) install(ctx context.Context, src *Sources, what string) error 
 
 // execCommand is RunCommand with os/exec. What it runs is the project's
 // code, an install's scripts or a build's plugins, so it runs with no
-// credential in its environment (childenv, D47, amended).
+// credential in its environment, and a scratch home (childenv, D47,
+// amended).
 func execCommand(ctx context.Context, dir string, log io.Writer, name string, args ...string) error {
+	env, cleanup, err := childenv.Environ()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, log, log
-	cmd.Env = childenv.Environ()
+	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, log, log, env
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s in %s: %w", name, strings.Join(args, " "), dir, err)
 	}

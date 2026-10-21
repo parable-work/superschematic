@@ -15,8 +15,11 @@
 # The prepare job runs, with no credentials, all the project code the cloud
 # jobs need: the build, the installs, the sites' and bundles' builds and the
 # sidecar documents (superschematic stack prepare). A cloud job takes what
-# it made, and runs no build, no Bun and no package's script after it signs
-# in or anywhere else.
+# it made: it runs no build, no package's script and no sidecar document,
+# and its only package manager run, the schemas root's install with
+# --ignore-scripts, which the loader reads the types of, is on a Bun or
+# Node.js downloaded from its release, never restored from a cache another
+# job could write.
 
 name: desk-stack
 
@@ -117,6 +120,7 @@ jobs:
           name: prepared
           path: ${{ runner.temp }}/prepared
           if-no-files-found: error
+          retention-days: "1"
 
   plan-staging:
     name: plan Staging

@@ -52,6 +52,11 @@ type Prepared struct {
 	// holds the documents alone.
 	Built bool `json:"built"`
 
+	// Provenance is where the directory was prepared, in CI: the commit
+	// and the workflow run. A stack command in CI refuses a directory of
+	// another commit or run (CheckProvenance).
+	Provenance Provenance `json:"provenance,omitzero"`
+
 	// Documents holds each sidecar document a module of a service runs,
 	// by DocumentKey.
 	Documents map[string]*PreparedDocument `json:"documents,omitempty"`
@@ -61,6 +66,41 @@ type Prepared struct {
 	Contexts map[string]*PreparedContext  `json:"contexts,omitempty"`
 	Sites    map[string]*PreparedArtifact `json:"sites,omitempty"`
 	Bundles  map[string]*PreparedArtifact `json:"bundles,omitempty"`
+}
+
+// Provenance is the commit and the CI run a directory was prepared in:
+// GitHub Actions' GITHUB_SHA and GITHUB_RUN_ID. Empty outside CI.
+//
+// The digests in a prepared directory are checked against prepared.json,
+// which the same prepare wrote: they catch a corrupted or half-uploaded
+// directory, not a forged one, since code that runs in the prepare job,
+// a dependency's install script, writes prepared.json too. What a cloud
+// job deploys is as trustworthy as the prepare job of the same run, which
+// runs the same pull request's code a deploy without --prepared would
+// have run; the plan of a pull request, and the hazard gate, are what
+// review it (D47, amended). Provenance ties a directory to its run, so an
+// artifact of another run or commit cannot be deployed by mistake.
+type Provenance struct {
+	Commit string `json:"commit,omitempty"`
+	Run    string `json:"run,omitempty"`
+}
+
+// CIProvenance is this process's provenance: GitHub Actions' commit and
+// run, or none outside it.
+func CIProvenance() Provenance {
+	return Provenance{Commit: os.Getenv("GITHUB_SHA"), Run: os.Getenv("GITHUB_RUN_ID")}
+}
+
+// CheckProvenance refuses, when current names a commit (in CI), a
+// directory prepared at another commit or in another run, or outside CI.
+func (p *Prepared) CheckProvenance(current Provenance) error {
+	if current.Commit == "" {
+		return nil
+	}
+	if p.Provenance.Commit != current.Commit || (current.Run != "" && p.Provenance.Run != current.Run) {
+		return fmt.Errorf("--prepared %s was prepared at commit %q in run %q, and this is commit %s in run %s: download the artifact of this run's prepare job", p.Dir, p.Provenance.Commit, p.Provenance.Run, current.Commit, current.Run)
+	}
+	return nil
 }
 
 // PreparedDocument is a sidecar document's module, run.
@@ -167,9 +207,13 @@ func (p *Prepared) Document(root, servicePath, file string) (json.RawMessage, []
 
 // underRoot returns p relative to root, slash separated, when it lies
 // under it.
+//
+// The real path comes first: a workspace package a module imports through
+// a node_modules link is the package's own source, which the replay must
+// see change, and not a file under node_modules.
 func underRoot(root, p string) (string, bool) {
-	for _, r := range []string{root, evalSymlinks(root)} {
-		for _, q := range []string{p, evalSymlinks(p)} {
+	for _, r := range []string{evalSymlinks(root), root} {
+		for _, q := range []string{evalSymlinks(p), p} {
 			rel, err := filepath.Rel(r, q)
 			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
 				return filepath.ToSlash(rel), true
@@ -234,19 +278,16 @@ func ReadPrepared(dir string) (*Prepared, error) {
 	return p, nil
 }
 
-// CheckFor refuses a directory prepared for another stack, and, when
-// build is set, one prepared with --no-build or without environment.
+// CheckFor refuses a directory prepared for another stack or without
+// environment, and, when build is set, one prepared with --no-build.
 func (p *Prepared) CheckFor(stack, environment string, build bool) error {
 	if p.Stack != stack {
 		return fmt.Errorf("--prepared %s was prepared for stack %s, not %s", p.Dir, p.Stack, stack)
 	}
-	if !build {
-		return nil
-	}
-	if !p.Built {
+	if build && !p.Built {
 		return fmt.Errorf("--prepared %s holds the documents alone (stack prepare --no-build): prepare %s without --no-build, or build nothing with --no-build", p.Dir, environment)
 	}
-	if !slices.Contains(p.Environments, environment) {
+	if len(p.Environments) > 0 && !slices.Contains(p.Environments, environment) {
 		return fmt.Errorf("--prepared %s was prepared for %s, not %s: run `superschematic stack prepare %s`", p.Dir, strings.Join(p.Environments, ", "), environment, environment)
 	}
 	return nil
@@ -316,7 +357,12 @@ func untar(r io.Reader, dest string) error {
 			return err
 		}
 		name := strings.TrimSuffix(hdr.Name, "/")
-		if name == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {
+		// A name is slash-separated, relative and clean, holds no
+		// backslash, which Windows reads as a separator and so as a way out
+		// of dest, and is local on this platform (no drive, no reserved
+		// name).
+		if name == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") ||
+			strings.Contains(name, `\`) || !filepath.IsLocal(filepath.FromSlash(name)) {
 			return fmt.Errorf("entry %q is not a path in the archive", hdr.Name)
 		}
 		target := filepath.Join(dest, filepath.FromSlash(name))
@@ -369,6 +415,9 @@ type PrepareOptions struct {
 	// earlier prepare, and refused when it holds anything else.
 	Dir string
 
+	// Provenance is recorded in the directory: CIProvenance in CI.
+	Provenance Provenance
+
 	// Log receives progress.
 	Log io.Writer
 }
@@ -391,7 +440,7 @@ func Prepare(ctx context.Context, o PrepareOptions) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Prepared{Dir: abs, Stack: o.Stack, Built: o.Sources != nil, Documents: o.Documents}
+	p := &Prepared{Dir: abs, Stack: o.Stack, Built: o.Sources != nil, Provenance: o.Provenance, Documents: o.Documents}
 	for _, env := range o.Environments {
 		p.Environments = append(p.Environments, env.Environment)
 	}

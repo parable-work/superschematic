@@ -271,7 +271,7 @@ func (g github) header(w *yamlWriter, notes []string) {
 	w.line(0, "#")
 	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers, jobs, workers and engine runners with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
 	w.line(0, "#")
-	w.comment(0, "The prepare job runs, with no credentials, all the project code the cloud jobs need: the build, the installs, the sites' and bundles' builds and the sidecar documents (superschematic stack prepare). A cloud job takes what it made, and runs no build, no Bun and no package's script after it signs in or anywhere else.")
+	w.comment(0, "The prepare job runs, with no credentials, all the project code the cloud jobs need: the build, the installs, the sites' and bundles' builds and the sidecar documents (superschematic stack prepare). A cloud job takes what it made: it runs no build, no package's script and no sidecar document, and its only package manager run, the schemas root's install with --ignore-scripts, which the loader reads the types of, is on a Bun or Node.js downloaded from its release, never restored from a cache another job could write.")
 	if len(notes) > 0 {
 		w.line(0, "#")
 		w.line(0, "# Environments with no job:")
@@ -845,15 +845,22 @@ func (g github) prepare(environments []string, previews bool) job {
 	steps = append(steps, step{
 		name: "Upload what prepare made",
 		uses: &actionUpload,
-		with: [][2]string{{"name", preparedArtifact}, {"path", preparedDir}, {"if-no-files-found", "error"}},
+		// A day is enough for the jobs of the run, the only ones that
+		// read it; a deploy whose reviewers approve it later fails to
+		// download, and the run is started again.
+		with: [][2]string{{"name", preparedArtifact}, {"path", preparedDir}, {"if-no-files-found", "error"}, {"retention-days", "1"}},
 	})
 	return job{id: "prepare", name: "prepare", cond: cond, steps: steps}
 }
 
 // setupBun installs Bun at the release tools.env pins, the one a
-// TypeScript server's image runs on.
+// TypeScript server's image runs on, downloaded every time: setup-bun
+// otherwise keeps the binary in the repository's Actions cache, which a
+// job that runs the project's dependencies (check's, prepare's) can write,
+// so a cloud job would run a binary they planted before it signs in (D47,
+// amended).
 func setupBun() step {
-	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}}}
+	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}, {"no-cache", "true"}}}
 }
 
 // NodeVersion is the Node.js release a job sets up for a project whose
@@ -865,9 +872,11 @@ const NodeVersion = "24"
 
 // setupNode installs Node.js at the release tools.env pins, so a job's
 // npm ci runs on one release from run to run rather than whichever the
-// current LTS is.
+// current LTS is. It restores no package manager's cache, which setup-node
+// otherwise does for a project that names its package manager, and which
+// a job that runs the project's dependencies can write (D47, amended).
 func setupNode() step {
-	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}}}
+	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}, {"package-manager-cache", "false"}}}
 }
 
 // hasSite reports whether env deploys a static site, which `stack
