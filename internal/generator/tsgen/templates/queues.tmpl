@@ -74,6 +74,8 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
+  readonly due?: string;
 }
 
 /** A queue of the database, whose messages are M. */

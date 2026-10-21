@@ -3280,12 +3280,18 @@ export abstract class FulfilOrders {}
   needs none: each statement is one `UPDATE` or `DELETE`, which takes the
   write lock before it reads a row, and a claim is one `UPDATE ... WHERE id
   IN (the due messages, oldest first, up to ?1) ... RETURNING`, so two
-  workers that claim at once take different messages. Times are text in
-  RFC 3339, UTC, to the millisecond, the form the SQLite model's default
-  writes, so they compare as text; the backoff doubles with a shift, since
-  SQLite's `power()` is optional. A message crosses through its JSON form,
+  workers that claim at once take different messages. A claim reads
+  whether a message is due first (`due`), so an idle poll takes no write
+  lock. Times are text in RFC 3339, UTC, to the millisecond, the form the
+  SQLite model's default writes, so they compare as text; the backoff
+  doubles with a shift, since SQLite's `power()` is optional. The runtimes
+  open the file in write-ahead logging and begin a write transaction
+  IMMEDIATE, so a server's transaction that reads, then enqueues, waits for
+  a worker's write lock rather than failing. On either database, a claimed
+  row that does not read into its message is failed alone with `the
+  message could not be read`, and the others reach their handlers. A message crosses through its JSON form,
   each field as its definition marks it: a JSON value or a list as JSON
-  text, a UUID (`uuid`) as its lowercase hyphenated text, a timestamp
+  text, a UUID (`uuid`), base62 or hyphenated, as its lowercase hyphenated text, a timestamp
   (`timestamp`) in RFC 3339 in UTC with its fraction kept, a boolean
   (`boolean`) as 1 or 0, and a duration as its canonical text. A location
   has no storage on SQLite, so a queue that holds one has no statements
@@ -3293,11 +3299,12 @@ export abstract class FulfilOrders {}
   `sqliteStatements`, `queues.rs` as the same member, and the Go ORM
   writes `queues_sqlite.go`, whose `Enqueue<Queue>SQLite(ctx, tx, msg)`
   takes a `*sql.Tx` and whose `New<Queue>SQLiteQueue(db)` claims over a
-  `*sql.DB` of any driver. The TypeScript runtime's `./sqlite` and `./d1`
-  entries export `enqueueStatement(db, queue, msg)`, the statement a
-  caller adds to the batch whose writes caused the message, since a
-  `SqlDatabase` has no interactive transaction, and `sqliteQueue(db,
-  queue)`, the claims over one. The Rust runtime's `sqlite` feature adds
+  `*sql.DB` of any driver, opened with a busy timeout and in WAL. The
+  TypeScript runtime's `./sqlite` and `./d1` entries export
+  `enqueueStatement(db, queue, msg)`, the statement a caller adds to the
+  batch whose writes caused the message, since a `SqlDatabase` has no
+  interactive transaction, and `./sqlite` alone `sqliteQueue(db, queue)`,
+  the claims over one. The Rust runtime's `sqlite` feature adds
   `queue::enqueue_sqlite`, through a rusqlite connection or transaction,
   and `queue::SqliteQueue`, which the worker loop runs as it runs a
   `PostgresQueue`. On the local target a TypeScript worker of a

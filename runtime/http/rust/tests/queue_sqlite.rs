@@ -12,10 +12,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Value};
 use superschematic_http_runtime::queue::{
-    enqueue_sqlite, QueueDefinition, QueueError, SqliteQueue,
+    enqueue_sqlite, QueueDefinition, QueueError, SqliteQueue, UNREADABLE,
 };
 use superschematic_http_runtime::worker::{run_worker, Options};
 use superschematic_http_runtime::{BoxError, Shutdown};
@@ -129,11 +129,15 @@ async fn a_message_commits_with_its_transaction_or_not_at_all() {
     let db = Db::open("tx");
     let def = order_placed();
     let mut connection = db.connection();
-    let tx = connection.transaction().unwrap();
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
     enqueue_sqlite(&tx, &def, &an_order(1)).unwrap();
     tx.rollback().unwrap();
     assert_eq!(db.count("order_placed_queue", "1"), 0);
-    let tx = connection.transaction().unwrap();
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
     enqueue_sqlite(&tx, &def, &an_order(1)).unwrap();
     tx.commit().unwrap();
     let row: (String, String, String, i64, Option<String>, String, String) = db
@@ -316,6 +320,102 @@ async fn a_queue_that_keeps_none_deletes_a_message_as_it_completes_it() {
     assert_eq!(claim.message, json!({}));
     queue.complete(&claim.id, &claim.token).await.unwrap();
     assert_eq!(db.count("ping_queue", "1"), 0);
+}
+
+#[tokio::test]
+async fn a_row_the_claim_cannot_read_fails_alone() {
+    let db = Db::open("unreadable");
+    let def = order_placed();
+    db.enqueue(&def, &an_order(1));
+    db.exec("INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ('0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b', 'low', 1, '{not json')");
+    let queue = db.queue(def);
+    let claims = queue.claim(5, Duration::from_secs(60)).await.unwrap();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0].message["quantity"], json!(1));
+    let (state, attempts, error): (String, i64, String) = db
+        .connection()
+        .query_row(
+            "SELECT state, attempts, last_error FROM order_placed_queue WHERE order_id = '0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((state.as_str(), attempts), ("ready", 1));
+    assert!(error.starts_with(&format!("{UNREADABLE}: ")), "{error}");
+}
+
+#[tokio::test]
+async fn an_idle_claim_takes_no_write_lock() {
+    let db = Db::open("idle");
+    let queue = db.queue(order_placed());
+    // Another connection holds the write lock: an idle claim only reads,
+    // and returns at once.
+    let mut holder = db.connection();
+    let tx = holder
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    let started = std::time::Instant::now();
+    assert!(queue
+        .claim(5, Duration::from_secs(60))
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    tx.rollback().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn enqueues_that_read_first_run_beside_a_polling_worker_never_busy() {
+    let db = Db::open("busy");
+    let def = order_placed();
+    let queue = db.queue(def.clone());
+    let done = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (counting, stopping) = (Arc::clone(&done), Arc::clone(&stop));
+    let poller = tokio::spawn(async move {
+        while !stopping.load(Ordering::SeqCst) {
+            for claim in queue.claim(10, Duration::from_secs(60)).await.unwrap() {
+                queue.complete(&claim.id, &claim.token).await.unwrap();
+                counting.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    });
+    let path = db.path().to_path_buf();
+    let total = 200;
+    tokio::task::spawn_blocking(move || {
+        let mut connection = Connection::open(&path).unwrap();
+        connection.busy_timeout(Duration::from_secs(5)).unwrap();
+        for _ in 0..total {
+            let tx = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .unwrap();
+            let _: i64 = tx
+                .query_row("SELECT COUNT(*) FROM order_placed_queue", [], |r| r.get(0))
+                .unwrap();
+            enqueue_sqlite(&tx, &def, &an_order(1)).unwrap();
+            tx.commit().unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    for _ in 0..400 {
+        if done.load(Ordering::SeqCst) == total {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    stop.store(true, Ordering::SeqCst);
+    poller.await.unwrap();
+    assert_eq!(done.load(Ordering::SeqCst), total);
+    let mode: String = db
+        .connection()
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
 }
 
 #[tokio::test]

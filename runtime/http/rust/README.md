@@ -213,8 +213,12 @@ TypeScript runtimes' (D51):
   `sqliteStatements`. `enqueue_sqlite(&tx, &queue, &message)` writes a
   message through a rusqlite connection, in the caller's transaction when
   it is a `Transaction`, and `SqliteQueue::<M>::open(path, queue)` claims
-  over a connection of its own, each call on tokio's blocking pool, with
-  the same methods as `PostgresQueue`; the worker loop runs either. A
+  over a connection of its own, in write-ahead logging, each call on
+  tokio's blocking pool, with the same methods as `PostgresQueue`; the
+  worker loop runs either. A caller's transaction that enqueues begins
+  IMMEDIATE. A claim reads whether a message is due before it takes the
+  write lock, and on either database fails a row that does not read alone
+  (`UNREADABLE`). A
   field crosses as the descriptor marks it (`uuid`, `timestamp`,
   `boolean`): a UUID, base62 or hyphenated, as its lowercase hyphenated
   text, a timestamp in RFC 3339 in UTC with its fraction kept, a boolean

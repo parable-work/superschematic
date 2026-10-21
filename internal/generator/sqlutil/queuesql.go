@@ -71,6 +71,13 @@ type QueueStatements struct {
 	// rows. Each run is one short transaction; a worker runs it again
 	// while it deletes a whole batch.
 	Prune string
+
+	// Due, on SQLite alone, reads whether a message is due or claimed past
+	// its claim's expiry, a row or none, with no parameter: a claim runs it
+	// first and takes the write lock only when it finds one, so an idle
+	// worker's polls only read. Postgres has none: its claim locks no row
+	// it does not take.
+	Due string
 }
 
 // queueBackoffDoublings bounds the exponent of a failure's backoff, so the
@@ -185,7 +192,10 @@ const sqliteUUID = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4
 // twice and no transaction spans a round trip. The times are text in
 // sqliteNow's form, which every statement writes and compares; the backoff
 // doubles with a shift, since SQLite's power() is an optional extension,
-// and its product turns to a REAL, not an overflow, past 2^63. A claim's
+// and its product turns to a REAL, not an overflow, past 2^63; and its cap
+// ignores a NULL maximum, as Postgres's LEAST does, where SQLite's MIN would
+// be NULL. A claim reads whether any message is due first (Due), so an idle
+// poll takes no write lock. A claim's
 // ID and token are the columns' text, lowercase, which the changes compare
 // as text.
 func SQLiteQueueStatements(table string, columns []string, keepDone bool) QueueStatements {
@@ -224,7 +234,7 @@ func SQLiteQueueStatements(table string, columns []string, keepDone bool) QueueS
 		Fail: lines(
 			"UPDATE "+table+" SET",
 			fmt.Sprintf("  state = CASE WHEN attempts > ?3 THEN '%s' ELSE '%s' END,", ir.QueueStateDead, ir.QueueStateReady),
-			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE %s END,", sqliteIn(fmt.Sprintf("MIN(?4 * (1 << MIN(attempts - 1, %d)), ?6)", queueBackoffDoublings))),
+			fmt.Sprintf("  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE %s END,", sqliteIn(fmt.Sprintf("COALESCE(MIN(%[1]s, ?6), %[1]s)", fmt.Sprintf("?4 * (1 << MIN(attempts - 1, %d))", queueBackoffDoublings)))),
 			"  last_error = ?5, "+unclaim+", updated_at = "+sqliteNow,
 			claimed,
 			"RETURNING state",
@@ -245,16 +255,26 @@ func SQLiteQueueStatements(table string, columns []string, keepDone bool) QueueS
 			"  LIMIT ?2",
 			")",
 		),
+		Due: lines(
+			"SELECT 1 FROM "+table,
+			fmt.Sprintf("WHERE (state = '%s' AND due_at <= %s) OR (state = '%s' AND claim_expires_at <= %s)", ir.QueueStateReady, sqliteNow, ir.QueueStateClaimed, sqliteNow),
+			"LIMIT 1",
+		),
 	}
 }
 
 // All are the statements by name, in the order the struct declares them,
-// for the generators that write each and the tests that compare them.
+// for the generators that write each and the tests that compare them; Due
+// only where the dialect has one.
 func (s QueueStatements) All() []NamedStatement {
-	return []NamedStatement{
+	all := []NamedStatement{
 		{"insert", s.Insert}, {"expire", s.Expire}, {"claim", s.Claim}, {"complete", s.Complete},
 		{"fail", s.Fail}, {"extend", s.Extend}, {"release", s.Release}, {"prune", s.Prune},
 	}
+	if s.Due != "" {
+		all = append(all, NamedStatement{"due", s.Due})
+	}
+	return all
 }
 
 // NamedStatement is one of a queue's statements with its name, lower case.

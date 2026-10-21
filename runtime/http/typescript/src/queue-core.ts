@@ -49,6 +49,8 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
+  readonly due?: string;
 }
 
 /** A queue of a database, whose messages are M, as its types package's ./queues entry exports it. */
@@ -202,4 +204,45 @@ export function formatDuration(nanos: bigint): string {
 /** An error's message. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * What a claim records on a message it took but could not read into its
+ * type, before the reason: the claim fails that message alone, as a handler
+ * that threw would, and hands the others to their handlers, so one
+ * undecodable row neither strands its batch nor burns its neighbours'
+ * attempts. Go and Rust record the same words.
+ */
+export const UNREADABLE = 'the message could not be read';
+
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const HYPHENATED_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/u;
+const MAX_UUID = (1n << 128n) - 1n;
+
+/**
+ * A UUID's lowercase hyphenated text from its hyphenated form or its base62
+ * form (1 to 22 characters, case-sensitive), as superscalar's ParseUUID, the
+ * Go ORM and the Rust client read one, since a TypeScript type's
+ * Identity.UUID may hold either. Throws for any other text.
+ */
+export function canonicalUUID(value: unknown): string {
+  const text = typeof value === 'string' ? value : '';
+  let n: bigint | undefined;
+  if (text.length === 36 && HYPHENATED_UUID.test(text)) {
+    n = BigInt(`0x${text.replaceAll('-', '')}`);
+  } else if (text.length >= 1 && text.length <= 22) {
+    n = 0n;
+    for (const c of text) {
+      const digit = BASE62.indexOf(c);
+      if (digit < 0) {
+        n = undefined;
+        break;
+      }
+      n = n * 62n + BigInt(digit);
+    }
+    if (n !== undefined && n > MAX_UUID) n = undefined;
+  }
+  if (n === undefined) throw new Error(`${JSON.stringify(value)} is no UUID, hyphenated or base62`);
+  const hex = n.toString(16).padStart(32, '0');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

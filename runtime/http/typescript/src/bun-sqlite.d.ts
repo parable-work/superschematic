@@ -15,7 +15,8 @@ declare module 'bun:sqlite' {
     prepare(sql: string): Statement;
     query(sql: string): Statement;
     run(sql: string): unknown;
-    transaction<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R;
+    /** A function that runs fn in a transaction: BEGIN as it is, or BEGIN IMMEDIATE through immediate. */
+    transaction<A extends unknown[], R>(fn: (...args: A) => R): ((...args: A) => R) & { immediate(...args: A): R };
     close(): void;
   }
 }

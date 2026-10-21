@@ -8,7 +8,12 @@ package orm
 // the TypeScript types' queues.ts and the Rust types' queues.rs carry too,
 // so a message one language enqueues another claims alike. The ORM imports
 // no driver: the caller opens the database with one, modernc.org/sqlite
-// among them.
+// among them, in write-ahead logging and with a busy timeout, which a
+// connection of database/sql's pool otherwise lacks, so it waits for another
+// process's write lock: file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL).
+// A transaction that reads before it enqueues begins IMMEDIATE
+// (_txlock=immediate), so it takes the write lock as it begins rather than
+// failing on a stale snapshot.
 //
 // SQLite has one writer at a time, so a claim needs no FOR UPDATE SKIP
 // LOCKED: each statement is one UPDATE or DELETE, which holds the write lock
@@ -120,11 +125,21 @@ func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) 
 	return nil
 }
 
-// claim marks dead each message whose last attempt's claim expired, then
-// claims up to n due messages for lease, each with its message's JSON.
+// claim reads whether a message is due, so an idle poll takes no write
+// lock, and when one is marks dead each message whose last attempt's claim
+// expired, then claims up to n due messages for lease, each with its
+// message's JSON. A row whose columns do not read it fails alone, recording
+// Unreadable and why.
 func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease time.Duration) ([]sqliteClaimed, error) {
 	if n <= 0 {
 		return nil, nil
+	}
+	var one int
+	switch err := db.QueryRowContext(ctx, t.statements.due).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 	}
 	if _, err := db.ExecContext(ctx, t.statements.expire, t.retries); err != nil {
 		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
@@ -135,6 +150,7 @@ func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease ti
 	}
 	defer rows.Close()
 	var claims []sqliteClaimed
+	var unreadable []*queueUnreadable
 	for rows.Next() {
 		var c sqliteClaimed
 		var attempt int64
@@ -147,25 +163,45 @@ func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease ti
 			return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 		}
 		c.attempt = int(attempt)
-		members := map[string]any{}
-		for i, f := range t.fields {
-			value, err := sqliteMemberValue(columns[i], f)
-			if err != nil {
-				return nil, fmt.Errorf("claim on %s: message %s field %s: %w", t.name, c.id, f.name, err)
-			}
-			if value != nil {
-				members[f.name] = value
-			}
-		}
-		if c.message, err = json.Marshal(members); err != nil {
-			return nil, fmt.Errorf("claim on %s: message %s: %w", t.name, c.id, err)
+		if c.message, err = t.messageOf(c.id, columns); err != nil {
+			unreadable = append(unreadable, &queueUnreadable{id: c.id, token: c.token, err: err})
+			continue
 		}
 		claims = append(claims, c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 	}
+	_ = rows.Close()
+	for _, u := range unreadable {
+		t.unreadable(ctx, db, u)
+	}
 	return claims, nil
+}
+
+// messageOf is a claimed row's columns as its message's JSON.
+func (t sqliteQueueTable) messageOf(id string, columns []any) ([]byte, error) {
+	members := map[string]any{}
+	for i, f := range t.fields {
+		value, err := sqliteMemberValue(columns[i], f)
+		if err != nil {
+			return nil, fmt.Errorf("message %s field %s: %w", id, f.name, err)
+		}
+		if value != nil {
+			members[f.name] = value
+		}
+	}
+	data, err := json.Marshal(members)
+	if err != nil {
+		return nil, fmt.Errorf("message %s: %w", id, err)
+	}
+	return data, nil
+}
+
+// unreadable fails a claimed message that did not read, alone: a failure
+// to record that leaves it to its lease.
+func (t sqliteQueueTable) unreadable(ctx context.Context, db *sql.DB, u *queueUnreadable) {
+	_, _ = t.fail(ctx, db, u.id, u.token, Unreadable+": "+u.err.Error())
 }
 
 // fail records cause on a claimed message and makes it due again after the
@@ -422,7 +458,7 @@ RETURNING id, claim_token, attempts, order_id, placed_at, priority, quantity, no
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
 		fail: `UPDATE order_placed_queue SET
   state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6)) || ' seconds') END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
   last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
 RETURNING state`,
@@ -436,6 +472,9 @@ WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
   ORDER BY updated_at
   LIMIT ?2
 )`,
+		due: `SELECT 1 FROM order_placed_queue
+WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+LIMIT 1`,
 	},
 }
 
@@ -458,18 +497,21 @@ func NewOrderPlacedSQLiteQueue(db *sql.DB) *OrderPlacedSQLiteQueue {
 }
 
 // Claim claims up to n due messages for lease, each read from its JSON form
-// as the types read it.
+// as the types read it; one that does not read it fails alone.
 func (q *OrderPlacedSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]OrderPlacedClaim, error) {
 	rows, err := orderPlacedSQLiteQueue.claim(ctx, q.db, n, lease)
 	if err != nil {
 		return nil, err
 	}
-	claims := make([]OrderPlacedClaim, len(rows))
-	for i, row := range rows {
-		claims[i] = OrderPlacedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
-		if err := json.Unmarshal(row.message, &claims[i].Message); err != nil {
-			return nil, fmt.Errorf("claim on %s: message %s: %w", orderPlacedSQLiteQueue.name, row.id, err)
+	claims := make([]OrderPlacedClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := OrderPlacedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			orderPlacedSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
 		}
+		claims = append(claims, claim)
 	}
 	return claims, nil
 }
@@ -532,7 +574,7 @@ RETURNING id, claim_token, attempts, sent_at`,
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
 		fail: `UPDATE ping_queue SET
   state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6)) || ' seconds') END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
   last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
 RETURNING state`,
@@ -546,6 +588,9 @@ WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
   ORDER BY updated_at
   LIMIT ?2
 )`,
+		due: `SELECT 1 FROM ping_queue
+WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+LIMIT 1`,
 	},
 }
 
@@ -568,18 +613,21 @@ func NewPingSQLiteQueue(db *sql.DB) *PingSQLiteQueue {
 }
 
 // Claim claims up to n due messages for lease, each read from its JSON form
-// as the types read it.
+// as the types read it; one that does not read it fails alone.
 func (q *PingSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]PingClaim, error) {
 	rows, err := pingSQLiteQueue.claim(ctx, q.db, n, lease)
 	if err != nil {
 		return nil, err
 	}
-	claims := make([]PingClaim, len(rows))
-	for i, row := range rows {
-		claims[i] = PingClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
-		if err := json.Unmarshal(row.message, &claims[i].Message); err != nil {
-			return nil, fmt.Errorf("claim on %s: message %s: %w", pingSQLiteQueue.name, row.id, err)
+	claims := make([]PingClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := PingClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			pingSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
 		}
+		claims = append(claims, claim)
 	}
 	return claims, nil
 }

@@ -69,6 +69,13 @@ use codec::{is_json, param_text, Column, Text};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{enqueue_sqlite, SqliteQueue};
 
+/// What a claim records, before the reason, on a message it took but could
+/// not read as its type: it fails that message alone, as a handler that
+/// failed would, and returns the others, so one undecodable row neither
+/// strands its batch nor burns its neighbours' attempts. Go and TypeScript
+/// record the same words.
+pub const UNREADABLE: &str = "the message could not be read";
+
 /// What a refused change says of a token that no longer claims its
 /// message, as Go's `ErrClaimLost` and TypeScript's `ClaimLostError` say it.
 pub const CLAIM_LOST: &str =
@@ -175,6 +182,10 @@ pub struct QueueStatements {
     pub extend: String,
     pub release: String,
     pub prune: String,
+    /// On SQLite alone: whether a message is due, which a claim reads
+    /// before it takes the write lock; empty on Postgres.
+    #[serde(default)]
+    pub due: String,
 }
 
 /// A queue of a database, as its Rust types crate's `queues.rs` describes
@@ -458,8 +469,8 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
 
     /// Marks dead each message whose last attempt's claim expired, then
     /// claims up to `n` due messages for `lease`, and reads each. A message
-    /// that does not read as `M` fails the claim, as a row Go's ORM cannot
-    /// scan does.
+    /// that does not read as `M` is claimed already, so it is failed alone,
+    /// its cause [`UNREADABLE`] and why, and the others are returned.
     pub async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<M>>, QueueError> {
         if n == 0 {
             return Ok(Vec::new());
@@ -483,7 +494,25 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
             .query(&claim, &[&Text::of(n), &Text::of(lease.as_secs_f64())])
             .await
             .map_err(|err| QueueError::failed(&context, &err))?;
-        rows.iter().map(|row| self.claim_of(row)).collect()
+        drop(client);
+        let mut claims = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match self.claim_of(row) {
+                Ok(claim) => claims.push(claim),
+                Err(err) => {
+                    let (Ok(id), Ok(token)) =
+                        (row.try_get::<_, String>(0), row.try_get::<_, String>(1))
+                    else {
+                        return Err(err);
+                    };
+                    // A failure to record it leaves the message to its lease.
+                    let _ = self
+                        .fail(&id, &token, &format!("{UNREADABLE}: {err}"))
+                        .await;
+                }
+            }
+        }
+        Ok(claims)
     }
 
     /// A claimed row, `[id, token, attempt, ...the message's columns]`, as

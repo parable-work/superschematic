@@ -62,6 +62,8 @@ export interface QueueStatements {
   readonly extend: string;
   readonly release: string;
   readonly prune: string;
+  /** On SQLite alone: whether a message is due, which a claim reads before it takes the write lock. */
+  readonly due?: string;
 }
 
 /** A queue of the database, whose messages are M. */
@@ -167,7 +169,7 @@ RETURNING id, claim_token, attempts, order_id, placed_at, priority, quantity, no
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
     fail: `UPDATE order_placed_queue SET
   state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6)) || ' seconds') END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
   last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
 RETURNING state`,
@@ -181,6 +183,9 @@ WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
   ORDER BY updated_at
   LIMIT ?2
 )`,
+    due: `SELECT 1 FROM order_placed_queue
+WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+LIMIT 1`,
   },
 };
 
@@ -256,7 +261,7 @@ RETURNING id, claim_token, attempts, sent_at`,
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
     fail: `UPDATE ping_queue SET
   state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6)) || ' seconds') END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
   last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
 RETURNING state`,
@@ -270,5 +275,8 @@ WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
   ORDER BY updated_at
   LIMIT ?2
 )`,
+    due: `SELECT 1 FROM ping_queue
+WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+LIMIT 1`,
   },
 };

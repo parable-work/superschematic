@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { QueueDefinition, QueueStatements } from './queue-core';
+import * as d1 from './d1';
+import { UNREADABLE, type QueueDefinition, type QueueStatements } from './queue-core';
 import { enqueueSqlite, enqueueStatement, sqliteColumnValue, sqliteMemberValue, sqliteQueue, utcTimestamp } from './queue-sqlite';
 import { ClaimLostError, openSqlite, type SqliteDatabase } from './sqlite';
 
@@ -50,7 +51,7 @@ RETURNING id, claim_token, attempts${columns.map(c => `, ${c}`).join('')}`,
       : `DELETE FROM ${table}\n${claimed}`,
     fail: `UPDATE ${table} SET
   state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE ${IN('MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6)')} END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE ${IN('COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))')} END,
   last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = ${NOW}
 ${claimed}
 RETURNING state`,
@@ -62,6 +63,9 @@ RETURNING state`,
   ORDER BY updated_at
   LIMIT ?2
 )`,
+    due: `SELECT 1 FROM ${table}
+WHERE (state = 'ready' AND due_at <= ${NOW}) OR (state = 'claimed' AND claim_expires_at <= ${NOW})
+LIMIT 1`,
   };
 }
 
@@ -328,6 +332,113 @@ describe('the queue client on SQLite', () => {
     expect(await db.prepare('SELECT COUNT(*) AS n FROM ping_queue').first('n')).toBe(0);
   });
 
+  test('a row the claim cannot read fails alone, and the others reach their handlers', async () => {
+    const [db] = database();
+    await enqueueSqlite(db, orderPlaced, MESSAGE);
+    await db.prepare(`INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ('0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b', 'low', 1, '{not json')`).run();
+    const claims = await sqliteQueue(db, orderPlaced).claim(5);
+    expect(claims.map(c => c.message.orderId)).toEqual(['6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e']);
+    const bad = await db
+      .prepare(`SELECT state, attempts, last_error FROM order_placed_queue WHERE order_id = '0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b'`)
+      .first<{ state: string; attempts: number; last_error: string }>();
+    expect(bad!.state).toBe('ready');
+    expect(bad!.attempts).toBe(1);
+    expect(bad!.last_error.startsWith(`${UNREADABLE}: `)).toBe(true);
+  });
+
+  test('a base62 UUID goes hyphenated, as Go and Rust write it, and text that is no UUID is refused', async () => {
+    const [db] = database();
+    await enqueueSqlite(db, orderPlaced, { ...MESSAGE, orderId: '3Nf1lmBDcdDKfsC9ccR4DG' });
+    expect(await db.prepare('SELECT order_id FROM order_placed_queue').first('order_id')).toBe('6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e');
+    expect(() => enqueueStatement(db, orderPlaced, { ...MESSAGE, orderId: 'not a uuid' })).toThrow(/is no UUID/);
+  });
+
+  test("a NULL maximum backoff caps nothing, as Postgres's LEAST ignores it", async () => {
+    const [db] = database();
+    await enqueueSqlite(db, orderPlaced, MESSAGE);
+    const queue = sqliteQueue(db, { ...orderPlaced, maxBackoffSeconds: null as unknown as number });
+    const [claim] = await queue.claim(1);
+    expect(await queue.fail(claim!.id, claim!.token, 'once')).toBe(false);
+    const r = await row(db, claim!.id);
+    expect(r.state).toBe('ready');
+    expect(r.due_in).toBeGreaterThan(55);
+  });
+
+  test("a server's read-then-enqueue batches run beside a polling worker in another process, never busy", async () => {
+    const [db] = database();
+    const file = (db as unknown as { path: string }).path;
+    const stop = join(dir, 'stop');
+    const script = join(dir, 'worker.ts');
+    writeFileSync(
+      script,
+      `import { openSqlite, sqliteQueue } from ${JSON.stringify(join(import.meta.dir, 'sqlite.ts'))};
+import { existsSync } from 'node:fs';
+const definition = JSON.parse(process.argv[3]);
+const db = openSqlite(process.argv[2]);
+const queue = sqliteQueue(db, definition);
+let done = 0;
+while (!existsSync(process.argv[4])) {
+  for (const claim of await queue.claim(10)) {
+    await queue.complete(claim.id, claim.token);
+    done++;
+  }
+  await Bun.sleep(1);
+}
+console.log(done);
+db.close();
+`
+    );
+    const worker = Bun.spawn(['bun', script, file, JSON.stringify(orderPlaced), stop], { stdout: 'pipe', stderr: 'pipe' });
+    const total = 300;
+    for (let i = 0; i < total; i++) {
+      await db.batch([db.prepare('SELECT COUNT(*) AS n FROM orders'), db.prepare('INSERT INTO orders (id) VALUES (?1)').bind(`o${i}`), enqueueStatement(db, orderPlaced, MESSAGE)]);
+    }
+    for (let i = 0; i < 1000 && (await db.prepare(`SELECT COUNT(*) AS n FROM order_placed_queue WHERE state = 'done'`).first('n')) !== total; i++) {
+      await Bun.sleep(10);
+    }
+    writeFileSync(stop, '');
+    const [code, out, err] = await Promise.all([worker.exited, new Response(worker.stdout).text(), new Response(worker.stderr).text()]);
+    expect(err).toBe('');
+    expect(code).toBe(0);
+    expect(Number(out.trim())).toBe(total);
+  });
+
+  test("a batch that reads before it writes waits for another process's write lock, never failing on a stale snapshot", async () => {
+    const [db] = database();
+    const file = (db as unknown as { path: string }).path;
+    const locked = join(dir, 'locked');
+    const script = join(dir, 'writer.ts');
+    // Another process holds the write lock with a write pending for 300 ms,
+    // as a worker's claim would.
+    writeFileSync(
+      script,
+      `import { Database } from 'bun:sqlite';
+import { writeFileSync } from 'node:fs';
+const db = new Database(process.argv[2]);
+db.run('PRAGMA busy_timeout = 5000');
+db.run('BEGIN IMMEDIATE');
+db.run("INSERT INTO orders (id) VALUES ('other')");
+writeFileSync(process.argv[3], '');
+Bun.sleepSync(300);
+db.run('COMMIT');
+db.close();
+`
+    );
+    const writer = Bun.spawn(['bun', script, file, locked], { stderr: 'pipe' });
+    for (let i = 0; i < 500 && !(await Bun.file(locked).exists()); i++) await Bun.sleep(10);
+    // A deferred transaction would read a snapshot here, then fail to write
+    // once the other commits (SQLITE_BUSY_SNAPSHOT); an IMMEDIATE one waits.
+    await db.batch([db.prepare('SELECT COUNT(*) AS n FROM orders'), db.prepare("INSERT INTO orders (id) VALUES ('mine')"), enqueueStatement(db, orderPlaced, MESSAGE)]);
+    expect(await writer.exited).toBe(0);
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM orders').first('n')).toBe(2);
+    expect(await db.prepare("SELECT journal_mode AS m FROM pragma_journal_mode").first('m')).toBe('wal');
+  });
+
+  test('the ./d1 entry exports no claims: no worker claims on D1', () => {
+    expect('sqliteQueue' in d1).toBe(false);
+    expect('enqueueStatement' in d1).toBe(true);
+  });
+
   test('a definition with no statements on SQLite is refused', () => {
     const [db] = database();
     const { sqliteStatements: _, ...postgresOnly } = orderPlaced;
@@ -341,6 +452,7 @@ describe('a field on SQLite', () => {
     expect(utcTimestamp('2026-10-11T09:15:00.123456+02:00')).toBe('2026-10-11T07:15:00.123456Z');
     expect(utcTimestamp('2026-10-11T00:15:00-01:30')).toBe('2026-10-11T01:45:00Z');
     expect(utcTimestamp('2026-10-11T09:15:00.5z')).toBe('2026-10-11T09:15:00.5Z');
+    expect(utcTimestamp('2026-10-11T09:15:00+0200')).toBe('2026-10-11T07:15:00Z');
     expect(utcTimestamp(new Date('2026-10-11T09:15:00.5Z'))).toBe('2026-10-11T09:15:00.500Z');
     expect(() => utcTimestamp('yesterday')).toThrow(/no RFC 3339 timestamp/);
   });
@@ -354,5 +466,7 @@ describe('a field on SQLite', () => {
     expect(sqliteColumnValue('1500ms', { name: 'd', column: 'd', interval: true })).toBe('1.5s');
     expect(sqliteMemberValue('250µs', { name: 'd', column: 'd', interval: true })).toBe('250us');
     expect(() => sqliteColumnValue({ lat: 1, lon: 2 }, { name: 'p', column: 'p', point: true })).toThrow(/no storage for a location/);
+    expect(sqliteColumnValue(9007199254740991n, { name: 'n', column: 'n' })).toBe(9007199254740991);
+    expect(() => sqliteColumnValue(9007199254740992n, { name: 'n', column: 'n' })).toThrow(/out of the range/);
   });
 });

@@ -383,14 +383,18 @@ reject with `ClaimLostError` once the token no longer claims it; and
 one.
 
 On SQLite (D53, amended) a definition of a database that lists the sqlite
-dialect also carries `sqliteStatements`, and the `./sqlite` and `./d1`
-entries run them over a `SqlDatabase`, which `queue-sqlite.ts` alone
-imports, so a Worker bundles it: `enqueueStatement(db, queue, msg)` is the
-statement that writes a message, which the caller adds to the batch whose
-writes caused it, since a `SqlDatabase` has no interactive transaction
-(`enqueueSqlite` runs it alone); and `sqliteQueue(db, queue)` returns the
-same claims as `postgresQueue`, each one statement under SQLite's single
-writer. A field crosses as its definition marks it: a UUID lowercase, a
+dialect also carries `sqliteStatements`, which `queue-sqlite.ts` runs over a
+`SqlDatabase`: `enqueueStatement(db, queue, msg)`, from `./sqlite` and
+`./d1`, is the statement that writes a message, which the caller adds to the
+batch whose writes caused it, since a `SqlDatabase` has no interactive
+transaction (`enqueueSqlite` runs it alone); and `sqliteQueue(db, queue)`,
+from `./sqlite` alone, since no worker claims on D1, returns the same claims
+as `postgresQueue`, each one statement under SQLite's single writer, after a
+read of whether any message is due. `openSqlite` puts the file in
+write-ahead logging and runs `batch` IMMEDIATE. On either database a
+claimed row that does not read is failed alone (`UNREADABLE`). A field
+crosses as its definition marks it: a UUID, base62 or hyphenated, as its
+hyphenated text (on Postgres too), a
 timestamp in RFC 3339 in UTC with its fraction kept (read back as a
 `Date`), a boolean 1 or 0, a duration its canonical text, a JSON value or
 a list its JSON text. `src/queue-sqlite.test.ts` runs them on a file

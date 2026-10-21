@@ -131,6 +131,9 @@ type QueueStatements struct {
 	Extend   string `json:"extend"`
 	Release  string `json:"release"`
 	Prune    string `json:"prune"`
+	// Due is SQLite's read of whether a message is due, which a claim
+	// runs before it takes the write lock; Postgres has none.
+	Due string `json:"due,omitempty"`
 }
 
 // queueStatements are s by the names queues.ts gives them.
@@ -144,6 +147,7 @@ func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 		Extend:   s.Extend,
 		Release:  s.Release,
 		Prune:    s.Prune,
+		Due:      s.Due,
 	}
 }
 
