@@ -136,7 +136,10 @@ tokio = { version = "1", features = ["macros", "rt"] }
 }
 
 // refusalErrors reads the field errors of the SDK's refusal,
-// "input validation failed: path: rule; path: rule", as FieldErrors.
+// "input validation failed: path: rule; path: rule", as FieldErrors. A
+// union's member names each rule it breaks; the input's own schema check
+// says what is wrong at input.<path> ("invalid format", "must be at most
+// 32 characters"), which schemaRule names as the rule.
 func refusalErrors(message string) sdktest.FieldErrors {
 	errors := sdktest.FieldErrors{}
 	failures, ok := strings.CutPrefix(message, "invalid sdk configuration: input validation failed: ")
@@ -145,9 +148,40 @@ func refusalErrors(message string) sdktest.FieldErrors {
 	}
 	for _, failure := range strings.Split(failures, "; ") {
 		path, rule, _ := strings.Cut(failure, ": ")
+		if inner, ok := strings.CutPrefix(path, "input."); ok {
+			path, rule = inner, schemaRule(rule)
+		}
 		errors[path] = append(errors[path], rule)
 	}
 	return errors
+}
+
+// schemaRule names the rule a failure of the Rust SDK's input schema check
+// breaks, by the message it gives.
+func schemaRule(message string) string {
+	switch {
+	case message == "invalid format":
+		return "pattern"
+	case message == "required field":
+		return "required"
+	case message == "value must match one of the allowed enum values":
+		return "enum"
+	case strings.HasPrefix(message, "expected "):
+		return "type"
+	case strings.HasPrefix(message, "must be at least ") && strings.HasSuffix(message, " characters"):
+		return "minLength"
+	case strings.HasPrefix(message, "must be at most ") && strings.HasSuffix(message, " characters"):
+		return "maxLength"
+	case strings.HasPrefix(message, "must contain at least "):
+		return "listMin"
+	case strings.HasPrefix(message, "must contain at most "):
+		return "listMax"
+	case strings.HasPrefix(message, "must be at least "):
+		return "min"
+	case strings.HasPrefix(message, "must be at most "):
+		return "max"
+	}
+	return message
 }
 
 // unionRequestsSDKTest is tests/union_requests.rs of the generated SDK

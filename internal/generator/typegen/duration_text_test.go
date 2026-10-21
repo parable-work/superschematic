@@ -206,6 +206,10 @@ func TestADurationOfAnotherJSONTypeIsRefused(t *testing.T) {
 	if err := json.Unmarshal([]byte(` + "`" + `{"wait": 5}` + "`" + `), &timer); err == nil {
 		t.Fatal("a number decoded as a duration")
 	}
+	// The rules and the core accept it, but a time.Duration cannot hold it.
+	if err := json.Unmarshal([]byte(` + "`" + `{"wait": "2562047h1h"}` + "`" + `), &timer); err == nil {
+		t.Fatal("a duration beyond a time.Duration decoded")
+	}
 }
 
 func TestADurationReportFollowsTheField(t *testing.T) {
