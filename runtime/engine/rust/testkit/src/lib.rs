@@ -41,6 +41,7 @@ pub mod behaviors;
 pub mod commerce_fixtures;
 pub mod core_fixtures;
 mod http;
+pub mod payments_fixtures;
 pub mod workqueue_fixtures;
 
 #[cfg(feature = "axum")]
