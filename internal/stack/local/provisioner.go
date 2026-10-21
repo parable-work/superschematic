@@ -941,7 +941,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
 		}
-		engine, err := p.projectEngine(ctx, req, module, s.what(), s.Deployable)
+		engine, err := p.projectEngine(ctx, req, module, s.what(), s.Deployable, true)
 		if err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/stack/local"
@@ -157,7 +158,9 @@ func TestTheProjectsEngineBuildsForItsEntrypoints(t *testing.T) {
 
 // TestAnEngineCrateByVersionIsRefused: a crate that depends on the engine
 // by version, as a build with no [paths] engine keys writes it, is refused
-// before cargo runs, since no registry serves the engine's crates.
+// before cargo runs, since no registry serves the engine's crates; so is
+// one whose member's binding crate is by version, as a build that sets
+// engine_rust and leaves engine_abi_rust unset writes it.
 func TestAnEngineCrateByVersionIsRefused(t *testing.T) {
 	f := newFixture(t, "Dev")
 	crate, _ := engineCrate(t, f, "shop-db", `{ version = "0.0.0", default-features = false }`)
@@ -167,7 +170,7 @@ func TestAnEngineCrateByVersionIsRefused(t *testing.T) {
 		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
 	}
 	err := f.applyAll(t)
-	if err == nil || !strings.Contains(err.Error(), "local: server shop-api: the engine crate of shop-db depends on superschematic-engine by version") {
+	if err == nil || !strings.Contains(err.Error(), "local: server shop-api: the engine crate of shop-db depends on superschematic-engine ([paths] engine_rust) by version") {
 		t.Fatalf("apply = %v, want the crate refused", err)
 	}
 	for _, cmd := range f.runner.commands {
@@ -179,35 +182,13 @@ func TestAnEngineCrateByVersionIsRefused(t *testing.T) {
 
 // TestARebuiltEngineCrateRelinks: applied again after the archive changed,
 // shop-api builds against a directory of the new archive's own, which
-// changes the flags Go's build cache keys the link on, and the earlier
-// archive's directory is gone.
+// changes the flags Go's build cache keys the link on. The rollout keeps
+// the directory used last before it, which a process may still name, and
+// removes older ones: after a third archive, the first's is gone.
 func TestARebuiltEngineCrateRelinks(t *testing.T) {
 	f := newFixture(t, "Dev")
 	crate, messages := engineCrate(t, f, "shop-db", `{ path = "../engine", default-features = false }`)
 	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
-	rules := func() []rule {
-		return []rule{
-			{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
-			{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
-			{prefix: "/bin/cargo build", out: messages[projectengine.FFIDir]},
-		}
-	}
-	flags := func() string {
-		t.Helper()
-		got := ""
-		for _, cmd := range f.runner.commands {
-			if strings.HasSuffix(cmd.Path, "/go") && filepath.Base(cmd.Dir) == "shop-api" {
-				got = envValue(cmd.Env, "CGO_LDFLAGS")
-			}
-		}
-		dir, _, _ := strings.Cut(strings.TrimPrefix(got, "-L"), " ")
-		return dir
-	}
-	f.runner.rules = rules()
-	if err := f.applyAll(t); err != nil {
-		t.Fatalf("%v\n%s", err, f.out)
-	}
-	first := flags()
 	var built string
 	for _, line := range strings.Split(messages[projectengine.FFIDir], "\n") {
 		var m struct{ Filenames []string }
@@ -215,21 +196,78 @@ func TestARebuiltEngineCrateRelinks(t *testing.T) {
 			built = m.Filenames[0]
 		}
 	}
-	if err := os.WriteFile(built, []byte("the archive, rebuilt"), 0o644); err != nil {
-		t.Fatal(err)
+	runs := 0
+	apply := func(content string) string {
+		t.Helper()
+		runs++
+		if err := os.WriteFile(built, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f.runner.rules = []rule{
+			{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+			{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+			{prefix: "/bin/cargo build", out: messages[projectengine.FFIDir]},
+		}
+		if err := f.applyAll(t); err != nil {
+			t.Fatalf("%v\n%s", err, f.out)
+		}
+		got := ""
+		for _, cmd := range f.runner.commands {
+			if strings.HasSuffix(cmd.Path, "/go") && filepath.Base(cmd.Dir) == "shop-api" {
+				got = envValue(cmd.Env, "CGO_LDFLAGS")
+			}
+		}
+		dir, _, _ := strings.Cut(strings.TrimPrefix(got, "-L"), " ")
+		if data, err := os.ReadFile(filepath.Join(dir, "libsuperschematic_engine.a")); err != nil || string(data) != content {
+			t.Fatalf("shop-api builds against %q, whose archive is %q (%v), want %q", dir, data, err, content)
+		}
+		// Each later run is later by the clock the prune reads.
+		then := time.Now().Add(time.Duration(runs-10) * time.Minute)
+		if err := os.Chtimes(dir, then, then); err != nil {
+			t.Fatal(err)
+		}
+		return dir
 	}
-	f.runner.rules = rules()
-	if err := f.applyAll(t); err != nil {
-		t.Fatalf("%v\n%s", err, f.out)
+	first := apply("the archive, the first build of it")
+	second := apply("the archive, rebuilt")
+	if first == second {
+		t.Fatalf("shop-api built against %s twice, want a directory per archive", first)
 	}
-	second := flags()
-	if first == "" || second == "" || first == second {
-		t.Fatalf("shop-api built against %q, then %q, want two directories", first, second)
+	if _, err := os.Stat(first); err != nil {
+		t.Errorf("the archive used last before, at %s, is gone: %v", first, err)
+	}
+	third := apply("the third")
+	for _, kept := range []string{second, third} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s is gone: %v", kept, err)
+		}
 	}
 	if _, err := os.Stat(first); !os.IsNotExist(err) {
-		t.Errorf("the earlier archive's directory %s is left: %v", first, err)
+		t.Errorf("the first archive's directory %s is left: %v", first, err)
 	}
-	if data, err := os.ReadFile(filepath.Join(second, "libsuperschematic_engine.a")); err != nil || string(data) != "the archive, rebuilt" {
-		t.Errorf("the staged archive is %q (%v), want the rebuilt one", data, err)
+}
+
+// TestAPartlySetEngineCrateIsRefused: engine_rust set and engine_abi_rust
+// not, the crate depends on the engine by path and its ffi member on the C
+// ABI's crate by version, which is refused, naming the key to set.
+func TestAPartlySetEngineCrateIsRefused(t *testing.T) {
+	f := newFixture(t, "Dev")
+	crate, _ := engineCrate(t, f, "shop-db", `{ path = "../engine", default-features = false }`)
+	if err := os.WriteFile(filepath.Join(crate, "ffi", "Cargo.toml"), []byte("[package]\nname = \"shop-db-engine-ffi\"\n\n[dependencies]\nsuperschematic-engine-abi = { version = \"0.0.0\", default-features = false }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	err := f.applyAll(t)
+	if err == nil || !strings.Contains(err.Error(), "the engine crate of shop-db depends on superschematic-engine-abi ([paths] engine_abi_rust) by version") {
+		t.Fatalf("apply = %v, want the member's dependency refused", err)
+	}
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/cargo" {
+			t.Errorf("cargo ran: %s", cmd)
+		}
 	}
 }

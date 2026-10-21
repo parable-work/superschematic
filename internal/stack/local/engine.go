@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -98,14 +100,15 @@ const cgoLinkerFlags = "CGO_LDFLAGS"
 // projectengine.LinkFile, and returns what its build or process takes of
 // it. It refuses a crate that depends on the engine's crates by version,
 // as one built with no [paths] key naming the engine's checkout does: no
-// registry serves them.
-func (p *Provisioner) projectEngine(ctx context.Context, req registry.ProvisionRequest, module, what, deployable string) (projectEngine, error) {
+// registry serves them. prune is stage's: stack dev's rollout prunes what
+// earlier runs staged, and stack run does not.
+func (p *Provisioner) projectEngine(ctx context.Context, req registry.ProvisionRequest, module, what, deployable string, prune bool) (projectEngine, error) {
 	link, err := projectengine.ReadLink(module)
 	if err != nil || link == nil {
 		return projectEngine{}, err
 	}
 	crate := filepath.Join(module, filepath.FromSlash(link.Crate))
-	if err := checkEngineCrate(crate, link.Database); err != nil {
+	if err := checkEngineCrate(crate, link.Member, link.Database); err != nil {
 		return projectEngine{}, fmt.Errorf("local: %s %s: %w", what, deployable, err)
 	}
 	if link.Lockfile != "" {
@@ -144,7 +147,7 @@ func (p *Provisioner) projectEngine(ctx context.Context, req registry.ProvisionR
 	if link.Member == projectengine.NapiDir {
 		name = link.Database + "-napi.node"
 	}
-	staged, err := stage(built, filepath.Join(req.Dir, EngineDir, link.Database, link.Member), name)
+	staged, err := stage(built, filepath.Join(req.Dir, EngineDir, link.Database, link.Member), name, prune)
 	if err != nil {
 		return projectEngine{}, fmt.Errorf("local: the engine crate of %s for %s %s: %w", link.Database, what, deployable, err)
 	}
@@ -172,26 +175,50 @@ func engineCargoEnv() []string {
 	return env
 }
 
+// engineCrates are the engine's crates a project's engine crate or its
+// members depend on, and the [paths] key that names each.
+var engineCrates = map[string]string{
+	projectengine.EngineCrate:    "engine_rust",
+	projectengine.BehaviorsCrate: "engine_behaviors_rust",
+	projectengine.WorkQueueCrate: "engine_workqueue_rust",
+	projectengine.ABICrate:       "engine_abi_rust",
+	projectengine.NapiCrate:      "engine_napi_rust",
+}
+
 // checkEngineCrate refuses a project's engine crate the build did not
-// write, or one that depends on the engine by version rather than by path:
-// the engine's crates are no registry's, so only a checkout the naming
-// file's [paths] engine_rust names builds it.
-func checkEngineCrate(crate, database string) error {
-	path := filepath.Join(crate, "Cargo.toml")
-	var manifest struct {
-		Dependencies map[string]any `toml:"dependencies"`
+// write, or one whose library or member depends on one of the engine's
+// crates by version rather than by path: the engine's crates are no
+// registry's, so only a checkout the naming file's [paths] engine keys
+// name builds it, and a key left unset writes its crate by version.
+func checkEngineCrate(crate, member, database string) error {
+	var byVersion []string
+	for i, path := range []string{filepath.Join(crate, "Cargo.toml"), filepath.Join(crate, member, "Cargo.toml")} {
+		var manifest struct {
+			Dependencies map[string]any `toml:"dependencies"`
+		}
+		if _, err := toml.DecodeFile(path, &manifest); errors.Is(err, fs.ErrNotExist) {
+			if i == 0 {
+				return fmt.Errorf("no engine crate of %s at %s, which the build of %s writes (D58)", database, crate, database)
+			}
+			return fmt.Errorf("the engine crate of %s has no %s member at %s, which the build of %s writes (D58)", database, member, filepath.Dir(path), database)
+		} else if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		if i == 0 && manifest.Dependencies[projectengine.EngineCrate] == nil {
+			return fmt.Errorf("%s does not depend on %s", path, projectengine.EngineCrate)
+		}
+		for _, name := range slices.Sorted(maps.Keys(engineCrates)) {
+			dep, ok := manifest.Dependencies[name]
+			if !ok {
+				continue
+			}
+			if table, ok := dep.(map[string]any); !ok || table["path"] == nil {
+				byVersion = append(byVersion, fmt.Sprintf("%s ([paths] %s)", name, engineCrates[name]))
+			}
+		}
 	}
-	if _, err := toml.DecodeFile(path, &manifest); errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("no engine crate of %s at %s, which the build of %s writes (D58)", database, crate, database)
-	} else if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-	dep, ok := manifest.Dependencies[projectengine.EngineCrate].(map[string]any)
-	if !ok {
-		return fmt.Errorf("%s does not depend on %s", path, projectengine.EngineCrate)
-	}
-	if _, ok := dep["path"]; !ok {
-		return fmt.Errorf("the engine crate of %s depends on %s by version, as a build whose naming file's [paths] engine_rust is unset writes it, and no registry serves the engine's crates; set the [paths] engine keys (engine_rust, engine_behaviors_rust, engine_workqueue_rust, engine_abi_rust, engine_napi_rust) to a superschematic checkout's runtime/engine/rust crates", database, projectengine.EngineCrate)
+	if len(byVersion) > 0 {
+		return fmt.Errorf("the engine crate of %s depends on %s by version, as a build whose naming file leaves those [paths] keys unset writes it, and no registry serves the engine's crates; set them to a superschematic checkout's runtime/engine/rust and runtime/engine-workqueue/rust crates", database, strings.Join(byVersion, ", "))
 	}
 	return nil
 }
@@ -263,29 +290,74 @@ func cargoArtifact(out []byte, manifest, kind string) (string, error) {
 }
 
 // stage copies built into dir/<its SHA-256's first 16 hex digits>/name,
-// unless an earlier run staged the same bytes there, removes what earlier
-// runs staged in dir under other digests, and returns its path. A process
-// that loaded an addon removed so keeps it.
-func stage(built, dir, name string) (string, error) {
+// unless an earlier run staged the same bytes there, and returns its path.
+// It holds dir's lock file while it does, so two processes that stage at
+// once, stack dev and stack run, wait for each other: the copy is a file
+// of a unique name renamed into place, and no prune runs under another's
+// copy. With prune, which stack dev's rollout asks for and stack run does
+// not, it then removes what earlier runs staged under other digests but
+// the one used last before this, which a process stack dev or stack run
+// started from it may still name. A process that loaded an addon removed so
+// keeps it.
+func stage(built, dir, name string, prune bool) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, stageLock), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = lock.Close() }()
+	if err := lockFile(lock); err != nil {
+		return "", err
+	}
 	dest, err := stageDigest(built, dir, name)
-	if err != nil {
-		return "", err
+	if err != nil || !prune {
+		return dest, err
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if entry.Name() != filepath.Base(filepath.Dir(dest)) {
-			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-				return "", err
-			}
-		}
-	}
-	return dest, nil
+	return dest, pruneStaged(dir, filepath.Base(filepath.Dir(dest)))
 }
 
-// stageDigest is stage's copy.
+// stageLock is the lock file of a member's staging directory.
+const stageLock = ".lock"
+
+// pruneStaged removes the digest directories in dir but current and the
+// one used last before it, by their modification times, which stageDigest
+// sets on each use.
+func pruneStaged(dir, current string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var previous string
+	var previousTime time.Time
+	var others []string
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == current || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		others = append(others, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if previous == "" || info.ModTime().After(previousTime) {
+			previous, previousTime = entry.Name(), info.ModTime()
+		}
+	}
+	for _, other := range others {
+		if other == previous {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, other)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stageDigest is stage's copy, under its lock. It marks the digest's
+// directory used now, which pruneStaged orders them by.
 func stageDigest(built, dir, name string) (string, error) {
 	f, err := os.Open(built)
 	if err != nil {
@@ -301,11 +373,12 @@ func stageDigest(built, dir, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(dest); err == nil {
-		return dest, nil
-	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
+	}
+	now := time.Now()
+	if _, err := os.Stat(dest); err == nil {
+		return dest, os.Chtimes(filepath.Dir(dest), now, now)
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", err
@@ -327,5 +400,5 @@ func stageDigest(built, dir, name string) (string, error) {
 		_ = os.Remove(tmp.Name())
 		return "", err
 	}
-	return dest, nil
+	return dest, os.Chtimes(filepath.Dir(dest), now, now)
 }
