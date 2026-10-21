@@ -56,10 +56,10 @@ interface BunRuntime {
 
 const logger = createLogger({ stack: 'ts-lite-stack', server: 'ts-notes' });
 
-/** A database /readyz pings and the shutdown closes, by its service. */
+/** A database /readyz checks by a ping and the shutdown closes, by its service. */
 interface Dependency {
   readonly name: string;
-  ping(): Promise<void>;
+  check(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   // URL names, opened now: its DB service lists sqlite first (D64).
   const tsNotesDbDatabase = openDatabase('ts-notes-db', 'TS_NOTES_DB_DATABASE', tsNotesConfig.TS_NOTES_DB_DATABASE);
   const dependencies: readonly Dependency[] = [
-    { name: 'ts-notes-db', ping: () => pingSqlDatabase(tsNotesDbDatabase, READINESS_TIMEOUT_MS), close: async () => tsNotesDbDatabase.close() },
+    { name: 'ts-notes-db', check: () => pingSqlDatabase(tsNotesDbDatabase, READINESS_TIMEOUT_MS), close: async () => tsNotesDbDatabase.close() },
   ];
 
   const app = new Hono();
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     if (draining) return c.json({ status: 'draining' }, 503);
     const failed = await Promise.all(
       dependencies.map(dependency =>
-        dependency.ping().then(
+        dependency.check().then(
           () => undefined,
           (error: unknown) => {
             logger.warn('not ready', { dependency: dependency.name, error });
