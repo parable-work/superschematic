@@ -1493,11 +1493,14 @@ impl AccessPolicy for AnswerPolicy {
 
 /// The files of the corpus a replay runs by default: the engine's own
 /// test files, whose scenarios need no behavior or few, the core
-/// behaviors' files and the work queue's (`workqueue-*`), whose engines
-/// register its behaviors by name after the core's
-/// ([`superschematic_engine_workqueue::behavior`]).
-pub const ENGINE_FILES: [&str; 45] = [
+/// behaviors' files, the work queue's (`workqueue-*`) and the commerce
+/// package's (`commerce-*`), whose engines register the package's
+/// behaviors by name after the core's ([`behaviors::package_behavior`]).
+pub const ENGINE_FILES: [&str; 48] = [
     "access",
+    "commerce-holds",
+    "commerce-holds-timers",
+    "commerce-stock",
     "compat",
     "core-approvals",
     "core-behaviors",
