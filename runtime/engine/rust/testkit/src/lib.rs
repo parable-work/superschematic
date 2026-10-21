@@ -38,6 +38,7 @@
 #[cfg(feature = "axum")]
 mod axum;
 pub mod behaviors;
+pub mod commerce_fixtures;
 pub mod core_fixtures;
 mod http;
 pub mod workqueue_fixtures;

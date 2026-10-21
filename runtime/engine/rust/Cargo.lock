@@ -1682,6 +1682,7 @@ version = "0.0.0"
 dependencies = [
  "napi-build",
  "superschematic-engine-behaviors",
+ "superschematic-engine-commerce",
  "superschematic-engine-napi",
  "superschematic-engine-workqueue",
 ]
@@ -1697,6 +1698,14 @@ dependencies = [
  "superschematic-versiongraph-engine",
  "unicode-general-category",
  "uuid",
+]
+
+[[package]]
+name = "superschematic-engine-commerce"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "superschematic-engine",
 ]
 
 [[package]]
@@ -1740,6 +1749,7 @@ dependencies = [
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
+ "superschematic-engine-commerce",
  "superschematic-engine-workqueue",
  "tokio",
  "tower",
