@@ -259,6 +259,9 @@
             }
           ],
           "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
           "limits": {
             "cpuMs": 30000
           },
@@ -417,6 +420,9 @@
             }
           ],
           "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
           "mainModule": "main.js",
           "modules": [
             {

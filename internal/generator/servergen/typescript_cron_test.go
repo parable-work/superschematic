@@ -169,18 +169,21 @@ func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 		"pricing: shopPricingClient,",
 		"media: shopMediaBucket,",
 		"return construct('shop-api', 'jobs', () => shopApiImpl.createJobs(shopApiDeps));",
-		"await untilAborted(jobs.reindex(signal), signal);",
-		"async scheduled(controller: ScheduledController): Promise<void> {",
+		"telemetry.job('Reindex', () => jobs.reindex(signal)),",
+		"async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {",
+		"ctx.waitUntil(telemetry.flush());",
+		"const telemetry = startWorkersTelemetry(env, { service: 'shop-api-reindex', stack: 'edge-stack', kind: 'job', logger });",
 		"await runTries({ cron: controller.cron });",
 		"logger.info('job started', { api: 'shop-api', class: 'Reindex', ...fields, try: attempt, tries: TRIES });",
 		// The job's Workflow (D64, amended).
 		"export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {",
 		"const running = env['SUPERSCHEMATIC_BUNDLE'];",
-		"await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, () => runTries({ instance: event.instanceId }));",
+		"await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {",
+		"await runTries({ instance: event.instanceId });",
 		"logger.info('job done', { took: (Date.now() - started) / 1000, try: attempt });",
 		"logger.error('job failed', { took: (Date.now() - started) / 1000, try: attempt, tries: TRIES, error });",
 		"throw new Error(`job shop-api-reindex failed on each of its ${TRIES} tries:",
-		"fetch: serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service')),",
+		"fetch: telemetry.traced(serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service'))),",
 	} {
 		if !strings.Contains(scheduled, want) {
 			t.Errorf("scheduled.ts does not hold %q:\n%s", want, scheduled)

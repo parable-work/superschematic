@@ -49,6 +49,8 @@ resources:
           text: "2222222222222222222222222222222222222222222222222222222222222222"
           type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       limits:
         cpuMs: 30000
       mainModule: main.js
@@ -131,6 +133,8 @@ resources:
           text: https://web-stack-staging-storefront-web.acme.workers.dev
           type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js

@@ -25,6 +25,7 @@ const till :Workerd.Worker = (
     (name = "TS_PRICING_SERVICE_URL", text = "https://Till"),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const tester :Workerd.Worker = (

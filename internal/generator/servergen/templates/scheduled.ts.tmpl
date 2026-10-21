@@ -5,7 +5,8 @@
 // {{ $api.Service }} on Cloudflare's Cron Triggers (docs/stack-model.md, section 18.9).
 // superschematic writes it beside main.ts, which stack dev runs on Bun,
 // because an environment of the stack places the job on Cron Triggers;
-// bundle.ts bundles it for workerd, with no Node API and no nodejs_compat.
+// bundle.ts bundles it for workerd, with no Node API but AsyncLocalStorage,
+// under nodejs_als.
 //
 // When Cloudflare loads the version, scheduled.ts reads the API's config
 // from the Worker's string bindings, so a refused config fails the
@@ -27,6 +28,11 @@
 // once the Worker's {{ .BundleBinding }} binding shows it runs that bundle,
 // and fails with the error a firing throws.
 //
+// Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
+// when the Worker's OTEL_ bindings name an endpoint, each try's run of the
+// job's method is a span named after its @job class, each call a client
+// span, and a run sends its spans as it ends.
+//
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
@@ -36,6 +42,7 @@ import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 {{- if .WorkersImports }}
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 {{- end }}
+import { startWorkersTelemetry } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers-telemetry';
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
@@ -61,6 +68,15 @@ const TIMEOUT_MS = {{ .Job.TimeoutSeconds }} * 1000;
 const TRIES: number = {{ .Job.Tries }};
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, job: {{ tsQuote .Name }} });
+
+// Trace export, from the Worker's OTEL_ bindings: a refused value throws
+// here, and Cloudflare refuses the version.
+const telemetry = startWorkersTelemetry(env, { service: {{ tsQuote .Name }}, stack: {{ tsQuote .Stack }}, kind: 'job', logger });
+
+/** What Cloudflare hands the scheduled handler beside the controller: waitUntil keeps the isolate for work after the run. */
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
 {{- if $api.Config }}
 {{- if $api.Secrets }}
 
@@ -119,7 +135,10 @@ async function build() {
 /** Runs one try: builds the jobs and runs the job's method, until signal aborts. */
 async function tryOnce(signal: AbortSignal): Promise<void> {
   const jobs = await build();
-  await untilAborted(jobs.{{ .Job.Method }}(signal), signal);
+  await untilAborted(
+    telemetry.job({{ tsQuote .Job.Name }}, () => jobs.{{ .Job.Method }}(signal)),
+    signal
+  );
 }
 
 /**
@@ -148,8 +167,12 @@ async function runTries(fields: Readonly<Record<string, unknown>>): Promise<void
 }
 
 export default {
-  async scheduled(controller: ScheduledController): Promise<void> {
-    await runTries({ cron: controller.cron });
+  async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {
+    try {
+      await runTries({ cron: controller.cron });
+    } finally {
+      ctx.waitUntil(telemetry.flush());
+    }
   },
 };
 
@@ -174,7 +197,13 @@ export class {{ .WorkflowClass }} extends WorkflowEntrypoint<unknown, RunPayload
         `job {{ .Name }} runs bundle ${typeof running === 'string' ? running : 'unknown'}, but the last deploy rolled out ${payload.bundle}: a deploy may be under way, or the Worker changed outside one; deploy it, then run the job`
       );
     }
-    await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, () => runTries({ instance: event.instanceId }));
+    await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {
+      try {
+        await runTries({ instance: event.instanceId });
+      } finally {
+        await telemetry.flush();
+      }
+    });
     return 'done';
   }
 }
@@ -236,7 +265,7 @@ function bindingName(field: string, name: string | undefined): string {
 function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
   return new {{ .Module }}.{{ .Class }}({
     baseUrl: endpoint.url,
-    fetch: serviceFetch(binding(env, bindingName({{ tsQuote .Field }}, endpoint.binding?.name), 'service')),
+    fetch: telemetry.traced(serviceFetch(binding(env, bindingName({{ tsQuote .Field }}, endpoint.binding?.name), 'service'))),
     serviceCredential: serviceCredentialFor(endpoint.credential),
   });
 }

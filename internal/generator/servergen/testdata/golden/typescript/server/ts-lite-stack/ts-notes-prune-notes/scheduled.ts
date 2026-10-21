@@ -4,7 +4,8 @@
 // ts-notes on Cloudflare's Cron Triggers (docs/stack-model.md, section 18.9).
 // superschematic writes it beside main.ts, which stack dev runs on Bun,
 // because an environment of the stack places the job on Cron Triggers;
-// bundle.ts bundles it for workerd, with no Node API and no nodejs_compat.
+// bundle.ts bundles it for workerd, with no Node API but AsyncLocalStorage,
+// under nodejs_als.
 //
 // When Cloudflare loads the version, scheduled.ts reads the API's config
 // from the Worker's string bindings, so a refused config fails the
@@ -26,6 +27,11 @@
 // once the Worker's SUPERSCHEMATIC_BUNDLE binding shows it runs that bundle,
 // and fails with the error a firing throws.
 //
+// Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
+// when the Worker's OTEL_ bindings name an endpoint, each try's run of the
+// job's method is a span named after its @job class, each call a client
+// span, and a run sends its spans as it ends.
+//
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-notes-implementation, at typescript/ts-notes
@@ -33,6 +39,7 @@
 import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
 import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import type { SqlDatabase } from '@superschematic/http-runtime/d1';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
@@ -50,6 +57,15 @@ const TIMEOUT_MS = 60 * 1000;
 const TRIES: number = 1;
 
 const logger = createLogger({ stack: 'ts-lite-stack', job: 'ts-notes-prune-notes' });
+
+// Trace export, from the Worker's OTEL_ bindings: a refused value throws
+// here, and Cloudflare refuses the version.
+const telemetry = startWorkersTelemetry(env, { service: 'ts-notes-prune-notes', stack: 'ts-lite-stack', kind: 'job', logger });
+
+/** What Cloudflare hands the scheduled handler beside the controller: waitUntil keeps the isolate for work after the run. */
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
 
 // The API's config as Cloudflare loads the version, from the string
 // bindings: a refused config throws here, and Cloudflare refuses the version.
@@ -77,7 +93,10 @@ async function build() {
 /** Runs one try: builds the jobs and runs the job's method, until signal aborts. */
 async function tryOnce(signal: AbortSignal): Promise<void> {
   const jobs = await build();
-  await untilAborted(jobs.pruneNotes(signal), signal);
+  await untilAborted(
+    telemetry.job('PruneNotes', () => jobs.pruneNotes(signal)),
+    signal
+  );
 }
 
 /**
@@ -106,8 +125,12 @@ async function runTries(fields: Readonly<Record<string, unknown>>): Promise<void
 }
 
 export default {
-  async scheduled(controller: ScheduledController): Promise<void> {
-    await runTries({ cron: controller.cron });
+  async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {
+    try {
+      await runTries({ cron: controller.cron });
+    } finally {
+      ctx.waitUntil(telemetry.flush());
+    }
   },
 };
 
@@ -132,7 +155,13 @@ export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {
         `job ts-notes-prune-notes runs bundle ${typeof running === 'string' ? running : 'unknown'}, but the last deploy rolled out ${payload.bundle}: a deploy may be under way, or the Worker changed outside one; deploy it, then run the job`
       );
     }
-    await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, () => runTries({ instance: event.instanceId }));
+    await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {
+      try {
+        await runTries({ instance: event.instanceId });
+      } finally {
+        await telemetry.flush();
+      }
+    });
     return 'done';
   }
 }

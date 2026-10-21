@@ -37,6 +37,7 @@ const ok :Workerd.Worker = (
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const flaky :Workerd.Worker = (
@@ -50,6 +51,7 @@ const flaky :Workerd.Worker = (
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const broken :Workerd.Worker = (
@@ -63,6 +65,7 @@ const broken :Workerd.Worker = (
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const hung :Workerd.Worker = (
@@ -76,6 +79,7 @@ const hung :Workerd.Worker = (
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const tester :Workerd.Worker = (

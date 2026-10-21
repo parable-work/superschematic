@@ -96,6 +96,14 @@ var TelemetryPackages = map[string]string{
 	"@opentelemetry/sdk-trace":                 "2.12.0",
 }
 
+// WorkersTelemetryPackages are the OpenTelemetry packages the HTTP
+// runtime's ./workers-telemetry entry imports beside TelemetryPackages,
+// which a server or a job on Workers depends on too (D64, amended): it
+// sends with OpenTelemetry's own protobuf serializer.
+var WorkersTelemetryPackages = map[string]string{
+	"@opentelemetry/otlp-transformer": "0.223.0",
+}
+
 // The GCS Node client the HTTP runtime's ./gcs entry imports, which only a
 // server whose APIs list a bucket depends on (D54): the release the
 // runtime is checked against.
@@ -1113,6 +1121,10 @@ func (s *TypeScriptServer) planPackage() {
 		"hono":                         tsrestgen.HonoVersion,
 	}
 	maps.Copy(deps, TelemetryPackages)
+	if s.Workers {
+		// fetch.ts and scheduled.ts export through ./workers-telemetry.
+		maps.Copy(deps, WorkersTelemetryPackages)
+	}
 	for _, a := range s.APIs {
 		deps[a.Package] = "workspace:*"
 		deps[a.ImplPackage] = "workspace:*"

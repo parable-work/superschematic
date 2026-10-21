@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 /*
 The Workers check, scripts/workers-check.mjs (D64), on files planted here:
-it refuses an import from node:, even one Bun's browser target would
-replace with an empty module, the Bun global, and a WebAssembly module
+it refuses an import from node: but node:async_hooks, even one Bun's
+browser target would replace with an empty module, the Bun global, and a WebAssembly module
 other than superscalar's, and passes what workerd runs. `bun run test`
 runs the check on the package's own entries after the build.
 */
@@ -28,6 +28,12 @@ describe('workers-check', () => {
     const { code, output } = run('fs.ts', "import { readFileSync } from 'node:fs';\nexport const read = () => readFileSync('/etc/hostname');\n");
     expect(code).toBe(1);
     expect(output).toContain('fs.ts imports node:fs, which workerd has only under nodejs_compat');
+  });
+
+  test('passes node:async_hooks, which a Worker has under nodejs_als', () => {
+    const { code, output } = run('als.ts', "import { AsyncLocalStorage } from 'node:async_hooks';\nexport const store = new AsyncLocalStorage<string>();\n");
+    expect(output).not.toContain('nodejs_compat');
+    expect(code).toBe(0);
   });
 
   test('refuses a Node built-in named without node:', () => {

@@ -72,13 +72,15 @@ const BundleBinding = ir.BundleDigestVariable
 const MaxScheduledRunSeconds = 15 * 60
 
 // cronSettings is the schema of a job's settings on Cron (section 18.1):
-// Workers Logs, on by default, and cpuMs, the CPU time a run may take,
-// Cloudflare's default when unset.
+// Workers Logs, on by default; cpuMs, the CPU time a run may take,
+// Cloudflare's default when unset; and telemetry, which turns its trace
+// export on or off against the environment's (telemetry.go).
 const cronSettings = `{
   "type": "object",
   "properties": {
     "logs": {"type": "boolean"},
-    "cpuMs": {"type": "integer", "minimum": 1, "maximum": 300000}
+    "cpuMs": {"type": "integer", "minimum": 1, "maximum": 300000},
+    "telemetry": {"type": "boolean"}
   },
   "additionalProperties": false
 }`
