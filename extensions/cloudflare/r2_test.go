@@ -120,17 +120,60 @@ func TestR2Refusals(t *testing.T) {
 		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of shop-media would be named with 74 characters before its parameter values, and R2 takes a name of at most 63: "+
 			"it joins stack's \""+s.Name+"\" (52), environment's \"preview\" (7), Bucket service's \"shop-media\" (10), parameter pr's \"pr\" (2)")
 	})
-	for _, setting := range []string{"jurisdiction", "versioning"} {
+	for setting, value := range map[string]any{"jurisdiction": "us", "versioning": true} {
 		t.Run(setting, func(t *testing.T) {
 			s := callsStack()
-			value := any("eu")
-			if setting == "versioning" {
-				value = true
-			}
 			s.Environments[1].Settings[0].Values = map[string]any{setting: value}
 			_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
 			refusedWith(t, errs, stack.CodeInvalidSettings, "settings of shop-media on platform cloudflare.r2")
 		})
+	}
+	t.Run("a jurisdiction beside a location hint", func(t *testing.T) {
+		s := callsStack()
+		s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu", "locationHint": "weur"}
+		_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "bucket shop-media sets locationHint weur and jurisdiction eu; R2 places a bucket in a jurisdiction by the jurisdiction alone, so set one")
+	})
+}
+
+// TestR2BucketInAJurisdiction (D64, amended): Staging's bucket in the EU
+// jurisdiction is an r2Bucket and a lifecycle that name it; the edge's
+// token names the bucket's objects under eu in place of default; and the
+// storefront's credential names the jurisdiction, which its version holds
+// as one more plain binding, so the runtime signs URLs for the EU host.
+func TestR2BucketInAJurisdiction(t *testing.T) {
+	reg := assemble(t)
+	s := callsStack()
+	s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu", "deleteAfterDays": 30}
+	env, errs := resolveOver(t, reg, s, callsServices(), "Staging")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	if got, want := jsonOf(t, node(t, env, "shop-media.bucket").Properties), `{"accountId":"`+accountID+`","jurisdiction":"eu","name":"calls-stack-staging-shop-media"}`; got != want {
+		t.Errorf("the bucket is %s, want %s", got, want)
+	}
+	if got := node(t, env, "shop-media.lifecycle").Properties["jurisdiction"]; got != "eu" {
+		t.Errorf("the lifecycle's jurisdiction is %v", got)
+	}
+	want := `[{"effect":"allow","permissionGroups":[{"id":"` + cloudflare.R2ObjectsWriteGroup + `"}],` +
+		`"resources":{"$concat":["{\"com.cloudflare.edge.r2.bucket.` + accountID + `_eu_",{"$output":{"resource":"shop-media.bucket","name":"name"}},"\":\"*\"}"]}}]`
+	if got := jsonOf(t, node(t, env, "shop-storefront.r2.shop-media.token").Properties["policies"]); got != want {
+		t.Errorf("the token's policies are\n%s, want\n%s", got, want)
+	}
+	want = `{"binding":"SHOP_MEDIA_BUCKET","name":{"$output":{"resource":"shop-media.bucket","name":"name"}},` +
+		`"r2":{"accessKeyId":{"$output":{"resource":"shop-storefront.r2.shop-media.token","name":"id"}},"account":"` + accountID + `","jurisdiction":"eu",` +
+		`"token":{"$output":{"resource":"shop-storefront.r2.shop-media.token","name":"value"}}}}`
+	if got := derivedValue(t, env, "shop-storefront", "SHOP_MEDIA_BUCKET"); got != want {
+		t.Errorf("the storefront's bucket is\n%s, want\n%s", got, want)
+	}
+	if got, want := bindingsOf(t, node(t, env, "shop-storefront.version"))["SHOP_MEDIA_BUCKET_R2_JURISDICTION"], `{"name":"SHOP_MEDIA_BUCKET_R2_JURISDICTION","text":"eu","type":"plain_text"}`; got != want {
+		t.Errorf("the storefront's jurisdiction binding is %s, want %s", got, want)
+	}
+	if got := cloudflare.R2JurisdictionEndpoint(accountID, "eu"); got != "https://"+accountID+".eu.r2.cloudflarestorage.com" {
+		t.Errorf("the EU endpoint is %s", got)
+	}
+	if got := cloudflare.R2JurisdictionEndpoint(accountID, ""); got != cloudflare.R2Endpoint(accountID) {
+		t.Errorf("the default jurisdiction's endpoint is %s", got)
 	}
 }
 
@@ -275,6 +318,35 @@ func TestPreDestroyEmptiesAMembersBuckets(t *testing.T) {
 		t.Errorf("a bucket that is gone: %v", err)
 	}
 	if got := log.String(); got != "  bucket calls-stack-preview-shop-media-pr125: gone\n" {
+		t.Errorf("the log says %q", got)
+	}
+}
+
+// TestPreDestroyEmptiesABucketInAJurisdiction (D64, amended): a member's
+// bucket in the EU jurisdiction is emptied at the jurisdiction's S3 host,
+// where R2 keeps its objects, and the default host's bucket of the same
+// name is left alone.
+func TestPreDestroyEmptiesABucketInAJurisdiction(t *testing.T) {
+	f := newFixture(t)
+	putObjects(t, f.cloud, "eu:calls-stack-preview-shop-media-pr123", "carts/ada.png")
+	putObjects(t, f.cloud, "calls-stack-preview-shop-media-pr123", "carts/elsewhere.png")
+	s := callsStack()
+	s.Environments[1].Settings[0].Values = map[string]any{"jurisdiction": "eu"}
+	preview, errs := resolveOver(t, f.reg, s, callsServices(), "Preview")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	log := &bytes.Buffer{}
+	if err := f.target(t).PreDestroy.PrepareDestroy(context.Background(), registry.Run{Environment: preview, Parameters: map[string]string{"pr": "123"}}, log); err != nil {
+		t.Fatal(err)
+	}
+	for bucket, want := range map[string][]string{"eu:calls-stack-preview-shop-media-pr123": nil, "calls-stack-preview-shop-media-pr123": {"carts/elsewhere.png"}} {
+		keys, err := f.cloud.ListObjects(context.Background(), accountID, bucket, "")
+		if err != nil || !slices.Equal(keys, want) {
+			t.Errorf("%s holds %v, %v; want %v", bucket, keys, err, want)
+		}
+	}
+	if got := log.String(); got != "  bucket calls-stack-preview-shop-media-pr123: emptied, 1 objects deleted\n" {
 		t.Errorf("the log says %q", got)
 	}
 }

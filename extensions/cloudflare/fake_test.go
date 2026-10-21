@@ -277,6 +277,42 @@ func (c *fakeCloud) ListObjects(_ context.Context, account, bucket, prefix strin
 	return keys, c.checkAccount(account)
 }
 
+// InJurisdiction is the fake's view of a jurisdiction's buckets: their
+// objects sit in the fake under `<jurisdiction>:<bucket>`, apart from the
+// default jurisdiction's, as R2 serves them at another host.
+func (c *fakeCloud) InJurisdiction(jurisdiction string) cloudflare.Cloud {
+	if jurisdiction == "" {
+		return c
+	}
+	return fakeJurisdiction{fakeCloud: c, jurisdiction: jurisdiction}
+}
+
+var _ cloudflare.JurisdictionCloud = (*fakeCloud)(nil)
+
+// fakeJurisdiction is fakeCloud's object calls on a jurisdiction's buckets.
+type fakeJurisdiction struct {
+	*fakeCloud
+	jurisdiction string
+}
+
+func (c fakeJurisdiction) in(bucket string) string { return c.jurisdiction + ":" + bucket }
+
+func (c fakeJurisdiction) ListObjects(ctx context.Context, account, bucket, prefix string) ([]string, error) {
+	return c.fakeCloud.ListObjects(ctx, account, c.in(bucket), prefix)
+}
+
+func (c fakeJurisdiction) DeleteObject(ctx context.Context, account, bucket, key string) error {
+	return c.fakeCloud.DeleteObject(ctx, account, c.in(bucket), key)
+}
+
+func (c fakeJurisdiction) GetObject(ctx context.Context, account, bucket, key string) ([]byte, map[string]string, error) {
+	return c.fakeCloud.GetObject(ctx, account, c.in(bucket), key)
+}
+
+func (c fakeJurisdiction) PutObject(ctx context.Context, account, bucket, key string, data []byte, metadata map[string]string) error {
+	return c.fakeCloud.PutObject(ctx, account, c.in(bucket), key, data, metadata)
+}
+
 // fakeGitHub is the repository's Actions secrets in memory; unready makes
 // it the gh that is missing.
 type fakeGitHub struct {

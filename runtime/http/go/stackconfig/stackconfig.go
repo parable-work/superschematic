@@ -21,7 +21,8 @@
 // that says so: a database's D1 binding (field_D1_BINDING,
 // field_D1_DATABASE), a service's binding (field_BINDING_NAME,
 // field_BINDING_WORKER), and a bucket's R2 binding and credential
-// (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN).
+// (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN,
+// field_R2_JURISDICTION).
 // The TypeScript runtime reads them for its Workers entry.
 package stackconfig
 
@@ -173,7 +174,7 @@ func workerOnly(getenv func(string) string, what string, names ...string) error 
 }
 
 func loadBucket(field string, getenv func(string) string) (Bucket, error) {
-	if err := workerOnly(getenv, "an R2 binding", field+"_BINDING", field+"_R2_ACCOUNT", field+"_R2_ACCESS_KEY_ID", field+"_R2_TOKEN"); err != nil {
+	if err := workerOnly(getenv, "an R2 binding", field+"_BINDING", field+"_R2_ACCOUNT", field+"_R2_ACCESS_KEY_ID", field+"_R2_TOKEN", field+"_R2_JURISDICTION"); err != nil {
 		return Bucket{}, err
 	}
 	name := getenv(field + "_NAME")

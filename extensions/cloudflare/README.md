@@ -216,19 +216,24 @@ rule deletes each object that many days after it was written.
 | `locationHint` | `wnam`, `enam`, `weur`, `eeur`, `apac`, `oc` | the bucket's `location` |
 | `storageClass` | `Standard`, `InfrequentAccess` | the class of new objects |
 | `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
+| `jurisdiction` | `eu`, `fedramp` | the bucket's and the lifecycle's `jurisdiction`; refused beside `locationHint` |
 
 `cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
 `<caller>.r2.<bucket>.token`, an `accountToken` named
 `<stack>-<env>-<caller>-<bucket>` whose one policy allows
 Workers R2 Storage Bucket Item Write (`R2ObjectsWriteGroup`, the id
 Cloudflare publishes, which bootstrap checks against the account's list)
-on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`, and derives
-`{name, binding, r2: {account, accessKeyId, token}}`, the bucket's name,
-the `r2_bucket` binding's name, and the token's `id` and `value`, the
-value a `secret_text` binding. `buckets-never-public` refuses an
+on `com.cloudflare.edge.r2.bucket.<account>_<jurisdiction>_<bucket>`
+(`default` unless the bucket names one), and derives
+`{name, binding, r2: {account, jurisdiction?, accessKeyId, token}}`, the
+bucket's name, the `r2_bucket` binding's name, the bucket's jurisdiction,
+whose S3 host, `<account>.<jurisdiction>.r2.cloudflarestorage.com`, the
+runtime signs URLs for, and the token's `id` and `value`, the value a
+`secret_text` binding. `buckets-never-public` refuses an
 `r2ManagedDomain` or an `r2CustomDomain` on a Bucket service's bucket.
 The target's `PreDestroy` empties each bucket of a member of a
-parameterized environment through `Cloud`'s S3 calls before its destroy.
+parameterized environment through `Cloud`'s S3 calls before its destroy,
+at its jurisdiction's S3 host (`JurisdictionCloud`).
 
 ## Jobs on Cron Triggers
 

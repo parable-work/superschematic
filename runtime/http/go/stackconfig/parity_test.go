@@ -148,6 +148,15 @@ func parityCorpus(t *testing.T) parityFile {
 	d1 := map[string]any{"binding": "SHOP_DB_DATABASE", "database": "1c3e5a7b-9d2f-4b6a-8c0e-2f4a6b8c0d1e"}
 	binding := map[string]any{"name": "SHOP_API_SERVICE", "worker": "shop-api"}
 	r2 := map[string]any{"account": "0123456789abcdef0123456789abcdef", "accessKeyId": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d", "token": "r2-token-value"}
+	// r2With is r2 with one more member: a jurisdiction (D64, amended).
+	r2With := func(key, value string) map[string]any {
+		out := map[string]any{key: value}
+		for k, v := range r2 {
+			out[k] = v
+		}
+		return out
+	}
+	r2eu := r2With("jurisdiction", "eu")
 	const calls = "SHOP_API_CALLERS_ISSUERS_"
 	notMember := func(names ...string) []string {
 		var out []string
@@ -257,6 +266,18 @@ func parityCorpus(t *testing.T) parityFile {
 			Value:      map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET", "r2": r2},
 			Want:       map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET", "r2": r2},
 			WorkerOnly: []string{"environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN are set: only a Worker reads an R2 binding (D64)"}},
+		{Name: "bucket: an R2 credential in a jurisdiction", Reader: readerBucket, Field: "SHOP_MEDIA_BUCKET",
+			Value:      map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET", "r2": r2eu},
+			Want:       map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET", "r2": r2eu},
+			WorkerOnly: []string{"environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"}},
+		{Name: "bucket: a jurisdiction without a credential", Reader: readerBucket, Field: "SHOP_MEDIA_BUCKET",
+			Value: map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET"}, Edits: map[string]*string{"SHOP_MEDIA_BUCKET_R2_JURISDICTION": str("eu")},
+			Refusals:   []string{"environment variable SHOP_MEDIA_BUCKET_R2_JURISDICTION is set and SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN are not; a jurisdiction names the S3 host of an R2 credential's signed URLs"},
+			WorkerOnly: []string{"environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"}},
+		{Name: "bucket: a jurisdiction that is no host label", Reader: readerBucket, Field: "SHOP_MEDIA_BUCKET",
+			Value:      map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET", "r2": r2With("jurisdiction", "eu.evil.test/")},
+			Refusals:   []string{`environment variable SHOP_MEDIA_BUCKET_R2_JURISDICTION is "eu.evil.test/"; want a jurisdiction of lowercase letters and digits, eu or fedramp`},
+			WorkerOnly: []string{"environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"}},
 		{Name: "bucket: an R2 binding alone", Reader: readerBucket, Field: "SHOP_MEDIA_BUCKET",
 			Value:      map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET"},
 			Want:       map[string]any{"name": "shop-stack-shop-media", "binding": "SHOP_MEDIA_BUCKET"},

@@ -141,7 +141,7 @@ func NewCloud(token string) Cloud {
 	return &restCloud{
 		token:  token,
 		api:    "https://api.cloudflare.com/client/v4",
-		r2:     R2Endpoint,
+		r2:     R2JurisdictionEndpoint,
 		client: &http.Client{Timeout: 2 * time.Minute},
 		now:    time.Now,
 		ids:    map[string]string{},
@@ -152,12 +152,48 @@ func NewCloud(token string) Cloud {
 type restCloud struct {
 	token  string
 	api    string
-	r2     func(account string) string
+	r2     func(account, jurisdiction string) string
 	client *http.Client
 	now    func() time.Time
 
+	// jurisdiction is the R2 jurisdiction whose S3 host the object calls
+	// reach, "" for the default one (InJurisdiction).
+	jurisdiction string
+
 	mu  sync.Mutex
 	ids map[string]string
+}
+
+// JurisdictionCloud is a Cloud whose object calls can reach the buckets of
+// an R2 jurisdiction, which R2's S3 API serves at a host of their own
+// (R2JurisdictionEndpoint, D64, amended). NewCloud's is one.
+type JurisdictionCloud interface {
+	Cloud
+
+	// InJurisdiction returns the Cloud whose object calls reach the
+	// buckets of jurisdiction, eu or fedramp; "" is the default one.
+	InJurisdiction(jurisdiction string) Cloud
+}
+
+var _ JurisdictionCloud = (*restCloud)(nil)
+
+// InJurisdiction returns the Cloud whose object calls go to the S3 host of
+// jurisdiction's buckets, signed as every object call is.
+func (c *restCloud) InJurisdiction(jurisdiction string) Cloud {
+	return &restCloud{token: c.token, api: c.api, r2: c.r2, client: c.client, now: c.now, jurisdiction: jurisdiction, ids: map[string]string{}}
+}
+
+// cloudIn is cloud's view of jurisdiction's buckets: cloud itself for the
+// default one, else through InJurisdiction, which a Cloud that cannot reach
+// a jurisdiction does not have.
+func cloudIn(cloud Cloud, jurisdiction string) (Cloud, error) {
+	if jurisdiction == "" {
+		return cloud, nil
+	}
+	if jc, ok := cloud.(JurisdictionCloud); ok {
+		return jc.InJurisdiction(jurisdiction), nil
+	}
+	return nil, fmt.Errorf("cloudflare: this Cloud reaches no bucket of R2 jurisdiction %s", jurisdiction)
 }
 
 // envelope is the REST API's response.
@@ -368,7 +404,7 @@ func (c *restCloud) s3(ctx context.Context, account, method, bucket, key string,
 		}
 		id = tok.ID
 	}
-	u, err := url.Parse(c.r2(account))
+	u, err := url.Parse(c.r2(account, c.jurisdiction))
 	if err != nil {
 		return nil, nil, err
 	}

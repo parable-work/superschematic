@@ -306,8 +306,10 @@ these, the twins of the Go runtime's `stackconfig` package (D51):
   `field_ENDPOINT` when an emulator serves the bucket, and on Workers
   `field_BINDING`, the R2 binding, and `field_R2_ACCOUNT`,
   `field_R2_ACCESS_KEY_ID` and `field_R2_TOKEN`, the credential that signs
-  its URLs (D64). It returns a `BucketConnection`, `{ name, endpoint?,
-  binding?, r2? }`.
+  its URLs (D64), with `field_R2_JURISDICTION` for a bucket in a
+  jurisdiction, `eu` or `fedramp`, whose URLs name
+  `<account>.<jurisdiction>.r2.cloudflarestorage.com` (D64, amended). It
+  returns a `BucketConnection`, `{ name, endpoint?, binding?, r2? }`.
 - `loadCallers(field, env)` reads an API's callers field
   (`<API>_CALLERS`): its issuers, keys and callers, as the
   `ServiceAuthConfig` that `serviceAuthenticator` takes. A key is a JWK's
