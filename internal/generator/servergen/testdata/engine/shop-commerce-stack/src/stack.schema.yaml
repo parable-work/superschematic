@@ -1,0 +1,19 @@
+# shop-commerce-api runs on its default server, a Go one, which opens the
+# engine on shop-commerce-db, whose types compose the commerce behaviors,
+# and shop-commerce-db's runner runs beside it, in shop-commerce-api's Go
+# (D70, D58). Its one environment, Local, runs on the local target.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-commerce-api, kind: API }
+      expose:
+        - service: { name: shop-commerce-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local
