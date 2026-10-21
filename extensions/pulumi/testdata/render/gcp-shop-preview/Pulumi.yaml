@@ -179,18 +179,6 @@ resources:
         - ${shop-api-service}
         - ${shop-db-database-shop-db}
       version: 9.37.1
-  # phase infrastructure; owners Orders
-  Orders-trace-agent:
-    name: Orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${Orders-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${Orders-account}
-      version: 9.37.1
   # phase exposure; owners dns
   dns-shop-api-a:
     name: dns.shop-api.a
@@ -544,18 +532,6 @@ resources:
         - ${shop-api-account}
         - ${shop-media-bucket}
       version: 9.37.1
-  # phase infrastructure; owners shop-api
-  shop-api-trace-agent:
-    name: shop-api.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-api-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${shop-api-account}
-      version: 9.37.1
   # phase exposure; owners shop-api
   shop-api-url-map:
     name: shop-api.url-map
@@ -682,18 +658,6 @@ resources:
     options:
       dependsOn:
         - ${shop-api-service}
-        - ${shop-orders-fulfil-orders-account}
-      version: 9.37.1
-  # phase infrastructure; owners shop-orders-fulfil-orders
-  shop-orders-fulfil-orders-trace-agent:
-    name: shop-orders-fulfil-orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-orders-fulfil-orders-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
         - ${shop-orders-fulfil-orders-account}
       version: 9.37.1
   # phase rollout; owners shop-orders-fulfil-orders
@@ -907,18 +871,6 @@ resources:
         - ${shop-api-service}
         - ${shop-orders-ship-orders-account}
       version: 9.37.1
-  # phase infrastructure; owners shop-orders-ship-orders
-  shop-orders-ship-orders-trace-agent:
-    name: shop-orders-ship-orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-orders-ship-orders-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${shop-orders-ship-orders-account}
-      version: 9.37.1
   # phase infrastructure; owners shop-web
   shop-web-address:
     name: shop-web.address
@@ -1121,7 +1073,6 @@ outputs:
   Orders.run-invoker.shop-api.id: ${Orders-run-invoker-shop-api.id}
   Orders.service.id: ${Orders-service.id}
   Orders.service.uri: ${Orders-service.uri}
-  Orders.trace-agent.id: ${Orders-trace-agent.id}
   dns.shop-api.a.id: ${dns-shop-api-a.id}
   dns.shop-api.cname.id: ${dns-shop-api-cname.id}
   dns.shop-web.a.id: ${dns-shop-web-a.id}
@@ -1159,7 +1110,6 @@ outputs:
   shop-api.service.uri: ${shop-api-service.uri}
   shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
   shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
-  shop-api.trace-agent.id: ${shop-api-trace-agent.id}
   shop-api.url-map.id: ${shop-api-url-map.id}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
@@ -1177,7 +1127,6 @@ outputs:
   shop-orders-fulfil-orders.database-user.shop-db.id: ${shop-orders-fulfil-orders-database-user-shop-db.id}
   shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-fulfil-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-fulfil-orders.run-invoker.shop-api.id: ${shop-orders-fulfil-orders-run-invoker-shop-api.id}
-  shop-orders-fulfil-orders.trace-agent.id: ${shop-orders-fulfil-orders-trace-agent.id}
   shop-orders-fulfil-orders.worker-pool.id: ${shop-orders-fulfil-orders-worker-pool.id}
   shop-orders-ship-orders.account.email: ${shop-orders-ship-orders-account.email}
   shop-orders-ship-orders.account.id: ${shop-orders-ship-orders-account.id}
@@ -1188,7 +1137,6 @@ outputs:
   shop-orders-ship-orders.job.id: ${shop-orders-ship-orders-job.id}
   shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
-  shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}
   shop-web.address.address: ${shop-web-address.address}
   shop-web.address.id: ${shop-web-address.id}
   shop-web.anchor.id: ${shop-web-anchor.id}

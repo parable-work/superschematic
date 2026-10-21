@@ -7424,15 +7424,8 @@ Status: built.
   its span before it exits.
 
 Not built:
-- Export on gcp. A target would need to set the variables for each Cloud
-  Run service, job and worker pool, from a value of the environment, and a
-  place to send to: an OpenTelemetry Collector as a sidecar container,
-  with Google's exporter and the Cloud Trace agent role each workload's
-  account has (section 7.2), or Google's OTLP endpoint,
-  `telemetry.googleapis.com`, whose OAuth token expires, so a static
-  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
-  `deployment.environment.name` and the image digest in
-  `OTEL_RESOURCE_ATTRIBUTES` too.
+- Export on gcp: built by the amendment at the end of this file that
+  names it (`### D67, amended`).
 - The cloudflare target's Workers build, which does not import
   `./telemetry`.
 - Metrics and logs, as above.
@@ -7861,5 +7854,46 @@ mirror's, and the links under `web/` stay as the default root's install
 made them. `TestStackDevRunsTheShop` checks that `stack dev --out` serves
 `shop-web` from its mirror. The generated CI builds each site in the
 default root, as before.
+
+The rule is reversible until the first release.
+
+### D67, amended: a gcp environment's telemetry turns export on, to Cloud Trace with the account's own token or to a collector
+
+D67 left export on gcp unbuilt: nothing set the OTEL variables on a Cloud
+Run service, job or worker pool, every workload's account held the Cloud
+Trace agent role for nothing, and Cloud Trace's OTLP endpoint,
+`telemetry.googleapis.com`, takes an OAuth access token that expires
+within the hour, which no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries.
+Google's own guidance has an application configure its exporter with its
+Application Default Credentials. None of the three runtimes' exporters
+does that without new code: Go's `otlptracehttp` takes static headers or
+an `http.Client`, TypeScript's `exporter-trace-otlp-proto` a headers
+function, and Rust's `opentelemetry-otlp` the `HttpClient` it is given, so
+each needs a token source of its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The gcp target's environment values take `telemetry`, an object whose presence turns export on for every server, job and worker: `{}` exports to Cloud Trace's OTLP endpoint, `https://telemetry.googleapis.com`; `endpoint` names an OTLP/HTTP collector's base URL instead; `sampleRatio`, 0 to 1, samples that share of the traces that start in a deployable. A server's, job's or worker's settings take `telemetry: true` or `false`, which turns its own export on, to the environment's endpoint or Cloud Trace's, or off. | A boolean alone, with no way to reach a collector or sample. A value on each deployable alone, which every environment would repeat. Headers in the setting, which would put a collector's credential into `environment.json`; a collector that needs one waits for a secret binding of its own. |
+| A deployable that exports gets `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` set to its name, the entrypoint's default made explicit, and `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name` (a preview member's with its parameters), `gcp.project_id`, which Cloud Trace's endpoint reads the spans' project from, `cloud.provider`, `cloud.region`, and `service.version`, the image. The image is a part of its own in the value's concatenation, so the deploy pins it to its digest there as it pins the container's (`PinImages` now pins a concatenation's part equal to the repository, and no part that only begins with it). A sample ratio sets `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and its argument. A binding of one of those names is refused. | `service.version` left out, which D67 asked a target for. The digest by a token of its own, a third pinning path. |
+| Each runtime sends the account's access token to an endpoint whose host is `googleapis.com` or under it, unless `OTEL_EXPORTER_OTLP_HEADERS` or its traces form names an `authorization` header: from the metadata server (`GCE_METADATA_HOST` when set, else `metadata.google.internal`), held until five minutes before it expires. Go wraps the exporter's `http.Client` transport (`telemetry/google.go`), TypeScript gives the exporter a headers function over `googleAccessTokenSource`, and Rust's export client adds the header itself. An export without a token fails as any other, and TypeScript, whose headers function may not throw, logs the failure and sends none. The rule is the host, so no new variable joins OpenTelemetry's. | A variable of our own that asks for the token, beside the standard ones D67 limits the configuration to. An OpenTelemetry Collector as a sidecar of every service, job and worker pool, with Google's exporter: a second container to configure, start and pay for in each, and a worker pool's and a job's sidecars behave differently from a service's. Google's client libraries for Application Default Credentials, three dependencies for one metadata request. |
+| A deployable that exports to Cloud Trace gets `roles/cloudtrace.agent` on the project for its account, which holds `telemetry.traces.write`, and only then; one that exports to a collector, or not at all, holds no trace role. `stack bootstrap` enables the Telemetry and Cloud Trace APIs for an environment whose graph grants the role, in place of Cloud Trace's for every Cloud Run graph, so an environment that turns Cloud Trace on later runs bootstrap again. | The role for every account, as before, whether or not anything exports. `roles/telemetry.tracesWriter`, Google's newer role for the endpoint alone, which a project's existing grants and Organization Policy are less likely to name; either holds the permission. |
+| The local target is unchanged: `stack dev` hands on the shell's OTEL variables (D67). | A collector `stack dev` starts, which D67 declined. |
+
+Status: built. gcp's `TestTelemetryTurnsExportOn`,
+`TestTelemetryToACollector`, `TestTelemetryOfOneDeployable`,
+`TestTelemetryRefuses` and `TestBootstrapEnablesTheTraceAPIs`, and the
+Production golden, which exports a quarter of its traces but from
+ShipOrders, hold the lowering; every other golden loses the trace agent
+role. stackdeploy's `TestPinImagesPinsAPartOfAConcatenation` holds the
+pin. Go's `TestGoogleAuthGoesToGoogleAlone` and `TestGoogleTokenTransport`,
+TypeScript's `Google's OTLP endpoint` tests, one of which exports through
+the real exporter, and Rust's `telemetry::tests` hold the host rule, the
+token, its cache and its refusal. Nothing has run on Google Cloud: the
+first live check is that Cloud Trace takes the spans of each runtime with
+the account's token and `gcp.project_id`, and that a worker pool's and a
+job's metadata server give the token as a service's does.
+
+Not built: headers for a collector, from a secret; a collector the target
+runs; metrics and logs (D67).
 
 The rule is reversible until the first release.

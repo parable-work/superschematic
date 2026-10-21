@@ -55,8 +55,8 @@ func servicePublicAddress(ctx registry.PlatformContext) any {
 // lowerService lowers a server to:
 //
 //   - what a server and a job share (lowerWorkload): a service account,
-//     the trace agent role for it, since the entrypoint exports traces to
-//     Cloud Trace (section 7.5), a Secret Manager secret and an accessor
+//     the trace agent role for it when it exports traces to Cloud Trace
+//     (telemetry.go), a Secret Manager secret and an accessor
 //     grant per secret binding, and the Cloud SQL volume and VPC egress
 //     its edges need;
 //   - the Cloud Run service, whose CPU is allocated only while it handles
@@ -174,8 +174,8 @@ type workload struct {
 // 7.2, 8.7 and 8.8, D52, D53):
 //
 //   - a service account named after the deployable, and the trace agent
-//     role for it, since the entrypoint exports traces to Cloud Trace
-//     (section 7.5);
+//     role for it when it exports traces to Cloud Trace (telemetry.go,
+//     D67, amended);
 //   - a Secret Manager secret and an accessor grant per secret binding
 //     (secretNodes);
 //   - its config as the container's environment variables: a literal as
@@ -183,7 +183,8 @@ type workload struct {
 //     to its Secret Manager secret, a derived field as one variable per
 //     member of the value its edge's connector derived, a secret member,
 //     such as the generic connector's signing key, from a Secret Manager
-//     secret of its own (secretMemberNodes, D63);
+//     secret of its own (secretMemberNodes, D63), and, when it exports
+//     its traces, OpenTelemetry's variables (telemetryEnv);
 //   - the image's repository path, which the deploy pins to a digest
 //     (section 11.2), and the cpu and memory settings;
 //   - the Cloud SQL volume, holding the instances its connections name,
@@ -205,18 +206,19 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 	member := ir.Output{Resource: account, Name: "member"}
 	var out registry.Lowered
 	add := func(res ...*ir.Resource) { out.Resources = append(out.Resources, res...) }
-	add(
-		&ir.Resource{ID: account, Type: TypeAccount, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
-			"project":     v.project,
-			"accountId":   d.ResourceName,
-			"displayName": fmt.Sprintf("%s %s %s %s", env.Stack, env.Name, d.Kind, d.Name),
-		}},
-		&ir.Resource{ID: d.Name + ".trace-agent", Type: TypeProjectIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+	add(&ir.Resource{ID: account, Type: TypeAccount, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+		"project":     v.project,
+		"accountId":   d.ResourceName,
+		"displayName": fmt.Sprintf("%s %s %s %s", env.Stack, env.Name, d.Kind, d.Name),
+	}})
+	telemetry := telemetryOf(env, d)
+	if telemetry != nil && telemetry.cloudTrace() {
+		add(&ir.Resource{ID: d.Name + ".trace-agent", Type: TypeProjectIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
 			"project": v.project,
-			"role":    "roles/cloudtrace.agent",
+			"role":    traceAgentRole,
 			"member":  member,
-		}},
-	)
+		}})
+	}
 
 	var envs, instances []any
 	for _, b := range d.Bindings {
@@ -255,6 +257,14 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 		default:
 			return registry.Lowered{}, workload{}, fmt.Errorf("binding %s has source %q", b.Field, b.Source)
 		}
+	}
+
+	if telemetry != nil {
+		vars, err := telemetryEnv(env, v, d, telemetry)
+		if err != nil {
+			return registry.Lowered{}, workload{}, err
+		}
+		envs = append(envs, vars...)
 	}
 
 	w := workload{

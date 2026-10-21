@@ -7,7 +7,10 @@
   "values": {
     "production": true,
     "project": "acme-prod",
-    "region": "us-east1"
+    "region": "us-east1",
+    "telemetry": {
+      "sampleRatio": 0.25
+    }
   },
   "domain": "acme.dev",
   "dns": {
@@ -396,7 +399,8 @@
       },
       "settings": {
         "cpu": "2",
-        "memory": "1Gi"
+        "memory": "1Gi",
+        "telemetry": false
       },
       "resourceName": "shop-orders-ship-orders",
       "bindings": [
@@ -841,6 +845,31 @@
                         "version": "latest"
                       }
                     }
+                  },
+                  {
+                    "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                    "value": "https://telemetry.googleapis.com"
+                  },
+                  {
+                    "name": "OTEL_SERVICE_NAME",
+                    "value": "Orders"
+                  },
+                  {
+                    "name": "OTEL_RESOURCE_ATTRIBUTES",
+                    "value": {
+                      "$concat": [
+                        "deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=",
+                        "us-east1-docker.pkg.dev/acme-prod/shop/orders"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER",
+                    "value": "parentbased_traceidratio"
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER_ARG",
+                    "value": "0.25"
                   }
                 ],
                 "image": "us-east1-docker.pkg.dev/acme-prod/shop/orders",
@@ -1567,6 +1596,31 @@
                         "version": "latest"
                       }
                     }
+                  },
+                  {
+                    "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                    "value": "https://telemetry.googleapis.com"
+                  },
+                  {
+                    "name": "OTEL_SERVICE_NAME",
+                    "value": "shop-api"
+                  },
+                  {
+                    "name": "OTEL_RESOURCE_ATTRIBUTES",
+                    "value": {
+                      "$concat": [
+                        "deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=",
+                        "us-east1-docker.pkg.dev/acme-prod/shop/shop-api"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER",
+                    "value": "parentbased_traceidratio"
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER_ARG",
+                    "value": "0.25"
                   }
                 ],
                 "image": "us-east1-docker.pkg.dev/acme-prod/shop/shop-api",
@@ -2083,6 +2137,31 @@
                     }
                   },
                   {
+                    "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                    "value": "https://telemetry.googleapis.com"
+                  },
+                  {
+                    "name": "OTEL_SERVICE_NAME",
+                    "value": "shop-orders-fulfil-orders"
+                  },
+                  {
+                    "name": "OTEL_RESOURCE_ATTRIBUTES",
+                    "value": {
+                      "$concat": [
+                        "deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=",
+                        "us-east1-docker.pkg.dev/acme-prod/shop/shop-orders-fulfil-orders"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER",
+                    "value": "parentbased_traceidratio"
+                  },
+                  {
+                    "name": "OTEL_TRACES_SAMPLER_ARG",
+                    "value": "0.25"
+                  },
+                  {
                     "name": "WORKER_CONCURRENCY",
                     "value": "4"
                   }
@@ -2526,27 +2605,6 @@
         ]
       },
       {
-        "id": "shop-orders-ship-orders.trace-agent",
-        "type": "gcp:projects/iAMMember:IAMMember",
-        "properties": {
-          "member": {
-            "$output": {
-              "resource": "shop-orders-ship-orders.account",
-              "name": "member"
-            }
-          },
-          "project": "acme-prod",
-          "role": "roles/cloudtrace.agent"
-        },
-        "dependsOn": [
-          "shop-orders-ship-orders.account"
-        ],
-        "phase": "infrastructure",
-        "owners": [
-          "shop-orders-ship-orders"
-        ]
-      },
-      {
         "id": "shop-web.address",
         "type": "gcp:compute/globalAddress:GlobalAddress",
         "properties": {
@@ -2938,7 +2996,6 @@
         "shop-orders-ship-orders.cloudsql-login.shop-db",
         "shop-orders-ship-orders.database-user.shop-db",
         "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
-        "shop-orders-ship-orders.trace-agent",
         "shop-web.address",
         "shop-web.anchor",
         "shop-web.backend",

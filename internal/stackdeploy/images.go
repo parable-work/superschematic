@@ -129,14 +129,25 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 	return pinned, nil
 }
 
-// replaceString replaces every string in v equal to old with new, and
-// returns how many it replaced.
+// replaceString replaces every string in v equal to old with new, a part
+// of a concatenation among them, as the gcp target writes the image into
+// OTEL_RESOURCE_ATTRIBUTES (D67, amended), and returns how many it
+// replaced.
 func replaceString(v any, old, new string) (any, int) {
 	switch v := v.(type) {
 	case string:
 		if v == old {
 			return new, 1
 		}
+	case ir.Concat:
+		n := 0
+		for i, inner := range v {
+			if s, ok := inner.(string); ok && s == old {
+				v[i] = new
+				n++
+			}
+		}
+		return v, n
 	case map[string]any:
 		n := 0
 		for key, inner := range v {

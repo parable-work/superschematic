@@ -55,9 +55,12 @@ const (
 
 // targetValues is the schema of an environment's gcp values: the project
 // and region every resource lands in, the project's number, which
-// bootstrap records and the generated CI's identity names (D47), and
-// whether the environment is production, which the defaults and the policy
-// rules read (section 7.5).
+// bootstrap records and the generated CI's identity names (D47), whether
+// the environment is production, which the defaults and the policy rules
+// read (section 7.5), and its telemetry, which turns each server's, job's
+// and worker's trace export on (telemetry.go, D67, amended): to an OTLP/HTTP
+// endpoint, Cloud Trace's unless it names a collector's, sampling a share
+// of the traces when it says.
 const targetValues = `{
   "type": "object",
   "required": ["project", "region"],
@@ -65,7 +68,15 @@ const targetValues = `{
     "project": {"type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"},
     "projectNumber": {"type": "string", "pattern": "^[1-9][0-9]{5,19}$"},
     "region": {"type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]+$"},
-    "production": {"type": "boolean"}
+    "production": {"type": "boolean"},
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "endpoint": {"type": "string", "pattern": "^https?://[^/?#\\s,]+(/[^?#\\s,]*)?$"},
+        "sampleRatio": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }`
@@ -73,7 +84,8 @@ const targetValues = `{
 // cloudRunSettings is the schema of a server's settings on Cloud Run.
 // cpuAlwaysAllocated keeps an instance's CPU between requests, for a
 // server that works between them, and bills the instance for its whole
-// life (lowerService).
+// life (lowerService). telemetry turns the server's trace export on or
+// off over its environment's (D67, amended).
 const cloudRunSettings = `{
   "type": "object",
   "properties": {
@@ -82,18 +94,22 @@ const cloudRunSettings = `{
     "concurrency": {"type": "integer", "minimum": 1, "maximum": 1000},
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
     "cpuAlwaysAllocated": {"type": "boolean"},
-    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+    "telemetry": {"type": "boolean"}
   },
   "additionalProperties": false
 }`
 
 // cloudRunJobSettings is the schema of a job's settings on Cloud Run
-// (D52): the resources of its one task, as a server's container takes.
+// (D52): the resources of its one task, as a server's container takes,
+// and whether it exports its traces, over its environment's telemetry
+// (D67, amended).
 const cloudRunJobSettings = `{
   "type": "object",
   "properties": {
     "cpu": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?|[0-9]+m)$"},
-    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+    "telemetry": {"type": "boolean"}
   },
   "additionalProperties": false
 }`
@@ -111,12 +127,14 @@ const siteSettings = `{
 // worker pool's CPU is always allocated, which Cloud Run gives as one CPU
 // or more, so a fraction of one is refused here rather than by the deploy.
 // How many instances run, and how many messages each handles, are the
-// core's settings (ir.ResolvedWorker).
+// core's settings (ir.ResolvedWorker). telemetry turns the worker's trace
+// export on or off over its environment's (D67, amended).
 const cloudRunWorkerSettings = `{
   "type": "object",
   "properties": {
     "cpu": {"type": "string", "pattern": "^([1-9][0-9]*(\\.[0-9]+)?|[1-9][0-9]{3,}m)$"},
-    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"}
+    "memory": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+    "telemetry": {"type": "boolean"}
   },
   "additionalProperties": false
 }`

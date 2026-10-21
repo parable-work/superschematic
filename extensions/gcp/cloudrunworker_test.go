@@ -44,7 +44,7 @@ func TestWorkerPlatform(t *testing.T) {
 		t.Errorf("the worker runs %+v", d.Worker)
 	}
 	if got := strings.Join(ownedBy(env, fulfilOrders), ", "); got != "network, network.nat, network.router, network.subnet, secret.PaymentsSecrets.STRIPE_KEY, "+
-		fulfilOrders+".account, "+fulfilOrders+".reads.PaymentsSecrets.STRIPE_KEY, "+fulfilOrders+".trace-agent, "+fulfilOrders+".worker-pool" {
+		fulfilOrders+".account, "+fulfilOrders+".reads.PaymentsSecrets.STRIPE_KEY, "+fulfilOrders+".worker-pool" {
 		t.Errorf("the worker lowers to %s", got)
 	}
 	for _, e := range env.Edges {
