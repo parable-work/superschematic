@@ -1924,8 +1924,8 @@ one of two places (D47, amended):
   that opens the engine (D58) gets a third, which builds the core's engine
   archive (`superschematic-engine-ffi`) from the Cargo workspace beside
   `[paths] engine_go`, with the crates it reaches by path at their places
-  in the checkout: the work queue's crate, the schema IR's and the schema
-  runtime's, the version graph's engine and core, and superscalar's
+  in the checkout: the work queue's crate, the commerce crate, the schema
+  IR's and the schema runtime's, the version graph's engine and core, and superscalar's
   crates with their workspace's manifest, which its core takes its lints
   from.
   Without `[paths] engine_go` such an entrypoint gets no Dockerfile from a

@@ -207,7 +207,7 @@ func TestTheRustEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
 	// The engine's workspace reaches the crates of superscalar beside its
 	// core, as the checkout lays them out.
 	copyTree(t, filepath.Join(repo, "third_party", "superscalar", "crates"), filepath.Join(repoRoot, "third_party", "superscalar", "crates"))
-	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
+	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/engine-commerce/rust", "runtime/schema/rust-ir", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
 		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
 	}
 	f := loadEngineFixture(t)

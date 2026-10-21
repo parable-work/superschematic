@@ -63,6 +63,7 @@ FROM rust:${RUST_VERSION}-trixie AS engine
 WORKDIR /src
 COPY runtime/engine/rust runtime/engine/rust
 COPY runtime/engine-workqueue/rust runtime/engine-workqueue/rust
+COPY runtime/engine-commerce/rust runtime/engine-commerce/rust
 COPY runtime/schema/rust-ir runtime/schema/rust-ir
 COPY runtime/schema/rust runtime/schema/rust
 COPY runtime/versiongraph/rust-engine runtime/versiongraph/rust-engine

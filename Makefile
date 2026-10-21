@@ -262,8 +262,9 @@ rust:
 # every feature combination of the databases (both, neither, and each
 # alone) and on the axum router over Postgres, as a Rust server builds it,
 # and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The work
-# queue's crate (runtime/engine-workqueue/rust) is a member, so it builds,
-# lints and tests here with the rest. The
+# queue's crate (runtime/engine-workqueue/rust) and the commerce crate
+# (runtime/engine-commerce/rust) are members, so they build, lint and test
+# here with the rest. The
 # engine reads schemas through runtime/schema/rust-ir, which needs the
 # superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
 # and the storage's tests run on SQLite, and on Postgres as well when
