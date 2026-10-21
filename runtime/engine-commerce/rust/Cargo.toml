@@ -19,6 +19,12 @@ sqlite = ["superschematic-engine/sqlite"]
 postgres = ["superschematic-engine/postgres"]
 
 [dependencies]
+# Calendar's time zones (D70): the IANA database bundled into the binary
+# (tzdb-bundle-always) and no other, neither the host's zone files nor its
+# system zone (no tzdb-zoneinfo, tz-system), so every server built from the
+# lock file computes the same slots. A rule change ships with a release.
+# Unlicense OR MIT, as jiff-tzdb is.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
 # The engine's JSON features (D58): a number keeps its text, an object its
 # members' order.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }

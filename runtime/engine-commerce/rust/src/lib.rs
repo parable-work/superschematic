@@ -33,19 +33,20 @@
 //! [`commerce`] registers every behavior of the package, in [`NAMES`]'
 //! order; [`behavior`] gives one by name.
 
+pub mod calendar;
 pub mod supply;
 
 use superschematic_engine::BehaviorSet;
 
 /// Every commerce behavior this crate implements so far, in the order
 /// [`commerce`] registers them.
-pub const NAMES: [&str; 0] = [];
+pub const NAMES: [&str; 1] = ["Calendar"];
 
 /// Registers one behavior in a set.
 type Register = fn(BehaviorSet) -> BehaviorSet;
 
 /// Each behavior, by name, in [`NAMES`]' order.
-const REGISTER: [(&str, Register); 0] = [];
+const REGISTER: [(&str, Register); 1] = [("Calendar", |set| set.with(calendar::Calendar))];
 
 /// One commerce behavior by name, for a host that registers only some;
 /// `None` for a name that is none of [`NAMES`].
