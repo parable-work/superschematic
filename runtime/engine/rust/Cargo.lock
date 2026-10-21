@@ -1707,6 +1707,7 @@ dependencies = [
  "serde_json",
  "superscalar",
  "superschematic-engine",
+ "superschematic-engine-behaviors",
 ]
 
 [[package]]

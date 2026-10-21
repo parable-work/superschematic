@@ -944,7 +944,7 @@ fn an_amount_in_another_currency_is_refused() {
         )
         .unwrap();
         assert_eq!(opened["currency"], json!("JPY"));
-        if currency::listed() {
+        if currency::CHECKS_TABLE {
             // A field that holds no active code is refused at openPayment.
             create(
                 &engine,
@@ -984,7 +984,7 @@ fn a_literal_currency_is_checked_against_iso_4217_when_the_schema_is_defined() {
         define(payments_config(json!({"currency": "JPY"}))).expect("an active code");
         // The configSchema's pattern refuses what is not three capitals.
         assert!(define(payments_config(json!({"currency": "gbp"}))).is_err());
-        if currency::listed() {
+        if currency::CHECKS_TABLE {
             let refused = refusal(define(payments_config(json!({"currency": "XYZ"}))));
             assert!(refused.to_string().contains("XYZ"), "{refused}");
         } else {

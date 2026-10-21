@@ -446,7 +446,9 @@ fn parse_config(raw: &Value, target: &ConfigTarget<'_>) -> Result<PaymentsConfig
     let currency = match raw.get("currency") {
         None => None,
         Some(Value::String(code)) => {
-            currency::check(code).map_err(|why| Error::config(format!("currency: {why}")))?;
+            if let Some(why) = currency::refusal("currency", code) {
+                return Err(Error::config(why));
+            }
             Some(CurrencySource::Code(code.clone()))
         }
         Some(given) => {
@@ -1766,7 +1768,7 @@ fn open_payment(
             None,
         ));
     };
-    if let Err(why) = currency::check(&currency) {
+    if let Some(why) = currency::refusal("the instance's currency", &currency) {
         return Err(vetoed(cx, OP, why, CURRENCY_MISMATCH, None));
     }
     // A currency the config names must be the one Holds.total carries.

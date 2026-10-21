@@ -8910,10 +8910,11 @@ rules are reversible until the first release.
 M5, `Payments`: built in `runtime/engine-commerce/rust` (`payments.rs`)
 and registered by `commerce()`, with its own tables of attempts, actions,
 refunds, a refund instance's issues and the provider events it recorded,
-the same SQL on both databases. A literal currency is checked through
-superscalar's `Finance.Currency` at run time (the crate's `currency`
-module), so the crate builds at a pin without the scalar and holds a code
-to its shape alone there. The testkit's `commerce_payments` (11 cases)
+the same SQL on both databases. A literal currency, and the code an
+instance pays in, is checked against `Finance.Currency`'s table through
+the crate's `currency` module, which Stock's builder added: its `build.rs`
+turns the table on when the superscalar checkout carries the scalar, and
+until then a code is held to its shape alone. The testkit's `commerce_payments` (11 cases)
 and `commerce_payments_refunds` (4) pass on SQLite and Postgres:
 idempotent and reordered events, `amount_locked` from a field and from a
 stand-in `Holds.total`, `require`, `voidOn` and `payment_in_progress`,

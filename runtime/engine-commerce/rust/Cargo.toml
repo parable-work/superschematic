@@ -15,8 +15,8 @@ publish.workspace = true
 [features]
 # The databases the engine runs on, as the engine has them.
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine/sqlite"]
-postgres = ["superschematic-engine/postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
 
 [dependencies]
 # The engine's JSON features (D58): a number keeps its text, an object its
@@ -26,9 +26,13 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 # engine: these behaviors reach it as any extension's do, and an
 # extension's supply uses the supply module the same way.
 superschematic-engine = { path = "../../engine/rust/engine", default-features = false }
-# superscalar's core, by the path the schema reader links it from: the
-# Finance.Currency check of a currency code (the `currency` module), the
-# scalar's own, read at run time so a pin without the scalar still builds.
+# The core's behaviors, for what Holds reads as they do: a link's targets
+# (link_many) and a date-time as Timers reads one (parse_date_time).
+superschematic-engine-behaviors = { path = "../../engine/rust/behaviors", default-features = false }
+# superscalar's core, by path from the checkout superscalar.pin names, as
+# the engine's schema reader links it: Finance.Currency's ISO 4217 table,
+# which `currency` checks a config's code against once the pin carries it
+# (build.rs).
 superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
 
 [lints]
