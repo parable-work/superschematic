@@ -194,6 +194,11 @@ type EngineProject struct {
 	// Crates are the directories of the extensions' crates the crate
 	// reaches by path, which an image builds with it.
 	Crates []string
+
+	// Lockfile is the lock file of the engine's Cargo workspace, which a
+	// crate with no lock file of its own starts from: the workspace of the
+	// engine's crate a [paths] key names, empty when none does.
+	Lockfile string
 }
 
 // engineCrates are the paths, relative to the checkout's root, that the
@@ -345,7 +350,7 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 	if err := s.planModule(input, dir); err != nil {
 		return nil, err
 	}
-	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir, in.EngineGo); err != nil {
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
 		return nil, err
 	}
 	s.Docker, s.NoDocker, err = planDocker(input, dir)
@@ -382,21 +387,31 @@ func writeEngine(s *Server, dir string) error {
 
 // engineLink is the projectengine.Link of an entrypoint at dir whose engine
 // is built from project, the project's engine crate, nil when project is
-// nil: member is the crate's member the entrypoint takes, and beside, a
-// [paths] key naming the engine's Go binding or npm package, puts the
-// engine's Cargo workspace, whose lock file the crate starts from, at
-// ../rust, as the image's engine stage takes it.
-func engineLink(project *EngineProject, dir, member, beside string) (*projectengine.Link, error) {
+// nil: member is the crate's member the entrypoint takes, and the crate
+// starts from the engine workspace's lock file the project names.
+func engineLink(project *EngineProject, dir, member string) (*projectengine.Link, error) {
 	if project == nil {
 		return nil, nil
 	}
-	var lockfile string
-	if beside != "" {
-		lockfile = filepath.Join(filepath.Dir(beside), "rust", "Cargo.lock")
-	}
-	l, err := projectengine.LinkOf(dir, project.Database, project.Dir, member, lockfile)
+	l, err := projectengine.LinkOf(dir, project.Database, project.Dir, member, project.Lockfile)
 	if err != nil {
 		return nil, err
 	}
 	return &l, nil
+}
+
+// EngineLockfile is the lock file of the engine's Cargo workspace the
+// naming file's [paths] keys locate, empty when none does: the workspace
+// holding the engine's crate (engine_rust), or the one beside its Go
+// binding or npm package (engine_go, engine_typescript), runtime/engine/rust.
+func EngineLockfile(paths naming.LocalPaths) string {
+	switch {
+	case paths.EngineRust != "":
+		return filepath.Join(filepath.Dir(paths.EngineRust), "Cargo.lock")
+	case paths.EngineGo != "":
+		return filepath.Join(filepath.Dir(paths.EngineGo), "rust", "Cargo.lock")
+	case paths.EngineTypeScript != "":
+		return filepath.Join(filepath.Dir(paths.EngineTypeScript), "rust", "Cargo.lock")
+	}
+	return ""
 }

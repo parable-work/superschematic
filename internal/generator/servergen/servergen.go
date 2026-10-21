@@ -820,7 +820,7 @@ func Plan(in Input) (*Server, error) {
 		return nil, err
 	}
 	in.opensEngine = len(s.Engines) > 0
-	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir, in.EngineGo); err != nil {
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
 		return nil, err
 	}
 	s.Docker, s.NoDocker, err = planDocker(in, dir)

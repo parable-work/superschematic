@@ -358,3 +358,22 @@ func TestAReleaseImageRefusesAProjectsEngine(t *testing.T) {
 		t.Errorf("queue-api's link file is %+v (%v), want the ffi member with no lock file", link, err)
 	}
 }
+
+// TestEngineLockfile: the engine workspace's lock file comes from whichever
+// [paths] key locates the workspace, engine_rust alone included, and from
+// none without one.
+func TestEngineLockfile(t *testing.T) {
+	for _, tc := range []struct {
+		paths naming.LocalPaths
+		want  string
+	}{
+		{naming.LocalPaths{EngineRust: "/ss/runtime/engine/rust/engine"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{EngineGo: "/ss/runtime/engine/go"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{EngineTypeScript: "/ss/runtime/engine/typescript"}, "/ss/runtime/engine/rust/Cargo.lock"},
+		{naming.LocalPaths{ScalarGo: "/ss/third_party/superscalar/go"}, ""},
+	} {
+		if got := servergen.EngineLockfile(tc.paths); got != filepath.FromSlash(tc.want) {
+			t.Errorf("EngineLockfile(%+v) = %q, want %q", tc.paths, got, tc.want)
+		}
+	}
+}

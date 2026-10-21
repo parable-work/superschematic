@@ -281,7 +281,7 @@ func (g github) check() job {
 	archives := slices.DeleteFunc(slices.Sorted(maps.Keys(st.EngineArchives)), func(db string) bool {
 		return !slices.Contains(slices.Collect(maps.Values(engines)), db)
 	})
-	engineTypeScript := st.EngineCheckout != "" && len(tsPackages) > 0
+	engineTypeScript := st.EngineCheckout != "" && st.EngineCheckoutTypeScript && len(tsPackages) > 0
 	if st.EngineCheckout != "" && (len(archives) > 0 || engineTypeScript) {
 		steps = append(steps, engineSuperscalar(st.EngineCheckout))
 	}
