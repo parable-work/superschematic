@@ -1,0 +1,6 @@
+{
+  "database": "queue-db",
+  "crate": "../../../engine/rust/queue-db",
+  "member": "ffi",
+  "lockfile": "../../../../../runtime/engine/rust/Cargo.lock"
+}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -194,7 +195,9 @@ func (r ratingWithACrate) Register(reg *registry.Registry) error {
 // runner open the engine naming acme.Rating among its behaviors; each
 // image's engine stage builds the crate's napi member, the project's engine
 // addon, in the core's addon's place, its lock file seeded from the engine
-// workspace's, and names it with SUPERSCHEMATIC_ENGINE_ADDON (D58).
+// workspace's, and names it with SUPERSCHEMATIC_ENGINE_ADDON (D58). Each
+// package's projectengine.LinkFile names the crate's napi member, from
+// which the local target builds the addon.
 func TestATypeScriptEntrypointLoadsTheProjectsEngineAddon(t *testing.T) {
 	repo := testpaths.RepoRoot(t)
 	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
@@ -221,6 +224,13 @@ func TestATypeScriptEntrypointLoadsTheProjectsEngineAddon(t *testing.T) {
 		}
 		if !strings.Contains(string(main), `deskDbEngineDocument, 'permission', { behaviors: ['acme.Rating']`) {
 			t.Errorf("%s opens the engine without acme.Rating:\n%s", d, main)
+		}
+		link, err := projectengine.ReadLink(dir)
+		if err != nil || link == nil {
+			t.Fatalf("%s has no %s: %v", d, projectengine.LinkFile, err)
+		}
+		if want := (projectengine.Link{Database: "desk-db", Crate: "../../../engine/rust/desk-db", Member: projectengine.NapiDir, Lockfile: "../../../../../runtime/engine/rust/Cargo.lock"}); *link != want {
+			t.Errorf("%s's %s is %+v, want %+v", d, projectengine.LinkFile, *link, want)
 		}
 		if d == engineTSJob {
 			continue
@@ -717,6 +727,26 @@ if (command === 'create') {
 // superscalar's addon and the engine's in Rust stages, and runs only
 // outside -short.
 func TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
+	typeScriptEngineImage(t, false)
+}
+
+// TestTheTypeScriptEngineProjectDockerfileBuildsAnImageThatServes: as
+// TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes, with desk-db's
+// Account composing acme.Rating, whose crate the project holds at
+// crates/behaviors: the engine stage builds the project's engine crate's
+// napi member in the core addon's place, its lock file seeded from the
+// engine workspace's, and the image keeps it where
+// SUPERSCHEMATIC_ENGINE_ADDON names it (D58). The image serves as the
+// core's does, and Bun in the container loads the named addon, which
+// reports the project's crate.
+func TestTheTypeScriptEngineProjectDockerfileBuildsAnImageThatServes(t *testing.T) {
+	typeScriptEngineImage(t, true)
+}
+
+// typeScriptEngineImage builds desk-ts-api's image, on the project's
+// engine addon when project is set, and runs it.
+func typeScriptEngineImage(t *testing.T, project bool) {
+	t.Helper()
 	needDocker(t)
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -744,7 +774,35 @@ func TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
 		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
 	}
 	f := loadTypeScriptEngineFixture(t)
-	f.build(t, repoRoot, tsEngineFakePaths(repoRoot), engineTSOrder...)
+	paths := tsEngineFakePaths(repoRoot)
+	tag := "engine"
+	if project {
+		// The project's engine crate depends on the engine's crates the
+		// context holds.
+		engine := filepath.Join(repoRoot, "runtime", "engine", "rust")
+		paths.EngineRust, paths.EngineBehaviorsRust = filepath.Join(engine, "engine"), filepath.Join(engine, "behaviors")
+		paths.EngineABIRust, paths.EngineNapiRust = filepath.Join(engine, "abi"), filepath.Join(engine, "napi")
+		paths.EngineWorkQueueRust = filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust")
+		tag = "engine-project"
+		reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.reg = reg
+		composeOnAccount(f, ir.BehaviorRef{Name: "acme.Rating", Config: json.RawMessage(`{"maxStars":5}`)})
+		// acme's crate at crates/behaviors in this project, on the engine
+		// crates of the checkout the context holds.
+		crate := filepath.Join(repoRoot, "crates", "behaviors")
+		copyTree(t, filepath.Join(repo, "examples", "acme-schematic", "crates", "behaviors"), crate, "target")
+		manifest, err := os.ReadFile(filepath.Join(crate, "Cargo.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(crate, "Cargo.toml"), []byte(strings.ReplaceAll(string(manifest), `"../../../../runtime/`, `"../../runtime/`)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.build(t, repoRoot, paths, engineTSOrder...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out
@@ -770,7 +828,7 @@ func TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer context.Close()
-	image := fmt.Sprintf("superschematic-servergen-ts-test:%d-engine", time.Now().UnixNano())
+	image := fmt.Sprintf("superschematic-servergen-ts-test:%d-%s", time.Now().UnixNano(), tag)
 	build := exec.Command("docker", "build", "-q", "-t", image, "-f", built.Dockerfile, "-")
 	build.Stdin = context
 	if output, err := build.CombinedOutput(); err != nil {
@@ -803,6 +861,15 @@ func TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
 	}
 	s.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
 	s.expect(t, http.MethodGet, "/engine/desk-db/namespaces/desk-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)
+	if project {
+		// The addon the image names is the project's, and loads on the
+		// image's glibc.
+		crate := naming.Default().RustEngineCrate("desk-db") + "-napi"
+		got := docker(t, "exec", container, "bun", "-e", `const addon = require(process.env.SUPERSCHEMATIC_ENGINE_ADDON); console.log(process.env.SUPERSCHEMATIC_ENGINE_ADDON, addon.project())`)
+		if want := "/engine/" + crate + ".node " + crate; strings.TrimSpace(got) != want {
+			t.Errorf("the image's addon is %q, want %q", got, want)
+		}
+	}
 	docker(t, "stop", container)
 	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
 		t.Errorf("the container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
