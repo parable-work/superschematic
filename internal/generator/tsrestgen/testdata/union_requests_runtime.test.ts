@@ -3,8 +3,10 @@ Sends union_requests.json's requests to the generated router for
 union-lists-api (run by TestGeneratedRouterAnswersUnionRequests with API_DIR
 set to the materialized package, UNION_REQUESTS to the requests and
 UNION_RESPONSES to the file it writes). Its implementation answers
-drawShape with the shape it received, pay with the payment's kind, and
-checkout with the payment's kind, a colon and the number of shapes. It
+drawShape with the shape it received, pay with the payment's kind,
+checkout with the payment's kind, a colon and the number of shapes, the
+list, grid and map operations with the number of shapes, and probe with
+ok. It
 writes each request's name, the status and the body the router answered,
 which the Go test holds to the requests' expectations.
 */
@@ -29,6 +31,10 @@ function app() {
       pay: async ({ payment }: { payment: Payment }) => payment.kind,
       checkout: async ({ input }: { input: { payment: Payment; shapes?: unknown[] } }) =>
         `${input.payment.kind}:${input.shapes?.length ?? 0}`,
+      drawShapes: async ({ shapes }: { shapes: unknown[] }) => `${shapes.length}`,
+      shapeGrid: async ({ rows }: { rows: unknown[][] }) => `${rows.reduce((n, row) => n + row.length, 0)}`,
+      shapesByKey: async ({ byKey }: { byKey: Record<string, unknown> }) => `${Object.keys(byKey).length}`,
+      probe: async () => 'ok',
       listShapes: async () => [],
       shapeRows: async () => [],
       getShape: async () => null,

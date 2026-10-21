@@ -121,6 +121,7 @@ func TestUnionOutputsAreMarked(t *testing.T) {
 	if want := []string{"Marker", "Shape"}; !slices.Equal(namespace.UnionOutputTypes, want) {
 		t.Errorf("UnionOutputTypes = %v, want %v", namespace.UnionOutputTypes, want)
 	}
+	// Probe's unions are fields of its input, which its model reads.
 	if want := []string{"Payment", "Shape"}; !slices.Equal(namespace.UnionArgumentTypes, want) {
 		t.Errorf("UnionArgumentTypes = %v, want %v", namespace.UnionArgumentTypes, want)
 	}
@@ -141,6 +142,10 @@ func TestUnionOutputsAreMarked(t *testing.T) {
 		"draw_shape":     {true, "Shape"},
 		"pay":            {false, ""},
 		"checkout":       {false, ""},
+		"draw_shapes":    {false, ""},
+		"shape_grid":     {false, ""},
+		"shapes_by_key":  {false, ""},
+		"probe":          {false, ""},
 	}
 	for _, endpoint := range namespace.Endpoints {
 		w, ok := want[endpoint.MethodName]

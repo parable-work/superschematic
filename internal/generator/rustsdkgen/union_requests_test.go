@@ -94,9 +94,10 @@ tokio = { version = "1", features = ["macros", "rt"] }
 		t.Fatal(err)
 	}
 	var outcomes map[string]struct {
-		Skipped bool            `json:"skipped"`
-		Sent    json.RawMessage `json:"sent"`
-		Error   string          `json:"error"`
+		Skipped  bool            `json:"skipped"`
+		Sent     json.RawMessage `json:"sent"`
+		Expected json.RawMessage `json:"expected"`
+		Error    string          `json:"error"`
 	}
 	if err := json.Unmarshal(data, &outcomes); err != nil {
 		t.Fatal(err)
@@ -111,9 +112,10 @@ tokio = { version = "1", features = ["macros", "rt"] }
 				t.Errorf("%s: the Rust types cannot hold its arguments", request.Name)
 			}
 		case request.SDKSends():
+			// A typed SDK sends the arguments as its Rust types hold them.
 			var got, want any
-			if json.Unmarshal(outcome.Sent, &got) != nil || json.Unmarshal(request.Body, &want) != nil {
-				t.Errorf("%s: sent %s (%s), want %s", request.Name, outcome.Sent, outcome.Error, request.Body)
+			if json.Unmarshal(outcome.Sent, &got) != nil || json.Unmarshal(outcome.Expected, &want) != nil {
+				t.Errorf("%s: sent %s (%s), want %s", request.Name, outcome.Sent, outcome.Error, outcome.Expected)
 				continue
 			}
 			gotJSON, _ := json.Marshal(got)
@@ -161,8 +163,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use serde_json::{json, Value};
-use SDK_CRATE::namespaces::shape::{DrawShapeInput, PayInput};
-use SDK_CRATE::types::{Checkout, Payment, Shape};
+use SDK_CRATE::namespaces::shape::{DrawShapeInput, DrawShapesInput, PayInput, ShapeGridInput, ShapesByKeyInput};
+use SDK_CRATE::types::{Checkout, Payment, Probe, Shape};
 use SDK_CRATE::{ClientConfig, UnionListsApiSdk};
 
 /// Serves one request: it records the body it is sent and answers data.
@@ -218,26 +220,70 @@ async fn union_requests() {
         let data = if request["status"] == 200 { request["data"].clone() } else { Value::Null };
         let sent = Arc::new(Mutex::new(None));
         let sdk = serve(data, sent.clone());
-        let result = match request["operation"].as_str().unwrap() {
+        // Each call's arguments, as the SDK serializes them, beside its result.
+        let result: Option<(Value, Result<(), String>)> = match request["operation"].as_str().unwrap() {
             "drawShape" => match serde_json::from_value::<Shape>(body["shape"].clone()) {
-                Ok(shape) => Some(sdk.shape.draw_shape(DrawShapeInput { shape }, None).await.map(|_| ())),
+                Ok(shape) => {
+                    let input = DrawShapeInput { shape };
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.draw_shape(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
                 Err(_) => None,
             },
             "pay" => match serde_json::from_value::<Payment>(body["payment"].clone()) {
-                Ok(payment) => Some(sdk.shape.pay(PayInput { payment }, None).await.map(|_| ())),
+                Ok(payment) => {
+                    let input = PayInput { payment };
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.pay(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
                 Err(_) => None,
             },
             "checkout" => match serde_json::from_value::<Checkout>(body.clone()) {
-                Ok(input) => Some(sdk.shape.checkout(input, None).await.map(|_| ())),
+                Ok(input) => {
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.checkout(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
+                Err(_) => None,
+            },
+            "probe" => match serde_json::from_value::<Probe>(body.clone()) {
+                Ok(input) => {
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.probe(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
+                Err(_) => None,
+            },
+            "drawShapes" => match serde_json::from_value::<Vec<Shape>>(body["shapes"].clone()) {
+                Ok(shapes) => {
+                    let input = DrawShapesInput { shapes };
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.draw_shapes(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
+                Err(_) => None,
+            },
+            "shapeGrid" => match serde_json::from_value::<Vec<Vec<Shape>>>(body["rows"].clone()) {
+                Ok(rows) => {
+                    let input = ShapeGridInput { rows };
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.shape_grid(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
+                Err(_) => None,
+            },
+            "shapesByKey" => match serde_json::from_value::<HashMap<String, Shape>>(body["byKey"].clone()) {
+                Ok(by_key) => {
+                    let input = ShapesByKeyInput { by_key };
+                    let expected = serde_json::to_value(&input).unwrap();
+                    Some((expected, sdk.shape.shapes_by_key(input, None).await.map(|_| ()).map_err(|e| e.to_string())))
+                }
                 Err(_) => None,
             },
             other => panic!("{name}: unknown operation {other}"),
         };
         let outcome = match result {
             None => json!({"skipped": true}),
-            Some(result) => json!({
+            Some((expected, result)) => json!({
                 "sent": sent.lock().unwrap().clone(),
-                "error": result.err().map(|error| error.to_string()),
+                "expected": expected,
+                "error": result.err(),
             }),
         };
         outcomes.insert(name, outcome);

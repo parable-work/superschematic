@@ -98,6 +98,7 @@ type UnionRequest struct {
 	Input     bool            `json:"input,omitempty"`
 	Reason    string          `json:"reason,omitempty"`
 	Parameter string          `json:"parameter,omitempty"`
+	At        string          `json:"at,omitempty"`
 	Errors    FieldErrors     `json:"errors,omitempty"`
 	SDK       json.RawMessage `json:"sdk"`
 }
@@ -451,6 +452,7 @@ func checkUnionResponse(request UnionRequest, response UnionResponse) []string {
 		Details struct {
 			Reason    string `json:"reason"`
 			Parameter string `json:"parameter"`
+			Path      string `json:"path"`
 		} `json:"details"`
 	}
 	if err := json.Unmarshal(response.Body, &body); err != nil {
@@ -491,21 +493,26 @@ func checkUnionResponse(request UnionRequest, response UnionResponse) []string {
 		return problems
 	}
 	// A body argument's refusal: the TypeScript and Rust routers name the
-	// argument in details.parameter, and the Go route names its errors
-	// under the argument's path.
+	// argument, the reason and the value's path in details, and the Go
+	// route answers the field errors.
+	want := request.Errors
+	if want == nil {
+		want = FieldErrors{}
+	}
 	if body.Details.Parameter != "" {
 		if body.Details.Parameter != request.Parameter {
 			problems = append(problems, fmt.Sprintf("parameter %q, want %q", body.Details.Parameter, request.Parameter))
 		}
+		if body.Details.Reason != request.Reason {
+			problems = append(problems, fmt.Sprintf("reason %q, want %q", body.Details.Reason, request.Reason))
+		}
+		if body.Details.Path != request.At {
+			problems = append(problems, fmt.Sprintf("path %q, want %q", body.Details.Path, request.At))
+		}
 		return problems
 	}
-	if len(errors) == 0 {
-		return []string{fmt.Sprintf("no parameter and no errors, want the refusal of %s", request.Parameter)}
-	}
-	for path := range errors {
-		if path != request.Parameter && !strings.HasPrefix(path, request.Parameter+".") && !strings.HasPrefix(path, request.Parameter+"[") {
-			problems = append(problems, fmt.Sprintf("error at %q, want one under %s", path, request.Parameter))
-		}
+	if errors.String() != want.String() {
+		problems = append(problems, fmt.Sprintf("errors %s, want %s", errors, want))
 	}
 	return problems
 }

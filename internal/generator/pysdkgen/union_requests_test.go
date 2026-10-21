@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/pygen"
@@ -96,10 +98,11 @@ func TestUnionArgumentsPythonSDK(t *testing.T) {
 					t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, request.Body)
 					continue
 				}
-				gotJSON, _ := json.Marshal(got)
-				wantJSON, _ := json.Marshal(want)
-				if string(gotJSON) != string(wantJSON) {
-					t.Errorf("%s: sent %s, want %s", request.Name, gotJSON, wantJSON)
+				// The SDK sends the arguments as its models hold them: a
+				// default filled in, a key no field declares dropped, but
+				// no value changed, so nothing is coerced.
+				if !sentAsGiven(got, want) {
+					t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, request.Body)
 				}
 			}
 			continue
@@ -108,14 +111,69 @@ func TestUnionArgumentsPythonSDK(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := sdktest.FlattenFieldErrors(outcome.Errors)
+		flat, err := sdktest.FlattenFieldErrors(outcome.Errors)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// The Python SDK names an argument by its Python name (by_key);
+		// the wire name is the requests'.
+		got := sdktest.FieldErrors{}
+		for path, rules := range flat {
+			got[wireArgumentPath(path)] = rules
 		}
 		if !outcome.Refused || got.String() != want.String() {
 			t.Errorf("%s: refused %v with %s, want %s (sent %s)", request.Name, outcome.Refused, got, want, outcome.Sent)
 		}
 	}
+}
+
+// wireArgumentPath writes the argument a Python SDK error path starts
+// with, its snake_case Python name, by its wire name, in camelCase.
+func wireArgumentPath(path string) string {
+	end := strings.IndexAny(path, "[.")
+	if end < 0 {
+		end = len(path)
+	}
+	parts := strings.Split(path[:end], "_")
+	for i := 1; i < len(parts); i++ {
+		if parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "") + path[end:]
+}
+
+// sentAsGiven reports whether sent holds the values given does: an object's
+// keys both hold are sent as given, a key only one holds is a default the
+// models filled in or a key they dropped, and lists and other values are
+// equal.
+func sentAsGiven(sent, given any) bool {
+	switch s := sent.(type) {
+	case map[string]any:
+		g, ok := given.(map[string]any)
+		if !ok {
+			return false
+		}
+		for key, value := range s {
+			if gv, both := g[key]; both && !sentAsGiven(value, gv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		g, ok := given.([]any)
+		if !ok || len(g) != len(s) {
+			return false
+		}
+		for i := range s {
+			if !sentAsGiven(s[i], g[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	// A number decodes as a float64 and text as a string: "1" is not 1.
+	return reflect.DeepEqual(sent, given)
 }
 
 // unionRequestsProbe takes the types and SDK directories, the SDK package
@@ -170,6 +228,10 @@ for request in requests:
         "drawShape": lambda: shape.draw_shape(body["shape"]),
         "pay": lambda: shape.pay(body["payment"]),
         "checkout": lambda: shape.checkout(body),
+        "drawShapes": lambda: shape.draw_shapes(body["shapes"]),
+        "shapeGrid": lambda: shape.shape_grid(body["rows"]),
+        "shapesByKey": lambda: shape.shapes_by_key(body["byKey"]),
+        "probe": lambda: shape.probe(body),
     }
     try:
         calls[request["operation"]]()

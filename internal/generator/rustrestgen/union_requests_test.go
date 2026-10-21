@@ -43,15 +43,17 @@ func TestRustRouterAnswersUnionRequests(t *testing.T) {
 
 // unionRequestsRouterTest is tests/union_requests.rs of the generated API
 // crate. Its implementation answers drawShape with the shape it received,
-// pay with the payment's kind, and checkout with the payment's kind, a
-// colon and the number of shapes. It sends each request of
+// pay with the payment's kind, checkout with the payment's kind, a colon
+// and the number of shapes, the list, grid and map operations with the
+// number of shapes, and probe with ok. It sends each request of
 // $UNION_REQUESTS and writes what the router answered to
 // $UNION_RESPONSES.
 const unionRequestsRouterTest = `use std::sync::Arc;
 
 use API_CRATE::{
-    build_router, types, Implementations, ShapeCheckoutArgs, ShapeDrawShapeArgs, ShapeFindShapeArgs,
-    ShapeGetShapeArgs, ShapeImplementation, ShapePayArgs,
+    build_router, types, Implementations, ShapeCheckoutArgs, ShapeDrawShapeArgs, ShapeDrawShapesArgs,
+    ShapeFindShapeArgs, ShapeGetShapeArgs, ShapeImplementation, ShapePayArgs, ShapeProbeArgs,
+    ShapeShapeGridArgs, ShapeShapesByKeyArgs,
 };
 use RUNTIME_CRATE::{ApiError, RequestContext};
 use async_trait::async_trait;
@@ -80,6 +82,18 @@ impl ShapeImplementation for Shapes {
     }
     async fn draw_shape(&self, _: RequestContext, args: ShapeDrawShapeArgs) -> Result<types::Shape, ApiError> {
         Ok(args.shape)
+    }
+    async fn draw_shapes(&self, _: RequestContext, args: ShapeDrawShapesArgs) -> Result<String, ApiError> {
+        Ok(args.shapes.len().to_string())
+    }
+    async fn shape_grid(&self, _: RequestContext, args: ShapeShapeGridArgs) -> Result<String, ApiError> {
+        Ok(args.rows.iter().map(Vec::len).sum::<usize>().to_string())
+    }
+    async fn shapes_by_key(&self, _: RequestContext, args: ShapeShapesByKeyArgs) -> Result<String, ApiError> {
+        Ok(args.by_key.len().to_string())
+    }
+    async fn probe(&self, _: RequestContext, _: ShapeProbeArgs) -> Result<String, ApiError> {
+        Ok("ok".to_string())
     }
     async fn shape_groups(&self, _: RequestContext) -> Result<Vec<types::Shape>, ApiError> {
         Ok(vec![])

@@ -56,6 +56,10 @@ func TestUnionListsSDKOutputTypeHints(t *testing.T) {
 		"draw_shape":      "Shape",
 		"pay":             "str",
 		"checkout":        "str",
+		"draw_shapes":     "str",
+		"shape_grid":      "str",
+		"shapes_by_key":   "str",
+		"probe":           "str",
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {

@@ -138,6 +138,22 @@ func (s shapes) Checkout(context.Context, *types.Checkout) (*string, error) {
 	return nil, nil
 }
 
+func (s shapes) DrawShapes(context.Context, []types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) ShapeGrid(context.Context, [][]types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) ShapesByKey(context.Context, map[string]types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) Probe(context.Context, *types.Probe) (*string, error) {
+	return nil, nil
+}
+
 // data serves impl, sends GET path and returns the envelope's data.
 func data(t *testing.T, impl shapes, path string) any {
 	t.Helper()
@@ -211,8 +227,9 @@ func TestANilNullableShapeIsNull(t *testing.T) {
 
 // unionRequestsAPIServerTest runs in the generated API module. Its
 // implementation answers drawShape with the shape it received, pay with
-// the payment's kind, and checkout with the payment's kind, a colon and the
-// number of shapes. It sends each request of $UNION_REQUESTS and writes
+// the payment's kind, checkout with the payment's kind, a colon and the
+// number of shapes, the list, grid and map operations with the number of
+// shapes, and probe with ok. It sends each request of $UNION_REQUESTS and writes
 // what the routes answered to $UNION_RESPONSES.
 const unionRequestsAPIServerTest = `package unionlistsapi_test
 
@@ -253,6 +270,32 @@ func (unionRequests) Pay(_ context.Context, payment types.Payment) (*string, err
 
 func (unionRequests) Checkout(_ context.Context, input *types.Checkout) (*string, error) {
 	answer := fmt.Sprintf("%s:%d", kindOf(input.Payment), len(input.Shapes.Value))
+	return &answer, nil
+}
+
+func count(n int) (*string, error) {
+	answer := fmt.Sprint(n)
+	return &answer, nil
+}
+
+func (unionRequests) DrawShapes(_ context.Context, shapes []types.Shape) (*string, error) {
+	return count(len(shapes))
+}
+
+func (unionRequests) ShapeGrid(_ context.Context, rows [][]types.Shape) (*string, error) {
+	n := 0
+	for _, row := range rows {
+		n += len(row)
+	}
+	return count(n)
+}
+
+func (unionRequests) ShapesByKey(_ context.Context, byKey map[string]types.Shape) (*string, error) {
+	return count(len(byKey))
+}
+
+func (unionRequests) Probe(context.Context, *types.Probe) (*string, error) {
+	answer := "ok"
 	return &answer, nil
 }
 

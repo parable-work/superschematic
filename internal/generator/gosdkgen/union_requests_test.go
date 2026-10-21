@@ -38,9 +38,10 @@ func TestUnionArgumentsGoSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	var outcomes map[string]struct {
-		Skipped bool            `json:"skipped"`
-		Sent    json.RawMessage `json:"sent"`
-		Errors  json.RawMessage `json:"errors"`
+		Skipped  bool            `json:"skipped"`
+		Sent     json.RawMessage `json:"sent"`
+		Expected json.RawMessage `json:"expected"`
+		Errors   json.RawMessage `json:"errors"`
 	}
 	if err := json.Unmarshal(data, &outcomes); err != nil {
 		t.Fatal(err)
@@ -62,13 +63,16 @@ func TestUnionArgumentsGoSDK(t *testing.T) {
 			t.Fatal(err)
 		}
 		if request.SDKSends() {
-			var got, body any
-			if err := json.Unmarshal(outcome.Sent, &got); err != nil || json.Unmarshal(request.Body, &body) != nil {
-				t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, request.Body)
+			// A typed SDK sends the arguments as their Go types hold them:
+			// a UUID in its canonical form, a default filled in, a key no
+			// field declares dropped.
+			var got, want any
+			if err := json.Unmarshal(outcome.Sent, &got); err != nil || json.Unmarshal(outcome.Expected, &want) != nil {
+				t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, outcome.Expected)
 				continue
 			}
-			if gotJSON, _ := json.Marshal(got); string(gotJSON) != mustMarshal(t, body) {
-				t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, request.Body)
+			if mustMarshal(t, got) != mustMarshal(t, want) {
+				t.Errorf("%s: sent %s, want %s", request.Name, outcome.Sent, outcome.Expected)
 			}
 			continue
 		}
@@ -115,9 +119,10 @@ import (
 )
 
 type outcome struct {
-	Skipped bool            ` + "`json:\"skipped,omitempty\"`" + `
-	Sent    json.RawMessage ` + "`json:\"sent,omitempty\"`" + `
-	Errors  json.RawMessage ` + "`json:\"errors,omitempty\"`" + `
+	Skipped  bool            ` + "`json:\"skipped,omitempty\"`" + `
+	Sent     json.RawMessage ` + "`json:\"sent,omitempty\"`" + `
+	Expected json.RawMessage ` + "`json:\"expected,omitempty\"`" + `
+	Errors   json.RawMessage ` + "`json:\"errors,omitempty\"`" + `
 }
 
 func TestUnionArguments(t *testing.T) {
@@ -155,6 +160,7 @@ func TestUnionArguments(t *testing.T) {
 		}
 		ctx := context.Background()
 		var callErr error
+		var args any
 		skipped := false
 		switch request.Operation {
 		case "drawShape":
@@ -163,6 +169,7 @@ func TestUnionArguments(t *testing.T) {
 				skipped = true
 				break
 			}
+			args = namespaces.ShapeDrawShapeInput{Shape: shape.Value}
 			_, callErr = client.ShapeNamespace.DrawShape(ctx, namespaces.ShapeDrawShapeInput{Shape: shape.Value})
 		case "pay":
 			var payment types.PaymentWrapper
@@ -170,6 +177,7 @@ func TestUnionArguments(t *testing.T) {
 				skipped = true
 				break
 			}
+			args = namespaces.ShapePayInput{Payment: payment.Value}
 			_, callErr = client.ShapeNamespace.Pay(ctx, namespaces.ShapePayInput{Payment: payment.Value})
 		case "checkout":
 			body, _ := json.Marshal(request.Body)
@@ -178,12 +186,64 @@ func TestUnionArguments(t *testing.T) {
 				skipped = true
 				break
 			}
+			args = input
 			_, callErr = client.ShapeNamespace.Checkout(ctx, input)
+		case "probe":
+			body, _ := json.Marshal(request.Body)
+			var input types.Probe
+			if json.Unmarshal(body, &input) != nil {
+				skipped = true
+				break
+			}
+			args = input
+			_, callErr = client.ShapeNamespace.Probe(ctx, input)
+		case "drawShapes":
+			var wrapped []types.ShapeWrapper
+			if json.Unmarshal(request.Body["shapes"], &wrapped) != nil {
+				skipped = true
+				break
+			}
+			shapes := make([]types.Shape, len(wrapped))
+			for i, w := range wrapped {
+				shapes[i] = w.Value
+			}
+			args = namespaces.ShapeDrawShapesInput{Shapes: shapes}
+			_, callErr = client.ShapeNamespace.DrawShapes(ctx, namespaces.ShapeDrawShapesInput{Shapes: shapes})
+		case "shapeGrid":
+			var wrapped [][]types.ShapeWrapper
+			if json.Unmarshal(request.Body["rows"], &wrapped) != nil {
+				skipped = true
+				break
+			}
+			rows := make([][]types.Shape, len(wrapped))
+			for i, row := range wrapped {
+				rows[i] = make([]types.Shape, len(row))
+				for j, w := range row {
+					rows[i][j] = w.Value
+				}
+			}
+			args = namespaces.ShapeShapeGridInput{Rows: rows}
+			_, callErr = client.ShapeNamespace.ShapeGrid(ctx, namespaces.ShapeShapeGridInput{Rows: rows})
+		case "shapesByKey":
+			var wrapped map[string]types.ShapeWrapper
+			if json.Unmarshal(request.Body["byKey"], &wrapped) != nil {
+				skipped = true
+				break
+			}
+			byKey := make(map[string]types.Shape, len(wrapped))
+			for key, w := range wrapped {
+				byKey[key] = w.Value
+			}
+			args = namespaces.ShapeShapesByKeyInput{ByKey: byKey}
+			_, callErr = client.ShapeNamespace.ShapesByKey(ctx, namespaces.ShapeShapesByKeyInput{ByKey: byKey})
 		default:
 			t.Fatalf("%s: unknown operation %s", request.Name, request.Operation)
 		}
 		server.Close()
 		result := outcome{Skipped: skipped, Sent: sent}
+		if args != nil {
+			result.Expected, _ = json.Marshal(args)
+		}
 		var validation *namespaces.ValidationError
 		switch {
 		case errors.As(callErr, &validation):

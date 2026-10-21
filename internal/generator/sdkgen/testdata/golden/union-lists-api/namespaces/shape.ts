@@ -8,6 +8,7 @@ import type {
   Drawing,
   Marker,
   Payment,
+  Probe,
   Shape,
   ValidationErrors,
   ValidationResult,
@@ -21,6 +22,7 @@ import {
   setFieldErrors,
   validateCheckout,
   validatePayment,
+  validateProbe,
   validateShape,
 } from '@schemas/union-lists-api-types';
 
@@ -192,6 +194,36 @@ export class ShapeNamespace {
       `/api/payments`,
       scalarInput,
       { ...toRequestOptions(requestSignal) }
+    );
+    return result;
+  }
+
+  /**
+   * Reads one probe, whose input holds the probe unions, and answers ok.
+   * @param input - Request payload
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns string
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async probe(
+    input: Probe,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<string> {
+    if (input === null || input === undefined) {
+      throw new ValidationError({ '': [{ validator: 'required', message: 'input is required' }] });
+    }
+    // Validate input before sending request
+    const validationErrors: ValidationResult = validateProbe(input);
+    if (validationErrors !== true) {
+      throw new ValidationError(validationErrors);
+    }
+    // Make POST request
+    const result = await this.client.post<string>(
+      `/api/probe`,
+      input,
+      { ...toRequestOptions(signal) }
     );
     return result;
   }
@@ -412,6 +444,151 @@ export class ShapeNamespace {
       { ...toRequestOptions(requestSignal) }
     );
     return parseShapeFromJSON(result);
+  }
+
+  /**
+   * Draws shapes, a list body argument, and answers how many.
+   * @param shapes - shapes argument
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns string
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async drawShapes(
+    shapes: any,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<string> {
+    let requestSignal = signal;
+    let scalarInput = {
+      shapes,
+    };
+    if (typeof shapes === 'object' && shapes !== null && !Array.isArray(shapes)) {
+      scalarInput = shapes;
+    }
+    // Validate scalar arguments before sending request
+    const errors = newValidationErrors();
+    {
+      // shapes holds a union: each value is validated as the member the
+      // union picks (validateShape), its errors under the value's path, as the
+      // route reports them. A value no member reads is sent, for the
+      // route to refuse it.
+      const unionValue: unknown = scalarInput.shapes;
+      if (unionValue === undefined || unionValue === null) {
+        setFieldErrors(errors, "shapes", [{ validator: "required", message: "shapes is required" }]);
+      } else {
+        validateUnionArgument(errors, "shapes", unionValue, 1, false, (member: unknown) =>
+          validateShape(member as Shape)
+        );
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError(errors);
+    }
+    // Make POST request
+    const result = await this.client.post<string>(
+      `/api/shapes/batch`,
+      scalarInput,
+      { ...toRequestOptions(requestSignal) }
+    );
+    return result;
+  }
+
+  /**
+   * Draws rows of shapes, a list of lists body argument, and answers
+   * how many.
+   * @param rows - rows argument
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns string
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapeGrid(
+    rows: any,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<string> {
+    let requestSignal = signal;
+    let scalarInput = {
+      rows,
+    };
+    if (typeof rows === 'object' && rows !== null && !Array.isArray(rows)) {
+      scalarInput = rows;
+    }
+    // Validate scalar arguments before sending request
+    const errors = newValidationErrors();
+    {
+      // rows holds a union: each value is validated as the member the
+      // union picks (validateShape), its errors under the value's path, as the
+      // route reports them. A value no member reads is sent, for the
+      // route to refuse it.
+      const unionValue: unknown = scalarInput.rows;
+      if (unionValue === undefined || unionValue === null) {
+        setFieldErrors(errors, "rows", [{ validator: "required", message: "rows is required" }]);
+      } else {
+        validateUnionArgument(errors, "rows", unionValue, 2, false, (member: unknown) =>
+          validateShape(member as Shape)
+        );
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError(errors);
+    }
+    // Make POST request
+    const result = await this.client.post<string>(
+      `/api/shapes/grid`,
+      scalarInput,
+      { ...toRequestOptions(requestSignal) }
+    );
+    return result;
+  }
+
+  /**
+   * Draws named shapes, a map body argument, and answers how many.
+   * @param byKey - byKey argument
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns string
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapesByKey(
+    byKey: any,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<string> {
+    let requestSignal = signal;
+    let scalarInput = {
+      byKey,
+    };
+    if (typeof byKey === 'object' && byKey !== null && !Array.isArray(byKey)) {
+      scalarInput = byKey;
+    }
+    // Validate scalar arguments before sending request
+    const errors = newValidationErrors();
+    {
+      // byKey holds a union: each value is validated as the member the
+      // union picks (validateShape), its errors under the value's path, as the
+      // route reports them. A value no member reads is sent, for the
+      // route to refuse it.
+      const unionValue: unknown = scalarInput.byKey;
+      if (unionValue === undefined || unionValue === null) {
+        setFieldErrors(errors, "byKey", [{ validator: "required", message: "byKey is required" }]);
+      } else {
+        validateUnionArgument(errors, "byKey", unionValue, 0, true, (member: unknown) =>
+          validateShape(member as Shape)
+        );
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError(errors);
+    }
+    // Make POST request
+    const result = await this.client.post<string>(
+      `/api/shapes/named`,
+      scalarInput,
+      { ...toRequestOptions(requestSignal) }
+    );
+    return result;
   }
 
   /**

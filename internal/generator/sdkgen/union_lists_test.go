@@ -177,6 +177,10 @@ func TestUnionListsSDKOutputTypes(t *testing.T) {
 		"drawShape":     "Shape",
 		"pay":           "string",
 		"checkout":      "string",
+		"drawShapes":    "string",
+		"shapeGrid":     "string",
+		"shapesByKey":   "string",
+		"probe":         "string",
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {

@@ -138,7 +138,7 @@ describe("TypeScript SDK union responses", () => {
   });
 
   test("a @strictJSON member the payload breaks, and an unknown kind, are refused", async () => {
-    expect((await refusal(sdkWith().shape.getMarker("m-3"))).reason).toBe("unknown fields: note");
+    expect((await refusal(sdkWith().shape.getMarker("m-3"))).reason).toBe("does not match the declared type");
     expect((await refusal(sdkWith().shape.getMarker("m-4"))).reason).toBe("does not match the declared type");
   });
 

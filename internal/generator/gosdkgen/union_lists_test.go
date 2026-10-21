@@ -84,7 +84,8 @@ func TestUnionListsDecodeThroughTheirWrappers(t *testing.T) {
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {
-			if ep.MethodName == "Pay" || ep.MethodName == "Checkout" {
+			switch ep.MethodName {
+			case "Pay", "Checkout", "DrawShapes", "ShapeGrid", "ShapesByKey", "Probe":
 				// They answer a string; union_requests_test.go sends them.
 				continue
 			}
