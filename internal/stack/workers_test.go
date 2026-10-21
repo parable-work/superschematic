@@ -80,11 +80,23 @@ func TestWorkerInstances(t *testing.T) {
 		t.Errorf("Preview runs %d instances, %d at a time; want one, with Staging's 8", preview.Worker.Instances, preview.Worker.Concurrency)
 	}
 
+	// A range: Production's three instances the fewest and ten the most
+	// (D53, amended); turned off, it runs none and no range.
+	s, _ = workerShop()
+	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).MaxInstances = intp(10)
+	if production := run(s, "Production"); production.Worker.Instances != 3 || production.Worker.MaxInstances != 10 {
+		t.Errorf("Production runs %d to %d instances, want 3 to 10", production.Worker.Instances, production.Worker.MaxInstances)
+	}
+	if staging := run(s, "Staging"); staging.Worker.MaxInstances != 0 {
+		t.Errorf("Staging runs up to %d instances, want a fixed count", staging.Worker.MaxInstances)
+	}
+
 	off := false
 	s, _ = workerShop()
 	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).Enabled = &off
-	if production := run(s, "Production"); production.Worker.Instances != 0 {
-		t.Errorf("Production turned off runs %d instances, want none", production.Worker.Instances)
+	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).MaxInstances = intp(10)
+	if production := run(s, "Production"); production.Worker.Instances != 0 || production.Worker.MaxInstances != 0 {
+		t.Errorf("Production turned off runs %d to %d instances, want none", production.Worker.Instances, production.Worker.MaxInstances)
 	}
 }
 
@@ -153,6 +165,24 @@ func TestWorkerRefusals(t *testing.T) {
 		settingsFor(s.Environment("Staging"), fulfil).Schedule = "0 * * * *"
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule or a time zone on worker shop-orders-fulfil-orders, which runs until it is stopped")
+	})
+	t.Run("a maximum under the instances", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Production"), fulfil).MaxInstances = intp(2)
+		_, errs := resolve(t, reg, s, services, "Production")
+		mustFail(t, errs, stack.CodeInvalidSettings, "worker shop-orders-fulfil-orders may run up to 2 instances (maxInstances), under its 3 (instances), the fewest it runs")
+	})
+	t.Run("a maximum of none", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Staging"), fulfil).MaxInstances = intp(0)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "maxInstances is 0; it is one or more")
+	})
+	t.Run("a maximum on a server", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).MaxInstances = intp(2)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances or concurrency on server shop-api; only a worker takes them")
 	})
 	t.Run("a concurrency of none", func(t *testing.T) {
 		s, services := workerShop()

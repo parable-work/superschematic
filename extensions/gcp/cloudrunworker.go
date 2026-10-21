@@ -44,6 +44,12 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if run == nil {
 		return registry.Lowered{}, fmt.Errorf("worker %s has no run", d.Name)
 	}
+	if run.MaxInstances > run.Instances {
+		// A worker pool's instance count is manual, and Cloud Run scales
+		// none by itself; the scaler that would read the queue's depth
+		// and set it is designed, not built (D53, amended).
+		return registry.Lowered{}, fmt.Errorf("worker %s may run from %d to %d instances, and scaling a worker pool with its queue's depth is not built: a Cloud Run worker pool runs the instance count it is given; set instances alone (D53, amended)", d.Name, run.Instances, run.MaxInstances)
+	}
 	if run.GraceSeconds >= workerShutdownSeconds {
 		return registry.Lowered{}, fmt.Errorf("worker %s lets its handlers finish for %ds when it stops, and Cloud Run stops a worker pool's instance %ds after SIGTERM; give its @worker a grace under %ds", d.Name, run.GraceSeconds, workerShutdownSeconds, workerShutdownSeconds)
 	}

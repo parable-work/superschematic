@@ -313,6 +313,13 @@ type DeployableSettings struct {
 	// `of` names a worker sets them (D53).
 	Instances   *int `json:"instances,omitempty" yaml:"instances,omitempty"`
 	Concurrency *int `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+
+	// MaxInstances is the most instances of a worker a target may run as
+	// its queue's depth grows, Instances then the fewest: a range a
+	// scaler would move the instance count within (D53, amended). No
+	// target scales a worker yet: gcp refuses a range, and local runs one
+	// process. Only an element whose `of` names a worker sets it.
+	MaxInstances *int `json:"maxInstances,omitempty" yaml:"maxInstances,omitempty"`
 }
 
 // EnvValue is the value an environment gives one config field: a literal,

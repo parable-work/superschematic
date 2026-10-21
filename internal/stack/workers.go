@@ -132,7 +132,7 @@ func (r *resolver) resolveWorkerRef(where string, ref ir.DeployableRef) (*deploy
 // takes on another deployable, which it refuses.
 func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *ir.DeployableSettings) bool {
 	if d.res.Kind != ir.DeployableWorker {
-		if entry.Instances != nil || entry.Concurrency != nil {
+		if entry.Instances != nil || entry.Concurrency != nil || entry.MaxInstances != nil {
 			r.fail(CodeInvalidSettings, "%s sets instances or concurrency on %s %s; only a worker takes them, named beside its API's handle with `worker`", where, d.res.Kind, d.res.Name)
 			return true
 		}
@@ -154,6 +154,13 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 		}
 		instances := *entry.Instances
 		s.instances, s.workerFrom["instances"] = &instances, env
+	}
+	if entry.MaxInstances != nil {
+		if *entry.MaxInstances < 1 {
+			r.fail(CodeInvalidSettings, "%s maxInstances is %d; it is one or more", where, *entry.MaxInstances)
+		}
+		maxInstances := *entry.MaxInstances
+		s.maxInstances, s.workerFrom["maxInstances"] = &maxInstances, env
 	}
 	if entry.Concurrency != nil {
 		if *entry.Concurrency < 1 {
@@ -220,8 +227,14 @@ func (r *resolver) runWorkers() {
 		if s.instances != nil {
 			run.Instances = *s.instances
 		}
+		if s.maxInstances != nil {
+			if *s.maxInstances < run.Instances {
+				r.fail(CodeInvalidSettings, "worker %s may run up to %d instances (maxInstances), under its %d (instances), the fewest it runs", name, *s.maxInstances, run.Instances)
+			}
+			run.MaxInstances = *s.maxInstances
+		}
 		if s.enabled != nil && !*s.enabled {
-			run.Instances = 0
+			run.Instances, run.MaxInstances = 0, 0
 		}
 		run.GraceSeconds = registry.WorkerGraceSeconds(d.worker)
 	}

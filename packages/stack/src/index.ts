@@ -164,8 +164,14 @@ type JobElementOf<T, Of> =
  * worker that is off runs no instance, and its queue's messages wait.
  */
 export type WorkerRun = {
-  /** How many instances run; one unless set. */
+  /** How many instances run; one unless set, and the fewest when maxInstances is set. */
   readonly instances?: number;
+  /**
+   * The most instances a target may run as the queue's depth grows, a
+   * range from `instances` (D53, amended). No target scales a worker yet:
+   * gcp refuses a range, and local runs one process.
+   */
+  readonly maxInstances?: number;
   /** How many messages an instance handles at a time; the `@worker` concurrency unless set. */
   readonly concurrency?: number;
   /** Turns the worker on or off. */
