@@ -241,8 +241,9 @@ func TestTypeScriptCronD1(t *testing.T) {
 
 // TestTypeScriptCronRefusals: a job on Workers whose API's database lists
 // postgres first is refused, since a Worker reaches a database through D1
-// alone, and a worker on a bundle platform is refused, since a worker
-// claims on Postgres (D64).
+// alone, and a worker on a bundle platform is refused, since a worker is a
+// process that claims until it is stopped, which no Worker runs (D64, D53
+// amended).
 func TestTypeScriptCronRefusals(t *testing.T) {
 	in := cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 		o.Deps.Database = "shop-db"

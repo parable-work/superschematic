@@ -171,7 +171,9 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 
 // runWorkers decides what each worker runs in the environment (D53): its
 // queue, which must be a `@queue` of the database its API connects to, on
-// a database the environment runs on Postgres; its concurrency, the
+// a database the environment runs on Postgres or on a SQLite file, whose
+// platform does not refuse a worker's claims (D53, amended); its
+// concurrency, the
 // decorator's unless the settings change it; and its instances, one unless
 // the settings change them, and none when they turn it off. Its grace is
 // the decorator's.
@@ -200,9 +202,15 @@ func (r *resolver) runWorkers() {
 			continue
 		}
 		run.Database = db
-		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" && host.res.Dialect != registry.SQLDialectPostgres {
-			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)",
-				name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
+		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" {
+			switch {
+			case host.platform.NoQueueClaims != "":
+				r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database on platform %s, where no worker claims: %s (D53, amended)",
+					name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect, host.platform.Name, host.platform.NoQueueClaims)
+			case host.res.Dialect != registry.SQLDialectPostgres && host.res.Dialect != registry.SQLDialectSQLite:
+				r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres or SQLite, the dialects the queue clients claim on (D53, amended)",
+					name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
+			}
 		}
 		run.Concurrency = registry.WorkerConcurrency(d.worker)
 		if s.concurrency != nil {

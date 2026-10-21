@@ -20,9 +20,9 @@ package orm
 //
 // A message crosses to its row through its JSON form, as the TypeScript and
 // Rust clients' messages do: each field is the member of its name, a JSON
-// value and a list the JSON text of its column, a UUID its lowercase
-// hyphenated text, a timestamp RFC 3339 in UTC, a boolean 1 or 0, and a
-// duration its canonical text. A member a message leaves out takes its
+// value and a list the JSON text of its column, a UUID, base62 in its JSON,
+// its lowercase hyphenated text, a timestamp RFC 3339 in UTC, a boolean 1
+// or 0, and a duration its canonical text. A member a message leaves out takes its
 // column's default, and an enum with a schema default writes that default.
 
 import (
@@ -37,6 +37,7 @@ import (
 	"time"
 
 	types "example.com/schemas/types/go/fixture-queue-db"
+	scalars "github.com/parable-work/superscalar/go"
 )
 
 // SQLiteExecer is what an enqueue on SQLite writes through: the caller's
@@ -291,7 +292,12 @@ func sqliteElement(value any, f sqliteQueueField) (any, error) {
 	text, isText := value.(string)
 	switch {
 	case f.uuid && isText:
-		return strings.ToLower(text), nil
+		// A UUID's JSON is its base62; its column holds it hyphenated.
+		id, err := scalars.ParseUUID(text)
+		if err != nil {
+			return nil, err
+		}
+		return id.ToUUID().String(), nil
 	case f.timestamp && isText:
 		at, err := time.Parse(time.RFC3339Nano, text)
 		if err != nil {

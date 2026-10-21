@@ -40,6 +40,7 @@ func testQueuesWriteWhatTheGoORMWrites(t *testing.T, fixture string) {
 		SchemaName:  fixture,
 		ModulePath:  "example.com/schemas/orm/" + fixture,
 		TypesModule: "example.com/schemas/types/go/" + fixture,
+		SQLite:      true,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
@@ -74,6 +75,20 @@ func testQueuesWriteWhatTheGoORMWrites(t *testing.T, fixture string) {
 				f.Point != gf.IsGeoPoint || f.Interval != gf.IsInterval {
 				t.Errorf("queue %s field %s: queues.ts writes %+v, the Go ORM column %s, JSON %v, list %v, default %q, point %v, interval %v",
 					q.Name, f.Name, f, gf.QuotedDBName, gf.IsJSONField, gf.NativeList(), gf.EnumDefault, gf.IsGeoPoint, gf.IsInterval)
+			}
+		}
+		// On SQLite (D53, amended): the same statements, or none for the
+		// same reason, and each field converted as the Go ORM converts it.
+		if (q.SQLiteStatements == nil) != (g.SQLiteStatements == nil) || (q.SQLiteStatements != nil && *q.SQLiteStatements != *g.SQLiteStatements) {
+			t.Errorf("queue %s: queues.ts's statements on SQLite are not the Go ORM's:\n%+v\n%+v", q.Name, q.SQLiteStatements, g.SQLiteStatements)
+		}
+		if q.SQLiteUnsupported != g.SQLiteUnsupported {
+			t.Errorf("queue %s: queues.ts says %q of SQLite, the Go ORM %q", q.Name, q.SQLiteUnsupported, g.SQLiteUnsupported)
+		}
+		for j, gf := range g.SQLiteFields {
+			f := q.Fields[j]
+			if f.Name != gf.Name || f.UUID != gf.UUID || f.Timestamp != gf.Timestamp || f.Boolean != gf.Boolean || f.Interval != gf.Interval || f.JSON != gf.JSON || f.List != gf.List {
+				t.Errorf("queue %s field %s: queues.ts marks %+v on SQLite, the Go ORM %+v", q.Name, f.Name, f, gf)
 			}
 		}
 	}

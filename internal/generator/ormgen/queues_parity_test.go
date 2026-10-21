@@ -15,6 +15,8 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
+	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -83,6 +85,28 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Go, TypeScript and Rust queues against one Postgres")
 	}
+	runQueueParity(t, "postgres")
+}
+
+// TestQueueParityOfGoTypeScriptAndRustOnSQLite runs the same cases on
+// SQLite (D53, amended), each in a file of its own, which the Go ORM's
+// queues_sqlite.go writes through modernc.org/sqlite, the TypeScript
+// client through bun:sqlite and the Rust client through rusqlite, each
+// process with a connection of its own: all three run the statements
+// sqlutil.SQLiteQueueStatements writes. LocationsAndDurationsAgree skips,
+// since SQLite has no storage for a location. It needs no database, and
+// skips as the Postgres test does without Bun or cargo.
+func TestQueueParityOfGoTypeScriptAndRustOnSQLite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	runQueueParity(t, "sqlite")
+}
+
+// runQueueParity generates the fixture's Go ORM, TypeScript types and Rust
+// types, each with its queues' statements on SQLite too, and runs the
+// generated TestQueueParity on dialect, postgres or sqlite.
+func runQueueParity(t *testing.T, dialect string) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
@@ -127,7 +151,7 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 	if err := typegen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatal(err)
 	}
-	ormOutput, err := Generate(schema, Options{SchemaName: queueFixture, ModulePath: "example.com/schemas/orm/" + queueFixture, TypesModule: typesModule, Clock: clock})
+	ormOutput, err := Generate(schema, Options{SchemaName: queueFixture, ModulePath: "example.com/schemas/orm/" + queueFixture, TypesModule: typesModule, SQLite: true, Clock: clock})
 	if err != nil {
 		t.Fatalf("generate orm: %v", err)
 	}
@@ -141,7 +165,7 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 	// The TypeScript types package, in a Bun workspace with a member that
 	// runs the queue client over its queues.ts.
 	tsTypesDir := filepath.Join(root, "types", "typescript", queueFixture)
-	tsOutput, err := tsgen.Generate(schema, tsgen.Options{SchemaName: queueFixture, Clock: clock})
+	tsOutput, err := tsgen.Generate(schema, tsgen.Options{SchemaName: queueFixture, SQLite: true, Clock: clock})
 	if err != nil {
 		t.Fatalf("generate typescript types: %v", err)
 	}
@@ -191,6 +215,27 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 	if err := sqlgen.WriteDDL(ddl, ddlDir); err != nil {
 		t.Fatal(err)
 	}
+	// The SQLite model's DDL of fixture-queue-db alone: SQLite has no
+	// storage for fixture-queue-geo-db's locations.
+	sqliteSchema, err := loader.LoadService(filepath.Join(fixturesDir, queueFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := sqlmigrate.BuildModel(sqliteSchema, sqlgen.Options{SchemaName: queueFixture}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatalf("the SQLite model: %v", err)
+	}
+	sqliteDDL, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ormDir, "testdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ormDir, "testdata", "create_sqlite.sql"), []byte(sqliteDDL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QUEUE_PARITY_DIALECT", dialect)
 	t.Setenv("QUEUE_PARITY_BUN", bun)
 	t.Setenv("QUEUE_PARITY_SCRIPT", filepath.Join(scriptDir, "parity.ts"))
 	t.Setenv("QUEUE_PARITY_RUST", rust)
@@ -199,6 +244,9 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 		t.Fatal("the generated parity test did not pass")
 	}
 	for _, subtest := range queueParitySubtests {
+		if dialect == "sqlite" && subtest == "LocationsAndDurationsAgree" {
+			continue
+		}
 		if !strings.Contains(out, "--- PASS: TestQueueParity/"+subtest+" ") {
 			t.Errorf("the generated parity test's %s did not pass", subtest)
 		}
@@ -222,7 +270,7 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 func buildQueueParityRust(t *testing.T, cargo string, paths naming.LocalPaths, schema *ir.Schema, clock codegen.Clock, root string) string {
 	t.Helper()
 	typesDir := filepath.Join(root, "types", "rust", queueFixture)
-	output, err := rustgen.Generate(schema, rustgen.Options{SchemaName: queueFixture, Clock: clock})
+	output, err := rustgen.Generate(schema, rustgen.Options{SchemaName: queueFixture, SQLite: true, Clock: clock})
 	if err != nil {
 		t.Fatalf("generate rust types: %v", err)
 	}
@@ -290,9 +338,10 @@ edition = "2021"
 publish = false
 
 [dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = "1.0.228"
 serde_json = "1.0.149"
-superschematic-http-runtime = { path = %q, features = ["postgres"] }
+superschematic-http-runtime = { path = %q, features = ["postgres", "sqlite"] }
 tokio = { version = "1.52.2", features = ["macros", "rt"] }
 types = { package = %q, path = %q }
 
@@ -318,7 +367,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 use superschematic_http_runtime::postgres::connect;
-use superschematic_http_runtime::queue::{enqueue, PostgresQueue, QueueDefinition, QueueError};
+use superschematic_http_runtime::queue::{
+    enqueue, enqueue_sqlite, PostgresQueue, QueueDefinition, QueueError, SqliteQueue,
+};
 use superschematic_http_runtime::stackconfig::Database;
 use types::{DeliveryPlanned, OrderPlaced, DELIVERY_PLANNED_QUEUE, ORDER_PLACED_QUEUE};
 
@@ -364,11 +415,14 @@ async fn run(args: &[String]) -> Result<Value, String> {
     }
 }
 
-async fn run_on<M: Serialize + DeserializeOwned>(descriptor: &str, args: &[String]) -> Result<Value, String> {
+async fn run_on<M: Serialize + DeserializeOwned + Send + 'static>(descriptor: &str, args: &[String]) -> Result<Value, String> {
     let step = arg(args, 0)?;
     let url = arg(args, 1)?;
     let rest = &args[2..];
     let definition = QueueDefinition::parse(descriptor).map_err(refused)?;
+    if let Some(path) = url.strip_prefix("sqlite:") {
+        return run_on_sqlite::<M>(definition, path, step, rest).await;
+    }
     let pool = connect(&Database::Url(url.to_string())).map_err(|err| err.to_string())?;
     let queue = PostgresQueue::<M>::new(pool.clone(), definition.clone());
     let result = match step {
@@ -426,28 +480,102 @@ async fn run_on<M: Serialize + DeserializeOwned>(descriptor: &str, args: &[Strin
     pool.close();
     Ok(result)
 }
+
+/// The step on the queue on the SQLite file at path, enqueueing in a
+/// transaction of its own.
+async fn run_on_sqlite<M: Serialize + DeserializeOwned + Send + 'static>(
+    definition: QueueDefinition,
+    path: &str,
+    step: &str,
+    rest: &[String],
+) -> Result<Value, String> {
+    if step == "enqueue" {
+        let message: M = serde_json::from_str(arg(rest, 0)?)
+            .map_err(|err| format!("the message: {err}"))?;
+        let mut connection = rusqlite::Connection::open(path).map_err(|err| err.to_string())?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(|err| err.to_string())?;
+        let tx = connection.transaction().map_err(|err| err.to_string())?;
+        enqueue_sqlite(&tx, &definition, &message).map_err(refused)?;
+        tx.commit().map_err(|err| err.to_string())?;
+        return Ok(Value::Null);
+    }
+    let queue = SqliteQueue::<M>::open(path, definition).map_err(refused)?;
+    Ok(match step {
+        "claim" => {
+            let n: usize = arg(rest, 0)?.parse().map_err(|err| format!("n: {err}"))?;
+            let mut claims = Vec::new();
+            for claim in queue.claim(n, LEASE).await.map_err(refused)? {
+                let message = serde_json::to_value(&claim.message).map_err(|err| err.to_string())?;
+                claims.push(json!({
+                    "id": claim.id,
+                    "token": claim.token,
+                    "attempt": claim.attempt,
+                    "message": message,
+                }));
+            }
+            Value::Array(claims)
+        }
+        "complete" => {
+            queue.complete(arg(rest, 0)?, arg(rest, 1)?).await.map_err(refused)?;
+            Value::Null
+        }
+        "fail" => Value::Bool(
+            queue
+                .fail(arg(rest, 0)?, arg(rest, 1)?, arg(rest, 2)?)
+                .await
+                .map_err(refused)?,
+        ),
+        "extend" => {
+            let seconds: u64 = arg(rest, 2)?.parse().map_err(|err| format!("seconds: {err}"))?;
+            queue
+                .extend(arg(rest, 0)?, arg(rest, 1)?, Duration::from_secs(seconds))
+                .await
+                .map_err(refused)?;
+            Value::Null
+        }
+        "release" => {
+            queue.release(arg(rest, 0)?, arg(rest, 1)?).await.map_err(refused)?;
+            Value::Null
+        }
+        "prune" => {
+            let limit: usize = arg(rest, 0)?.parse().map_err(|err| format!("limit: {err}"))?;
+            Value::from(queue.prune(limit).await.map_err(refused)?)
+        }
+        other => return Err(format!("no step {other}")),
+    })
+}
 `
 
 // queueParityScript runs one step of the TypeScript queue client on the
-// database its second argument names, on the queue QUEUE_PARITY_QUEUE
-// names, and prints its result as JSON.
+// database its second argument names, a Postgres URL or a sqlite: one, on
+// the queue QUEUE_PARITY_QUEUE names, and prints its result as JSON. On
+// SQLite it enqueues through enqueueStatement in a batch, as a server adds
+// the message to the writes that caused it.
 const queueParityScript = `import pg from 'pg';
 import { enqueue, postgresQueue } from '@superschematic/http-runtime/postgres';
+import { enqueueStatement, openSqlite, sqliteFile, sqliteQueue } from '@superschematic/http-runtime/sqlite';
 import { deliveryPlannedQueue, orderPlacedQueue } from '@TYPES@/queues';
 
 const [step, url, ...args] = process.argv.slice(2);
 // The queue QUEUE_PARITY_QUEUE names, OrderPlaced when unset.
 const definition = (process.env.QUEUE_PARITY_QUEUE === 'DeliveryPlanned' ? deliveryPlannedQueue : orderPlacedQueue) as typeof orderPlacedQueue;
-const pool = new pg.Pool({ connectionString: url, max: 1 });
+const file = url.startsWith('sqlite:') ? openSqlite(sqliteFile(url)) : undefined;
+const pool = file === undefined ? new pg.Pool({ connectionString: url, max: 1 }) : undefined;
 try {
-  const queue = postgresQueue(pool, definition);
+  const queue = file !== undefined ? sqliteQueue(file, definition) : postgresQueue(pool!, definition);
   let result: unknown = null;
   switch (step) {
     case 'claim':
       result = await queue.claim(Number(args[0]), 60);
       break;
     case 'enqueue': {
-      const client = await pool.connect();
+      if (file !== undefined) {
+        await file.batch([enqueueStatement(file, definition, JSON.parse(args[0]))]);
+        break;
+      }
+      const client = await pool!.connect();
       try {
         await client.query('BEGIN');
         await enqueue(client, definition, JSON.parse(args[0]));
@@ -480,7 +608,8 @@ try {
   console.error(error instanceof Error ? error.name + ': ' + error.message : String(error));
   process.exitCode = 1;
 } finally {
-  await pool.end();
+  file?.close();
+  await pool?.end();
 }
 `
 
@@ -488,12 +617,14 @@ const queueParityORMTest = `package orm
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -502,6 +633,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	scalars "github.com/parable-work/superscalar/go"
 	types "example.com/schemas/types/go/fixture-queue-db"
+	_ "modernc.org/sqlite"
 )
 
 // printedClaim is a claim the TypeScript client or the Rust binary
@@ -537,15 +669,33 @@ type side struct {
 	prune    func(limit int) (int, error)
 }
 
-// parity is a schema of a subtest's own holding the queue's tables, the Go
-// ORM's queue over it, and the URL by which the TypeScript client and the
-// Rust binary reach the same schema.
+// orderQueue is the Go ORM's queue OrderPlaced: OrderPlacedQueue on
+// Postgres, OrderPlacedSQLiteQueue on SQLite.
+type orderQueue interface {
+	Claim(ctx context.Context, n int, lease time.Duration) ([]OrderPlacedClaim, error)
+	Complete(ctx context.Context, id, token string) error
+	Fail(ctx context.Context, id, token, cause string) (bool, error)
+	Extend(ctx context.Context, id, token string, lease time.Duration) error
+	Release(ctx context.Context, id, token string) error
+	Prune(ctx context.Context, limit int) (int, error)
+}
+
+// sqliteDialect is QUEUE_PARITY_DIALECT's value that runs the parity on
+// SQLite; any other runs it on Postgres.
+const sqliteDialect = "sqlite"
+
+// parity is a database of a subtest's own holding the queue's tables: a
+// schema of the Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, or a
+// SQLite file when QUEUE_PARITY_DIALECT is sqlite. It holds the Go ORM's
+// queue over it, and the URL by which the TypeScript client and the Rust
+// binary reach the same database.
 type parity struct {
 	t     *testing.T
 	ctx   context.Context
 	pool  *pgxpool.Pool
 	db    *Database
-	queue *OrderPlacedQueue
+	file  *sql.DB
+	queue orderQueue
 	url   string
 
 	// on is the queue the TypeScript client and the Rust binary run their
@@ -554,8 +704,14 @@ type parity struct {
 	on string
 }
 
+// onSQLite reports whether the parity runs on SQLite.
+func onSQLite() bool { return os.Getenv("QUEUE_PARITY_DIALECT") == sqliteDialect }
+
 func newParity(t *testing.T) *parity {
 	t.Helper()
+	if onSQLite() {
+		return newSQLiteParity(t)
+	}
 	ctx := context.Background()
 	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
 	createSQL, err := os.ReadFile("testdata/create.sql")
@@ -599,6 +755,121 @@ func newParity(t *testing.T) *parity {
 	q.Set("options", "-csearch_path="+schema+",public")
 	u.RawQuery = q.Encode()
 	return &parity{t: t, ctx: ctx, pool: pool, db: db, queue: db.OrderPlacedQueue(), url: u.String()}
+}
+
+// newSQLiteParity is a SQLite file of the subtest's own holding the
+// queue's tables, testdata/create_sqlite.sql, opened through
+// modernc.org/sqlite with the busy timeout the TypeScript and Rust clients
+// use, since their processes write the same file.
+func newSQLiteParity(t *testing.T) *parity {
+	t.Helper()
+	createSQL, err := os.ReadFile("testdata/create_sqlite.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "queue.sqlite")
+	file, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	if _, err := file.Exec(string(createSQL)); err != nil {
+		t.Fatalf("apply create_sqlite.sql: %v", err)
+	}
+	return &parity{t: t, ctx: context.Background(), file: file, queue: NewOrderPlacedSQLiteQueue(file), url: "sqlite:" + path}
+}
+
+// enqueue writes msg with the Go ORM in a transaction of its own.
+func (p *parity) enqueue(msg *types.OrderPlaced) error {
+	if p.file == nil {
+		return p.db.Transaction(p.ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(p.ctx, tx, msg) })
+	}
+	tx, err := p.file.BeginTx(p.ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := EnqueueOrderPlacedSQLite(p.ctx, tx, msg); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// dialectSQL is the SQL of the parity's dialect: postgres's on Postgres, sqlite's
+// on SQLite.
+func (p *parity) dialectSQL(postgres, sqlite string) string {
+	if p.file != nil {
+		return sqlite
+	}
+	return postgres
+}
+
+// queryRow runs a query of one row, its arguments by number ($1 or ?1).
+func (p *parity) queryRow(query string, args []any, dest ...any) {
+	p.t.Helper()
+	var err error
+	if p.file != nil {
+		err = p.file.QueryRowContext(p.ctx, query, args...).Scan(dest...)
+	} else {
+		err = p.pool.QueryRow(p.ctx, query, args...).Scan(dest...)
+	}
+	if err != nil {
+		p.t.Fatalf("%s: %v", query, err)
+	}
+}
+
+// sqliteAgo is SQLite's clock moved by seconds, in the form a queue's
+// times hold.
+func sqliteAgo(seconds float64) string {
+	return fmt.Sprintf("strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now', '%+f seconds')", -seconds)
+}
+
+// expireClaim makes a message's claim expired a second ago.
+func (p *parity) expireClaim(id string) {
+	p.t.Helper()
+	p.exec(p.dialectSQL(
+		"UPDATE order_placed_queue SET claim_expires_at = now() - interval '1 second' WHERE id = $1::uuid",
+		"UPDATE order_placed_queue SET claim_expires_at = "+sqliteAgo(1)+" WHERE id = ?1",
+	), id)
+}
+
+// dueSoon makes a message due in two seconds.
+func (p *parity) dueSoon(id string) {
+	p.t.Helper()
+	p.exec(p.dialectSQL(
+		"UPDATE order_placed_queue SET due_at = now() + interval '2 seconds' WHERE id = $1::uuid",
+		"UPDATE order_placed_queue SET due_at = "+sqliteAgo(-2)+" WHERE id = ?1",
+	), id)
+}
+
+// doneAgo makes a message done ago.
+func (p *parity) doneAgo(id string, ago time.Duration) {
+	p.t.Helper()
+	p.exec(p.dialectSQL(
+		fmt.Sprintf("UPDATE order_placed_queue SET updated_at = now() - make_interval(secs => %f) WHERE id = $1::uuid", ago.Seconds()),
+		"UPDATE order_placed_queue SET updated_at = "+sqliteAgo(ago.Seconds())+" WHERE id = ?1",
+	), id)
+}
+
+// markDead makes a claimed message dead for a month.
+func (p *parity) markDead(id string) {
+	p.t.Helper()
+	p.exec(p.dialectSQL(
+		"UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL, updated_at = now() - interval '30 days' WHERE id = $1::uuid",
+		"UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL, updated_at = "+sqliteAgo(30*86400)+" WHERE id = ?1",
+	), id)
+}
+
+// deadAndDone are the IDs of the dead messages and of the done ones, each
+// joined by commas.
+func (p *parity) deadAndDone() (string, string) {
+	p.t.Helper()
+	var dead, done string
+	p.queryRow(p.dialectSQL(
+		"SELECT COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'dead'), ''), COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'done'), '') FROM order_placed_queue",
+		"SELECT COALESCE(group_concat(id, ',') FILTER (WHERE state = 'dead'), ''), COALESCE(group_concat(id, ',') FILTER (WHERE state = 'done'), '') FROM order_placed_queue",
+	), nil, &dead, &done)
+	return dead, done
 }
 
 // step runs one step of the TypeScript client or the Rust binary and
@@ -681,7 +952,7 @@ func (p *parity) sides() map[string]side {
 			if err := json.Unmarshal([]byte(message), &msg); err != nil {
 				p.t.Fatal(err)
 			}
-			if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, &msg) }); err != nil {
+			if err := p.enqueue(&msg); err != nil {
 				p.t.Fatalf("Go's enqueue: %v", err)
 			}
 		},
@@ -772,9 +1043,10 @@ func (p *parity) state(id string) (string, int, string) {
 	p.t.Helper()
 	var s, lastError string
 	var attempts int
-	if err := p.pool.QueryRow(p.ctx, "SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&s, &attempts, &lastError); err != nil {
-		p.t.Fatal(err)
-	}
+	p.queryRow(p.dialectSQL(
+		"SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE id = $1::uuid",
+		"SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE id = ?1",
+	), []any{id}, &s, &attempts, &lastError)
 	return s, attempts, lastError
 }
 
@@ -791,17 +1063,25 @@ func (p *parity) expect(id, state string, attempts int, lastError string) {
 func (p *parity) dueIn(id string) float64 {
 	p.t.Helper()
 	var seconds float64
-	if err := p.pool.QueryRow(p.ctx, "SELECT extract(epoch FROM due_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&seconds); err != nil {
-		p.t.Fatal(err)
-	}
+	p.queryRow(p.dialectSQL(
+		"SELECT extract(epoch FROM due_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid",
+		// Rounded to the millisecond, SQLite's clock, past julianday's float.
+		"SELECT round((julianday(due_at) - julianday('now')) * 86400, 3) FROM order_placed_queue WHERE id = ?1",
+	), []any{id}, &seconds)
 	return seconds
 }
 
 // exec runs a statement on the parity's schema.
 func (p *parity) exec(sql string, args ...any) {
 	p.t.Helper()
-	if _, err := p.pool.Exec(p.ctx, sql, args...); err != nil {
-		p.t.Fatal(err)
+	var err error
+	if p.file != nil {
+		_, err = p.file.ExecContext(p.ctx, sql, args...)
+	} else {
+		_, err = p.pool.Exec(p.ctx, sql, args...)
+	}
+	if err != nil {
+		p.t.Fatalf("%s: %v", sql, err)
 	}
 }
 
@@ -809,18 +1089,21 @@ func (p *parity) exec(sql string, args ...any) {
 func (p *parity) expiresIn(id string) float64 {
 	p.t.Helper()
 	var seconds float64
-	if err := p.pool.QueryRow(p.ctx, "SELECT extract(epoch FROM claim_expires_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&seconds); err != nil {
-		p.t.Fatal(err)
-	}
+	p.queryRow(p.dialectSQL(
+		"SELECT extract(epoch FROM claim_expires_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid",
+		// Rounded to the millisecond, SQLite's clock, past julianday's float.
+		"SELECT round((julianday(claim_expires_at) - julianday('now')) * 86400, 3) FROM order_placed_queue WHERE id = ?1",
+	), []any{id}, &seconds)
 	return seconds
 }
 
 // due makes each ready message due now, past its backoff.
 func (p *parity) due() {
 	p.t.Helper()
-	if _, err := p.pool.Exec(p.ctx, "UPDATE order_placed_queue SET due_at = now() - interval '1 second' WHERE state = 'ready'"); err != nil {
-		p.t.Fatal(err)
-	}
+	p.exec(p.dialectSQL(
+		"UPDATE order_placed_queue SET due_at = now() - interval '1 second' WHERE state = 'ready'",
+		"UPDATE order_placed_queue SET due_at = "+sqliteAgo(1)+" WHERE state = 'ready'",
+	))
 }
 
 func mustUUID(text string) scalars.UUID {
@@ -924,7 +1207,7 @@ func testGoAndTypeScript(t *testing.T) {
 
 	// Go enqueues; TypeScript claims and reads every field.
 	msg := fullGoMessage()
-	if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
+	if err := p.enqueue(msg); err != nil {
 		t.Fatal(err)
 	}
 	claims := tsClaims(5)
@@ -1024,7 +1307,6 @@ func testGoAndTypeScript(t *testing.T) {
 // claims neither Go nor TypeScript claims a message.
 func testRustReadsGoAndTypeScript(t *testing.T) {
 	p := newParity(t)
-	ctx := p.ctx
 	full := fullGoMessage()
 	unset := &types.OrderPlaced{
 		OrderId:  mustUUID("5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"),
@@ -1033,7 +1315,7 @@ func testRustReadsGoAndTypeScript(t *testing.T) {
 		ShipTo:   types.Address{Line1: "9 Ash Ct", City: "Springfield"},
 	}
 	for _, msg := range []*types.OrderPlaced{full, unset} {
-		if err := p.db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
+		if err := p.enqueue(msg); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1336,9 +1618,7 @@ func testAttemptsAndStatesAgree(t *testing.T) {
 	const expiring = "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
 	sides["Go"].enqueue(orderJSON(expiring))
 	first := p.one(sides["TypeScript"], 1)
-	if _, err := p.pool.Exec(p.ctx, "UPDATE order_placed_queue SET claim_expires_at = now() - interval '1 second' WHERE id = $1::uuid", first.ID); err != nil {
-		t.Fatal(err)
-	}
+	p.expireClaim(first.ID)
 	again := p.one(sides["Rust"], 2)
 	if again.ID != first.ID || again.Token == first.Token {
 		t.Fatalf("Rust claimed %+v, want the expired claim %s again under a new token", again, first.ID)
@@ -1384,7 +1664,7 @@ func testBackoffGrowsForEverySide(t *testing.T) {
 		if left := p.dueIn(c.ID); left > round.wait || left < round.wait-5 {
 			t.Fatalf("after %s's fail of attempt %d the message is due in %.1fs, want about %.0fs", round.failer, attempt, left, round.wait)
 		}
-		p.exec("UPDATE order_placed_queue SET due_at = now() + interval '2 seconds' WHERE id = $1::uuid", c.ID)
+		p.dueSoon(c.ID)
 		for name, s := range sides {
 			if got := s.claim(1); len(got) != 0 {
 				t.Fatalf("%s claimed %+v within the backoff of attempt %d", name, got, attempt)
@@ -1432,27 +1712,24 @@ func testEachPrunesTheOthersDoneMessages(t *testing.T) {
 				}
 			}
 			for _, id := range old {
-				p.exec("UPDATE order_placed_queue SET updated_at = now() - interval '2 hours' WHERE id = $1::uuid", id)
+				p.doneAgo(id, 2*time.Hour)
 			}
 			sides["Go"].enqueue(orderJSON("0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"))
 			recent := p.one(sides["Go"], 1)
 			if err := sides["Rust"].complete(recent.ID, recent.Token); err != nil {
 				t.Fatal(err)
 			}
-			p.exec("UPDATE order_placed_queue SET updated_at = now() - interval '1 minute' WHERE id = $1::uuid", recent.ID)
+			p.doneAgo(recent.ID, time.Minute)
 			sides["TypeScript"].enqueue(orderJSON("5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"))
 			dead := p.one(sides["TypeScript"], 1)
-			p.exec("UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL, updated_at = now() - interval '30 days' WHERE id = $1::uuid", dead.ID)
+			p.markDead(dead.ID)
 
 			for i, want := range []int{4, 2, 0} {
 				if n, err := sides[pruner].prune(4); err != nil || n != want {
 					t.Fatalf("%s's prune %d deleted %d, %v; want %d", pruner, i+1, n, err, want)
 				}
 			}
-			var deadIDs, doneIDs string
-			if err := p.pool.QueryRow(p.ctx, "SELECT COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'dead'), ''), COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'done'), '') FROM order_placed_queue").Scan(&deadIDs, &doneIDs); err != nil {
-				t.Fatal(err)
-			}
+			deadIDs, doneIDs := p.deadAndDone()
 			if deadIDs != dead.ID || doneIDs != recent.ID {
 				t.Fatalf("after %s's prunes the queue holds dead %q and done %q, want the dead %s and the recent %s", pruner, deadIDs, doneIDs, dead.ID, recent.ID)
 			}
@@ -1492,6 +1769,9 @@ func duration(d time.Duration) *types.TemporalDuration {
 // written with days and months reads on each side as their hours, a day
 // 24 and a month 30 days.
 func testLocationsAndDurationsAgree(t *testing.T) {
+	if onSQLite() {
+		t.Skip("SQLite has no storage for a location, so DeliveryPlanned is Postgres's alone")
+	}
 	p := newParity(t)
 	p.on = "DeliveryPlanned"
 	queue := p.db.DeliveryPlannedQueue()

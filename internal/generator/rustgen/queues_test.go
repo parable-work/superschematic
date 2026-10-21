@@ -179,7 +179,7 @@ var definitionPattern = regexp.MustCompile(`(?s)export const \w+: QueueDefinitio
 // TypeScript types exports, by message, each read as data.
 func typeScriptDefinitions(t *testing.T, schema *ir.Schema) map[string]any {
 	t.Helper()
-	output, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "fixture-queue-db", Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})
+	output, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "fixture-queue-db", SQLite: true, Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -173,20 +173,20 @@ func TestWorkerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidStack, "worker FulfilOrders of shop-orders handles queue OrderPlaced, and shop-orders connects to no database")
 	})
-	t.Run("a queue on SQLite", func(t *testing.T) {
+	t.Run("a Go worker's queue on SQLite", func(t *testing.T) {
 		s, services := workerShop()
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker on shop-db, and environment Staging places shop-db on shop-db, a sqlite database; a Go or Rust API's Deps reach Postgres alone")
 	})
-	t.Run("a Rust worker's queue on SQLite", func(t *testing.T) {
+	t.Run("a queue on a platform where no worker claims", func(t *testing.T) {
 		s, services := workerShop()
-		service(services, "shop-orders").Language = registry.APILanguageRust
+		service(services, "shop-orders").Language = registry.APILanguageTypeScript
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
-		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
-		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)")
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = noClaimsPlatform
+		_, errs := resolve(t, assemble(t, noClaimsTarget{}), s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database on platform noclaims.d1, where no worker claims: it is reached through a binding alone (D53, amended)")
 	})
 	t.Run("a worker named like another deployable", func(t *testing.T) {
 		s, services := workerShop()
@@ -214,3 +214,23 @@ func TestWorkerRefusals(t *testing.T) {
 }
 
 func intp(n int) *int { return &n }
+
+// noClaimsPlatform is a database platform where no worker claims, as
+// cloudflare.d1 is (D53, amended).
+const noClaimsPlatform = "noclaims.d1"
+
+// noClaimsTarget registers noClaimsPlatform.
+type noClaimsTarget struct{}
+
+func (noClaimsTarget) Name() string { return "noclaims" }
+
+func (noClaimsTarget) Register(r *registry.Registry) error {
+	return r.RegisterPlatform(registry.PlatformSpec{
+		Name: noClaimsPlatform, Provider: "noclaims", Kind: ir.DeployableDatabase,
+		Dialects:      []string{registry.SQLDialectSQLite},
+		NoQueueClaims: "it is reached through a binding alone",
+		NameOf:        func(ctx registry.PlatformContext) any { return ctx.Deployable.Name },
+		AddressOf:     func(registry.PlatformContext) any { return nil },
+		Lower:         func(registry.PlatformContext) (registry.Lowered, error) { return registry.Lowered{}, nil },
+	})
+}
