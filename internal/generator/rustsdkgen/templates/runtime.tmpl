@@ -276,6 +276,102 @@ where
     Ok(value)
 }
 
+{{ if .ChecksUnions -}}
+/// Refuses the call when a union value's member broke rules of its own:
+/// failures are what collect_union_errors found, one `path: rule` each.
+pub fn refuse_union_failures(failures: Vec<String>) -> Result<(), SDKError> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(SDKError::config(format!(
+        "input validation failed: {}",
+        failures.join("; ")
+    )))
+}
+
+/// Validates a union argument's or input field's value, at path, as the
+/// member the union picks, with the union's validator in the types crate
+/// (`validate_<union>`): each element of a list of depth levels at
+/// path[i], and in a map each value at path[key], adding each rule its
+/// member breaks to failures as `path: rule` (path.field for a field of the
+/// member), as the route reports them. A null element or map value is
+/// `required` there. A missing or null value passes, as does one no member
+/// reads: the route refuses those.
+pub fn collect_union_errors<E: Serialize>(
+    path: &str,
+    value: Option<&Value>,
+    depth: usize,
+    is_map: bool,
+    validate: fn(&Value) -> E,
+    failures: &mut Vec<String>,
+) -> Result<(), SDKError> {
+    match value {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::Object(entries)) if is_map => {
+            for (key, entry) in entries {
+                collect_union_element(&format!("{path}[{key}]"), entry, depth, validate, failures)?;
+            }
+            Ok(())
+        }
+        Some(value) => collect_union_levels(path, value, depth, validate, failures),
+    }
+}
+
+fn collect_union_element<E: Serialize>(
+    path: &str,
+    value: &Value,
+    depth: usize,
+    validate: fn(&Value) -> E,
+    failures: &mut Vec<String>,
+) -> Result<(), SDKError> {
+    if value.is_null() {
+        failures.push(format!("{path}: required"));
+        return Ok(());
+    }
+    collect_union_levels(path, value, depth, validate, failures)
+}
+
+fn collect_union_levels<E: Serialize>(
+    path: &str,
+    value: &Value,
+    depth: usize,
+    validate: fn(&Value) -> E,
+    failures: &mut Vec<String>,
+) -> Result<(), SDKError> {
+    match value {
+        Value::Array(items) if depth > 0 => {
+            for (index, item) in items.iter().enumerate() {
+                collect_union_element(&format!("{path}[{index}]"), item, depth - 1, validate, failures)?;
+            }
+            Ok(())
+        }
+        member => {
+            flatten_field_errors(path, &serde_json::to_value(validate(member))?, failures);
+            Ok(())
+        }
+    }
+}
+
+/// Writes field errors, as a validator's errors serialize, as one
+/// `path: rule` per error, a nested object's at path.field.
+fn flatten_field_errors(path: &str, errors: &Value, failures: &mut Vec<String>) {
+    match errors {
+        Value::Object(fields) => {
+            for (field, nested) in fields {
+                flatten_field_errors(&format!("{path}.{field}"), nested, failures);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                let rule = item.get("validator").and_then(Value::as_str).unwrap_or("invalid");
+                failures.push(format!("{path}: {rule}"));
+            }
+        }
+        _ => {}
+    }
+}
+
+{{ end -}}
 pub fn validate_input(schema_name: &str, value: &Value) -> Result<(), SDKError> {
 {{- if .HasInputSchemas}}
     let schemas = input_schemas()?;

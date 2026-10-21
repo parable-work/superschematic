@@ -111,8 +111,11 @@ func TestDispatch(t *testing.T) {
  if _, ok := member(t, valid).(NewMessageUnionTrigger); !ok { t.Fatal("new-message trigger misrouted") }
  if _, ok := member(t, existing).(ExistingMessageUnionTrigger); !ok { t.Fatal("existing-message trigger decoded as the first member") }
  if _, ok := member(t, "{\"messageId\":\"" + key + "\"}").(ExistingMessageUnionTrigger); !ok { t.Fatal("untagged existing-message trigger misrouted") }
- // A stated tag must match: a new-message shape tagged existing is not a new message.
- if got, ok := member(t, "{\"kind\":\"existing_message\",\"message\":{}}").(ExistingMessageUnionTrigger); !ok || got.Validate().HasErrors() == false { t.Fatalf("contradicted tag accepted as %T", got) }
+ // A stated tag must match: a new-message shape tagged existing is not a
+ // new message, and lacking messageId it is no existing message either, as
+ // serde refuses it for the Rust member.
+ var contradicted UnionTriggerWrapper
+ if err := contradicted.UnmarshalJSON([]byte("{\"kind\":\"existing_message\",\"message\":{}}")); err == nil { t.Fatalf("contradicted tag accepted as %T", contradicted.Value) }
  // Unknown keys are tolerated once no member declares them all.
  if _, ok := member(t, "{\"kind\":\"existing_message\",\"messageId\":\"" + key + "\",\"legacy\":true}").(ExistingMessageUnionTrigger); !ok { t.Fatal("unknown key broke tagged dispatch") }
  if got, ok := ref(t, "{\"kind\":\"pane\",\"pieceId\":\"" + key + "\"}").(PaneUnionRef); !ok || got.Kind != "pane" { t.Fatalf("pane ref decoded as %T", got) }
@@ -126,23 +129,24 @@ func TestValidation(t *testing.T) {
  input := decode(t, "{\"trigger\":" + valid + ",\"triggers\":[" + existing + "],\"byName\":{\"a\":" + valid + "},\"optional\":null}")
  if errors := input.Validate(); errors.HasErrors() { t.Fatalf("complete input refused: %v", errors) }
 
- // The reported payload: the new-message member decodes, but its message
- // omits the idempotency key and the required mentions array.
- input = decode(t, "{\"trigger\":{\"kind\":\"new_message\",\"message\":{}},\"triggers\":[],\"byName\":{}}")
- errors := input.Validate()
- nested := errors.GetNestedErrors("trigger").GetNestedErrors("message")
- if len(nested.GetFieldErrors("idempotencyKey")) == 0 || len(nested.GetFieldErrors("mentions")) == 0 { t.Fatalf("incomplete member accepted: %v", errors) }
+ // The reported payload: a new message that omits the idempotency key and
+ // the required mentions array does not decode under the member's types,
+ // so no member reads it, as serde refuses it for the Rust member.
+ var refused StartUnionInput
+ if err := json.Unmarshal([]byte("{\"trigger\":{\"kind\":\"new_message\",\"message\":{}},\"triggers\":[],\"byName\":{}}"), &refused); err == nil { t.Fatal("incomplete member accepted") }
+ for _, payload := range []string{
+  "{\"trigger\":" + valid + ",\"triggers\":[" + valid + ",{\"message\":{}}],\"byName\":{}}",
+  "{\"trigger\":" + valid + ",\"triggers\":[],\"byName\":{\"bad\":{\"message\":{}}}}",
+  "{\"trigger\":" + valid + ",\"triggers\":[],\"byName\":{},\"optional\":{\"message\":{}}}",
+ } {
+  if err := json.Unmarshal([]byte(payload), &refused); err == nil { t.Fatalf("incomplete member accepted in %s", payload) }
+ }
 
  input = decode(t, "{}")
- errors = input.Validate()
+ errors := input.Validate()
  for _, field := range []string{"trigger", "triggers", "byName"} {
   if len(errors.GetFieldErrors(field)) == 0 { t.Fatalf("absent required union %s accepted: %v", field, errors) }
  }
-
- input = decode(t, "{\"trigger\":" + valid + ",\"triggers\":[" + valid + ",{\"message\":{}}],\"byName\":{\"bad\":{\"message\":{}}},\"optional\":{\"message\":{}}}")
- errors = input.Validate()
- expect(t, errors, "triggers[1]", "byName[bad]", "optional")
- if len(errors.GetNestedErrors("triggers[0]")) != 0 { t.Fatalf("valid element reported: %v", errors) }
 
  // Members held by pointer validate too; a nil element is not a member.
  input.Trigger = &NewMessageUnionTrigger{}

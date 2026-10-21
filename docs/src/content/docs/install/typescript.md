@@ -186,19 +186,37 @@ Every object type and every union also gets `parse<Name>FromJSON`, which
 reads a value as it arrives on the wire into its runtime types: a
 date-time field becomes a `Date`, a nested object or union field runs its
 own parser, and a `@strictJSON` type runs `parse<Type>Json`'s checks. A
-union's parser picks the member the Go and Rust types pick. When every
-member marks the same field `@internalMetadata`, that field's value names
-the member, and an absent, non-string or unknown value throws `ParseError`
-with `unknown discriminator`. Otherwise it picks by shape: the first member
-whose fields include every payload key wins, unless the payload
-contradicts one of the member's tags, a field that two or more members
-declare with distinct string or enum defaults; when no member declares
-every key, the first member whose tags the payload allows wins. A member
-wins only when its own parser reads the payload, so a `@strictJSON` member
-that refuses it is passed over, and a payload no member reads throws
-`ParseError` with `no matching member`. Any other value than an object
-throws `expected an object`; `null` and `undefined` are returned as they
+union's parser picks the member every language picks, by one structural
+predicate the generator writes for Go, TypeScript, Rust and Python alike.
+When every member marks the same field `@internalMetadata`, that field's
+value names the only candidate. Otherwise the candidates are the members
+whose fields include every payload key and whose tags the payload does
+not contradict, a tag being a field that two or more members declare with
+distinct string or enum defaults; when none of them reads the payload,
+the members whose tags the payload allows. The first candidate that reads
+the payload is the member. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part: a member
+that breaks one is picked, and its parser refuses it with `validation
+failed`. A value that is not an object, or that no member reads (an
+unknown discriminator included), throws `ParseError` with `does not match
+the declared type`, the reason the Go and Rust decoders give, and a
+message that says which; `null` and `undefined` are returned as they
 are.
+
+A union also gets `validate<Union>`, which validates the member its parser
+picks by the member's own validator, with the member's defaults filled in,
+so the errors sit at the member's paths (`number`, not `card.number`). A
+value no member reads, or that is not an object, validates: it is the
+parser's to refuse, as the Go and Rust decoders refuse it before any
+validator runs. A type's `validate<Type>` validates each union field with
+it, the member's errors nested under the field's path at each list level
+and key (`payment.number`, `shapes[1].radius`, `byName.a.radius`), as the
+Go types' `Validate` reports them.
 
 ## Load environment variables
 
@@ -248,6 +266,15 @@ an API with an operation that needs a caller (`@auth`,
 as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
+
+A union argument, alone, in a list or in a map, is validated before the
+request by the types package's `validate<Union>`: a null element or value
+is `required` at its path, and each value's member breaks its own rules at
+the value's path, nested (`shape.radius`, `shapes[1].radius`), as the route
+reports them. A value no member reads is sent as it is, and the route
+refuses it. A union field of an input is validated by the input's
+`validate<Type>`, in the same way. Either way the value is sent as JSON,
+a `Date` field as its RFC 3339 text, as an input is.
 
 A response is read as its type, at each list level, in each value of a
 map and in each item of a page. An object type or a union the schema declares goes through the
@@ -439,12 +466,19 @@ path, the query or the body, is checked against the scalar's own length,
 pattern and range, and a value that fails
 answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
 `min`, `max`). The problem `details` carry the `path` and the rule in
-`errors`. A union field of the input or of an object argument is read
-with the union's `parse<Union>FromJSON`, so the implementation receives
-its member with date-time fields as `Date`, and a member the parser
-refuses answers 400 with the parser's reason. A body argument whose type
-is a union has no strict decoder to check its member, and the build
-refuses it.
+`errors`. A union field of the input or of an object argument is
+validated as its member by the input's `validate<Type>`, so a member that
+breaks its own rules answers 400 with `validation failed` and the member's
+errors under the field's path (`payment.number`), and is then read with
+the union's `parse<Union>FromJSON`, so the implementation receives its
+member with date-time fields as `Date`. A union value no member reads
+answers 400 with `does not match the declared type`, as the Go and Rust
+servers answer it. A body argument whose type is a union, alone, in a list
+or in a map, is an object argument: `parse<Union>Json` checks the member
+the union picks by its rules and `parse<Union>FromJSON` reads it, and a
+value that is not an object, that no member reads or whose member breaks a
+rule is refused as an object argument is, `does not match the declared
+type` at the argument.
 
 ```ts
 import { Hono } from "hono";

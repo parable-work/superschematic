@@ -74,6 +74,49 @@ function validateMapArgument(
   }
 }
 {{- end}}
+{{- if .Namespace.HasUnionArgs}}
+
+/**
+ * Checks a union argument as the route reads it, adding each failure to
+ * errors at its path: a list level is an array (name[i]) and a map an
+ * object (name[key]), whose elements and values are never null, and each
+ * value runs validate, the union's validate<Union>, which validates the
+ * member the union picks, its errors nested under the value's path. A
+ * value no member reads passes, for the route to refuse it.
+ */
+function validateUnionArgument(
+  errors: ValidationErrors,
+  name: string,
+  value: unknown,
+  depth: number,
+  isMap: boolean,
+  validate: (member: unknown) => ValidationResult
+): void {
+  const check = (item: unknown, path: string, levels: number): void => {
+    if (item === null || item === undefined) {
+      setFieldErrors(errors, path, [{ validator: 'required', message: 'required field' }]);
+    } else if (levels > 0 && !Array.isArray(item)) {
+      setFieldErrors(errors, path, [{ validator: 'type', message: 'expected an array' }]);
+    } else if (levels > 0) {
+      (item as unknown[]).forEach((element, index) => check(element, `${path}[${index}]`, levels - 1));
+    } else {
+      const memberErrors = validate(item);
+      if (memberErrors !== true) {
+        addNestedErrors(errors, path, memberErrors);
+      }
+    }
+  };
+  if (!isMap) {
+    check(value, name, depth);
+  } else if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    setFieldErrors(errors, name, [{ validator: 'type', message: 'expected an object' }]);
+  } else {
+    for (const [key, entry] of Object.entries(value)) {
+      check(entry, `${name}[${key}]`, depth);
+    }
+  }
+}
+{{- end}}
 {{- if .Namespace.HasObjectMapArgs}}
 
 /**
@@ -381,7 +424,24 @@ export class {{.Namespace.ClassName}} {
     // Validate scalar arguments before sending request
     const errors = newValidationErrors();
     {{- range .ScalarArgs}}
-    {{- if .IsMap}}
+    {{- if .IsUnion}}
+    {
+      // {{.Name}} holds a union: each value is validated as the member the
+      // union picks (validate{{scalar_validator_symbol .Type}}), its errors under the value's path, as the
+      // route reports them. A value no member reads is sent, for the
+      // route to refuse it.
+      const unionValue: unknown = scalarInput.{{toCamelCase .Name}};
+      if (unionValue === undefined || unionValue === null) {
+        {{- if .Required}}
+        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+        {{- end}}
+      } else {
+        validateUnionArgument(errors, "{{toCamelCase .Name}}", unionValue, {{.ArrayDepth}}, {{.IsMap}}, (member: unknown) =>
+          validate{{scalar_validator_symbol .Type}}(member as {{type_ref .Type}})
+        );
+      }
+    }
+    {{- else if .IsMap}}
     {
       // {{.Name}} is a map, sent as a JSON object; {} is a value. Each
       // {{if .IsArray}}element of a list value{{else}}value{{end}} is checked at {{toCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}

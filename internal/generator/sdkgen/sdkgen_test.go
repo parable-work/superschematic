@@ -402,7 +402,7 @@ func TestConvertEndpointUsesPathAndMethod(t *testing.T) {
 			{Name: "shelf_id", Type: "Identity.UUID"},
 			{Name: "itemId", Type: "string"},
 		},
-	}, nil)
+	}, nil, nil)
 
 	if got.Path != "/api/shelves/{shelf_id}/items/{itemId}" {
 		t.Errorf("Path = %q", got.Path)
@@ -428,7 +428,7 @@ func TestScopedNamespaceEncodesTheScopeSegment(t *testing.T) {
 			{Name: "shelfId", Type: "string"},
 			{Name: "itemId", Type: "string"},
 		},
-	}, nil)
+	}, nil, nil)
 	tmpl, err := template.New("namespace.tmpl").Funcs(
 		codegen.MergeTemplateFuncs(tsutil.BaseTemplateFuncs(), customTemplateFuncs()),
 	).ParseFS(templatesFS, "templates/namespace.tmpl")

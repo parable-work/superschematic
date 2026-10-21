@@ -174,18 +174,27 @@ type it is a `*GenericJSON`: `nil` when the key is absent, and a pointer to
 also leave `nil`. Encoding writes the pointer back as `null` and leaves out
 a `nil` one. `To<Type>` carries an input's null over as the pointer.
 
-A union field decodes through its `<Union>Wrapper`. When every member
-marks the same field `@internalMetadata`, the wrapper picks the member by
-that field's value. Otherwise it picks by shape, because a member's decoder
-ignores keys the member does not declare: the first member whose fields
-include every payload key wins, unless the payload contradicts one of the
-member's tags. A tag is a field that two or more members declare with
-distinct string or enum defaults, such as
-`kind: Default<TriggerKind, TriggerKind.NewMessage>`. When no member
-declares every key, the wrapper tolerates the unknown keys and takes the
-first member whose tags the payload allows. `Validate` checks the member a
-union field holds, so a member without its required fields fails, and so
-does an absent required union or a nil union element of a list or map.
+A union field decodes through its `<Union>Wrapper`, which picks the member
+every language picks, by one structural predicate (`unionPickMember` in
+`unions.go`). When every member marks the same field `@internalMetadata`,
+that field's value names the only candidate. Otherwise the candidates are
+the members whose fields include every payload key and whose tags the
+payload does not contradict; a tag is a field that two or more members
+declare with distinct string or enum defaults, such as
+`kind: Default<TriggerKind, TriggerKind.NewMessage>`. When none of them
+reads the payload, the candidates are the members whose tags the payload
+allows, unknown keys tolerated. The first candidate that reads the
+payload is the member, decoded once. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part.
+A payload no member reads is an error. `Validate`
+checks the member a union field holds, so a member without its required
+fields fails, and so does an absent required union or a nil union element
+of a list or map.
 
 Encoding keeps an empty list apart from an absent one. An optional list is
 left out when it is nil and written when it is `[]`, so a decoded payload
@@ -230,6 +239,12 @@ from the query string (below). In the body:
   [JSON-valued scalars](/superschematic/reference/json-scalars/).
 - An object-typed argument goes through its type's decoder, and its field
   errors nest under the argument's path.
+- A union argument, alone, in a list or in a map, decodes into its
+  `<Union>Wrapper`, which picks the member as a union field's does, and the
+  implementation receives the member. A value that is not an object is
+  `type`, and one no member reads `type` with "does not match the declared
+  type"; the member's broken rules nest under the argument's path
+  (`shape.radius`).
 - A list is its JSON array and follows the
   [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
   `[]` satisfies a required list, `listMin` and `listMax` bound it, and a
@@ -405,7 +420,11 @@ map of lists), as the route takes it, and is sent as a JSON object; an
 optional one is left out when it is nil. Before the request, a nil
 required map is `required`, a nil list value is `required` at
 `name[key]`, and each value or list element runs its own validation at
-`name[key]` or `name[key][i]`.
+`name[key]` or `name[key][i]`. A union argument is validated through its
+`<Union>Wrapper`, as the member it holds: a nil one is `required`, and the
+member's errors nest under the argument's path (`payment.number`), or
+`name[i]` for an element of a list. An input's union fields are checked
+by the input's `Validate`.
 
 A method returns the response as the schema's Go type: `[]T` for a list
 and `map[string]T` for a map (`map[string][]T` for a map of lists). A

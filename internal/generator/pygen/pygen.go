@@ -66,9 +66,15 @@ type ModuleOutput struct {
 	TypeImports       []TypeImport
 	DependencyModules []string
 	Unions            []codegen.UnionInfo
+	// UnionReads is the structural predicate the unions pick their members
+	// by (D31, amended), nil without a union.
+	UnionReads        *UnionReads
 	Enums             []codegen.EnumInfo
 	CompositeDefaults []CompositeDefaultInfo
 	Timestamp         string
+
+	// readUnions are the unions UnionReads picks the members of.
+	readUnions map[string]bool
 
 	// ImportedEnumNames lists imported enum names so templates and default
 	// classification can distinguish dependency-owned enums from models.
@@ -133,6 +139,25 @@ type CompositeDefaultInfo struct {
 	FunctionName string
 	Type         string
 	JSONLiteral  string
+}
+
+// ReadsUnion reports whether field holds a union unions.py picks the
+// member of, which its model reads with read_union_field.
+func (o *ModuleOutput) ReadsUnion(field codegen.FieldInfo) bool {
+	return field.IsUnion && o.readUnions[field.Type]
+}
+
+// HasUnionFieldReads reports whether a model reads a union field with
+// read_union_field, which types.py then imports field_validator for.
+func (o *ModuleOutput) HasUnionFieldReads() bool {
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			if o.ReadsUnion(field) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // UnionMemberTypeNames returns the sorted unique member type names across
@@ -282,6 +307,17 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.Types = append(objectTypes, inputTypes...)
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 
+	if len(output.Unions) > 0 {
+		model, err := codegen.BuildReadModel(schema, opts.Dependencies)
+		if err != nil {
+			return nil, err
+		}
+		output.UnionReads = buildUnionReads(model, output.Scalars)
+		output.readUnions = map[string]bool{}
+		for _, union := range model.Unions {
+			output.readUnions[union.Name] = true
+		}
+	}
 	applyUnionDiscriminatorLiterals(output)
 	collectModelRebuildTypes(output, imported.enumNames)
 

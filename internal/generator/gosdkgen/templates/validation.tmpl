@@ -83,6 +83,21 @@ func appendScalarValidationErrors(validationErrors types.ValidationErrors, field
 		validationErrors.SetFieldErrors(fieldName, fieldErrors)
 	}
 }
+{{- if .ValidatesUnionArgs}}
+
+// appendUnionValidationErrors records "required" at path for a nil union
+// value, and otherwise the errors of the member the wrapper holds, nested
+// under path, as the route reports them.
+func appendUnionValidationErrors(validationErrors types.ValidationErrors, path string, isNil bool, wrapper inputValidator) {
+	if isNil {
+		validationErrors.AddFieldError(path, "required", "required field")
+		return
+	}
+	if memberErrs := wrapper.Validate(); memberErrs.HasErrors() {
+		validationErrors.AddNestedError(path, memberErrs)
+	}
+}
+{{- end}}
 {{- if .ValidatesListElements}}
 
 // validateListElement runs the validation of one element of a list argument

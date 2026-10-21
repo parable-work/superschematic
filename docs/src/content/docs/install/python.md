@@ -150,7 +150,11 @@ pydantic checks its types and required fields, then `validate_all` checks
 the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the
 input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
-and message, as the Go and TypeScript SDKs report them.
+and message, as the Go and TypeScript SDKs report them. A union field's
+member is checked the same way, at `payment.number`. A union argument is
+read as the member the union picks, as a union response is read, and its
+member's rules checked, at `shape.radius`; one no member reads raises
+`ValidationError` before the request.
 
 A response outside 2xx raises `APIError`, whose message is the problem's
 `detail` and which carries the `status_code`, the problem's `code` and the
@@ -169,8 +173,11 @@ list level, in each value of a map and in each item of a page. A model is
 read with `from_dict_non_strict`. A union is read as the member its alias
 picks: by the discriminator when every member marks the same field
 `@internalMetadata`, and otherwise the member the payload fits best, by
-pydantic's smart union matching. A union field of a model is read the
-same way. An enum stays the string the API sent.
+pydantic's smart union matching. An enum stays the string the API sent.
+A union field of a model, and a union argument, are read as the member
+the types package's `unions.pick_union_member` picks, the structural
+predicate every language picks by (see the Go, TypeScript and Rust
+pages), so nothing is coerced: `{"radius": "1"}` is no circle.
 A value its type cannot read, or data that is not the list or map the
 operation returns, raises `SDKError` naming where it is in the response
 (`data[1]`, `data[a]` for a map's key `a`, `data.items[0]`), with

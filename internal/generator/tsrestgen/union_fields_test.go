@@ -76,8 +76,8 @@ func TestGenerateUnionFieldInput(t *testing.T) {
 // TestGeneratedUnionFieldsRouter type-checks the generated package for
 // object-lists-api with drawing.annotate and drives it under bun over HTTP:
 // a Note in the input reaches the implementation as its member, with a
-// Flag's raisedAt a Date, and a Pin the body breaks, or a kind no member
-// has, is refused with the 400 of an input the parser refuses.
+// Flag's raisedAt a Date; and a Pin the body breaks, or a kind no member
+// has, is refused with the 400 of a value no member reads.
 func TestGeneratedUnionFieldsRouter(t *testing.T) {
 	schema := loadObjectListsAPI(t)
 	addAnnotateOperation(t, schema)

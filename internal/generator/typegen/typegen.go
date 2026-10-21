@@ -258,6 +258,10 @@ type EnumInfo struct {
 
 // ModuleOutput contains all generated code for a types module.
 type ModuleOutput struct {
+	// UnionReads is the structural predicate the unions pick their members
+	// by (D31, amended), nil without a union.
+	UnionReads *UnionReads
+
 	PackageName              string
 	SchemaName               string
 	ModulePath               string
@@ -485,6 +489,13 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.HasShapeDispatchedUnions, err = annotateShapeDispatch(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), enumLookup)
 	if err != nil {
 		return nil, err
+	}
+	if len(output.Unions) > 0 {
+		model, err := codegen.BuildReadModel(schema, opts.Dependencies)
+		if err != nil {
+			return nil, err
+		}
+		output.UnionReads = buildUnionReads(model, output)
 	}
 
 	graphs, err := graphdesc.Graphs(schema)

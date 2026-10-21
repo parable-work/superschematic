@@ -1340,7 +1340,13 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 		validationErrors := types.NewValidationErrors()
 		{{- range .BodyArgs }}
+		{{- if .UnionWrapper }}
+		// {{ .Name }} holds a union: each value decodes into its wrapper,
+		// which picks and validates the member the implementation receives.
+		requestBody.{{ .GoName }} = bodyargs.Unwrap{{ .Decoder }}(bodyargs.{{ .Decoder }}[{{ .UnionWrapper }}](validationErrors, body, body{{ .GoName }}Arg), func(w {{ .UnionWrapper }}) {{ .GoType }} { return w.Value })
+		{{- else }}
 		requestBody.{{ .GoName }} = bodyargs.{{ .Decoder }}[{{ .GoType }}](validationErrors, body, body{{ .GoName }}Arg)
+		{{- end }}
 		{{- end }}
 		if validationErrors.HasErrors() {
 			RespondValidationErrors(w, r, validationErrors)

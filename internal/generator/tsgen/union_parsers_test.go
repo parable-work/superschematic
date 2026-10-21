@@ -213,28 +213,41 @@ func TestUnionParsersRendering(t *testing.T) {
 		{read(cases[0]), "validators/index.ts", []string{"export * from './unions';"}},
 		{read(cases[0]), "validators/unions.ts", []string{
 			"import type { Shape } from '../types';",
-			"import { parseCircleFromJSON } from './types/circle';",
+			"import { parseCircleFromJSON, parseCircleJsonNonStrict } from './types/circle';",
 			"export function parseShapeFromJSON(input: unknown): Shape {",
-			`unionPayloadKeysWithin(payload, ["radius", "drawnAt"]) &&`,
-			"const member = readUnionMember(parseCircleFromJSON, payload);",
-			"throw new ParseError('parseShape: no member of Shape reads the payload', 'no matching member');",
+			"export function validateShape(value: Shape | null | undefined): ValidationResult {",
+			"export function parseShapeJson(input: unknown): unknown {",
+			// The structural predicate's tables: Circle requires radius, a
+			// number, and its drawnAt is held to its scalar's validator.
+			`"Circle": {`,
+			`{ name: "radius", required: true, depth: 0, map: false, kind: "number" }`,
+			`{ name: "drawnAt", required: false, depth: 0, map: false, kind: "scalar", json: "string", scalar: (value: unknown) => validateTemporalDateTime(value as never)[0] }`,
+			`"Shape": {`,
+			`{ type: "Circle", fields: ["radius", "drawnAt"], tags: [] }`,
+			"const index = withPicks(() => pickUnionMember(\"Shape\", payload));",
+			"throw new ParseError('parseShape: no member of Shape reads the payload', UNION_MISMATCH);",
 		}},
 		{read(cases[1]), "validators/unions.ts", []string{
 			"import type { Contact, Figure, Marker } from '../types';",
 			// Imported members come from the package that declares them.
-			"import { parseCircleFromJSON, parseSquareFromJSON } from '" + shapesPackage + "/validators';",
-			"import { parseStampFromJSON } from './types/stamp';",
+			"import { parseCircleFromJSON, parseCircleJsonNonStrict, parseSquareFromJSON, parseSquareJsonNonStrict } from '" + shapesPackage + "/validators';",
+			"import { parseStampFromJSON, parseStampJsonNonStrict } from './types/stamp';",
 			// Marker dispatches by its discriminator.
-			`const discriminator = payload["kind"];`,
-			`case "flag":` + "\n      return parseFlagFromJSON(payload);",
-			`throw new ParseError(` + "\n" + `    "parseMarker: discriminator kind is " + stated + ", not one of \"pin\", \"flag\"",`,
+			`discriminator: "kind",`,
+			`{ type: "Flag", tag: "flag" },`,
+			`"parseMarker: no member of Marker reads the payload, whose kind is " + stated + " (one of \"pin\", \"flag\")",`,
 			// Contact's members differ by a tag.
-			`unionPayloadTagsAllow(payload, [["kind", "sms"]])`,
+			`{ type: "Sms", fields: ["kind", "address"], tags: [["kind", "sms"]] },`,
+			// The imported members' tables come from the dependency's IR.
+			`"Square": {`,
 		}},
 		{read(cases[1]), "validators/types/drawing.ts", []string{
 			"import type { Drawing, Shape, Figure, Marker, Contact } from '../../types';",
-			"import { parseShapeFromJSON } from '" + shapesPackage + "/validators';",
-			"import { parseContactFromJSON, parseFigureFromJSON, parseMarkerFromJSON } from '../unions';",
+			"import { parseShapeFromJSON, validateShape } from '" + shapesPackage + "/validators';",
+			"import { parseContactFromJSON, validateContact, parseFigureFromJSON, validateFigure, parseMarkerFromJSON, validateMarker } from '../unions';",
+			// A union field is validated as its member, nested under its path.
+			"const memberErrors = validateFigure(member as Figure);",
+			"value.figures.forEach((item, index) => validateUnion(item, `figures[${index}]`));",
 			"? parseShapeFromJSON(obj.shape)",
 			"(obj.figures as unknown[]).map((item) => parseFigureFromJSON(item))",
 			"Array.isArray(row) ? row.map((item) => parseFigureFromJSON(item)) : (row as Figure[])",

@@ -109,7 +109,6 @@ argument.
 | A DB column whose element type is another table (`Table[][]`) | `<Type>.<field>: an array of arrays of table type <Table> cannot be a relation; store a list of lists of its keys or of a @jsonField type` |
 | A [projection](/superschematic/reference/projections/) column | `<Type>.<field>: projection columns cannot be arrays of arrays` |
 | A projection's `@column`, `@join`, row rule or `collapse` key that reads one | `<Table>.<field> is an array of arrays, which a projection cannot read` |
-| A body argument of the TypeScript API server whose element type is a union | `tsrestgen does not support arrays of arrays yet (<set>.<operation>(<argument>)): element type <T> is not a scalar, enum or object type` |
 
 ## List rules
 
