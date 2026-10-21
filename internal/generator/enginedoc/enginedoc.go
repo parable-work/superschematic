@@ -143,7 +143,7 @@ func Build(schema *ir.Schema, opts Options) (*Document, error) {
 		return nil, err
 	}
 
-	doc.Behaviors = behaviors(engineTypes, reg)
+	doc.Behaviors = Behaviors(engineTypes, reg)
 
 	r := resolver{schema: schema, deps: opts.Dependencies}
 	for _, td := range engineTypes {
@@ -218,8 +218,9 @@ func (d *Document) JSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// behaviors lists the behaviors the engine types compose, sorted by name.
-func behaviors(engineTypes []*ir.TypeDef, reg *registry.Registry) []Behavior {
+// Behaviors lists the behaviors the engine types compose, sorted by name,
+// each with what reg says implements it: the document's behaviors.
+func Behaviors(engineTypes []*ir.TypeDef, reg *registry.Registry) []Behavior {
 	seen := map[string]bool{}
 	var out []Behavior
 	for _, td := range engineTypes {

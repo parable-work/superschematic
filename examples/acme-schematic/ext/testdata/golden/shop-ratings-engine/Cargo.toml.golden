@@ -4,8 +4,9 @@
 # schema's types compose compiled in: the core's behaviors,
 # and each extension's, from the crate its registration names.
 # superschematic writes it on every build of the schema while its types
-# compose an extension's behavior; a host that opens the engine on the
-# schema depends on it and passes behaviors() and tools() in its options.
+# compose a behavior of the work queue or of an extension, which the core's
+# engine archive leaves out; a host that opens the engine on the schema
+# depends on it and passes behaviors() and tools() in its options.
 [package]
 name = "acme-shop-ratings-engine"
 version = "0.0.0"

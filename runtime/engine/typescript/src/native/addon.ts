@@ -36,7 +36,7 @@ export const NATIVE_ADDON_ENV = 'SUPERSCHEMATIC_ENGINE_ADDON';
  * request and error shapes of runtime/engine/rust/napi/src/lib.rs
  * (ABI_VERSION). An addon of another version is refused.
  */
-export const NATIVE_ABI_VERSION = 2;
+export const NATIVE_ABI_VERSION = 3;
 
 // `${process.platform}-${process.arch}` -> napi's platform triple: the
 // targets in package.json "napi.targets"; Linux is glibc only.
@@ -122,8 +122,12 @@ export interface Addon {
   engineRoutes(): string;
   /** A behavior context's method, on the test addon alone (src/native/bridge.ts). */
   bridgeCall?(generation: number, method: string, args: string): string;
-  /** Opens an engine; host answers what the options' `hosted` lists. */
-  NativeEngine: { open(options: string, host?: AddonHost): AddonEngine };
+  NativeEngine: {
+    /** Opens an engine on this thread; host answers what the options' `hosted` lists. */
+    open(options: string, host?: AddonHost): AddonEngine;
+    /** Opens an engine off this thread, on options that host nothing. */
+    openAsync(options: string): Promise<AddonEngine>;
+  };
 }
 
 /** The platform triple of this host, or a throw naming the host. */

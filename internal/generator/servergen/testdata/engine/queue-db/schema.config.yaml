@@ -1,0 +1,13 @@
+# An engine database whose Job composes the work queue's behaviors (D58),
+# which the core's engine archive leaves out: its build writes the
+# project's engine crate, engine/rust/queue-db, whose archive a Go server
+# on it links in the core's place. Its engine opens with the allowAll
+# policy, so a verified service may write.
+name: queue-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    rust: { enabled: true }
+  engine:
+    policy: allowAll

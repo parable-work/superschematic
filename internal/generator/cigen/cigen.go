@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
@@ -221,6 +222,16 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 	}
 	for _, env := range envs {
 		for _, d := range env.Deployables {
+			if d.Kind == ir.DeployableRunner && d.Runner != nil {
+				if _, ok := out.EngineArchives[d.Runner.Database]; ok || !projectEngine(c, d.Runner.Database) {
+					continue
+				}
+				if out.EngineArchives == nil {
+					out.EngineArchives = map[string]string{}
+				}
+				out.EngineArchives[d.Runner.Database] = path.Join(out.OutputRoot, "engine", "rust", d.Runner.Database, "ffi")
+				continue
+			}
 			if d.Kind == ir.DeployableSite && d.Site != nil {
 				if _, ok := out.Sites[d.Name]; ok {
 					continue
@@ -254,6 +265,30 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 		}
 	}
 	return out, nil
+}
+
+// projectEngine reports whether the engine of the engine database db
+// composes a behavior the core's engine archive does not run, the work
+// queue's or an extension's, so its servers link the archive of the
+// project's engine crate, which the build writes (D58). A database the
+// build cannot load is left to the generators that read it.
+func projectEngine(c registry.GenerateContext, db string) bool {
+	if c.LoadDependency == nil {
+		return false
+	}
+	schema, err := c.LoadDependency(db)
+	if err != nil {
+		return false
+	}
+	for _, td := range codegen.EngineTypes(schema) {
+		for _, ref := range td.Behaviors {
+			declared, ok := c.Registry.Behavior(ref.Name)
+			if !ok || declared.Extension != "" || declared.Package != registry.EnginePackage {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // packageManager names the package manager of the schemas root by its

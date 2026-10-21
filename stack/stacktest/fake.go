@@ -56,6 +56,12 @@ const (
 	// on a Cloud Run worker pool (D53).
 	WorkerPlatform = "fake.worker"
 
+	// RunnerPlatform runs an engine's runner as a pool of one instance, as
+	// gcp runs it on a Cloud Run worker pool (D58); RunnerSQLConnector
+	// connects it to its engine database, its one edge.
+	RunnerPlatform     = "fake.runner"
+	RunnerSQLConnector = "fake.runner-sql"
+
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
 
@@ -328,6 +334,15 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerWorker,
 		},
+		{
+			Name:      RunnerPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableRunner,
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerRunner,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
@@ -349,6 +364,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
+		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -378,6 +394,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableSite:     SitePlatform,
 			ir.DeployableBucket:   BucketPlatform,
 			ir.DeployableWorker:   WorkerPlatform,
+			ir.DeployableRunner:   RunnerPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -799,6 +816,32 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	if memory, ok := d.Settings["memory"]; ok {
 		pool["memory"] = memory
+	}
+	if len(env) > 0 {
+		pool["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
+	return out, nil
+}
+
+// lowerRunner lowers an engine's runner to an account and a pool of its
+// instances, one, which handles one thing at a time (D58).
+func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Runner == nil {
+		return registry.Lowered{}, fmt.Errorf("runner %s has no engine database", d.Name)
+	}
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	pool := map[string]any{
+		"name":        d.ResourceName,
+		"image":       kebab(d.Name),
+		"account":     member,
+		"language":    strings.ToLower(d.Language),
+		"instances":   d.Runner.Instances,
+		"concurrency": 1,
 	}
 	if len(env) > 0 {
 		pool["env"] = env

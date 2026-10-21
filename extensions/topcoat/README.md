@@ -215,6 +215,34 @@ cover an operation's, so pages and the JSON API agree.
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
 
+### The engine
+
+When the API's database is an engine database, a DB service whose types
+compose behaviors (D58), the crate keeps the engine in-process on SQLite.
+`engine::open(path)` opens it on a SQLite file, created if absent, with
+the database's engine document (its Rust types' `ENGINE_DOCUMENT`), the
+access policy its config sets (`engine::POLICY`) and the behaviors of the
+core or of the project's engine crate, and defines and publishes the
+document's schemas. The setup method then takes the engine, mounts its
+routes, its event stream and its MCP endpoint at `/engine/{*rest}`, each
+request's caller the one the API's `Authenticator` establishes, and keeps
+it in the app context (`Setup::engine`), which a page calls in-process on
+the blocking pool:
+
+```rust
+let engine = notes_api_topcoat::engine::open("notes.engine.db")?;
+Router::builder()
+    .discover()
+    .notes_api(implementations, authenticator, engine)
+    .build()
+```
+
+The crate depends on the engine's crates at the naming file's `[paths]
+engine_rust` and `engine_behaviors_rust`; without them it mounts no
+engine, and the build says so. `<service>_without_api` (below) takes the
+engine too and keeps it for the pages, but mounts none of its routes, as
+it mounts no JSON API.
+
 ### Several services in one app
 
 `[extension.topcoat] services` lists the services one Topcoat app hosts

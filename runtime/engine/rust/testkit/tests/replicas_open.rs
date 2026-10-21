@@ -14,10 +14,15 @@
 //! - Two engines on two schemas of a fresh database that publish Search at
 //!   once both create the full-text search the database holds once (the
 //!   `unaccent` extension, Postgres).
+//! - Engines that open, each as a user of its own with no privilege on the
+//!   database, a schema an administrator made for a role both users are
+//!   members of, as a deploy's migration job makes it: each acts as that
+//!   role, so all they create in it is the role's, and each changes and
+//!   reads what the other made (Postgres).
 //!
 //! Each case runs on Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`
-//! names one, in a schema of its own (the last in a database of its own),
-//! and the ones a SQLite file can hold on SQLite too.
+//! names one, in a schema of its own (the last two in a database of their
+//! own), and the ones a SQLite file can hold on SQLite too.
 
 mod replicas_support;
 mod support;
@@ -419,6 +424,187 @@ mod fresh_database {
                 }
             });
             drop(database);
+        }
+    }
+
+    // url with user and password in place of its own.
+    fn as_user(url: &str, user: &str, password: &str) -> String {
+        let (scheme, rest) = url.split_once("://").expect("a URL");
+        let rest = match rest.split_once('@') {
+            Some((_, host)) if !host.contains('@') => host,
+            _ => rest,
+        };
+        format!("{scheme}://{user}:{password}@{rest}")
+    }
+
+    #[test]
+    fn members_of_the_role_that_owns_the_schema_open_it_as_that_role() {
+        for target in targets("schema_owner_role") {
+            if target.dialect != Dialect::Postgres {
+                continue;
+            }
+            let admin_url = target.url().expect("a URL");
+            let owner = support::unique_name("engine_owner");
+            let (one, two) = (
+                support::unique_name("engine_one"),
+                support::unique_name("engine_two"),
+            );
+            let password = "engine-role-test";
+            // Dropped after the database, which drops before it.
+            let _roles = OwnRoles::create(
+                admin_url,
+                &[&one, &two, &owner],
+                &format!(
+                    "CREATE ROLE {owner} NOLOGIN;
+                     CREATE ROLE {one} LOGIN PASSWORD '{password}';
+                     CREATE ROLE {two} LOGIN PASSWORD '{password}';
+                     GRANT {owner} TO {one}, {two}"
+                ),
+            );
+            let database = OwnDatabase::create(admin_url, &support::unique_name("engine_roles"));
+            // As the migration job does: the schema the role's, and Search's
+            // extension in a schema of its own the role may use. Neither
+            // user may create in the database.
+            let mut db =
+                postgres::Client::connect(&database.url, postgres::NoTls).expect("connect");
+            db.batch_execute(&format!(
+                "REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+                 CREATE SCHEMA engine AUTHORIZATION {owner};
+                 CREATE SCHEMA superschematic_extensions;
+                 CREATE EXTENSION unaccent WITH SCHEMA superschematic_extensions;
+                 GRANT USAGE ON SCHEMA superschematic_extensions TO {owner}"
+            ))
+            .expect("the schema");
+            let open = |user: &str| {
+                let mut options = superschematic_engine::EngineOptions::new(
+                    superschematic_engine::Storage::Postgres {
+                        url: as_user(&database.url, user, password),
+                        options: superschematic_engine::storage::PostgresOptions {
+                            listen: false,
+                            ..Default::default()
+                        },
+                    },
+                );
+                options.policy = Some(superschematic_engine::Policy::allow_all());
+                options.behaviors = superschematic_engine_behaviors::core();
+                Engine::open(options).expect("open as a member")
+            };
+            let note = |name: &str, fields: Value| {
+                let mut document = schema_document(name, fields, json!({}));
+                document["types"][name]["behaviors"] = json!([{"name": "Search", "config": {"fields": ["title"]}}, {"name": "Comments"}]);
+                document
+            };
+            let title = json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]);
+            let search = |engine: &Engine, query: &str| {
+                engine
+                    .instances()
+                    .invoke_schema(&alice(), "Note", "search", &json!({ "query": query }), None)
+                    .expect("search")["items"]
+                    .as_array()
+                    .map(Vec::len)
+            };
+
+            // The first migrates the schema and publishes Note, with Search's
+            // index and configuration.
+            let first = open(&one);
+            publish(&first, &note("Note", title.clone()), None);
+            first
+                .instances()
+                .create(
+                    &alice(),
+                    "Note",
+                    &json!({"title": "walnut one"}),
+                    CreateOptions::default(),
+                )
+                .expect("create as one");
+
+            // The second writes through what the first made, and publishes
+            // a version and a type of its own, whose migrations change the
+            // first's tables and add its own.
+            let second = open(&two);
+            second
+                .instances()
+                .create(
+                    &alice(),
+                    "Note",
+                    &json!({"title": "walnut two"}),
+                    CreateOptions::default(),
+                )
+                .expect("create as two");
+            assert_eq!(search(&second, "walnut"), Some(2));
+            let mut fields = title.as_array().cloned().expect("fields");
+            fields.push(json!({"name": "body", "typeRef": {"name": "string"}}));
+            publish(&second, &note("Note", Value::Array(fields)), None);
+            publish(&second, &note("Memo", title.clone()), None);
+            second
+                .instances()
+                .create(
+                    &alice(),
+                    "Memo",
+                    &json!({"title": "walnut memo"}),
+                    CreateOptions::default(),
+                )
+                .expect("a memo");
+            assert_eq!(search(&first, "walnut"), Some(2));
+            drop(first);
+            let first = open(&one);
+            assert_eq!(count(&first, "SELECT COUNT(*) FROM engine_instances"), 3);
+
+            // All the engine made in its schema is the role's.
+            let others: Vec<String> = db
+                .query(
+                    "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = 'engine' AND c.relowner <> $1::text::regrole
+                     UNION ALL
+                     SELECT t.cfgname::text FROM pg_ts_config t JOIN pg_namespace n ON n.oid = t.cfgnamespace
+                     WHERE n.nspname = 'engine' AND t.cfgowner <> $1::text::regrole",
+                    &[&owner],
+                )
+                .expect("the owners")
+                .iter()
+                .map(|row| row.get(0))
+                .collect();
+            assert!(others.is_empty(), "owned by another role: {others:?}");
+            let made: i64 = db
+                .query_one(
+                    "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'engine'",
+                    &[],
+                )
+                .expect("a count")
+                .get(0);
+            assert!(made > 10, "the engine made {made} relations");
+            drop((first, second, db));
+        }
+    }
+
+    // Roles of the test's own, dropped when they go out of scope, which a
+    // database they own objects in must do first.
+    struct OwnRoles {
+        admin_url: String,
+        names: Vec<String>,
+    }
+
+    impl OwnRoles {
+        fn create(url: &str, names: &[&str], statements: &str) -> OwnRoles {
+            let roles = OwnRoles {
+                admin_url: url.to_owned(),
+                names: names.iter().map(|name| (*name).to_owned()).collect(),
+            };
+            postgres::Client::connect(url, postgres::NoTls)
+                .expect("connect")
+                .batch_execute(statements)
+                .expect("the roles");
+            roles
+        }
+    }
+
+    impl Drop for OwnRoles {
+        fn drop(&mut self) {
+            if let Ok(mut client) = postgres::Client::connect(&self.admin_url, postgres::NoTls) {
+                for name in &self.names {
+                    let _ = client.batch_execute(&format!("DROP ROLE IF EXISTS {name}"));
+                }
+            }
         }
     }
 }

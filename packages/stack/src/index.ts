@@ -30,8 +30,8 @@ export interface Targets {
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container and of its storage emulator
  * (D54), a server's and a site's settings its port, and a database, a job,
- * a worker and a bucket take no settings. A port left out is derived from
- * the stack, the environment and the deployable.
+ * a worker, a bucket and an engine's runner (D58) take no settings. A port
+ * left out is derived from the stack, the environment and the deployable.
  */
 export interface LocalTarget {
   values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
@@ -45,13 +45,15 @@ export interface LocalTarget {
   bucket: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   worker: {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  runner: {};
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -182,6 +184,29 @@ type WorkerElementOf<T, Of> =
         SettingsOf<T, "worker">
     : never;
 
+/**
+ * Whether an engine's runner runs in an environment (D58). A runner that is
+ * off runs no instance: no reaction, schedule, Timers deadline or event-log
+ * retention runs until it is on again, when each reaction reads on from its
+ * cursor, a schedule that came due runs once and every overdue deadline
+ * fires.
+ */
+export type RunnerRun = {
+  /** Turns the runner on or off. */
+  readonly enabled?: boolean;
+};
+
+/**
+ * What an engine's runner's settings element is: its database's handle in
+ * `of` and `runner: true`, whether it runs, and the target's runner
+ * settings. A runner reads no config but its database's connection, so it
+ * takes no env.
+ */
+type RunnerElementOf<T, Of> =
+  Of extends ServiceHandle<"DB">
+    ? { readonly of: Of; readonly runner: true; readonly platform?: string } & RunnerRun & SettingsOf<T, "runner">
+    : never;
+
 /** Every key of W, or of any member when W is a union. */
 type KeysOf<W> = W extends unknown ? keyof W : never;
 
@@ -192,10 +217,11 @@ type Exact<W, E> = W & { readonly [K in Exclude<keyof E, KeysOf<W>>]: never };
 type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<unknown>;
 
 /**
- * One settings element checked: its `of` picks the settings type, and a
- * `job` or a `worker` beside an API's handle makes it the element of that
- * job or worker; its env is the config's fields, and a key neither takes is
- * refused. An element that names a platform, which may be another
+ * One settings element checked: its `of` picks the settings type, a `job`
+ * or a `worker` beside an API's handle makes it the element of that job or
+ * worker, and `runner: true` beside a DB's handle that of the engine's
+ * runner of the database; its env is the config's fields, and a key none
+ * takes is refused. An element that names a platform, which may be another
  * target's, takes any settings key; the loader checks it against that
  * platform.
  */
@@ -205,7 +231,9 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
         ? JobElementOf<E extends { readonly platform: string } ? undefined : T, Of>
         : E extends { readonly worker: unknown }
           ? WorkerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-          : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+          : E extends { readonly runner: unknown }
+            ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+            : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
@@ -219,7 +247,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker` or `runner: true` beside a handle for a job, a worker or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];

@@ -1,0 +1,19 @@
+name: queue-api
+kind: API
+types:
+  Depth:
+    name: Depth
+    role: APIView
+    fields:
+      - name: queued
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: QueueQueries
+    serviceCallers: { mode: require }
+    operations:
+      - name: depth
+        typeRef: { name: Depth }
+        required: true
+        httpMethod: GET
+        restPath: depth

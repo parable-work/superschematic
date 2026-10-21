@@ -31,6 +31,30 @@
 # images of one commit may then differ. The generated CI's check refuses a
 # missing or stale lockfile before any deploy. The image runs main.ts on the
 # Bun release tools.env pins, as a non-root user.
+{{- with .Docker.Engine }}
+#
+# The {{ $.Kind }} opens the behavior engine (D58) through the engine's Node-API
+# addon, which the image builds from source for its platform, with the
+# crates the engine's Cargo workspace reaches by path at their places in
+# the checkout: the workspace beside the engine's package, the naming
+# file's [paths] engine_typescript.
+{{- if .Project }} Its engine database composes an extension's
+# behavior, so the engine stage builds the addon of the project's engine
+# crate, which compiles it in, from its napi member beside the engine's
+# crates and the extensions' at their places in the checkout, its lock file
+# seeded from the engine workspace's:
+#
+#   {{ .Project }}
+#
+# The image keeps it at {{ .AddonPath }}, which SUPERSCHEMATIC_ENGINE_ADDON
+# names, so the engine opens on it in the core's addon's place.
+{{- else }} The engine stage builds the core's
+# addon (superschematic-engine-addon), and the build stage puts it in the
+# package's native/, where the engine's loader looks for it.
+{{- end }} The build
+# stage emits the package's ./server entry, which the workspace's root
+# overrides the package with.
+{{- end }}
 
 ARG RUST_VERSION={{ .RustVersion }}
 ARG BUN_VERSION={{ .BunVersion }}
@@ -48,6 +72,36 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     esac \
     && mkdir /native \
     && cp target/release/libsuperscalar_napi.so "/native/superscalar-napi.$triple.node"
+{{- with .Docker.Engine }}
+
+FROM rust:${RUST_VERSION}-trixie AS engine
+WORKDIR /src
+COPY {{ .Workspace }} {{ .Workspace }}
+{{- range .Crates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+{{- if .Project }}
+COPY {{ .Project }} {{ .Project }}
+{{- range .ProjectCrates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    { test -f {{ .Project }}/Cargo.lock || cp {{ .Workspace }}/Cargo.lock {{ .Project }}/Cargo.lock; } \
+    && cargo build --release --manifest-path {{ .Project }}/napi/Cargo.toml \
+    && mkdir /native \
+    && cp {{ .Project }}/target/release/{{ .ProjectLib }} /native/{{ .Addon }}
+{{- else }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --locked --release --manifest-path {{ .Workspace }}/Cargo.toml -p superschematic-engine-addon \
+    && case "$(uname -m)" in \
+      x86_64) triple=linux-x64-gnu ;; \
+      aarch64) triple=linux-arm64-gnu ;; \
+      *) echo "the engine builds no Node-API addon for linux/$(uname -m)" >&2; exit 1 ;; \
+    esac \
+    && mkdir /native \
+    && cp {{ .Workspace }}/target/release/libsuperschematic_engine_addon.so "/native/superschematic-engine.$triple.node"
+{{- end }}
+{{- end }}
 
 FROM oven/bun:${BUN_VERSION} AS build
 WORKDIR /src
@@ -64,6 +118,13 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     && bun install --frozen-lockfile \
     && ln -sfn {{ .Docker.ScalarLink }} node_modules/superscalar \
     && bunx tsc -p tsconfig.json
+{{- with .Docker.Engine }}
+{{- if not .Project }}
+COPY --from=engine /native/ {{ .TypeScript }}/native/
+{{- end }}
+RUN cd {{ .TypeScript }} \
+    && /src/{{ $.Docker.HTTPRuntime }}/node_modules/.bin/tsc -p tsconfig.server.json
+{{- end }}
 WORKDIR /src/{{ .Docker.Workspace }}
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     if [ -f bun.lock ]; then frozen=--frozen-lockfile; else frozen=; \
@@ -73,6 +134,12 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 FROM oven/bun:${BUN_VERSION}
 {{- range .Docker.Runtime }}
 COPY --from=build /src/{{ . }} /src/{{ . }}
+{{- end }}
+{{- with .Docker.Engine }}
+{{- if .Project }}
+COPY --from=engine /native/{{ .Addon }} {{ .AddonPath }}
+ENV SUPERSCHEMATIC_ENGINE_ADDON={{ .AddonPath }}
+{{- end }}
 {{- end }}
 WORKDIR /src/{{ .Docker.Context }}
 USER bun

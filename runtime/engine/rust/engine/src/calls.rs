@@ -18,6 +18,12 @@
 //! which JSON cannot carry, so a host registers through
 //! [`crate::Behaviors::register`].
 //!
+//! A server's calls are here too: `deploy`, which defines and publishes a
+//! server's schema documents as the engine's own principal, which no
+//! request can be, leaving each one whose live version has its hash as it
+//! is, and `health`, what a server's readiness reads. Each takes no
+//! principal: a host makes them, never a request.
+//!
 //! The HTTP API is here too, for a binding that passes JSON across its
 //! boundary: `api.routes`, and `api.handle`, which takes the request as
 //! JSON (its body as text) and returns `{status, headers, body, stream}`;
@@ -44,9 +50,10 @@ use crate::namespaces::name_refusal;
 use crate::paging::page_size_refusal;
 use crate::principal::{check_principal, Principal};
 use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions};
+use crate::storage::Dialect;
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 55] = [
+pub const CALLS: [&str; 57] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -102,6 +109,8 @@ pub const CALLS: [&str; 55] = [
     "stream.next",
     "stream.close",
     "close",
+    "deploy",
+    "health",
 ];
 
 /// Calls a method of the engine by name, as `principal` for a method that
@@ -137,7 +146,8 @@ pub fn call_with(
     let options = |index: usize| options_of(args.get(index));
     // A shut-down engine refuses every call but the pulls that end its
     // streams.
-    if engine.is_closed() && !matches!(method, "stream.next" | "stream.close" | "close") {
+    if engine.is_closed() && !matches!(method, "stream.next" | "stream.close" | "close" | "health")
+    {
         return Err(Error::internal("the engine is closed"));
     }
     let result = match method {
@@ -546,6 +556,8 @@ pub fn call_with(
             engine.shutdown();
             return Ok(None);
         }
+        "deploy" => deploy(engine, args),
+        "health" => Ok(health(engine)),
         other => {
             return Err(Error::usage(format!(
                 "the engine has no call {}",
@@ -554,6 +566,69 @@ pub fn call_with(
         }
     };
     Ok(Some(result?))
+}
+
+/// [`Engine::deploy`] by its JSON arguments, `[documents, { namespace? }]`:
+/// each schema document, or its text, defined and published as the
+/// engine's own principal, which no request can be, one whose live version
+/// has its hash left as it is. It returns, per document, its `name`, the
+/// `namespace` and live `version` after the deploy, whether it was
+/// `defined` and whether a version was `published`. Arguments of another
+/// shape are a usage error (`TypeError`), as a host's misuse is, and a
+/// document the engine refuses its refusal.
+pub fn deploy(engine: &Engine, args: &[Value]) -> Result<Value> {
+    let Some(Value::Array(documents)) = args.first() else {
+        return Err(Error::usage(
+            "deploy takes [documents, { namespace? }]: a list of schema documents",
+        ));
+    };
+    let namespace = args
+        .get(1)
+        .and_then(Value::as_object)
+        .and_then(|options| options.get("namespace"))
+        .filter(|namespace| !namespace.is_null())
+        .map(js_string);
+    let deployed = engine.deploy(documents, namespace.as_deref())?;
+    Ok(Value::Array(
+        deployed.iter().map(crate::Deployed::to_json).collect(),
+    ))
+}
+
+/// What a server's readiness reads of the engine: `ready`, false once the
+/// engine closed (`closed`) or panicked inside a transaction (`poisoned`),
+/// or while its database does not answer a read (`error`, why); its
+/// `dialect`; and whether it is `listening` for other processes' commits
+/// on Postgres. It answers on a closed engine too.
+pub fn health(engine: &Engine) -> Value {
+    let closed = engine.is_closed();
+    let poisoned = engine.poisoned();
+    let error = if closed || poisoned {
+        None
+    } else {
+        engine.events().head().err().map(|error| error.to_string())
+    };
+    let mut out = Map::new();
+    out.insert(
+        "ready".into(),
+        Value::Bool(!closed && !poisoned && error.is_none()),
+    );
+    out.insert("closed".into(), Value::Bool(closed));
+    out.insert("poisoned".into(), Value::Bool(poisoned));
+    out.insert(
+        "dialect".into(),
+        Value::from(match engine.dialect() {
+            Dialect::Postgres => "postgres",
+            _ => "sqlite",
+        }),
+    );
+    out.insert(
+        "listening".into(),
+        Value::Bool(engine.db().notifier().listening()),
+    );
+    if let Some(error) = error {
+        out.insert("error".into(), Value::from(error));
+    }
+    Value::Object(out)
 }
 
 /// A principal a call passes as JSON, checked as the TypeScript engine's

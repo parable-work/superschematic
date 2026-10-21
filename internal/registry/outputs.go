@@ -117,6 +117,28 @@ type EngineOutputConfig struct {
 	// Namespace is the engine namespace the schema's engine types are
 	// defined and published in. Empty is the service's name.
 	Namespace string `json:"namespace,omitempty"`
+
+	// Mount is the path a server of an API on the database mounts the
+	// engine's routes at, its event stream and its MCP endpoint under it.
+	// Empty is /engine/<service> (DefaultEngineMount).
+	Mount string `json:"mount,omitempty"`
+
+	// Policy is the access policy the servers open the engine with, as the
+	// engine reads it: "permission" (a caller holding <Type>.<action>),
+	// "allowAll", or {"rules": [...]}. Empty is "permission".
+	Policy json.RawMessage `json:"policy,omitempty"`
+}
+
+// DefaultEnginePolicy is the access policy a server opens the engine with
+// unless outputs.engine.policy sets one (D58): the engine's permission
+// policy, which allows an action on a type to a caller holding
+// <Type>.<action>.
+const DefaultEnginePolicy = `"permission"`
+
+// DefaultEngineMount is where a server of an API on the DB service
+// service mounts the engine unless outputs.engine.mount sets it (D58).
+func DefaultEngineMount(service string) string {
+	return "/engine/" + service
 }
 
 // SQL dialects outputs.sql.dialects may list (the SqlDialect type in
@@ -350,6 +372,28 @@ func (o *Outputs) EngineNamespace() string {
 		return ""
 	}
 	return o.Engine.Namespace
+}
+
+// EngineMount returns outputs.engine.mount, else DefaultEngineMount of
+// service, the DB service the outputs are of.
+func (o *Outputs) EngineMount(service string) string {
+	if o == nil || o.Engine == nil || o.Engine.Mount == "" {
+		return DefaultEngineMount(service)
+	}
+	return o.Engine.Mount
+}
+
+// EnginePolicy returns outputs.engine.policy as compact JSON, else
+// DefaultEnginePolicy.
+func (o *Outputs) EnginePolicy() json.RawMessage {
+	if o == nil || o.Engine == nil || len(o.Engine.Policy) == 0 {
+		return json.RawMessage(DefaultEnginePolicy)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, o.Engine.Policy); err != nil {
+		return o.Engine.Policy
+	}
+	return compact.Bytes()
 }
 
 // SQLViewOwner returns outputs.sql.viewOwner ("" when unset).

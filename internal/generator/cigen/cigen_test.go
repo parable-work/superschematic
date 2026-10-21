@@ -909,7 +909,7 @@ func TestSitesInTheWorkflow(t *testing.T) {
 		t.Errorf("check builds the site with %+v", s)
 	}
 	if got, want := names("deploy-staging"), []string{"Check out", "Install superschematic " + version, "Set up Node.js",
-		"Install the schemas root's packages", "Set up Bun", "Sign in to Google Cloud as deployer", "Build the services", install, "Deploy Staging"}; !slices.Equal(got, want) {
+		"Install the schemas root's packages", "Set up Bun", "Build the services", install, "Sign in to Google Cloud as deployer", "Deploy Staging"}; !slices.Equal(got, want) {
 		t.Errorf("deploy-staging's steps:\n%q\nwant:\n%q", got, want)
 	}
 	for _, id := range []string{"check", "deploy-staging", "preview-preview"} {
@@ -1006,6 +1006,40 @@ func TestBundlesInTheWorkflow(t *testing.T) {
 	for _, id := range []string{"deploy-dev", "plan-staging"} {
 		if job := w.jobs[id]; job.step("Set up Bun") != nil || job.step(install) != nil {
 			t.Errorf("%s sets up Bun or installs the workspace, though it bundles nothing", id)
+		}
+	}
+}
+
+// TestCloudJobsSignInLast: every cloud job of every golden workflow signs
+// in after its installs and builds, which run the pull request's
+// lockfiles and scripts, so none of them finds the credentials file or
+// the environment google-github-actions/auth leaves for the later steps;
+// only the stack commands run after it.
+func TestCloudJobsSignInLast(t *testing.T) {
+	goldens, err := filepath.Glob("testdata/golden/*.yml")
+	if err != nil || len(goldens) == 0 {
+		t.Fatalf("no golden workflows: %v", err)
+	}
+	for _, path := range goldens {
+		w := parseWorkflow(t, readFile(t, path))
+		for _, id := range w.order {
+			j := w.jobs[id]
+			at := slices.IndexFunc(j.Steps, func(s parsedStep) bool { return strings.HasPrefix(s.Uses, "google-github-actions/auth@") })
+			if (at >= 0) != (j.Permissions["id-token"] == "write") {
+				t.Errorf("%s: %s signs in at step %d with permissions %v", path, id, at, j.Permissions)
+			}
+			if at < 0 {
+				continue
+			}
+			commands := j.Steps[at+1:]
+			if len(commands) == 0 {
+				t.Errorf("%s: %s signs in and runs nothing after", path, id)
+			}
+			for _, s := range commands {
+				if !strings.HasPrefix(s.Run, "superschematic stack ") {
+					t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
+				}
+			}
 		}
 	}
 }

@@ -127,7 +127,9 @@ The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
   (`examples/acme-schematic/scripts/smoke.sh`, `check_second_decorator.sh`
   and `examples/acme-shop/scripts/check.sh`),
   `examples/engine-notes/scripts/check.sh`,
-  `examples/engine-jobs/scripts/check.sh` and the version-graph scenarios
+  `examples/engine-jobs/scripts/check.sh`, the generated servers over the
+  engine (`make engine-servers`, three servers in Go, Rust and TypeScript
+  answering one script alike on Postgres) and the version-graph scenarios
   (`make versiongraph-scenarios`, `-ts`, `-rust` and `-python`). It runs
   twice a day on `main` as the release candidate (`release-candidate.yml`),
   and before every release. A red candidate opens an issue, "Release

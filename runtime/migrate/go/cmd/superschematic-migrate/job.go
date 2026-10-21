@@ -117,7 +117,7 @@ func runJobDatabase(ctx context.Context, j *migrate.Job, db *migrate.JobDatabase
 	if !ok {
 		return fmt.Errorf("the %s driver gives no privileges; leave privileges out of the job", driver.Dialect())
 	}
-	grants, err := granter.GrantReadWrite(ctx, db.Privileges.ReadWrite, migrate.StateTables())
+	grants, err := granter.GrantReadWrite(ctx, db.Privileges.ReadWrite, migrate.GrantExcept(db.Privileges))
 	if err != nil {
 		return err
 	}
@@ -128,6 +128,44 @@ func runJobDatabase(ctx context.Context, j *migrate.Job, db *migrate.JobDatabase
 	_, _ = fmt.Fprintf(o.stdout, "service %s: read and write privileges on %d object(s) in %d schema(s) for %s\n", db.Service, grants.Objects, grants.Schemas, roles)
 	if len(grants.Revoked) > 0 {
 		_, _ = fmt.Fprintf(o.stdout, "service %s: took the privileges of %s back\n", db.Service, strings.Join(grants.Revoked, ", "))
+	}
+	if e := db.Privileges.Engine; e != nil {
+		return grantEngine(ctx, granter, db.Service, *e, o)
+	}
+	return nil
+}
+
+// grantEngine gives the deployables that open the engine (D58) its schema,
+// and says what it changed.
+func grantEngine(ctx context.Context, granter migrate.Granter, service string, e migrate.EnginePrivileges, o options) error {
+	grants, err := granter.GrantEngine(ctx, e)
+	if err != nil {
+		return err
+	}
+	say := func(format string, args ...any) {
+		_, _ = fmt.Fprintf(o.stdout, "service %s: "+format+"\n", append([]any{service}, args...)...)
+	}
+	if grants.CreatedRole {
+		say("created role %s", e.Role)
+	}
+	switch {
+	case grants.CreatedSchema:
+		say("created the engine's schema %s, owned by %s", e.Schema, e.Role)
+	case grants.OwnedSchema:
+		say("gave the engine's schema %s to %s", e.Schema, e.Role)
+	}
+	members := "no role"
+	if len(e.Members) > 0 {
+		members = strings.Join(e.Members, ", ")
+	}
+	say("the engine's schema %s for %s, as %s", e.Schema, members, e.Role)
+	if len(grants.Revoked) > 0 {
+		say("took %s back from %s", e.Role, strings.Join(grants.Revoked, ", "))
+	}
+	if grants.ExtensionError != "" {
+		say("no unaccent extension, which the engine's Search needs on Postgres: %s; an administrator runs CREATE EXTENSION unaccent", grants.ExtensionError)
+	} else {
+		say("the unaccent extension in schema %s", grants.Extension)
 	}
 	return nil
 }

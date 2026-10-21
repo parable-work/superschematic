@@ -688,6 +688,38 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}}}, nil
 }
 
+// lowerRunner lowers an engine's runner to its process (D58): the
+// entrypoint module the build wrote at `server/<stack>/<runner>`, its
+// environment its sql edge's connection string, no port, and a readiness
+// of started. It runs the engine's runner while it holds the runner's lock
+// on the environment's Postgres; stack dev runs one, and none when the
+// environment turns it off.
+func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Runner == nil {
+		return registry.Lowered{}, fmt.Errorf("runner %s has no engine database", d.Name)
+	}
+	if d.Runner.Instances == 0 {
+		return registry.Lowered{}, nil
+	}
+	env, err := processEnv(d, func(string) error { return nil })
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{
+		ID:   processID(d.Name),
+		Type: TypeProcess,
+		Properties: map[string]any{
+			"name":      d.ResourceName,
+			"module":    ModulePath(ctx.Environment.Stack, d.Name),
+			"language":  strings.ToLower(d.Language),
+			"kind":      "runner",
+			"readiness": ReadinessStarted,
+			"env":       env,
+		},
+	}}}, nil
+}
+
 // jobID is the ID of a job's node.
 func jobID(deployable string) string { return deployable + ".job" }
 

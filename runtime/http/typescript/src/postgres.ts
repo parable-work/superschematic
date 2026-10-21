@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import pg from 'pg';
 import type { Pool, PoolConfig } from 'pg';
@@ -23,11 +26,26 @@ A pool connects when it is first used, so the server starts while its
 database is not up and /readyz, which pings each pool, reports it. The Node
 connector reads the instance's connection settings from the Cloud SQL Admin
 API when the pool is opened, which the Go dialer leaves to the first dial.
+
+A client that dials Postgres itself, as the behavior engine does from its
+addon (D58), reaches Cloud SQL through cloudSqlSocket: the connector's
+local proxy on a unix socket in a directory of its own, each connection
+to it carried over a connection the connector dials, with IAM database
+authentication, as the Go server's engine socket is. Its URL names the
+directory as its host, the IAM user and the database, with no password and
+no TLS of its own.
 */
 
-/** What connectPostgres uses of a Cloud SQL connector. */
+/** What connectPostgres and cloudSqlSocket use of a Cloud SQL connector. */
 export interface CloudSqlConnector {
   getOptions(options: { readonly instanceConnectionName?: string; readonly ipType?: unknown; readonly authType?: unknown }): Promise<{ stream: () => Duplex }>;
+  /** Listens on a unix socket at listenOptions.path and carries each connection to the instance; close stops it. cloudSqlSocket's. */
+  startLocalProxy?(options: {
+    readonly instanceConnectionName?: string;
+    readonly ipType?: unknown;
+    readonly authType?: unknown;
+    readonly listenOptions: { readonly path: string | undefined };
+  }): Promise<void>;
   close(): void;
 }
 
@@ -175,6 +193,75 @@ export async function connectPostgres(db: DatabaseConnection, options: ConnectPo
   const onIdleError = options.onIdleError ?? ((error: Error) => console.error(`postgres: an idle connection failed: ${error.message}`));
   pool.on('error', onIdleError);
   return pool;
+}
+
+/** A unix socket that carries each connection to a Cloud SQL instance over the connector (cloudSqlSocket). */
+export interface CloudSqlSocket {
+  /** The directory that holds the socket, .s.PGSQL.5432, which a client names as its host. */
+  readonly directory: string;
+  /**
+   * A libpq keyword/value connection string: the directory as its host, the
+   * IAM database user and the database, with no password, since the
+   * connector authenticates as the IAM user, and no TLS of its own, since
+   * the connector's connections are encrypted.
+   */
+  readonly url: string;
+  /** Stops the socket's connector, which ends its connections, and removes the directory. Closing twice does nothing. */
+  close(): void;
+}
+
+/**
+ * Serves the Cloud SQL database db to a client that dials Postgres itself
+ * (the behavior engine, D58) on a unix socket of its own: the connector's
+ * local proxy, in a directory of its own, carrying each connection over a
+ * connection the connector dials on the instance's public IP with IAM
+ * database authentication. A connector of its own serves it, so closing it
+ * leaves every pool's. Rejects when the connector is not installed, cannot
+ * read the instance's settings, or cannot listen.
+ */
+export async function cloudSqlSocket(db: CloudSqlConnection, options: Pick<ConnectPostgresOptions, 'loadConnector'> = {}): Promise<CloudSqlSocket> {
+  let module: CloudSqlConnectorModule;
+  try {
+    module = await (options.loadConnector ?? importConnector)();
+  } catch (err) {
+    throw new Error(
+      `a Cloud SQL connection needs ${CLOUD_SQL_CONNECTOR_PACKAGE}, which could not be loaded; add it to the server's dependencies (${err instanceof Error ? err.message : String(err)})`,
+      { cause: err }
+    );
+  }
+  const connector = new module.Connector();
+  const directory = mkdtempSync(join(tmpdir(), 'cloudsql-'));
+  let closed = false;
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    connector.close();
+    rmSync(directory, { recursive: true, force: true });
+  };
+  try {
+    if (typeof connector.startLocalProxy !== 'function') {
+      throw new Error(`the installed ${CLOUD_SQL_CONNECTOR_PACKAGE} has no startLocalProxy`);
+    }
+    await connector.startLocalProxy({
+      instanceConnectionName: db.instance,
+      ipType: module.IpAddressTypes.PUBLIC,
+      authType: module.AuthTypes.IAM,
+      listenOptions: { path: join(directory, '.s.PGSQL.5432') },
+    });
+  } catch (err) {
+    close();
+    throw new Error(`Cloud SQL instance ${db.instance}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  return {
+    directory,
+    url: `host=${keywordValue(directory)} port=5432 user=${keywordValue(db.user)} dbname=${keywordValue(db.database)} sslmode=disable`,
+    close,
+  };
+}
+
+/** Quotes a value of a libpq keyword/value connection string. */
+function keywordValue(value: string): string {
+  return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 }
 
 /**

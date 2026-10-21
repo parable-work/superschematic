@@ -476,6 +476,16 @@ func connecting(env *ir.ResolvedEnvironment, database, service string) []string 
 	return out
 }
 
+// engineDatabase reports whether service is an engine database (D58): the
+// environment runs its engine's runner, which some API that connects to it
+// gave it. Every deployable that connects to it opens its engine, since a
+// sql edge reaches the database of an API the deployable serves.
+func engineDatabase(env *ir.ResolvedEnvironment, service string) bool {
+	return slices.ContainsFunc(env.Deployables, func(d *ir.ResolvedDeployable) bool {
+		return d.Kind == ir.DeployableRunner && d.Runner != nil && d.Runner.Database == service
+	})
+}
+
 // runPhase runs one phase of plans on database, and records the schema it
 // leaves and the servers the runner saw connect; when the runner fails,
 // it records each plan's phase as pending on the schema the database
@@ -489,6 +499,7 @@ func (d *deploy) runPhase(ctx context.Context, database string, phase ir.Migrati
 			Plan:    plan.Document,
 			Steps:   plan.Steps(phase),
 			Servers: connecting(d.env, database, plan.Service),
+			Engine:  engineDatabase(d.env, plan.Service),
 		})
 		names = append(names, plan.Service)
 	}

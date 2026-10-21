@@ -88,12 +88,15 @@ mod wire;
 {{- if .Views }}
 pub mod views;
 {{- end }}
+{{- if .Engine }}
+pub mod engine;
+{{- end }}
 
 /// The service's API crate: its `Implementations`, `Args` structs and
 /// `types`.
 pub use {{ .APICrateIdent }} as api;
 
-{{- if .HasAuth }}
+{{- if or .HasAuth .Engine }}
 
 use std::sync::Arc;
 {{- end }}
@@ -202,6 +205,11 @@ pub struct Setup {
     /// `setup.rate_limits.of(&api::operations::<OPERATION>)`, whose limiter
     /// a page takes a token from with the client's `client_key(cx)`.
     pub rate_limits: RateLimits,
+{{- with .Engine }}
+    /// The engine of {{ .Database }} (D58), which [`engine::open`] opens in-process
+    /// on SQLite.
+    pub engine: Arc<{{ .EngineIdent }}::Engine>,
+{{- end }}
 }
 
 /// Adds the {{ .SchemaName }} API to a Topcoat app.
@@ -222,8 +230,12 @@ pub trait {{ .ExtTrait }} {
     /// Adds the layers that apply each options operation's rate limit and
     /// timeout to its search pickers' shards (`references::route_controls`).
 {{- end }}
+{{- with .Engine }}
+    /// Mounts the routes of `engine`, the engine of {{ .Database }} (D58), at
+    /// `{{ engineMount }}/{*rest}` (`engine::routes`), and keeps it in the app context.
+{{- end }}
     #[must_use]
-    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;
+    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self;
 
     /// Keeps `implementations`{{ if .HasAuth }} and `page_authenticator`{{ end }} for the in-process
     /// calls of `operations`, with its own registry of rate limiters{{ if .SetupLayers }} and the
@@ -231,33 +243,44 @@ pub trait {{ .ExtTrait }} {
     /// several services' crates (D61, amended), each one's pages and calls,
     /// which serves at most one service's JSON API at `/api`, since a second
     /// `/api/{*rest}` is a route Topcoat refuses.
+{{- if .Engine }} It keeps `engine` too, and
+    /// mounts none of its routes either.
+{{- end }}
     #[must_use]
-    fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;
+    fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self;
 }
 
 impl {{ .ExtTrait }} for RouterBuilder {
-    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self {
-        set_up(self, implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}, true)
+    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self {
+        set_up(self, implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}{{ if .Engine }}, engine{{ end }}, true)
     }
 
-    fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self {
-        set_up(self, implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}, false)
+    fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self {
+        set_up(self, implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}{{ if .Engine }}, engine{{ end }}, false)
     }
 }
 
 /// The app's router with the crate's setup: a new registry of the
 /// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
 /// its routes given the client's address and their limiters from the
-/// registry, `Setup` in the app context{{ if .SetupLayers }}, and the layers of the routes'
+/// registry{{ if .Engine }}, the engine's routes at `{{ engineMount }}/{*rest}` when `api`{{ end }}, `Setup` in the app context{{ if .SetupLayers }}, and the layers of the routes'
 /// controls{{ end }}.
-fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth }}, page_authenticator: Arc<dyn PageAuthenticator>{{ end }}, api: bool) -> RouterBuilder {
+fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth }}, page_authenticator: Arc<dyn PageAuthenticator>{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}, api: bool) -> RouterBuilder {
     let rate_limits = RateLimits::new();
     let router = if api {
         let json = build_router_with(
             implementations.clone(),
             RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
         );
+{{- if .Engine }}
+        let engine_routes = engine::routes(Arc::clone(&engine){{ if .HasAuth }}, Arc::clone(&implementations.authenticator){{ end }});
+        router
+            .route(TowerRoute::any("/api/{*rest}", json))
+            .route(TowerRoute::any("{{ engineMount }}/{*rest}", engine_routes))
+            .layer(ClientAddress)
+{{- else }}
         router.route(TowerRoute::any("/api/{*rest}", json)).layer(ClientAddress)
+{{- end }}
     } else {
         router
     };
@@ -274,6 +297,9 @@ fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth 
         rate_limits: rate_limits.clone(),
 {{- else }}
         rate_limits,
+{{- end }}
+{{- if .Engine }}
+        engine,
 {{- end }}
     }){{ with .SetupLayers }};
     {{ . }}{{ end }}

@@ -217,16 +217,21 @@ func TestJobRefusals(t *testing.T) {
 	invoke(t, nil, "job").expect(t, exitUsage, "job needs --job")
 	path := filepath.Join(t.TempDir(), "job.json")
 	for doc, want := range map[string]string{
-		`{"version": 2, "phase": "all", "databases": []}`:                                                                                                                                   "version 2",
-		`{"version": 1, "phase": "later", "databases": []}`:                                                                                                                                 `phase "later"`,
-		`{"version": 1, "phase": "all", "databases": []}`:                                                                                                                                   "no databases",
-		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x"}]}`:                                                                                            "neither a plan nor privileges",
-		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "database": "shop", "plan": "p"}]}`:                                                                               "names each database by its URL",
-		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme", "user": "u@p.iam"}, "databases": []}`:                                                                              "is not a connection name",
-		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme-staging:us-east1:shop-db", "user": "u@p.iam.gserviceaccount.com"}, "databases": []}`:                                 "want the IAM database user",
-		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme-staging:us-east1:shop-db", "user": "u@p.iam"}, "databases": [{"service": "shop", "databaseUrl": "x", "plan": "p"}]}`: "not a URL",
-		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": ["a", "a"]}}]}`:                                                   "role a is listed twice",
-		`{"version": 1, "phase": "all", "databases": [], "extra": true}`:                                                                                                                    "unknown field",
+		`{"version": 2, "phase": "all", "databases": []}`:                                                                                                                                             "version 2",
+		`{"version": 1, "phase": "later", "databases": []}`:                                                                                                                                           `phase "later"`,
+		`{"version": 1, "phase": "all", "databases": []}`:                                                                                                                                             "no databases",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x"}]}`:                                                                                                      "neither a plan nor privileges",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "database": "shop", "plan": "p"}]}`:                                                                                         "names each database by its URL",
+		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme", "user": "u@p.iam"}, "databases": []}`:                                                                                        "is not a connection name",
+		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme-staging:us-east1:shop-db", "user": "u@p.iam.gserviceaccount.com"}, "databases": []}`:                                           "want the IAM database user",
+		`{"version": 1, "phase": "all", "cloudSql": {"instance": "acme-staging:us-east1:shop-db", "user": "u@p.iam"}, "databases": [{"service": "shop", "databaseUrl": "x", "plan": "p"}]}`:           "not a URL",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": ["a", "a"]}}]}`:                                                             "role a is listed twice",
+		`{"version": 1, "phase": "all", "databases": [], "extra": true}`:                                                                                                                              "unknown field",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": [], "engine": {"schema": "Engine", "role": "r", "members": []}}}]}`:         "not one the engine takes",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": [], "engine": {"schema": "public", "role": "r", "members": []}}}]}`:         "not the engine's own",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": [], "engine": {"schema": "engine", "role": "", "members": []}}}]}`:          "no role",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": [], "engine": {"schema": "engine", "role": "r", "members": ["a", "a"]}}}]}`: "member a is listed twice",
+		`{"version": 1, "phase": "all", "databases": [{"service": "shop", "databaseUrl": "x", "privileges": {"readWrite": [], "engine": {"schema": "engine", "role": "r", "members": ["r"]}}}]}`:      "is its own member",
 	} {
 		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 			t.Fatal(err)
@@ -368,6 +373,187 @@ func TestJobOnCloudSQL(t *testing.T) {
 	if code != exitFailed || !strings.Contains(stderr.String(), "gs://state/nothing.json: file does not exist") {
 		t.Errorf("a missing job: exit %d, %s", code, stderr.String())
 	}
+}
+
+// engineRole is a name for the role that owns the engine's schema, unique
+// to the run, which the job creates; it is dropped when the test ends,
+// after the test's databases. Call it before testdb.NewPostgres.
+func engineRole(t *testing.T) string {
+	t.Helper()
+	server := os.Getenv(testdb.EnvURL)
+	if server == "" {
+		t.Skipf("set %s to run jobs against Postgres", testdb.EnvURL)
+	}
+	role := fmt.Sprintf("shop_engine_%d", time.Now().UnixNano())
+	t.Cleanup(func() { testdb.Exec(t, server, "DROP ROLE IF EXISTS "+pgx.Identifier{role}.Sanitize()) })
+	return role
+}
+
+// one is the single text a query returns.
+func one(t *testing.T, dbURL, query string, args ...any) string {
+	t.Helper()
+	got := testdb.Strings(t, dbURL, query, args...)
+	if len(got) != 1 {
+		t.Fatalf("%s: %v, want one row", query, got)
+	}
+	return got[0]
+}
+
+// TestJobGivesTheEngineItsSchemaOnCloudSQL runs a job with engine
+// privileges as a deploy on gcp writes one for an engine database (D58),
+// on a database set up as Cloud SQL sets one up, as TestJobOnCloudSQL
+// does, with a migrator that may not create roles itself, as
+// cloudsqlsuperuser may. The job creates the engine's role and its
+// schema, grants the role to the server and the runner, and creates
+// unaccent; each member, acting as the role as the engine does, changes
+// what the other created; the app's grants leave the engine's schema
+// alone; and a later job takes the role back from a member it no longer
+// lists.
+func TestJobGivesTheEngineItsSchemaOnCloudSQL(t *testing.T) {
+	r := roles(t, "shop-migrator", "shop-api", "shop-db-engine-runner", "cloudsqlsuperuser")
+	migrator, api, runner, superuser := r[0], r[1], r[2], r[3]
+	role := engineRole(t)
+	t.Setenv("PGPASSWORD", rolePassword)
+	dbURL := testdb.NewPostgres(t)
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := strings.TrimPrefix(u.Path, "/")
+	testdb.Exec(t, dbURL,
+		"ALTER ROLE "+pgx.Identifier{superuser}.Sanitize()+" CREATEROLE",
+		"GRANT "+pgx.Identifier{superuser}.Sanitize()+" TO "+pgx.Identifier{migrator}.Sanitize(),
+		"ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" OWNER TO "+pgx.Identifier{superuser}.Sanitize(),
+		"GRANT CREATE ON SCHEMA public TO "+pgx.Identifier{superuser}.Sanitize())
+
+	planPath, err := filepath.Abs(fixturePath(migrate.Postgres, "01-create"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &migrate.Job{
+		Version: migrate.JobVersion, Phase: migrate.Expand,
+		CloudSQL: &migrate.CloudSQLConnection{Instance: "acme-staging:us-east1:shop-db", User: migrator},
+		Databases: []*migrate.JobDatabase{{
+			Service: "shop", Database: database, Plan: planPath,
+			Privileges: &migrate.Privileges{
+				ReadWrite: []string{api, runner},
+				Engine:    &migrate.EnginePrivileges{Schema: "engine", Role: role, Members: []string{api, runner}},
+			},
+		}},
+	}
+	run := func() string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		o := options{
+			stdout: &stdout, stderr: &stderr,
+			getenv: func(string) string { return "" },
+			cloudSQL: func(context.Context, string) (sqlDialer, error) {
+				return &localDialer{addr: u.Host}, nil
+			},
+		}
+		code := runWith(context.Background(), []string{"job", "--job", writeJob(t, job)}, o)
+		t.Logf("job: exit %d\n%s%s", code, stdout.String(), stderr.String())
+		if code != exitOK {
+			t.Fatalf("job exit %d: %s", code, stderr.String())
+		}
+		return stdout.String()
+	}
+	out := run()
+	for _, want := range []string{
+		"service shop: read and write privileges on 2 object(s) in 1 schema(s)",
+		"service shop: created role " + role,
+		"service shop: created the engine's schema engine, owned by " + role,
+		"service shop: the engine's schema engine for " + api + ", " + runner + ", as " + role,
+		"service shop: the unaccent extension in schema superschematic_extensions",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the job did not say %q", want)
+		}
+	}
+	if got := one(t, dbURL, "SELECT pg_get_userbyid(nspowner)::text FROM pg_namespace WHERE nspname = 'engine'"); got != role {
+		t.Errorf("the engine's schema is owned by %s, want %s", got, role)
+	}
+	if got := one(t, dbURL, "SELECT rolcanlogin::text FROM pg_roles WHERE rolname = $1", role); got != "false" {
+		t.Errorf("%s can log in: %s", role, got)
+	}
+	if got := one(t, dbURL, "SELECT has_schema_privilege($1::name, 'superschematic_extensions', 'USAGE')::text", role); got != "true" {
+		t.Errorf("%s cannot use the extensions' schema", role)
+	}
+
+	// Each member acts as the role, as the engine does on a schema another
+	// role owns: what one creates the other changes.
+	act := "SET ROLE " + pgx.Identifier{role}.Sanitize()
+	testdb.Exec(t, asRole(t, dbURL, api), act,
+		"CREATE TABLE engine.engine_instances (id TEXT PRIMARY KEY)",
+		"CREATE TEXT SEARCH CONFIGURATION engine.notes (PARSER = pg_catalog.\"default\")",
+		"ALTER TEXT SEARCH CONFIGURATION engine.notes ADD MAPPING FOR asciiword, word WITH superschematic_extensions.unaccent, pg_catalog.simple")
+	testdb.Exec(t, asRole(t, dbURL, runner), act,
+		"ALTER TABLE engine.engine_instances ADD COLUMN body TEXT",
+		"INSERT INTO engine.engine_instances (id, body) VALUES ('n1', 'creme')",
+		"CREATE INDEX engine_instances_body ON engine.engine_instances (body)")
+	if got := one(t, asRole(t, dbURL, api), "SELECT to_tsvector('engine.notes', 'Crème brûlée')::text"); got != "'brulee':2 'creme':1" {
+		t.Errorf("the configuration reads %s", got)
+	}
+
+	// A later job lists the server alone: the runner loses the role, and
+	// the app's grants, which leave the engine's schema out, give nothing
+	// on it and take nothing back.
+	job.Databases[0].Plan = ""
+	job.Databases[0].Privileges.ReadWrite = []string{api}
+	job.Databases[0].Privileges.Engine.Members = []string{api}
+	out = run()
+	for _, want := range []string{
+		"service shop: read and write privileges on 2 object(s) in 1 schema(s) for " + api,
+		"service shop: took the privileges of " + runner + " back",
+		"service shop: took " + role + " back from " + runner,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the second job did not say %q", want)
+		}
+	}
+	if strings.Contains(out, "created") || strings.Contains(out, "took the privileges of "+role) {
+		t.Errorf("the second job created something again, or took the role's privileges:\n%s", out)
+	}
+	if got := one(t, dbURL, "SELECT pg_has_role($1::name, $2::name, 'MEMBER')::text", runner, role); got != "false" {
+		t.Errorf("%s is still a member of %s", runner, role)
+	}
+	if got := one(t, dbURL, "SELECT COALESCE(relacl::text, '') FROM pg_class WHERE relname = 'engine_instances'"); got != "" {
+		t.Errorf("the app's grants reached the engine's table: %s", got)
+	}
+}
+
+// TestJobGivesTheEngineItsSchemaAsACreateRoleUser: a job whose user may
+// create roles creates the engine's role itself, then makes itself a
+// member that may act as it, which Postgres 16 does not make the role's
+// creator, before it creates the schema the role's.
+func TestJobGivesTheEngineItsSchemaAsACreateRoleUser(t *testing.T) {
+	r := roles(t, "shop-migrator", "shop-api")
+	migrator, api := r[0], r[1]
+	role := engineRole(t)
+	dbURL := testdb.NewPostgres(t)
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := strings.TrimPrefix(u.Path, "/")
+	testdb.Exec(t, dbURL,
+		"ALTER ROLE "+pgx.Identifier{migrator}.Sanitize()+" CREATEROLE",
+		"ALTER DATABASE "+pgx.Identifier{database}.Sanitize()+" OWNER TO "+pgx.Identifier{migrator}.Sanitize())
+	job := &migrate.Job{Version: migrate.JobVersion, Phase: migrate.All, Databases: []*migrate.JobDatabase{{
+		Service: "shop", DatabaseURL: asRole(t, dbURL, migrator),
+		Privileges: &migrate.Privileges{
+			ReadWrite: []string{api},
+			Engine:    &migrate.EnginePrivileges{Schema: "engine", Role: role, Members: []string{api}},
+		},
+	}}}
+	invoke(t, nil, "job", "--job", writeJob(t, job)).
+		expect(t, exitOK, "created role "+role, "created the engine's schema engine, owned by "+role)
+	testdb.Exec(t, asRole(t, dbURL, api), "SET ROLE "+pgx.Identifier{role}.Sanitize(), "CREATE TABLE engine.t (id INT)")
+	if got := one(t, dbURL, "SELECT tableowner::text FROM pg_tables WHERE schemaname = 'engine'"); got != role {
+		t.Errorf("the member's table is owned by %s, want %s", got, role)
+	}
+	// Run again, it changes nothing.
+	invoke(t, nil, "job", "--job", writeJob(t, job)).expect(t, exitOK, "the engine's schema engine for "+api)
 }
 
 // TestRelativeTo resolves a plan beside its job document.

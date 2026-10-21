@@ -43,4 +43,7 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- range .Calls }}
 {{ .Crate }} = { path = "{{ .Path }}" }
 {{- end }}
+{{- with .Engine }}
+{{ .Crate }} = { path = "{{ .Path }}", default-features = false, features = ["background"] }
+{{- end }}
 {{- end }}

@@ -476,3 +476,49 @@ fn a_principal_passed_as_json_is_checked_as_the_typescript_engine_checks_it() {
     let principal = principal_from_json(&json!({"subject": "bob", "permissions": ["x"], "service": {"deployable": "worker", "serves": ["jobs"], "subject": "sa-1", "standsIn": false}})).unwrap();
     assert_eq!(principal.service.unwrap().deployable, "worker");
 }
+
+// A server's calls: deploy defines and publishes its documents as the
+// engine's own principal, once, and health is what its readiness reads,
+// answering on a closed engine too.
+#[test]
+fn deploy_publishes_a_document_once_and_health_reads_the_engine() {
+    for target in targets("deploy_publishes_a_document_once") {
+        let engine = target.open();
+        let deployed = call(
+            &engine,
+            "deploy",
+            None,
+            &[json!([order_document()]), json!({"namespace": "default"})],
+        )
+        .unwrap();
+        assert_eq!(
+            deployed,
+            Some(
+                json!([{"name": "Order", "namespace": "default", "version": 1, "defined": true, "published": true}])
+            )
+        );
+        let again = call(&engine, "deploy", None, &[json!([order_document()])]).unwrap();
+        assert_eq!(
+            again,
+            Some(
+                json!([{"name": "Order", "namespace": "default", "version": 1, "defined": false, "published": false}])
+            )
+        );
+        assert!(matches!(
+            call(&engine, "deploy", None, &[json!({})]),
+            Err(Error::Usage(message)) if message.contains("a list of schema documents")
+        ));
+        let health = call(&engine, "health", None, &[]).unwrap().unwrap();
+        assert_eq!(
+            (&health["ready"], &health["closed"], &health["poisoned"]),
+            (&json!(true), &json!(false), &json!(false))
+        );
+        engine.shutdown();
+        let closed = call(&engine, "health", None, &[]).unwrap().unwrap();
+        assert_eq!(
+            (&closed["ready"], &closed["closed"]),
+            (&json!(false), &json!(true))
+        );
+        assert!(CALLS.contains(&"deploy") && CALLS.contains(&"health"));
+    }
+}

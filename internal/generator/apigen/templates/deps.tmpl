@@ -41,6 +41,9 @@ import (
 {{- if .Deps.Buckets }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/bucket"
 {{- end }}
+{{- if .Engine }}
+	engine "{{ $.Naming.EngineGoModule }}"
+{{- end }}
 	"go.uber.org/zap"
 )
 
@@ -68,6 +71,14 @@ type Deps struct {
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	{{ .Field }} bucket.Bucket
+{{ end }}
+{{- if .Engine }}
+	// Engine is the engine of {{ .Engine.Database }}, the API's engine database
+	// (D58), which the entrypoint opens in the background, so it starts while
+	// the database is not up yet: Engine.Wait(ctx) returns it once it opens,
+	// and Engine.Engine() at once, or why it is not open. Its types'
+	// instances are the engine's, in namespace {{ .Engine.Namespace }}.
+	Engine *engine.Background
 {{ end }}
 	// Logger is the API's logger.
 	Logger *zap.Logger

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,19 @@ import (
 // no longer connects. A job's or a worker's IAM database user is its sql
 // edge's, as a server's is (connectSQL). The job is not a node of the graph (D45): it is made from
 // the release the binary pins, which the graph does not depend on.
+//
+// On an engine database (D58) every deployable that connects opens the
+// engine, as its own IAM database user, and the first to open it runs the
+// engine's migrations, so the job readies the engine's schema for them
+// all: a role of the database's own, engineRole, which cannot log in,
+// owns the schema `engine`, and each of their users is granted it. The
+// engine acts as its schema's owner, so every table any of them creates
+// there is the role's, and each may change it at a later migration or
+// publish. The job also creates the unaccent extension the engine's
+// Search needs, which an IAM user without cloudsqlsuperuser may not, and
+// gives the role USAGE on its schema. The migrator creates the role as
+// cloudsqlsuperuser, the role that may, and is a member of it, so the
+// schema it creates is the role's.
 //
 // The runner's image is built from a generated Dockerfile that installs
 // the runner with `go install` from its module at the release's tag
@@ -146,7 +160,31 @@ type migrateTarget struct {
 }
 
 type migratePrivileges struct {
-	ReadWrite []string `json:"readWrite"`
+	ReadWrite []string       `json:"readWrite"`
+	Engine    *migrateEngine `json:"engine,omitempty"`
+}
+
+type migrateEngine struct {
+	Schema  string   `json:"schema"`
+	Role    string   `json:"role"`
+	Members []string `json:"members"`
+}
+
+// engineSchema is the schema the engine keeps its tables in on a
+// database, the engine's default, which no server changes.
+const engineSchema = "engine"
+
+// engineRole names the role that owns the engine's schema on database:
+// the database's name and _engine, unique on the instance as the name is.
+// One past Postgres's 63 bytes keeps 46 of the name and a hash of all of
+// it.
+func engineRole(database string) string {
+	const suffix = "_engine"
+	if len(database)+len(suffix) <= 63 {
+		return database + suffix
+	}
+	sum := sha256.Sum256([]byte(database))
+	return database[:46] + "_" + hex.EncodeToString(sum[:])[:9] + suffix
 }
 
 // migrationRunner is the gcp target's MigrationRunner.
@@ -304,14 +342,23 @@ func migrationJob(req registry.MigrationRequest, v values) (*migrateJob, map[str
 			target.Plan = "plans/" + plan.Service + "-" + hex.EncodeToString(sum[:]) + ".json"
 			plans[target.Plan] = plan.Plan
 		}
-		// The servers, the jobs (D52) and the workers (D53) that connect,
-		// each by the IAM database user its sql edge made.
+		// The servers, the jobs (D52), the workers (D53) and an engine's
+		// runner (D58) that connect, each by the IAM database user its sql
+		// edge made.
 		for _, server := range plan.Servers {
 			user, err := nodeString(env, server+".database-user."+req.Database, "name", params)
 			if err != nil {
 				return nil, nil, fmt.Errorf("gcp: %s connects to %s: %w", server, plan.Service, err)
 			}
 			target.Privileges.ReadWrite = append(target.Privileges.ReadWrite, user)
+		}
+		// On an engine database each of them opens the engine.
+		if plan.Engine {
+			target.Privileges.Engine = &migrateEngine{
+				Schema:  engineSchema,
+				Role:    engineRole(database),
+				Members: slices.Clone(target.Privileges.ReadWrite),
+			}
 		}
 		job.Databases = append(job.Databases, target)
 	}

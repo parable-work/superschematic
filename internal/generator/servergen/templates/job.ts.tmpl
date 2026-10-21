@@ -22,11 +22,14 @@
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .PostgresDatabases }}
-import { connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
+{{- end }}
+{{- if .Engines }}
+import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
@@ -36,6 +39,9 @@ import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
+{{- range .Engines }}
+import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
+{{- end }}
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, job: {{ tsQuote .Name }} });
 
@@ -43,9 +49,9 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, job: {{ tsQuote .Name
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
  * goes in pools, which main ends, and so does its telemetry, which main
- * flushes.
+ * flushes.{{ if .Engines }} Each engine it opens goes in engines, which main closes.{{ end }}
  */
-async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .Engines }}, engines: { close(): void }[]{{ end }}): Promise<void> {
 {{- template "ts-background-connections" . }}
 
   // {{ $api.Service }}: its jobs, built from its Deps.
@@ -66,6 +72,10 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
 {{- if .SQLiteDatabases }}
 
 {{ template "ts-open-sqlite" . }}
+{{- end }}
+{{- if .Engines }}
+
+{{ template "ts-engine" . }}
 {{- end }}
 {{- template "ts-clients" . }}
 

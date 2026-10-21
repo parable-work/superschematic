@@ -741,3 +741,26 @@ func TestErrorWithDetails_EmptyCode(t *testing.T) {
 	assert.False(t, hasCode, "code field should be absent when empty string")
 	assert.Equal(t, map[string]any{"path": "/a"}, m["details"])
 }
+
+// TestAnswersAreNoStore: every answer, an envelope, a problem or a body of
+// no content, is Cache-Control: no-store, as the TypeScript and Rust
+// runtimes answer, unless the handler set a Cache-Control of its own.
+func TestAnswersAreNoStore(t *testing.T) {
+	for name, write := range map[string]func(http.ResponseWriter){
+		"envelope": func(w http.ResponseWriter) {
+			JSONEnvelope(w, http.StatusOK, map[string]any{"token": "t"}, testMeta())
+		},
+		"problem": func(w http.ResponseWriter) {
+			Error(w, http.StatusUnauthorized, "Authentication required", "unauthorized")
+		},
+		"nil body": func(w http.ResponseWriter) { JSON(w, http.StatusAccepted, nil) },
+	} {
+		rec := httptest.NewRecorder()
+		write(rec)
+		assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"), name)
+	}
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Cache-Control", "max-age=60")
+	JSON(rec, http.StatusOK, map[string]any{"cached": true})
+	assert.Equal(t, "max-age=60", rec.Header().Get("Cache-Control"), "a handler's own Cache-Control stays")
+}

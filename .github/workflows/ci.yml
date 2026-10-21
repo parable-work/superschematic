@@ -32,7 +32,8 @@ name: ci
 # modules), the runtimes' and the version graph's own test suites, and the
 # docs build. The full tier adds the Go tests without -short, the CLI smoke,
 # examples/migrations, the acme job, examples/engine-notes,
-# examples/engine-jobs and every version-graph scenario through the Go,
+# examples/engine-jobs, the generated servers over the engine
+# (engine-servers) and every version-graph scenario through the Go,
 # Rust, TypeScript and Python engines. It runs when release.yml calls this
 # workflow: before every release, on a dry run, and twice a day as the
 # release candidate on main (release-candidate.yml).
@@ -213,7 +214,7 @@ jobs:
         # TestEngineDocumentLoadsInTheEngine (the full tier: -short skips it)
         # loads a generated engine document through @superschematic/engine,
         # the Rust engine's Node-API addon (D58), as a TypeScript server
-        # will: the package's dist/, over the http runtime's, and the core's
+        # does: the package's dist/, over the http runtime's, and the core's
         # addon in its native/, a debug build, which compiles faster than the
         # release's and loads the same.
         if: github.event_name != 'pull_request'
@@ -1187,6 +1188,117 @@ jobs:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: runtime/engine/go
 
+  engine-servers:
+    # Generated servers mount the engine (D58), end to end, in the full tier
+    # alone: servergen's engine entrypoint tests build desk-db's Go, Rust and
+    # TypeScript servers, their jobs and runners, queue-db's server over
+    # the project's engine archive and desk-ts-api's over the project's
+    # engine addon (internal/generator/servergen/testdata/engine), and run
+    # each offline and on the Postgres below; and
+    # TestEngineServersAnswerOneScriptAlike builds desk-trio-stack's three
+    # servers over one engine database, runs one script against each and
+    # requires their transcripts to be identical, each step the HTTP corpus
+    # records in the corpus's shape, and the three to read what each other
+    # wrote and stream what each other commits. They need the three archives
+    # a Go server links, the engine's package and its Node-API addon, which
+    # the go job does not build, so they skip there and run here, where
+    # SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS and
+    # SUPERSCHEMATIC_REQUIRE_TS_CHECKS make a missing one a failure. The
+    # Dockerfile tests of the same fixtures run in the go job's full tier.
+    name: engine-servers (generated Go, Rust and TypeScript servers over the engine, on Postgres)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Install Rust toolchain
+        # The three archives, the addon and the Rust servers are built with
+        # this one toolchain (tools.env says why); the Rust entrypoint test
+        # runs clippy and rustfmt on the servers it builds.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            runtime/engine/rust
+            runtime/versiongraph/rust
+
+      - name: Build the superscalar dependency and the version graph's and the engine's archives
+        run: |
+          scripts/superscalar-dep.sh
+          scripts/versiongraph-archive.sh
+          scripts/engine-archive.sh
+
+      - name: Build the http runtime, and the engine's package and addon
+        # The engine's package links the http runtime's dist/ into its
+        # node_modules; the addon is the core's as a release ships it
+        # (runtime/engine/rust/addon), without the test addon's bridge.
+        run: |
+          (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
+          (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build && ../../../scripts/engine-napi.sh)
+
+      - name: Start Postgres
+        # A role with a password: the runner's Postgres refuses a
+        # passwordless one off its loopback. Each test makes a database of
+        # its own on it and drops it after.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
+      - name: The engine's servers, offline and on Postgres, and one script against three of them
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+          SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS: "1"
+          SUPERSCHEMATIC_REQUIRE_TS_CHECKS: "1"
+          SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # One target directory for every Rust server the tests build, so
+          # the engine's crate and axum compile once.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/generated-crates-target
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/engine-archive.sh --print)"
+          go test -count=1 -timeout 80m -v \
+            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$' \
+            ./internal/generator/servergen/
+
   versiongraph:
     name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
     # The scenarios through each language's engine are the full tier; a pull
@@ -1376,7 +1488,8 @@ jobs:
     # The only required status check on main (repository ruleset "main").
     # Runs even when a needed job fails so the check is always reported, and
     # fails if any needed job failed or was cancelled. A skipped job (dco
-    # outside a pull request, acme on one) does not fail it.
+    # outside a pull request, acme and engine-servers on one) does not fail
+    # it.
     #
     # On a draft every other job skips, and GitHub reports a skipped required
     # check as passing. So a draft's run reports under another name: the
@@ -1395,6 +1508,7 @@ jobs:
       - rust
       - engine-rust
       - engine-go
+      - engine-servers
       - versiongraph
       - docs
     runs-on: ubuntu-latest

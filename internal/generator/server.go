@@ -171,6 +171,34 @@ func (r run) generateServers() error {
 	if err := r.checkWorkers(st.Name, workers, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
+	runners, err := stack.Runners(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	for _, rn := range runners {
+		switch rn.Language {
+		case APILanguageGo:
+			runner, err := r.planRunner(st.Name, rn, cloudSQL[rn.Name])
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server: runner})
+		case APILanguageTypeScript:
+			runner, err := r.planTypeScriptRunner(st.Name, rn, cloudSQL[rn.Name])
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, runner)
+		case APILanguageRust:
+			runner, err := r.planRustRunner(st.Name, rn)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, runner)
+		default:
+			r.Logf("  - runner %s: the engine's runner of %s in %s, which gets no generated entrypoint yet (D58)\n", rn.Name, rn.Runner.Database, rn.Language)
+		}
+	}
 	for _, w := range workers {
 		switch w.Language {
 		case APILanguageGo:
@@ -877,6 +905,22 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true
 		}
+		if output.Engine != nil {
+			in.EngineGo = r.Options.Paths.EngineGo
+			if s.Kind == ir.DeployableServer && output.IsPublic && !output.Auth.Identity {
+				r.Logf("  - server %s: %s authenticates its users with its own AuthMiddleware, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, ref.Name, output.Engine.Database, output.Engine.Mount)
+			}
+			// A database whose types compose a behavior the core's archive
+			// does not run links its project's engine archive (D58).
+			what := fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name)
+			project, err := r.projectEngine(what, output.Engine.Database)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := linkEngineProject(fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), &in.EngineProject, project); err != nil {
+				return nil, nil, err
+			}
+		}
 		in.APIs = append(in.APIs, servergen.APIInput{Output: output, Implementation: impl, CORS: cors[ref.Name]})
 		modules = append(modules, apiModules...)
 		modules = append(modules, servergen.Module{Path: impl.Module, Dir: impl.ModuleDir, Direct: true})
@@ -944,6 +988,15 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		routes, err := served.APIOutput()
 		if err != nil {
 			return nil, nil, err
+		}
+		if err := r.checkTypeScriptEngine(stackName, s, ref.Name, routes); err != nil {
+			return nil, nil, err
+		}
+		if routes != nil && routes.Engine != nil {
+			what := fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name)
+			if err := r.typeScriptEngineProject(what, fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), routes.Engine, &in.EngineProject); err != nil {
+				return nil, nil, err
+			}
 		}
 		dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name)
 		exists, err := tsrestgen.ImplementationExists(dir)
@@ -1030,6 +1083,24 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		routes, err := served.APIOutput()
 		if err != nil {
 			return nil, nil, err
+		}
+		if routes.Engine != nil {
+			// The engine of the API's engine database (D58): its Rust types
+			// hold its document, and its project's engine crate the
+			// behaviors the core's do not.
+			if err := r.rustEngineTypes(stackName, s, ref.Name, routes.Engine.Database, &in); err != nil {
+				return nil, nil, err
+			}
+			project, err := r.projectEngine(fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name), routes.Engine.Database)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := linkEngineProject(fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), &in.EngineProject, project); err != nil {
+				return nil, nil, err
+			}
+			if s.Kind == ir.DeployableServer && routes.IsPublic && !routes.Auth.Identity {
+				r.Logf("  - server %s: %s authenticates its users with its own Authenticator, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, ref.Name, routes.Engine.Database, routes.Engine.Mount)
+			}
 		}
 		dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, ref.Name)
 		exists, err := rustrestgen.ImplementationExists(dir)
@@ -1266,6 +1337,13 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 		{Path: o.ModulePath, Dir: APIDir(out, o.SchemaName), Direct: true},
 		{Path: o.TypesModule, Dir: TypesDir(out, LangGo, o.SchemaName)},
 	}
+	if o.Engine != nil {
+		// main.go opens the engine with the engine document of the
+		// database's Go types (D58), and the API's Deps holds it.
+		modules = append(modules,
+			servergen.Module{Path: n.GoTypesModule(o.Engine.Database), Dir: TypesDir(out, LangGo, o.Engine.Database), Direct: true},
+			runtimeModule(n.EngineGoModule, paths.EngineGo, true))
+	}
 	if o.Auth.Identity && o.Deps.Database != "" {
 		// main.go builds the identity store from the descriptor constant of
 		// the database's Go types (D50).
@@ -1293,4 +1371,302 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
 	}
 	return modules
+}
+
+// planRunner plans the entrypoint of the Go engine's runner rn of the
+// stack (D58): its engine database's connection field, the engine info of
+// the first API on it, rn's API, as that API's own build reads it, and the
+// modules the runner's build reads: the database's Go types, which hold
+// its EngineDocument, the types modules they reach, and the runtime
+// modules. cloudSQL are the DB services some environment connects it to on
+// Cloud SQL.
+func (r run) planRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []string) (*servergen.Server, error) {
+	db, api := rn.Runner.Database, rn.Runner.API
+	output, err := r.servedAPI(stackName, rn.Name, api)
+	if err != nil {
+		return nil, err
+	}
+	if output.Engine == nil || output.Engine.Database != db {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
+	}
+	project, err := r.projectEngine(fmt.Sprintf("stack %s: runner %s runs the engine of %s for %s", stackName, rn.Name, db, api), db)
+	if err != nil {
+		return nil, err
+	}
+	field := ""
+	if output.EnvConfig != nil {
+		for _, f := range output.EnvConfig.Derived {
+			if f.Kind == ir.EdgeSQL && f.Service == db {
+				field = f.Key
+			}
+		}
+	}
+	if field == "" {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, and %s's config has no field for it", stackName, rn.Name, db, api)
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s: %w", stackName, rn.Name, db, err)
+	}
+	out, paths, n := r.Options.OutputRoot, r.Options.Paths, r.Options.Naming
+	modules := []servergen.Module{{Path: n.GoTypesModule(db), Dir: TypesDir(out, LangGo, db), Direct: true}}
+	closure, err := r.goTypesClosure(schema)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range closure {
+		modules = append(modules, servergen.Module{Path: m, Dir: TypesDir(out, LangGo, path.Base(m))})
+	}
+	versionGraph := apigen.DeclaresVersionGraph(schema)
+	modules = append(modules, r.runtimeModules(true, versionGraph)...)
+	in := servergen.RunnerInput{
+		Stack:          stackName,
+		Runner:         rn.Name,
+		Dir:            servergen.ServerDir(out, stackName, rn.Name),
+		Database:       db,
+		Field:          field,
+		Engine:         output.Engine,
+		Modules:        modules,
+		Naming:         n,
+		RepositoryRoot: n.BuildContext(r.Options.RepositoryRoot),
+		ScalarGo:       paths.ScalarGo,
+		Release:        r.Options.ReleaseInfo(),
+		EngineGo:       paths.EngineGo,
+		EngineProject:  project,
+		CloudSQL:       slices.Contains(cloudSQL, db),
+	}
+	if versionGraph {
+		in.VersionGraphGo = paths.VersionGraphGo
+	}
+	return servergen.PlanRunner(in)
+}
+
+// rustEngineTypes records, in in, the directory of the Rust types of db,
+// the engine database of the API api that the Rust deployable s serves,
+// which hold its engine document (D58), or refuses a database whose config
+// generates no Rust types.
+func (r run) rustEngineTypes(stackName string, s *ir.ResolvedDeployable, api, db string, in *servergen.RustInput) error {
+	if r.Options.DependencyConfig != nil {
+		if cfg, ok := r.Options.DependencyConfig(db); ok {
+			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+			if err != nil {
+				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) {
+				return fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s holds its engine document (D58) in its Rust types, and %s generates none; enable outputs.types.%s in %s's config", stackName, s.Kind, s.Name, api, db, db, LangRust, db)
+			}
+		}
+	}
+	if in.EngineTypes == nil {
+		in.EngineTypes = map[string]string{}
+	}
+	in.EngineTypes[db] = TypesDir(r.Options.OutputRoot, LangRust, db)
+	return nil
+}
+
+// planRustRunner plans the entrypoint of the Rust engine's runner rn of the
+// stack (D58): its engine database's connection field and the engine info
+// of the first API on it, rn's API, as that API's own build reads them, the
+// database's Rust types, which hold its engine document, and the project's
+// engine crate when the database composes the work queue's behaviors or
+// an extension's.
+func (r run) planRustRunner(stackName string, rn *ir.ResolvedDeployable) (*servergen.RustServer, error) {
+	db, api := rn.Runner.Database, rn.Runner.API
+	served, err := r.servedRun(stackName, rn.Name, api)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := served.APIOutput()
+	if err != nil {
+		return nil, err
+	}
+	if routes.Engine == nil || routes.Engine.Database != db {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
+	}
+	_, config, err := served.rustAPI()
+	if err != nil {
+		return nil, err
+	}
+	field := ""
+	if config != nil {
+		for _, f := range config.Derived {
+			if f.Kind == ir.EdgeSQL && f.Service == db {
+				field = f.Key
+			}
+		}
+	}
+	if field == "" {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, and %s's config has no field for it", stackName, rn.Name, db, api)
+	}
+	var in servergen.RustInput
+	if err := r.rustEngineTypes(stackName, rn, api, db, &in); err != nil {
+		return nil, err
+	}
+	project, err := r.projectEngine(fmt.Sprintf("stack %s: runner %s runs the engine of %s for %s", stackName, rn.Name, db, api), db)
+	if err != nil {
+		return nil, err
+	}
+	out := r.Options.OutputRoot
+	return servergen.PlanRustRunner(servergen.RustRunnerInput{
+		Stack:          stackName,
+		Runner:         rn.Name,
+		Dir:            servergen.ServerDir(out, stackName, rn.Name),
+		OutputRoot:     out,
+		Database:       db,
+		Field:          field,
+		Engine:         routes.Engine,
+		TypesDir:       in.EngineTypes[db],
+		Naming:         r.Options.Naming,
+		RepositoryRoot: r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		Paths:          r.Options.Paths,
+		EngineProject:  project,
+	})
+}
+
+// runtimeModules are the runtime modules an entrypoint's build reads
+// beside the generated ones: the HTTP runtime, which it imports, the
+// schema runtime, the schema IR and the scalar library, which the
+// generated modules import, the engine's binding when it opens the engine
+// (D58), which it imports, and the version graph's when a database it
+// reaches declares a graph. A module no [paths] key names a checkout of is
+// pinned to the release that generates the entrypoint (releasePins).
+func (r run) runtimeModules(engine, versionGraph bool) []servergen.Module {
+	paths, n := r.Options.Paths, r.Options.Naming
+	pins := r.releasePins()
+	runtimeModule := func(module, dir string, direct bool) servergen.Module {
+		m := servergen.Module{Path: module, Dir: dir, Direct: direct}
+		if version, ok := pins[module]; ok {
+			m.Version, m.Pinned = version, true
+		}
+		return m
+	}
+	scalar := runtimeModule(n.ScalarGoModule, paths.ScalarGo, false)
+	if !scalar.Pinned {
+		scalar.Version = "v1.0.0"
+	}
+	modules := []servergen.Module{
+		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),
+		runtimeModule(n.SchemaRuntimeGoModule, paths.SchemaRuntimeGo, false),
+		runtimeModule(n.SchemaIRGoModule, paths.SchemaIR, false),
+		scalar,
+	}
+	if engine {
+		modules = append(modules, runtimeModule(n.EngineGoModule, paths.EngineGo, true))
+	}
+	if versionGraph {
+		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
+	}
+	return modules
+}
+
+// checkTypeScriptEngine checks what a TypeScript server, job or worker s
+// opens of the engine database of api, which it serves, whose server
+// output is o (D58): a server of a public API that authenticates with an
+// authenticator of its own gives the engine no end user, and the build
+// says so, as for a Go server.
+func (r run) checkTypeScriptEngine(stackName string, s *ir.ResolvedDeployable, api string, o *apigen.APIOutput) error {
+	if o == nil || o.Engine == nil {
+		return nil
+	}
+	if s.Kind == ir.DeployableServer && o.IsPublic && !o.Auth.Identity {
+		r.Logf("  - server %s: %s authenticates its users with its own authenticate, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, api, o.Engine.Database, o.Engine.Mount)
+	}
+	return nil
+}
+
+// planTypeScriptRunner plans the entrypoint of the TypeScript engine's
+// runner rn of the stack (D58): its engine database's connection field and
+// the engine info of the first API on it, rn's API, as that API's own build
+// reads them. cloudSQL are the DB services some environment connects it to
+// on Cloud SQL.
+func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []string) (*servergen.TypeScriptServer, error) {
+	db, api := rn.Runner.Database, rn.Runner.API
+	served, err := r.servedRun(stackName, rn.Name, api)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := served.APIOutput()
+	if err != nil {
+		return nil, err
+	}
+	if routes == nil || routes.Engine == nil || routes.Engine.Database != db {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
+	}
+	var project *servergen.EngineProject
+	what := fmt.Sprintf("stack %s: runner %s runs the engine of %s for %s", stackName, rn.Name, db, api)
+	if err := r.typeScriptEngineProject(what, fmt.Sprintf("stack %s: runner %s", stackName, rn.Name), routes.Engine, &project); err != nil {
+		return nil, err
+	}
+	_, config, err := served.typeScriptAPI()
+	if err != nil {
+		return nil, err
+	}
+	field := ""
+	if config != nil {
+		for _, f := range config.Derived {
+			if f.Kind == ir.EdgeSQL && f.Service == db {
+				field = f.Key
+			}
+		}
+	}
+	if field == "" {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, and %s's config has no field for it", stackName, rn.Name, db, api)
+	}
+	out := r.Options.OutputRoot
+	return servergen.PlanTypeScript(servergen.TypeScriptInput{
+		Stack:              stackName,
+		Server:             rn.Name,
+		Dir:                servergen.ServerDir(out, stackName, rn.Name),
+		OutputRoot:         out,
+		Naming:             r.Options.Naming,
+		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		ImplementationRoot: r.Options.RepositoryRoot,
+		PackageDirs:        map[string]string{},
+		Paths:              r.Options.Paths,
+		CloudSQL:           cloudSQL,
+		Runner:             &servergen.TypeScriptRunnerInput{Database: db, Field: field, Engine: routes.Engine},
+		EngineProject:      project,
+	})
+}
+
+// typeScriptEngineProject records, in linked, the project's engine crate
+// of the engine database e as the one whose addon a TypeScript entrypoint
+// loads, when e composes an extension's behavior, which the core's addon
+// does not run (D58): the crate's napi member builds an addon over its
+// behaviors(), which the entrypoint loads in the core's place. The core's
+// addon carries the work queue's behaviors, so a database that composes
+// those alone needs none. what names the entrypoint and what it opens the
+// engine for, who the entrypoint, in the errors: of an extension's
+// behavior whose registration names no Rust crate, or one the project
+// does not hold, which no engine runs; and of a second project, since a
+// process loads one addon in the core's place.
+func (r run) typeScriptEngineProject(what, who string, e *apigen.EngineInfo, linked **servergen.EngineProject) error {
+	if len(addonExtensionBehaviors(e)) == 0 {
+		return nil
+	}
+	project, err := r.projectEngine(what, e.Database)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return nil
+	}
+	if *linked != nil && (*linked).Dir != project.Dir {
+		return fmt.Errorf("%s opens the engines of %s and %s, which each compose behaviors only their own project's engine addon runs, and a process loads one addon in the core's place; serve the APIs on them from servers of their own", who, (*linked).Database, project.Database)
+	}
+	*linked = project
+	return nil
+}
+
+// addonExtensionBehaviors are the behaviors an engine database composes
+// that an extension declares, by name: what the core's Node-API addon,
+// which runs the core's and the work queue's, does not (D58).
+func addonExtensionBehaviors(e *apigen.EngineInfo) []string {
+	var out []string
+	for _, b := range e.Behaviors {
+		if b.Extension != "" {
+			out = append(out, b.Name)
+		}
+	}
+	return out
 }

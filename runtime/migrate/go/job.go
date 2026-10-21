@@ -76,9 +76,48 @@ type Privileges struct {
 	// UPDATE and DELETE on its tables, SELECT on its views and USAGE and
 	// SELECT on its sequences, and a role the job's user gave privileges
 	// on them that is not listed loses them. The runner's state tables are
-	// left out. An empty list takes every such privilege back.
+	// left out, and so is the engine's schema, Engine's. An empty list
+	// takes every such privilege back.
 	ReadWrite []string `json:"readWrite"`
+
+	// Engine, when set, gives the deployables that open the engine (D58)
+	// on the DB service's database its schema, after ReadWrite.
+	Engine *EnginePrivileges `json:"engine,omitempty"`
 }
+
+// EnginePrivileges are what a job gives the deployables that open the
+// engine on a DB service's database, each as a database user of its own:
+// a role they share that owns the engine's schema. The engine acts as its
+// schema's owner (runtime/engine, "Several instances on one Postgres
+// database"), so whatever any of them creates there, at the engine's own
+// migrations or a publish, is the role's, and every member may change it
+// later.
+type EnginePrivileges struct {
+	// Schema is the engine's schema, engine unless the servers configure
+	// another. The job creates it, owned by Role, when it is missing, and
+	// gives it to Role when another role owns it.
+	Schema string `json:"schema"`
+
+	// Role owns Schema. The job creates it, a role that cannot log in,
+	// when it is missing, and makes its own user a member, which may act
+	// as it.
+	Role string `json:"role"`
+
+	// Members are the database users of the deployables that open the
+	// engine: each is granted Role, and a role the job granted it before
+	// that is not listed loses it. An empty list takes every grant back.
+	Members []string `json:"members"`
+}
+
+// EngineExtensionSchema is the schema a job creates the unaccent extension
+// in when the database has none, which the engine's Search needs on
+// Postgres: the one the engine itself creates it in, where its user may
+// (runtime/engine/rust/storage, fulltext::EXTENSION_SCHEMA).
+const EngineExtensionSchema = "superschematic_extensions"
+
+// engineSchemaPattern is a schema the engine takes: lowercase letters,
+// digits and _, starting with a letter or _, at most 63 bytes.
+var engineSchemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
 // cloudSQLInstancePattern is an instance connection name: a project id,
 // optionally under a domain, a region and an instance name.
@@ -137,12 +176,44 @@ func ReadJob(doc []byte) (*Job, error) {
 			if i := firstRepeat(p.ReadWrite); i >= 0 {
 				return nil, fmt.Errorf("job document: service %s: role %s is listed twice", d.Service, p.ReadWrite[i])
 			}
+			if err := checkEngine(p.Engine); err != nil {
+				return nil, fmt.Errorf("job document: service %s: engine: %w", d.Service, err)
+			}
 		}
 		if d.Plan == "" && d.Privileges == nil {
 			return nil, fmt.Errorf("job document: service %s has neither a plan nor privileges", d.Service)
 		}
 	}
 	return &job, nil
+}
+
+// checkEngine checks a database's engine privileges: a schema the engine
+// takes, other than public and the extensions' schema, a role, and each
+// member once, none of them the role.
+func checkEngine(e *EnginePrivileges) error {
+	if e == nil {
+		return nil
+	}
+	switch {
+	case !engineSchemaPattern.MatchString(e.Schema) || strings.HasPrefix(e.Schema, "pg_"):
+		return fmt.Errorf("schema %q is not one the engine takes: lowercase letters, digits and _, starting with a letter or _, at most 63 bytes, and not pg_", e.Schema)
+	case e.Schema == "public" || e.Schema == "information_schema" || e.Schema == EngineExtensionSchema:
+		return fmt.Errorf("schema %s is not the engine's own", e.Schema)
+	case e.Role == "" || strings.ContainsRune(e.Role, 0):
+		return fmt.Errorf("no role")
+	}
+	for _, member := range e.Members {
+		switch {
+		case member == "" || strings.ContainsRune(member, 0):
+			return fmt.Errorf("an empty member")
+		case member == e.Role:
+			return fmt.Errorf("role %s is its own member", e.Role)
+		}
+	}
+	if i := firstRepeat(e.Members); i >= 0 {
+		return fmt.Errorf("member %s is listed twice", e.Members[i])
+	}
+	return nil
 }
 
 func firstRepeat(list []string) int {
@@ -155,13 +226,55 @@ func firstRepeat(list []string) int {
 }
 
 // Granter is a driver that gives roles the privileges a server's APIs
-// need on a database's tables (Privileges). Package postgres implements
+// need on a database's tables (Privileges), and the deployables that open
+// the engine its schema (EnginePrivileges). Package postgres implements
 // it.
 type Granter interface {
 	// GrantReadWrite gives each of roles read and write privileges on the
 	// database's objects, and takes them back from every other role the
-	// connection's user gave them to. It leaves out the tables in except.
-	GrantReadWrite(ctx context.Context, roles []string, except []string) (*Grants, error)
+	// connection's user gave them to. It leaves out what except names.
+	GrantReadWrite(ctx context.Context, roles []string, except Except) (*Grants, error)
+
+	// GrantEngine makes the engine's schema its role's, creating either
+	// when it is missing, grants the role to each member and takes it back
+	// from every other role the connection's user granted it to, and
+	// readies the extension the engine's Search needs.
+	GrantEngine(ctx context.Context, engine EnginePrivileges) (*EngineGrants, error)
+}
+
+// Except is what GrantReadWrite leaves out: tables by name, in any
+// schema, and every object of a schema, with the grants on the schema.
+type Except struct {
+	Tables  []string
+	Schemas []string
+}
+
+// GrantExcept is what a job's GrantReadWrite leaves out: the runner's
+// state tables, and the engine's schema and the extensions' schema when p
+// gives the engine its own.
+func GrantExcept(p *Privileges) Except {
+	except := Except{Tables: StateTables()}
+	if p != nil && p.Engine != nil {
+		except.Schemas = []string{p.Engine.Schema, EngineExtensionSchema}
+	}
+	return except
+}
+
+// EngineGrants is what GrantEngine changed.
+type EngineGrants struct {
+	// CreatedRole and CreatedSchema report what it created; OwnedSchema
+	// that it gave an existing schema to the role.
+	CreatedRole, CreatedSchema, OwnedSchema bool
+
+	// Granted are the members that were given the role, and Revoked the
+	// roles it was taken back from.
+	Granted, Revoked []string
+
+	// Extension is the schema the unaccent extension lives in, or empty
+	// when it could not be created, which ExtensionError says why: the
+	// engine opens without it, and only Search's publish fails.
+	Extension      string
+	ExtensionError string
 }
 
 // Grants is what GrantReadWrite changed.

@@ -905,6 +905,9 @@ type crateOptions struct {
 	dependencies    []string
 	depOutputs      map[string]map[string]any
 	table           string
+	// before are services built into the root first, each with its
+	// outputs: a database whose Rust types the crate depends on.
+	before map[string]map[string]any
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
@@ -938,6 +941,11 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 	outputs := options.outputs
 	if outputs == nil {
 		outputs = outputsOf(service)
+	}
+	for dep, depOutputs := range options.before {
+		if _, err := buildService(t, dep, root, depOutputs); err != nil {
+			t.Fatalf("build %s: %v", dep, err)
+		}
 	}
 	source := options.dir
 	if source == "" {

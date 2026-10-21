@@ -194,7 +194,8 @@ type settings struct {
 
 	// instances and concurrency are a worker's, with enabled: what the
 	// environment chain sets, the later over the earlier. workerFrom names
-	// the environment that set each (D53).
+	// the environment that set each (D53). An engine's runner takes enabled
+	// alone (D58).
 	instances, concurrency *int
 	workerFrom             map[string]string
 }
@@ -229,6 +230,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.declareDeployables()
 	r.defaultDeployables()
 	r.defaultWorkers()
+	r.defaultRunners()
 	r.applySettings()
 	r.place()
 	r.expose()
@@ -237,6 +239,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
+	r.runRunners()
 	if r.failed() {
 		return nil
 	}
@@ -649,6 +652,8 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 	case ref.Service != nil && ref.Deployable != "":
 		r.fail(CodeInvalidStack, "%s names both service %s and deployable %s", where, ref.Service.Name, ref.Deployable)
 		return nil, false
+	case ref.Runner:
+		return r.resolveRunnerRef(where, ref)
 	case ref.Worker != "":
 		return r.resolveWorkerRef(where, ref)
 	case ref.Job != "" && ref.Service == nil:
@@ -736,7 +741,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyWorkerSettings(where, env.Name, d, entry) {
+			if r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
@@ -901,6 +906,8 @@ func (r *resolver) place() {
 		switch res.Kind {
 		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 			r.placeServer(d)
+		case ir.DeployableRunner:
+			r.placeRunner(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
 		case ir.DeployableSite:
@@ -1247,6 +1254,10 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	if d.Worker != nil {
 		worker := *d.Worker
 		c.Worker = &worker
+	}
+	if d.Runner != nil {
+		runner := *d.Runner
+		c.Runner = &runner
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))
