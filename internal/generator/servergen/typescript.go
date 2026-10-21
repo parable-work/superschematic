@@ -748,7 +748,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.NapiDir, in.Paths.EngineTypeScript); err != nil {
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.NapiDir); err != nil {
 		return nil, err
 	}
 	s.Docker, s.NoDocker, err = planTypeScriptDocker(in, s, dir)

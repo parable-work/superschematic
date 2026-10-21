@@ -265,6 +265,7 @@ func (r run) projectEngine(what, db string) (*servergen.EngineProject, error) {
 	project := &servergen.EngineProject{
 		Database: db,
 		Dir:      dir,
+		Lockfile: servergen.EngineLockfile(r.Options.Paths),
 		Crate:    crate.Name,
 		Ident:    crate.Ident,
 		Archive:  "lib" + strings.ReplaceAll(crate.FFIName(), "-", "_") + ".a",

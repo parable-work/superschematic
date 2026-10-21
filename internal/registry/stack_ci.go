@@ -117,6 +117,12 @@ type CIStack struct {
 	// place of the published ones, before it type-checks against them: what
 	// make setup builds on a developer's machine.
 	EngineCheckout string
+
+	// EngineCheckoutTypeScript is true when the naming file's [paths]
+	// engine_typescript names the engine package of EngineCheckout, so the
+	// output root's workspace takes the checkout's packages: only then does
+	// a check job build their dist/.
+	EngineCheckoutTypeScript bool
 }
 
 // CISite is a static site a CI job builds: its package's directory,

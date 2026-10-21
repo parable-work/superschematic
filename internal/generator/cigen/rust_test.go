@@ -256,13 +256,15 @@ func TestAProjectEngineArchiveInCheck(t *testing.T) {
 // crate starts from the engine workspace's lock file; and before the
 // workspace's install it builds the checkout's TypeScript packages the
 // workspace takes in place of the published ones, so the TypeScript server
-// type-checks against the checkout's engine.
+// type-checks against the checkout's engine; it builds them only when
+// [paths] engine_typescript names that checkout's package.
 func TestAnEngineCheckoutInCheck(t *testing.T) {
 	req := storefrontRequest()
 	req.Stack.Name, req.Stack.Dir = "desk-stack", "schemas/services/desk-stack"
 	req.Stack.TypeScriptImplementations = map[string]string{"desk-ts-api": "typescript/desk-ts-api"}
 	req.Stack.EngineArchives = map[string]string{"desk-db": "schemas/dist/engine/rust/desk-db/ffi"}
 	req.Stack.EngineCheckout = "vendor/superschematic"
+	req.Stack.EngineCheckoutTypeScript = true
 	env := *req.Environments[0].Environment
 	env.Stack = "desk-stack"
 	env.Deployables = []*ir.ResolvedDeployable{
@@ -319,6 +321,18 @@ func TestAnEngineCheckoutInCheck(t *testing.T) {
 		if s.WorkingDirectory != "vendor/superschematic" || !strings.Contains(s.Run, want) {
 			t.Errorf("the TypeScript packages step lacks %q: %+v", want, s)
 		}
+	}
+
+	// With the checkout found from engine_go alone, the workspace takes the
+	// published TypeScript packages, and check builds none of the
+	// checkout's.
+	req.Stack.EngineCheckoutTypeScript = false
+	files, err = cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(files[0].Data, []byte("Check out superscalar for the engine's checkout")) || bytes.Contains(files[0].Data, []byte("Build the TypeScript packages of the engine's checkout")) {
+		t.Errorf("a checkout of no engine_typescript builds its TypeScript packages, or no archive's superscalar:\n%s", files[0].Data)
 	}
 
 	// Without the checkout, check builds none of it.

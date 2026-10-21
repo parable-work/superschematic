@@ -271,6 +271,8 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 		if checkout := engineCheckout(c.Options.Paths); checkout != "" {
 			if dir, err := rel("the engine's checkout", checkout); err == nil {
 				out.EngineCheckout = dir
+				out.EngineCheckoutTypeScript = c.Options.Paths.EngineTypeScript != "" &&
+					engineCheckout(naming.LocalPaths{EngineTypeScript: c.Options.Paths.EngineTypeScript}) == checkout
 			} else {
 				c.Logf("  - %s CI of stack %s builds nothing of the engine's checkout: %v\n", Name, name, err)
 			}
