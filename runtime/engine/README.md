@@ -4889,7 +4889,7 @@ openEngine({
   path, policy,
   tools: {
     invocationPolicy: { key: 'confirm', values: ['never', 'always'], default: 'never' },
-    invocation: { delete: 'always', defineSchema: 'always' },
+    invocation: { delete: 'always', defineSchema: 'always', 'Payments.capturePayment': 'always' },
     keys: { scalar: 'x-acme-scalar', guidance: 'acme/operation-guidance', parameters: [{ key: 'x-acme-arguments', value: 1 }] },
   },
 });
@@ -4901,10 +4901,16 @@ openEngine({
   `search` and the namespace tools, `listNamespaces`, `createNamespace`,
   `archiveNamespace` and `unarchiveNamespace`) takes `invocation`'s value
   for it, else the default; a
-  behavior operation takes its declaration's `invocationPolicy`,
-  else the default. Registration refuses a declaration whose value is not
-  one of the values, as the compiler's `Finalize` does. The core's
-  behaviors name none, so they register under any policy.
+  behavior operation takes `invocation`'s value for
+  `<Behavior>.<operation>` (`Payments.capturePayment`, `acme.Rating.rate`),
+  else its declaration's `invocationPolicy`, else the default, in its
+  tool, the describe document and the behavior's own document.
+  Registration refuses a declaration whose value is not one of the
+  values, as the compiler's `Finalize` does. The core's behaviors name
+  none, so they register under any policy; a deployment marks the ones
+  it wants confirmed, such as the commerce operations that move money or
+  stock (D70), through `invocation`. A generated server takes it from
+  the engine database's `outputs.engine.tools.invocation`.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.
@@ -4913,8 +4919,12 @@ openEngine({
 registry refuses: a key `@mcp` already uses or not a letter followed by
 letters, digits or underscores, no values, a value that is not lowercase
 letters, digits, `_` and `-` starting with a letter, a value listed twice,
-a default or an `invocation` value outside the values, and a parameter
-key that is empty, repeated, the scalar key or one the core writes.
+a default or an `invocation` value outside the values, an `invocation`
+name that is neither a built-in tool nor `<Behavior>.<operation>`, and a
+parameter key that is empty, repeated, the scalar key or one the core
+writes. Once its behaviors are registered it refuses, as a usage error,
+an `invocation` name for a behavior it does not run or an operation the
+behavior does not declare.
 
 ## MCP
 

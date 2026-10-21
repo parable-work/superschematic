@@ -10,12 +10,19 @@ held to the Go defaults by runtime/engine/testdata/tool_parameters_parity.json.
   docs/extension-model.md). A behavior operation takes its declaration's
   invocationPolicy, which must be one of the values, or the default.
 - invocation: the policy of the operations every schema has and of the
-  engine's own tools, by operation name; the default when absent.
+  engine's own tools, by operation name, and of a behavior's operation, by
+  `<Behavior>.<operation>` (Payments.capturePayment, acme.Rating.rate),
+  which takes the place of its declaration's invocationPolicy (D70); the
+  default when absent. A deployment marks an operation whose declaration
+  names no policy, as the core's leave money-moving ones, through it, and
+  the engine refuses one naming a behavior it does not run or an operation
+  the behavior does not declare when it opens.
 - keys: the vendor keys of the tool documents (apigen.ToolKeys, section
   3.14): the scalar key, the `_meta` key of a tool's guidance, and keys
   written at the root of every argument schema.
 */
 
+import { BEHAVIOR_NAME } from '../types/declarations.js';
 import { isPlainObject } from './json.js';
 
 /** An invocation policy: apigen.ToolInvocationPolicy without its extension. */
@@ -84,12 +91,19 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   'unarchiveNamespace',
 ];
 
+/** A behavior's operation as `invocation` names it: `<Behavior>.<operation>`. */
+export type BehaviorOperation = `${string}.${string}`;
+
 /** EngineOptions.tools. */
 export interface ToolOptions {
   /** The core's by default: invocationPolicy, auto or ask, auto. */
   invocationPolicy?: InvocationPolicy;
-  /** The policy of a built-in operation or engine tool; the policy's default when absent. */
-  invocation?: Partial<Record<BuiltinTool, string>>;
+  /**
+   * The policy of a built-in operation or engine tool, or of a behavior's
+   * operation by `<Behavior>.<operation>`, in its declaration's place; the
+   * policy's default when absent.
+   */
+  invocation?: Partial<Record<BuiltinTool | BehaviorOperation, string>>;
   /** Each absent key is the core's: x-superschematic-scalar, superschematic/operation-guidance, none. */
   keys?: Partial<ToolKeys>;
 }
@@ -112,11 +126,14 @@ export const DEFAULT_TOOL_KEYS: ToolKeys = Object.freeze({
 export interface ResolvedToolOptions {
   readonly invocationPolicy: InvocationPolicy;
   readonly invocation: Readonly<Record<BuiltinTool, string>>;
+  /** The behavior operations the options set a policy for, by `<Behavior>.<operation>`. */
+  readonly operations: Readonly<Record<BehaviorOperation, string>>;
   readonly keys: ToolKeys;
 }
 
 const POLICY_KEY = /^[A-Za-z][A-Za-z0-9_]*$/;
 const POLICY_VALUE = /^[a-z][a-z0-9_-]*$/;
+const OPERATION_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
 // The keys the mcp record and @mcp already use (ir.ValidateMCPInvocationKey).
 const RESERVED_POLICY_KEYS = ['handle', 'hidden', 'hiddenReason', '_meta', 'name', 'description', 'icon', 'reason'];
 // The keys the core writes at the root of an argument schema.
@@ -150,9 +167,19 @@ export function resolveToolOptions(options: ToolOptions = {}): ResolvedToolOptio
   }
 
   const invocation = {} as Record<BuiltinTool, string>;
+  const operations = {} as Record<BehaviorOperation, string>;
   for (const [name, value] of Object.entries(options.invocation ?? {})) {
-    if (!BUILTIN_TOOLS.includes(name as BuiltinTool)) {
-      problems.push(`invocation names ${name}, which is not one of ${BUILTIN_TOOLS.join(', ')}`);
+    const dot = name.lastIndexOf('.');
+    if (dot >= 0) {
+      if (!BEHAVIOR_NAME.test(name.slice(0, dot)) || !OPERATION_NAME.test(name.slice(dot + 1))) {
+        problems.push(`invocation names ${JSON.stringify(name)}, which is no behavior's operation (<Behavior>.<operation>)`);
+      } else if (value !== undefined && !values.includes(value)) {
+        problems.push(`the invocation policy of ${name}, ${JSON.stringify(value)}, is not one of ${values.join(', ')}`);
+      } else if (value !== undefined) {
+        operations[name as BehaviorOperation] = value;
+      }
+    } else if (!BUILTIN_TOOLS.includes(name as BuiltinTool)) {
+      problems.push(`invocation names ${name}, which is not one of ${BUILTIN_TOOLS.join(', ')}, nor a behavior's operation (<Behavior>.<operation>)`);
     } else if (value !== undefined && !values.includes(value)) {
       problems.push(`the invocation policy of ${name}, ${JSON.stringify(value)}, is not one of ${values.join(', ')}`);
     }
@@ -191,6 +218,7 @@ export function resolveToolOptions(options: ToolOptions = {}): ResolvedToolOptio
   return Object.freeze({
     invocationPolicy: Object.freeze({ key: policy.key, values: Object.freeze([...values]), default: policy.default }),
     invocation: Object.freeze(invocation),
+    operations: Object.freeze(operations),
     keys: Object.freeze({ ...keys, parameters: Object.freeze(keys.parameters) }),
   });
 }

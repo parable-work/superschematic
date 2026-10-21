@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,10 +55,25 @@ type Document struct {
 }
 
 // Tools are an engine's tool options (D11): the invocation policy and the
-// vendor keys of the tool documents.
+// vendor keys of the tool documents, as the binary registers them, and the
+// policy of each tool or behavior operation the deployment marks
+// (outputs.engine.tools.invocation, D70).
 type Tools struct {
 	InvocationPolicy InvocationPolicy `json:"invocationPolicy"`
-	Keys             ToolKeys         `json:"keys"`
+	// Invocation is the policy of an engine tool, by name, or of a
+	// behavior operation, by <Behavior>.<operation>: the engine's
+	// tools.invocation. Absent when the deployment marks none.
+	Invocation map[string]string `json:"invocation,omitempty"`
+	Keys       ToolKeys          `json:"keys"`
+}
+
+// BuiltinTools are the engine's own tools and the operations every schema
+// has, which tools.invocation names bare: the Rust engine's BUILTIN_TOOLS.
+var BuiltinTools = []string{
+	"create", "get", "list", "update", "delete", "lookup",
+	"listSchemas", "describeSchema", "defineSchema", "listBehaviors", "describeBehavior",
+	"search", "getValue",
+	"listNamespaces", "createNamespace", "archiveNamespace", "unarchiveNamespace",
 }
 
 // InvocationPolicy is the registry's ToolInvocationPolicy without its
@@ -114,6 +131,9 @@ type Options struct {
 	// Dependencies are the loaded schemas of the service's dependencies,
 	// by name, which a type the schema imports is read from.
 	Dependencies map[string]*ir.Schema
+	// Invocation is outputs.engine.tools.invocation, which Build checks
+	// (CheckInvocation) and the document's tools carry.
+	Invocation map[string]string
 }
 
 // Build returns the engine document of a DB schema, or nil when no type of
@@ -141,6 +161,12 @@ func Build(schema *ir.Schema, opts Options) (*Document, error) {
 
 	if doc.Tools, err = ToolsFor(schema, reg); err != nil {
 		return nil, err
+	}
+	if err := CheckInvocation(opts.Invocation, engineTypes, reg); err != nil {
+		return nil, err
+	}
+	if len(opts.Invocation) > 0 {
+		doc.Tools.Invocation = maps.Clone(opts.Invocation)
 	}
 
 	doc.Behaviors = Behaviors(engineTypes, reg)
@@ -187,6 +213,55 @@ func ToolsFor(schema *ir.Schema, reg *registry.Registry) (Tools, error) {
 		tools.Keys.Parameters = append(tools.Keys.Parameters, ToolParameter{Key: kv.Key, Value: kv.Value})
 	}
 	return tools, nil
+}
+
+// CheckInvocation checks outputs.engine.tools.invocation as an engine
+// that opens with it would, and at build time: each name is a built-in
+// tool (BuiltinTools), or <Behavior>.<operation>, an operation the
+// declaration of a behavior the engine types compose declares, and each
+// value is one of the binary's invocation policy's. It names every
+// problem.
+func CheckInvocation(invocation map[string]string, engineTypes []*ir.TypeDef, reg *registry.Registry) error {
+	if len(invocation) == 0 {
+		return nil
+	}
+	composed := map[string]bool{}
+	for _, b := range Behaviors(engineTypes, reg) {
+		composed[b.Name] = true
+	}
+	policy := reg.ToolInvocationPolicy()
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(invocation)) {
+		value := invocation[name]
+		// A behavior's name may hold a dot (acme.Rating), an operation's
+		// never does.
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			behavior, operation := name[:dot], name[dot+1:]
+			declared, found := reg.Behavior(behavior)
+			switch {
+			case !found || !composed[behavior]:
+				problems = append(problems, fmt.Sprintf("%s names behavior %s, which no engine type composes", name, behavior))
+				continue
+			case !slices.ContainsFunc(declared.Operations, func(op registry.BehaviorOperation) bool { return op.Name == operation }):
+				names := make([]string, len(declared.Operations))
+				for i, op := range declared.Operations {
+					names[i] = op.Name
+				}
+				problems = append(problems, fmt.Sprintf("%s names no operation of %s (%s)", name, behavior, strings.Join(names, ", ")))
+				continue
+			}
+		} else if !slices.Contains(BuiltinTools, name) {
+			problems = append(problems, fmt.Sprintf("%s is neither an engine tool (%s) nor a behavior's operation (<Behavior>.<operation>)", name, strings.Join(BuiltinTools, ", ")))
+			continue
+		}
+		if !slices.Contains(policy.Values, value) {
+			problems = append(problems, fmt.Sprintf("the policy of %s, %q, is not one of %s's values (%s)", name, value, policy.Key, strings.Join(policy.Values, ", ")))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("enginedoc: outputs.engine.tools.invocation: %s", strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // Namespace returns the engine namespace of a DB service: configured, the

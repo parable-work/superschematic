@@ -1017,6 +1017,83 @@ fn invocation_policies_are_the_default_unless_configured_and_a_behavior_operatio
 
 use superschematic_engine::Engine;
 
+// A deployment marks a behavior's operation through the tool options
+// (D70): `<Behavior>.<operation>` takes the place of the declaration's
+// policy in the tool, the describe document and the behavior's own
+// document, and an engine refuses one that names a behavior it does not
+// run, or an operation the behavior does not declare.
+#[test]
+fn a_behavior_operation_takes_the_invocation_policy_the_tool_options_give_it() {
+    for target in targets("operation_invocation") {
+        let engine = target.open_with(fixtures(), |options| {
+            options.tools = ToolOptions {
+                invocation: vec![
+                    ("test.Counter.increment".into(), "ask".into()),
+                    ("test.Flag.flag".into(), "auto".into()),
+                ],
+                ..ToolOptions::default()
+            };
+        });
+        publish_item(
+            &engine,
+            json!([{"name": "test.Counter"}, {"name": "test.Flag"}]),
+        );
+        assert_eq!(
+            tool(&engine, "item.increment", &alice())["mcp"]["invocationPolicy"],
+            json!("ask")
+        );
+        assert_eq!(
+            tool(&engine, "item.history", &alice())["mcp"]["invocationPolicy"],
+            json!("auto")
+        );
+        assert_eq!(
+            tool(&engine, "item.flag", &alice())["mcp"]["invocationPolicy"],
+            json!("auto")
+        );
+        assert_eq!(
+            operation(&engine, "Item", "increment")["invocationPolicy"],
+            json!("ask")
+        );
+        let described = engine
+            .tools()
+            .describe_behavior(&alice(), "test.Counter")
+            .unwrap();
+        let increment = described["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|operation| operation["name"] == "increment")
+            .unwrap();
+        assert_eq!(increment["invocationPolicy"], json!("ask"));
+        drop(engine);
+
+        let refused = Engine::open({
+            let mut options = target.options(fixtures());
+            options.tools = ToolOptions {
+                invocation: vec![
+                    ("Payments.capturePayment".into(), "ask".into()),
+                    ("test.Counter.decrement".into(), "ask".into()),
+                ],
+                ..ToolOptions::default()
+            };
+            options
+        });
+        let message = usage(refused);
+        assert!(
+            message.contains(
+                "invocation names Payments.capturePayment, and this engine runs no behavior Payments"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "invocation names test.Counter.decrement, which is no operation of test.Counter"
+            ),
+            "{message}"
+        );
+    }
+}
+
 #[test]
 fn the_tool_options_are_checked_as_the_compilers_registry_checks_them() {
     let refusal_of = |options: ToolOptions| match options.check() {

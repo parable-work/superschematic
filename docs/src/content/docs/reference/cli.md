@@ -75,7 +75,10 @@ server of an API on the database mounts the engine's routes,
 `/engine/<service>` unless set; `outputs.engine.policy` the access
 policy it opens the engine with, `permission` unless set; and
 `outputs.engine.retention` how long the event log keeps events, which the
-database's runner prunes, every event unless set
+database's runner prunes, every event unless set; and
+`outputs.engine.tools.invocation` the MCP invocation policy of an engine
+tool or a behavior operation (`Payments.capturePayment: ask`), which the
+build checks against the behaviors the engine types compose
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
 When a type of a DB or General schema
 composes an extension's behavior whose registration names a Rust crate,

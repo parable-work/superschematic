@@ -486,6 +486,26 @@ describe('invocation policies', () => {
     assert.equal(operationOf(engine, 'Item', 'flag').invocationPolicy, 'ask');
   });
 
+  test("a behavior operation takes the policy the tool options give it, in its declaration's place (D70)", () => {
+    const engine = openBehaviorEngine({ tools: { invocation: { 'test.Counter.increment': 'ask', 'test.Flag.flag': 'auto' } } });
+    publishItem(engine, [{ name: 'test.Counter' }, { name: 'test.Flag' }]);
+    const policy = (name: string) => {
+      const entry = engine.tools.manifest(alice).tools.find((each) => each.name === name);
+      return entry === undefined || entry.mcp.hidden ? undefined : entry.mcp.invocationPolicy;
+    };
+    assert.deepEqual([policy('item.increment'), policy('item.history'), policy('item.flag')], ['ask', 'auto', 'auto']);
+    assert.equal(operationOf(engine, 'Item', 'increment').invocationPolicy, 'ask');
+    const increment = engine.tools.describeBehavior(alice, 'test.Counter').operations.find((operation) => operation.name === 'increment');
+    assert.equal(increment?.invocationPolicy, 'ask');
+
+    const refused = thrown(
+      () => openBehaviorEngine({ tools: { invocation: { 'Payments.capturePayment': 'ask', 'test.Counter.decrement': 'ask' } } }),
+      TypeError
+    );
+    assert.match(refused.message, /invocation names Payments\.capturePayment, and this engine runs no behavior Payments/);
+    assert.match(refused.message, /invocation names test\.Counter\.decrement, which is no operation of test\.Counter/);
+  });
+
   test("a distribution's policy: its key everywhere, its default, its values", () => {
     const review = { key: 'review', values: ['never', 'on-write', 'always'], default: 'on-write' };
     const flagUnderReview = defineBehavior({
@@ -543,6 +563,8 @@ describe('invocation policies', () => {
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: ['Never', 'never', 'never'], default: 'always' } }), /"Never" must be lowercase.*never is listed twice.*default "always" is not one of/);
     assert.match(refusal({ invocation: { delete: 'maybe' } }), /the invocation policy of delete, "maybe", is not one of auto, ask/);
     assert.match(refusal({ invocation: { publish: 'ask' } as never }), /invocation names publish, which is not one of create/);
+    assert.match(refusal({ invocation: { 'Payments.refundPayment': 'maybe' } }), /the invocation policy of Payments\.refundPayment, "maybe", is not one of auto, ask/);
+    assert.match(refusal({ invocation: { '.capturePayment': 'ask' } }), /invocation names "\.capturePayment", which is no behavior's operation/);
     assert.match(refusal({ keys: { parameters: [{ key: 'type', value: 1 }] } }), /"type" is written by the core/);
     assert.match(refusal({ keys: { scalar: 'x-s', parameters: [{ key: 'x-s', value: 1 }] } }), /"x-s" is the scalar key/);
     assert.match(refusal({ keys: { parameters: [{ key: 'x-a', value: 1 }, { key: 'x-a', value: 2 }] } }), /"x-a" is listed twice/);
