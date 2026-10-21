@@ -48,6 +48,17 @@ var (
 	actionSetupNode  = action{"actions/setup-node", "820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"}
 	actionPulumi     = action{"pulumi/actions", "8e5e406f4007fca908480587cb9893c07090f58d", "v7.0.0"}
 	actionGoogleAuth = action{"google-github-actions/auth", "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093", "v3.0.0"}
+	actionUpload     = action{"actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"}
+	actionDownload   = action{"actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "v8.0.1"}
+)
+
+// preparedArtifact names the artifact the prepare job uploads and every
+// cloud job downloads: the directory `stack prepare` wrote (D47,
+// amended), in the runner's temporary directory, preparedDir.
+const (
+	preparedArtifact = "prepared"
+	preparedDir      = "${{ runner.temp }}/prepared"
+	preparedFlag     = `--prepared "$RUNNER_TEMP/prepared"`
 )
 
 // gcpWorkloadIdentity is the identity kind of gcp's CI seam: Workload
@@ -57,7 +68,8 @@ var (
 // application default credentials, and exports its path and the project
 // to every later step of the job: so the job signs in after its installs
 // and builds, which run the pull request's lockfile and scripts, and
-// right before its stack commands (cloudSetup).
+// right before its stack commands (cloudSetup). It runs no project code:
+// the prepare job ran it, with no identity token (D47, amended).
 const gcpWorkloadIdentity = "gcp-workload-identity"
 
 // cloudflareAPIToken is the identity kind of the cloudflare target's CI
@@ -148,6 +160,7 @@ func (g github) render() ([]byte, error) {
 	st := g.req.Stack
 	var notes []string
 	var plans, previews, deploys []job
+	var prepared []string
 	previous := "check"
 	for _, env := range g.req.Environments {
 		e := env.Environment
@@ -177,6 +190,7 @@ func (g github) render() ([]byte, error) {
 				e.Environment, strings.Join(missing, " or "), e.Environment, st.Dir))
 			continue
 		}
+		prepared = append(prepared, e.Environment)
 		if len(e.Parameters) == 1 {
 			j, err := g.preview(env)
 			if err != nil {
@@ -204,7 +218,11 @@ func (g github) render() ([]byte, error) {
 			}
 		}
 	}
-	jobs := append([]job{g.check()}, plans...)
+	jobs := []job{g.check()}
+	if len(prepared) > 0 {
+		jobs = append(jobs, g.prepare(prepared, len(previews) > 0))
+	}
+	jobs = append(jobs, plans...)
 	jobs = append(jobs, previews...)
 	jobs = append(jobs, deploys...)
 	seen := map[string]string{}
@@ -252,6 +270,8 @@ func (g github) header(w *yamlWriter, notes []string) {
 	w.comment(0, fmt.Sprintf("The stack's service is %s. Change it and build it again with superschematic build, which writes this file.", st.Dir))
 	w.line(0, "#")
 	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers, jobs, workers and engine runners with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
+	w.line(0, "#")
+	w.comment(0, "The prepare job runs, with no credentials, all the project code the cloud jobs need: the build, the installs, the sites' and bundles' builds and the sidecar documents (superschematic stack prepare). A cloud job takes what it made, and runs no build, no Bun and no package's script after it signs in or anywhere else.")
 	if len(notes) > 0 {
 		w.line(0, "#")
 		w.line(0, "# Environments with no job:")
@@ -547,7 +567,7 @@ func (g github) typeScriptWorkspace() step {
 // as planner: levels 5 and 6.
 func (g github) plan(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, in, err := g.cloudSetup(env, registry.CIPlanner, nil)
+	steps, in, err := g.cloudSetup(env, registry.CIPlanner)
 	if err != nil {
 		return job{}, err
 	}
@@ -555,7 +575,7 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 	return job{
 		id:          "plan-" + jobID(e.Environment),
 		name:        "plan " + e.Environment,
-		needs:       "check",
+		needs:       "[check, prepare]",
 		cond:        strings.Join([]string{onPullRequest, notClosed, sameRepository}, " && "),
 		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-plan-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
@@ -568,12 +588,7 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 // destroys it when the pull request closes: level 7.
 func (g github) preview(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	var builds []step
-	for _, s := range g.builds(env) {
-		s.cond = notClosed
-		builds = append(builds, s)
-	}
-	steps, in, err := g.cloudSetup(env, registry.CIDeployer, builds)
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer)
 	if err != nil {
 		return job{}, err
 	}
@@ -585,10 +600,11 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 	return job{
 		id:    "preview-" + jobID(e.Environment),
 		name:  "preview " + e.Environment,
-		needs: "check",
+		needs: "[check, prepare]",
 		// check does not run when the pull request closes, and the
-		// destroy must run all the same.
-		cond:        fmt.Sprintf("!cancelled() && %s && %s && (%s || needs.check.result == 'success')", onPullRequest, sameRepository, closed),
+		// destroy must run all the same, with the documents prepare
+		// evaluated.
+		cond:        fmt.Sprintf("!cancelled() && %s && %s && needs.prepare.result == 'success' && (%s || needs.check.result == 'success')", onPullRequest, sameRepository, closed),
 		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
 		steps:       steps,
@@ -599,7 +615,7 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 // after the job before it.
 func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	e := env.Environment
-	steps, in, err := g.cloudSetup(env, registry.CIDeployer, g.builds(env))
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer)
 	if err != nil {
 		return job{}, err
 	}
@@ -607,7 +623,7 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
-		needs:       after,
+		needs:       "[" + after + ", prepare]",
 		cond:        fmt.Sprintf("github.event_name != 'pull_request' && github.ref == 'refs/heads/%s'", g.branch),
 		environment: e.Environment,
 		cloud:       in.idToken,
@@ -617,23 +633,23 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 }
 
 // cloudSetup is the steps a cloud job takes before its commands: the
-// checkout, superschematic, the schemas root's packages, Bun for a
-// deployer of an environment with a site or a bundle, the provisioner's
-// tools, the job's builds, and last the sign-in as role: a step, or the
-// env the steps that run the stack's commands take. Every step before the
-// sign-in runs with no credentials, as check does: the installs, which
-// run the lockfiles and scripts of the pull request, and the builds. Only
-// the stack commands after it read the credentials the sign-in leaves.
-func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole, builds []step) ([]step, signedIn, error) {
+// checkout, superschematic, the schemas root's packages, installed with
+// none of their scripts, which the loader reads the types of, the
+// provisioner's tools, the directory the prepare job wrote, and last the
+// sign-in as role: a step, or the env the steps that run the stack's
+// commands take. A cloud job runs no project code (D47, amended): the
+// prepare job built, installed and evaluated it all with no identity
+// token, which a job's `id-token: write` would give every one of its
+// steps, and the stack commands take it with --prepared, starting no Bun,
+// install or build. Only the stack commands read the credentials the
+// sign-in leaves.
+func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
 	if role == registry.CIDeployer && env.Migrate {
 		// The target migrates from the deploying machine (D64).
 		steps = append(steps, g.installMigrate())
 	}
-	steps = append(steps, g.packages()...)
-	if role == registry.CIDeployer && buildsWithBun(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
-		steps = append(steps, setupBun())
-	}
+	steps = append(steps, g.scriptlessPackages()...)
 	for _, tool := range env.Tools {
 		s, err := toolStep(tool)
 		if err != nil {
@@ -641,7 +657,11 @@ func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole, bui
 		}
 		steps = append(steps, s)
 	}
-	steps = append(steps, builds...)
+	steps = append(steps, step{
+		name: "Download what prepare made",
+		uses: &actionDownload,
+		with: [][2]string{{"name", preparedArtifact}, {"path", preparedDir}},
+	})
 	in, err := signIn(env.Identity(role), role)
 	if err != nil {
 		return nil, signedIn{}, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
@@ -763,6 +783,73 @@ func (g github) packages() []step {
 	return nil
 }
 
+// scriptlessPackages installs the schemas root's packages as packages
+// does, running none of their scripts: what a cloud job installs, which
+// runs no project code (D47, amended).
+func (g github) scriptlessPackages() []step {
+	steps := g.packages()
+	for i := range steps {
+		if steps[i].run != "" {
+			steps[i].name = "Install the schemas root's packages, running none of their scripts"
+			steps[i].run += " --ignore-scripts"
+		}
+	}
+	return steps
+}
+
+// prepare is the job that runs, with no credentials, all the project code
+// the cloud jobs of environments need (D47, amended): it installs the
+// schemas root's packages, builds every service, installs the output
+// root's workspace when an environment builds a site or a bundle, and runs
+// `stack prepare` for the environments, which evaluates the sidecar
+// documents, writes each image's build context, and builds each site and
+// bundle, into a directory it uploads as an artifact. It holds no
+// identity token and no secret. It runs on every event a cloud job runs
+// on: on a pull request from the repository, its closing too when the
+// stack has a preview, where it builds nothing and prepares the documents
+// a destroy reads.
+func (g github) prepare(environments []string, previews bool) job {
+	st := g.req.Stack
+	steps := []step{g.checkout(), g.install()}
+	steps = append(steps, g.packages()...)
+	bun := false
+	for _, env := range g.req.Environments {
+		if slices.Contains(environments, env.Environment.Environment) && buildsWithBun(env) {
+			bun = true
+		}
+	}
+	if bun && st.PackageManager != registry.PackageManagerBun {
+		steps = append(steps, setupBun())
+	}
+	var builds []step
+	builds = append(builds, g.buildSteps()...)
+	if bun {
+		builds = append(builds, g.typeScriptWorkspace())
+	}
+	args := append([]string{"superschematic", "stack", "prepare"}, environments...)
+	args = append(args, "--stack", st.Dir, "--dir", `"$RUNNER_TEMP/prepared"`)
+	builds = append(builds, step{name: "Prepare " + strings.Join(environments, ", "), run: strings.Join(args, " ")})
+	cond := fmt.Sprintf("github.event_name != 'pull_request' || (%s && %s)", notClosed, sameRepository)
+	if previews {
+		cond = fmt.Sprintf("github.event_name != 'pull_request' || %s", sameRepository)
+		for i := range builds {
+			builds[i].cond = notClosed
+		}
+		builds = append(builds, step{
+			name: "Prepare the documents of " + strings.Join(environments, ", ") + " for the destroy",
+			cond: closed,
+			run:  strings.Join(append(args, "--no-build"), " "),
+		})
+	}
+	steps = append(steps, builds...)
+	steps = append(steps, step{
+		name: "Upload what prepare made",
+		uses: &actionUpload,
+		with: [][2]string{{"name", preparedArtifact}, {"path", preparedDir}, {"if-no-files-found", "error"}},
+	})
+	return job{id: "prepare", name: "prepare", cond: cond, steps: steps}
+}
+
 // setupBun installs Bun at the release tools.env pins, the one a
 // TypeScript server's image runs on.
 func setupBun() step {
@@ -783,10 +870,10 @@ func setupNode() step {
 	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}}}
 }
 
-// hasSite reports whether env deploys a static site, which `stack deploy`
-// builds on the runner with Bun after a frozen install of the output
-// root's workspace (D55): its deploy and preview jobs set up Bun and
-// install the workspace from the committed lockfile first. A job, a
+// hasSite reports whether env deploys a static site, which `stack
+// prepare` builds on the runner with Bun after a frozen install of the
+// output root's workspace (D55; D47, amended): the prepare job sets up Bun
+// and installs the workspace from the committed lockfile first. A job, a
 // worker or a bucket needs nothing of the workflow: the deploy builds
 // their images on the target, as a server's, and a bucket is a node of
 // the graph.
@@ -795,16 +882,16 @@ func hasSite(env registry.CIEnvironment) bool {
 }
 
 // hasBundle reports whether env places a server, a job or a worker on a
-// platform whose artifact is a bundle (D64), which `stack deploy` builds
+// platform whose artifact is a bundle (D64), which `stack prepare` builds
 // on the runner with `bun bundle.ts` after a frozen install of the output
 // root's workspace, as it builds a site.
 func hasBundle(env registry.CIEnvironment) bool {
 	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.HasBundle() })
 }
 
-// buildsWithBun reports whether a deploy of env builds a site or a bundle
-// on the runner with Bun, so its deploy and preview jobs set up Bun and
-// install the workspace from the committed lockfile first.
+// buildsWithBun reports whether a deploy of env needs a site or a bundle
+// built on the runner with Bun, so the prepare job sets up Bun and
+// installs the workspace from the committed lockfile first.
 func buildsWithBun(env registry.CIEnvironment) bool { return hasSite(env) || hasBundle(env) }
 
 // bundled are the stack's servers, jobs and workers some environment
@@ -850,22 +937,11 @@ func (g github) buildSteps() []step {
 	return []step{setupRust(), g.build()}
 }
 
-// builds are the steps a deploy or preview job of env takes before it
-// signs in: the build, and the frozen install of the output root's
-// workspace for an environment with a site or a bundle, which stack
-// deploy builds or bundles on the runner from it (D55, D64).
-func (g github) builds(env registry.CIEnvironment) []step {
-	steps := g.buildSteps()
-	if buildsWithBun(env) {
-		steps = append(steps, g.typeScriptWorkspace())
-	}
-	return steps
-}
-
 // stackCommand is one of the stack commands on the stack, which the job
-// names since it runs from the repository root.
+// names since it runs from the repository root, reading what the prepare
+// job made (D47, amended).
 func (g github) stackCommand(command, environment string, flags ...string) string {
-	args := append([]string{"superschematic", "stack", command, environment, "--stack", g.req.Stack.Dir}, flags...)
+	args := append([]string{"superschematic", "stack", command, environment, "--stack", g.req.Stack.Dir, preparedFlag}, flags...)
 	return strings.Join(args, " ")
 }
 

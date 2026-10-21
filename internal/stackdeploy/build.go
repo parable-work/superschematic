@@ -47,8 +47,16 @@ type Sources struct {
 
 	// Run runs a site's build and a bundle's (`bun bundle.ts <dir>` in
 	// server/<stack>/<deployable>/ under OutputRoot, D64), and the frozen
-	// install of the workspace before them; nil runs them with os/exec.
+	// install of the workspace before them; nil runs them with os/exec,
+	// each with no credential in its environment (D47, amended).
 	Run RunCommand
+
+	// Prepared, when set, is what `stack prepare` wrote: the operation
+	// takes each image's build context, each site's files and each bundle
+	// from it, and installs, builds and writes nothing itself, so no
+	// project code runs beside its credentials (D47, amended). The other
+	// fields are then unread.
+	Prepared *Prepared
 }
 
 // Dockerfile returns the path of a server's or a job's Dockerfile.
@@ -135,27 +143,46 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 			continue
 		}
 		what := string(d.Kind) + " " + d.Name
-		dockerfile := src.Dockerfile(s.env.Stack, d.Name)
-		if _, err := os.Stat(dockerfile); errors.Is(err, fs.ErrNotExist) {
-			if len(only) > 0 {
-				return p, fmt.Errorf("%s has no Dockerfile at %s: run `superschematic build-all` first, or give its image with --image", what, dockerfile)
+		var archive string
+		var c *Context
+		if src.Prepared != nil {
+			// The context `stack prepare` wrote, with no credentials
+			// (D47, amended).
+			pc := src.Prepared.Contexts[d.Name]
+			if pc == nil {
+				if len(only) > 0 {
+					return p, fmt.Errorf("%s: %s holds no build context of it; run `superschematic stack prepare` for its environment, or give its image with --image", what, src.Prepared.Dir)
+				}
+				s.logf("%s: %s holds no build context of it, so its image comes from --image or the manifest", what, src.Prepared.Dir)
+				continue
 			}
-			s.logf("%s: no Dockerfile at %s, so its image comes from --image or the manifest", what, dockerfile)
-			continue
-		} else if err != nil {
-			return p, err
-		}
-		if p.dir == "" {
-			dir, err := os.MkdirTemp("", "superschematic-build-")
-			if err != nil {
+			var err error
+			if archive, c, err = src.Prepared.context(pc); err != nil {
+				return p, fmt.Errorf("%s: %w", what, err)
+			}
+		} else {
+			dockerfile := src.Dockerfile(s.env.Stack, d.Name)
+			if _, err := os.Stat(dockerfile); errors.Is(err, fs.ErrNotExist) {
+				if len(only) > 0 {
+					return p, fmt.Errorf("%s has no Dockerfile at %s: run `superschematic build-all` first, or give its image with --image", what, dockerfile)
+				}
+				s.logf("%s: no Dockerfile at %s, so its image comes from --image or the manifest", what, dockerfile)
+				continue
+			} else if err != nil {
 				return p, err
 			}
-			p.dir = dir
-		}
-		archive := filepath.Join(p.dir, d.Name+".tar.gz")
-		c, err := writeContextFile(archive, src.RepositoryRoot, dockerfile)
-		if err != nil {
-			return p, fmt.Errorf("%s: %w", what, err)
+			if p.dir == "" {
+				dir, err := os.MkdirTemp("", "superschematic-build-")
+				if err != nil {
+					return p, err
+				}
+				p.dir = dir
+			}
+			archive = filepath.Join(p.dir, d.Name+".tar.gz")
+			var err error
+			if c, err = writeContextFile(archive, src.RepositoryRoot, dockerfile); err != nil {
+				return p, fmt.Errorf("%s: %w", what, err)
+			}
 		}
 		if !force && p.images[d.Name] != "" && p.contexts[d.Name] == c.Digest {
 			s.logf("%s: context %s is the one %s was built from; keeping it", what, shortDigest(c.Digest), p.images[d.Name])
@@ -323,6 +350,7 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer sites.cleanup()
 		upload := slices.Clone(sites.built)
 		if o.Force {
 			upload = append(upload, sites.unchanged...)

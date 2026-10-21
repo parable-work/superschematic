@@ -4473,8 +4473,8 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run`, `queue` and
-`unlock`. Targets and provisioners plug into it; they add no commands of
+`dev`, `prepare`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run`,
+`queue` and `unlock`. Targets and provisioners plug into it; they add no commands of
 their own. `stack dev` runs a local environment (section 8.3), `stack run`
 runs a job once on demand, locally or in the cloud (section 8.7), and
 `stack queue` lists, retries and drops a queue's dead messages, locally or
@@ -4595,6 +4595,41 @@ provider reads and what to enter, as the DNS platform resolved them into
 run's account and hands it to the provisioner, which passes it to the
 tool's process for that run only, never to its config, its program or a
 file.
+
+`stack prepare [environment...]` runs, with no credentials, all the
+project code that `plan`, `build`, `deploy` and `destroy` would otherwise
+run beside the target's (D47, amended), in `cli/stack_prepare.go` over
+`stackdeploy.Prepare`. It evaluates every service's sidecar documents
+through the document harness, writes the build context of each server,
+job and worker of the environments whose Dockerfile the build wrote, and
+builds each site and each bundle after one frozen install of the
+workspace, into a directory, `<output-root>/prepared/<stack>` unless
+`--dir` names one: `prepared.json`, `contexts/<deployable>.tar.gz`,
+`sites/<site>.tar` and `bundles/<deployable>.tar`. A site's or a bundle's
+archive is the tar stream its digest is of (sections 8.10 and 18.5), so
+an upload that drops file modes cannot change it. With no environment
+named it prepares every one off the local target; `--no-build` writes the
+documents alone. Each of the four commands takes `--prepared <dir>`: the
+loader then reads each sidecar document a module runs from the directory
+(`loader.WithModuleRunner`), refusing one it lacks or whose module or
+imports changed since, and starts no Bun; a deploy or a build takes each
+context, site and bundle from it, checked against its digest, and
+installs and builds nothing. A directory prepared for another stack or
+environment, or with `--no-build` for a deploy that builds, is refused.
+
+Every child process a `stack` command or the document harness starts to
+run project code, the harness, the workspace's install, a site's build
+and a bundle's, gets an allowlisted environment (`internal/childenv`):
+the path, home, user, shell, temporary directories, locale, terminal,
+`CI`, proxies and certificates, `XDG_*`, Bun's install and cache
+directories and `NODE_ENV`. `SUPERSCHEMATIC_CHILD_ENV` names more, a
+private registry's token say, but never a credential's: no `GOOGLE_*`,
+`CLOUDSDK_*`, `CLOUDFLARE_*`, `PULUMI_*`, `AWS_*`, `AZURE_*`, `ARM_*` or
+`ACTIONS_*` variable, no `GITHUB_TOKEN`, `GH_TOKEN` or passphrase. A
+credentials file on disk, gcloud's application default credentials, stays
+readable to a child; on a developer's machine, `stack prepare` in a shell
+that holds no credentials and `stack deploy --prepared` keep the
+project's code away from them too.
 
 ### 11.2 Deploy
 
@@ -4857,42 +4892,53 @@ The GitHub workflow:
     that order and each named for its kind, which checks the
     implementations it depends on. The crates name the runtime checkouts
     `[paths]` names by path, so the CI checkout holds them, as the image's
-    context does. Every preview and deploy job, whose build runs the same
-    update, sets up the same release before it, since the runner's own
-    cargo may be another.
+    context does. The `prepare` job, whose build runs the same update,
+    sets up the same release before it, since the runner's own cargo may
+    be another.
   - For a stack with a site (section 8.10), `check` installs the same
     workspace from its lockfile, and builds each site with its build
     script in its package, `bun run <build>`, as `stack deploy` does, so a
     site that does not build fails the pull request. The ci generator
     locates each site's package under the repository root, as it locates
     the TypeScript implementations (`CIStack.Sites`).
+  - A `prepare` job runs, with no credentials, all the project code the
+    cloud jobs need (D47, amended): it installs the schemas root's
+    packages, runs the build after the Rust setup, installs the output
+    root's workspace when an environment with a cloud job has a site or a
+    bundle, and runs `stack prepare` for every environment with a cloud
+    job into the runner's temporary directory, which it uploads as the
+    artifact `prepared`. It has no `id-token` and no secret, and runs on
+    every event a cloud job runs on: when a pull request with a preview
+    closes, it builds nothing and prepares the documents alone (`--no-build`),
+    which the destroy reads.
   - A `plan` job per cloud environment without parameters runs `stack
-    plan` as `planner`, after `check`: the infrastructure diff, the
-    migration plans and their hazards (levels 5 and 6).
+    plan` as `planner`, after `check` and `prepare`: the infrastructure
+    diff, the migration plans and their hazards (levels 5 and 6).
   - A `preview` job per environment with one parameter runs `stack deploy
     <environment> --param <parameter>=<pull request number>` as
-    `deployer` after `check`, a member per pull request, and `stack
-    destroy` of that member when the pull request closes, when `check`
-    does not run (level 7). An environment with more parameters has no CI
+    `deployer` after `check` and `prepare`, a member per pull request,
+    and `stack destroy` of that member when the pull request closes, when
+    `check` does not run (level 7). An environment with more parameters has no CI
     job, and the workflow says so.
   - A pull request from a fork runs `check` alone: GitHub gives its jobs
     no identity token.
 - **On a push to the branch:** a `deploy` job per cloud environment
   without parameters, in the order the environments are declared. The
-  first deploys once `check` passes; each later one waits for the one
-  before. Each runs in a GitHub environment of its own name, so that
+  first deploys once `check` and `prepare` pass; each later one waits for
+  the one before, and for `prepare`. Each runs in a GitHub environment of its own name, so that
   environment's required reviewers approve it. Reviewers are a setting of
   the repository, not of the stack. `workflow_dispatch` runs `check` and,
   from the branch, the deploys.
-- A `deploy` or `preview` job of an environment with a site sets up Bun,
-  at `tools.env`'s release, even in a project whose schemas root installs
-  with npm, and installs the output root's workspace from its lockfile
-  after the build and before it signs in, since `stack deploy` builds
-  the site on the runner after a frozen install. A `plan` job does neither: `stack plan` builds
-  no site. Jobs, workers and buckets need nothing more of the workflow:
-  the deploy builds a job's or a worker's image through the target's
-  builder, as a server's, and a bucket, a job's schedule and a worker
-  pool are resources of the graph.
+- Every cloud job downloads `prepared`, installs the schemas root's
+  packages with `--ignore-scripts`, which the loader reads the types of,
+  and passes `--prepared` to its stack commands. It runs no build, no Bun
+  and no package's script: `prepare` set up Bun, at `tools.env`'s
+  release even in a project whose schemas root installs with npm, built
+  each site and bundle, and wrote each image's build context. Jobs,
+  workers and buckets need nothing more of the workflow: the deploy
+  builds a job's or a worker's image through the target's builder, from
+  its prepared context, as a server's, and a bucket, a job's schedule and
+  a worker pool are resources of the graph.
 - One deploy at a time per environment, and one preview job per member,
   neither cancelled by the next. A plan job has a group per pull request
   and environment: GitHub keeps one pending job per group and cancels the
@@ -4920,20 +4966,20 @@ An environment without it has no cloud jobs, and the workflow names the
 bootstrap to run. `google-github-actions/auth` signs in, and its
 credentials file gives superschematic and Pulumi application default
 credentials. The action exports the file's path and the project to every
-later step of the job, so a cloud job signs in last, right before its
-stack commands: the schemas root's install, the build, the Rust setup and
-the frozen install of the output root's workspace, which run the pull
-request's lockfiles and their packages' scripts, run with no credentials,
-as they do in `check`, which shows none of them needs Google Cloud (D47,
-amended). Two exposures remain, and the job is the boundary for both.
-The job's `id-token: write` lets any of its steps ask GitHub for an
-identity token, which the pool exchanges for the account's, since the
-pool admits any workflow of the repository as either account. And the
-stack commands run the project's TypeScript with the credentials: its
-sidecar documents, the workspace's install and each site's build. A
-fork's pull request has no cloud job, and a pull request from the
-repository runs the workflow it carries, which its author could change
-anyway. The cloud jobs install the provisioner's tools: the Pulumi
+later step of the job, and its `id-token: write` lets any step ask GitHub
+for an identity token, so a cloud job runs no project code at all (D47,
+amended): its steps are the checkout, superschematic's releases, the
+package manager's set-up, the schemas root's install with no scripts, the
+provisioner's tools, the download of `prepared`, the sign-in, last, and
+the stack commands, which start no Bun, install or build. The pull
+request's lockfiles, their packages' scripts, the build, each site's and
+bundle's build and the sidecar documents run in `prepare`, which holds
+no identity token and no secret. `TestCloudJobsSignInLast` holds every
+golden's cloud jobs to those steps. A fork's pull request has no cloud
+job, and a pull request from the repository runs the workflow it
+carries, which its author could change anyway, so this guards the
+credentials against the code a pull request's dependencies bring, not
+against its author. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
 is built with. A job that installs Bun installs `tools.env`'s release, the
 one a TypeScript server's image runs on, and a job that installs an npm
@@ -5634,10 +5680,11 @@ steps that run `superschematic stack plan`, `deploy` or `destroy`, and of
 no other step: not the job's, where a pull request's `bun install` would
 run its packages' scripts with them. D1's migrations run within `stack
 deploy`. There is no action and no `id-token: write`; the renderer
-refuses a field that is no secret's name. Deploy and preview jobs of an environment
-with a server, job or worker whose artifact is a bundle set up Bun and
-install the workspace, as a site's do, since the deploy runs `bundle.ts` on
-the runner; a plan job builds nothing and does neither. With a D1
+refuses a field that is no secret's name. The `prepare` job, with no
+token, sets up Bun, installs the workspace and runs `bundle.ts` for each
+server, job or worker whose artifact is a bundle, as for a site, and the
+deploy and preview jobs take the bundles it made with `--prepared` and
+run neither (section 11.3; D47, amended). With a D1
 database, they also install `superschematic-migrate` from the release,
 its own tarball beside the CLI's, checked against `SHA256SUMS`: the
 target's runner is a `registry.DeployingMachineMigrations`, so

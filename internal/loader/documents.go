@@ -55,6 +55,9 @@ func loadDocuments(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 			Registry:    reg,
 			Catalog:     o.schemaCatalog,
 			RunModule: func(file string) (json.RawMessage, []string, error) {
+				if o.runModule != nil {
+					return o.runModule(servicePath, file)
+				}
 				res, err := executor.RunDocument(servicePath, file, executor.WithProfiler(o.profile))
 				if err != nil {
 					return nil, nil, err

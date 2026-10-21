@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/parable-work/superschematic/internal/childenv"
 )
 
 // documentHarnessSource is the standalone harness bun runs to execute a
@@ -79,6 +81,9 @@ func RunDocument(servicePath, file string, opts ...Option) (result *Document, er
 
 	cmd := exec.Command(bunPath, "run", harnessPath, abs)
 	cmd.Dir = servicePath
+	// A document is the project's code: it runs with no credential in its
+	// environment (D47, amended).
+	cmd.Env = childenv.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
