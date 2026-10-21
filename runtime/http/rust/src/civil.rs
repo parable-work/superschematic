@@ -18,7 +18,7 @@ pub(crate) fn from_days(days: i64) -> (i64, i64, i64) {
 
 /// The days since 1970-01-01 of a proleptic Gregorian date: Howard
 /// Hinnant's `days_from_civil`.
-#[cfg(feature = "gcs")]
+#[cfg(any(feature = "gcs", feature = "sqlite"))]
 pub(crate) fn to_days(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);

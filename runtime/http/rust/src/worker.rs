@@ -62,7 +62,11 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::task::TaskTracker;
 use tracing::Instrument as _;
 
-use crate::queue::{Claim, PostgresQueue, QueueError};
+#[cfg(feature = "postgres")]
+use crate::queue::PostgresQueue;
+#[cfg(feature = "sqlite")]
+use crate::queue::SqliteQueue;
+use crate::queue::{Claim, QueueError};
 use crate::stackconfig::{quote, StackConfigError};
 use crate::{BoxError, Shutdown};
 
@@ -234,6 +238,7 @@ pub trait WorkerQueue: Send + Sync + 'static {
     }
 }
 
+#[cfg(feature = "postgres")]
 #[async_trait]
 impl<M: DeserializeOwned + Send + 'static> WorkerQueue for PostgresQueue<M> {
     type Message = M;
@@ -268,6 +273,44 @@ impl<M: DeserializeOwned + Send + 'static> WorkerQueue for PostgresQueue<M> {
 
     async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
         PostgresQueue::prune(self, limit).await
+    }
+}
+
+#[cfg(feature = "sqlite")]
+#[async_trait]
+impl<M: DeserializeOwned + Send + 'static> WorkerQueue for SqliteQueue<M> {
+    type Message = M;
+
+    fn name(&self) -> &str {
+        SqliteQueue::name(self)
+    }
+
+    fn lease(&self) -> Duration {
+        SqliteQueue::lease(self)
+    }
+
+    async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<M>>, QueueError> {
+        SqliteQueue::claim(self, n, lease).await
+    }
+
+    async fn extend(&self, id: &str, token: &str, lease: Duration) -> Result<(), QueueError> {
+        SqliteQueue::extend(self, id, token, lease).await
+    }
+
+    async fn complete(&self, id: &str, token: &str) -> Result<(), QueueError> {
+        SqliteQueue::complete(self, id, token).await
+    }
+
+    async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
+        SqliteQueue::fail(self, id, token, cause).await
+    }
+
+    async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
+        SqliteQueue::release(self, id, token).await
+    }
+
+    async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
+        SqliteQueue::prune(self, limit).await
     }
 }
 
@@ -485,7 +528,7 @@ where
         };
         match handled {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(err)) => Err(crate::postgres::chain(err.as_ref())),
+            Ok(Err(err)) => Err(crate::error::chain(err.as_ref())),
             Err(panic) => Err(format!("panic: {}", panic_message(panic.as_ref()))),
         }
     }

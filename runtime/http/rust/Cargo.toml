@@ -107,6 +107,11 @@ identity-sqlite = ["identity", "dep:rusqlite"]
 # caller's transaction, the claims of a queue its descriptor describes, and
 # the loop that claims and handles a worker's messages.
 postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "tokio/rt", "tokio-util/rt"]
+# A queue's claims on a SQLite file (D53, amended): enqueue_sqlite in a
+# caller's rusqlite transaction, SqliteQueue's claims of a queue whose
+# descriptor carries its statements on SQLite, and the worker loop over
+# them, on tokio's blocking pool.
+sqlite = ["dep:rusqlite", "tokio/rt", "tokio-util/rt"]
 # A bucket on Google Cloud Storage (D54): GcsBucket, the Bucket a stack
 # server, job or worker opens for each bucket its APIs list, over Cloud
 # Storage's JSON API through the http-client feature's client, as the
@@ -160,6 +165,11 @@ required-features = ["postgres"]
 [[test]]
 name = "queue"
 required-features = ["postgres"]
+
+# The queue client and the worker loop on a SQLite file (D53, amended).
+[[test]]
+name = "queue_sqlite"
+required-features = ["sqlite"]
 
 # The worker loop's log lines, as a worker writes them.
 [[test]]

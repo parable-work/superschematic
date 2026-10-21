@@ -163,6 +163,23 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+/// An error and its causes, each after a colon, leaving out a cause whose
+/// text the message already ends with.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(crate) fn chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !out.ends_with(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        source = cause.source();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
