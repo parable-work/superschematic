@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-engine-addon"
-description = "The core's Node-API addon (D58): export_engine_napi! over the core's behaviors and the work queue's, which @superschematic/engine loads and the release ships as @superschematic/engine-<target>"
+description = "The core's Node-API addon (D58): export_engine_napi! over the core's behaviors, the work queue's and the commerce behaviors, which @superschematic/engine loads and the release ships as @superschematic/engine-<target>"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,8 +22,8 @@ doctest = false
 [features]
 # Both databases by default, as the engine has them.
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine-napi/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
-postgres = ["superschematic-engine-napi/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+sqlite = ["superschematic-engine-napi/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite", "superschematic-engine-commerce/sqlite"]
+postgres = ["superschematic-engine-napi/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres", "superschematic-engine-commerce/postgres"]
 # The test addon's bridge to behaviors written in TypeScript
 # (superschematic-engine-napi's feature): scripts/engine-napi.sh
 # --js-behaviors. Never in a shipped addon.
@@ -39,6 +39,10 @@ superschematic-engine-behaviors = { path = "../behaviors", default-features = fa
 # when its options name them (behaviors), as a deployment registers
 # @superschematic/engine-workqueue's.
 superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
+# The commerce behaviors (D70), which an engine registers after those when
+# its options name them, as a deployment registers
+# @superschematic/engine-commerce's.
+superschematic-engine-commerce = { path = "../../../engine-commerce/rust", default-features = false }
 
 [build-dependencies]
 napi-build = "=2.5.0"

@@ -547,8 +547,9 @@ entrypoint of a Go server whose API's database holds engine types
 requires it, and its `go.mod` replaces it with this directory; unset, the
 module comes from the module proxy at the release's tag. The server's
 Dockerfile builds the engine's static archive from the Cargo workspace
-beside it (`../rust`), which reaches the work queue's crate, the schema
-IR's and the version graph's engine at their places in the same checkout;
+beside it (`../rust`), which reaches the work queue's crate, the commerce
+crate, the schema IR's and the version graph's engine at their places in
+the same checkout;
 unset, the image downloads it with the release's other archives.
 
 ### `paths.engine_typescript`

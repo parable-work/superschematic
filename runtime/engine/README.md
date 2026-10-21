@@ -16,15 +16,18 @@ documents, and the HTTP API as one request and one response any host
 mounts (`engine::api`), with the axum router a Rust server mounts it with
 (the `axum` feature); `superschematic-engine-behaviors` (`rust/behaviors`)
 the core's fifteen behaviors; the work queue's seven are
-`superschematic-engine-workqueue` (`runtime/engine-workqueue/rust`);
+`superschematic-engine-workqueue` (`runtime/engine-workqueue/rust`), and
+the commerce behaviors (D70) and their supply contract
+`superschematic-engine-commerce` (`runtime/engine-commerce/rust`);
 `superschematic-engine-testkit` (`rust/testkit`) replays the scenario and
 HTTP corpora (`testdata/`) on both databases. Each host language reaches
 it through a binding:
 
 - TypeScript: `@superschematic/engine` (`typescript/`), over the engine's
   Node-API addon (`rust/napi`, `export_engine_napi!`; `rust/addon`, the
-  core's addon, over the core's behaviors and the work queue's), which a
-  release ships prebuilt as `@superschematic/engine-<target>`. `openEngine`
+  core's addon, over the core's behaviors, the work queue's and the
+  commerce ones), which a release ships prebuilt as
+  `@superschematic/engine-<target>`. `openEngine`
   opens it on a SQLite file with every call synchronous; `openEngineAsync`
   with every call a promise, for a server on Postgres. `engineApp` and
   `engineMcp` (`./http`, `./mcp`) mount its own routes on Hono, and

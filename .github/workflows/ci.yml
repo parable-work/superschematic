@@ -1002,7 +1002,8 @@ jobs:
 
   engine-rust:
     # The workspace has the work queue's crate (runtime/engine-workqueue/rust)
-    # as a member, so --workspace builds, lints and tests it too.
+    # and the commerce crate (runtime/engine-commerce/rust) as members, so
+    # --workspace builds, lints and tests them too.
     name: engine-rust (the Rust engine's workspace)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest

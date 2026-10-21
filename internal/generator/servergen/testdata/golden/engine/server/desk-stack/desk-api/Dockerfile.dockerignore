@@ -6,6 +6,7 @@
 *
 !go/desk-api
 !ir
+!runtime/engine-commerce/rust
 !runtime/engine-workqueue/rust
 !runtime/engine/go
 !runtime/engine/rust

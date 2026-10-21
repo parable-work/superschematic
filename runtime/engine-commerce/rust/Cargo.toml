@@ -1,0 +1,31 @@
+[package]
+name = "superschematic-engine-commerce"
+description = "The commerce behaviors (D70) for the Rust engine (D58): Stock, Calendar, Holds and Payments, and the supply contract a claim holds supply through, each over the declaration the compiler registers"
+# A member of the engine's workspace (runtime/engine/rust), outside its
+# directory, as the work queue's crate is: one lock file, and one toolchain
+# for every archive a binding links (D58).
+workspace = "../../engine/rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The databases the engine runs on, as the engine has them.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine/sqlite"]
+postgres = ["superschematic-engine/postgres"]
+
+[dependencies]
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# The plug-in API an extension's behavior uses, and nothing else of the
+# engine: these behaviors reach it as any extension's do, and an
+# extension's supply uses the supply module the same way.
+superschematic-engine = { path = "../../engine/rust/engine", default-features = false }
+
+[lints]
+workspace = true
