@@ -45,7 +45,12 @@ async function main(): Promise<void> {
 
   let deskDb: Database;
   try {
-    deskDb = loadDatabase('DESK_DB_DATABASE');
+    const connection = loadDatabase('DESK_DB_DATABASE');
+    if ('d1' in connection) {
+      // Only a Worker reaches a D1 binding, and the engine runs on none (D64).
+      throw new Error('DESK_DB_DATABASE is a D1 binding, which only a Worker reaches; set DESK_DB_DATABASE_URL');
+    }
+    deskDb = connection;
   } catch (error) {
     throw new Error(`database desk-db: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
