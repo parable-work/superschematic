@@ -278,11 +278,16 @@ func (g github) check() job {
 		packages = append([]step{setupBun()}, packages...)
 	}
 	steps = append(steps, packages...)
+	archives := slices.DeleteFunc(slices.Sorted(maps.Keys(st.EngineArchives)), func(db string) bool {
+		return !slices.Contains(slices.Collect(maps.Values(engines)), db)
+	})
+	engineTypeScript := st.EngineCheckout != "" && len(tsPackages) > 0
+	if st.EngineCheckout != "" && (len(archives) > 0 || engineTypeScript) {
+		steps = append(steps, engineSuperscalar(st.EngineCheckout))
+	}
 	steps = append(steps, g.build())
-	for _, db := range slices.Sorted(maps.Keys(st.EngineArchives)) {
-		if slices.Contains(slices.Collect(maps.Values(engines)), db) {
-			steps = append(steps, engineArchive(db, st.EngineArchives[db]))
-		}
+	for _, db := range archives {
+		steps = append(steps, engineArchive(db, st.EngineArchives[db], st.EngineCheckout))
 	}
 	for _, m := range goModules {
 		compile := goBuild
@@ -296,6 +301,9 @@ func (g github) check() job {
 			dir:  path.Join(st.OutputRoot, "server", st.Name, m.name),
 			run:  compile,
 		})
+	}
+	if engineTypeScript {
+		steps = append(steps, engineTypeScriptPackages(st.EngineCheckout))
 	}
 	if workspace {
 		steps = append(steps, g.typeScriptWorkspace())
@@ -369,18 +377,54 @@ func engineArchiveDir(db string) string {
 // wrote, and stages it as libsuperschematic_engine.a, the name the engine's
 // Go binding links (D58): the static library cargo reports it built for
 // the crate, on the Rust release tools.env pins, which built the release's
-// other archives.
-func engineArchive(db, crate string) step {
+// other archives. With the engine's checkout at checkout, a crate with no
+// lock file of its own starts from the engine workspace's, as the image's
+// engine stage does.
+func engineArchive(db, crate, checkout string) step {
+	lines := []string{
+		"set -euo pipefail",
+		fmt.Sprintf(`dir="%s"`, engineArchiveDir(db)),
+		`mkdir -p "$dir"`,
+	}
+	if checkout != "" {
+		lines = append(lines, fmt.Sprintf(`test -f ../Cargo.lock || cp "$GITHUB_WORKSPACE/%s/runtime/engine/rust/Cargo.lock" ../Cargo.lock`, checkout))
+	}
 	return step{
 		name: "Build the engine archive of " + db,
 		dir:  crate,
-		run: strings.Join([]string{
-			"set -euo pipefail",
-			fmt.Sprintf(`dir="%s"`, engineArchiveDir(db)),
-			`mkdir -p "$dir"`,
+		run: strings.Join(append(lines,
 			`archive="$(cargo build --release --message-format=json-render-diagnostics | jq -r 'select(.reason == "compiler-artifact" and (.target.kind | index("staticlib"))) | .filenames[] | select(endswith(".a"))' | tail -n 1)"`,
 			`test -n "$archive"`,
 			`cp "$archive" "$dir/libsuperschematic_engine.a"`,
+		), "\n"),
+	}
+}
+
+// engineSuperscalar stands up the superscalar checkout under the engine's
+// checkout at checkout, which its crates reach by path and git does not
+// hold, from the commit its superscalar.pin names (D58).
+func engineSuperscalar(checkout string) step {
+	return step{
+		name: "Check out superscalar for the engine's checkout " + checkout,
+		dir:  checkout,
+		run:  "scripts/superscalar-dep.sh --checkout",
+	}
+}
+
+// engineTypeScriptPackages builds the dist/ of the packages of the engine's
+// checkout at checkout that the output root's workspace takes in place of
+// the published ones, which no checkout holds: superscalar's TypeScript
+// binding, the HTTP runtime's, and the engine's, which copies the HTTP
+// runtime's build (D58). The workspace's install, after it, takes them.
+func engineTypeScriptPackages(checkout string) step {
+	return step{
+		name: "Build the TypeScript packages of the engine's checkout " + checkout,
+		dir:  checkout,
+		run: strings.Join([]string{
+			"set -euo pipefail",
+			"(cd third_party/superscalar/bindings/typescript && bun install --frozen-lockfile && bun x --no-install tsc -p tsconfig.json && bun x --no-install tsc -p tsconfig.esm.json && bun scripts/fix-esm-extensions.mjs)",
+			"(cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)",
+			"(cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)",
 		}, "\n"),
 	}
 }
