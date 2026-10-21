@@ -235,6 +235,17 @@ type BootstrapRequest struct {
 	// remote names it (`acme/shop` on GitHub); empty when there is none.
 	Repository string
 
+	// Branch is the branch the generated CI deploys from: the stack's
+	// outputs.ci branch, DefaultCIBranch when it names none.
+	Branch string
+
+	// Environments are the stack's environments on Environment's target,
+	// resolved, Environment among them, in declaration order. A target
+	// whose bootstrap is the project's, which environments share, admits
+	// each CI job only as the account of the environments in the project
+	// that job deploys or plans (D69). Empty is Environment alone.
+	Environments []*ir.ResolvedEnvironment
+
 	// Credentials are the environment's platform credentials, each named
 	// once. Bootstrap creates each one's storage, readable by the accounts
 	// that deploy and by nothing else; the core then asks for each value

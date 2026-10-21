@@ -8403,8 +8403,9 @@ looks for them.
 
 Two exposures remain, and the job is the boundary for both. GitHub
 grants `id-token: write` to a whole job, so any step can ask for an
-identity token and exchange it at the pool, whose bindings admit any
-workflow of the repository as either account. And `stack plan`, `deploy`
+identity token and exchange it at the pool, whose bindings admitted any
+workflow of the repository as either account until D69 scoped them to the
+jobs that sign in as each. And `stack plan`, `deploy`
 and `destroy` run the project's TypeScript with the credentials: the
 loader runs its sidecar documents with Bun, and a deploy installs the
 workspace again and builds each site. A fork's pull request has no cloud
@@ -8417,11 +8418,51 @@ Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
 the builds; actionlint passes on them. No generated workflow has run on
 GitHub Actions.
 
-Not built:
-- Bindings scoped by claim: the deployer of an environment without
-  parameters admitting only a push to the branch in its GitHub
-  environment, so a pull request's job cannot act as it.
-- A deploy that runs the project's TypeScript with no credentials in its
-  environment.
+Not built: a deploy that runs the project's TypeScript with no
+credentials in its environment. The bindings scoped by claim, so a pull
+request's job cannot act as the deployer of an environment without
+parameters, are D69's.
+
+## D69. Each CI account admits only the runs of the jobs that sign in as it (D47 amended)
+
+D47's bootstrap gave `planner` and `deployer` `roles/iam.workloadIdentityUser`
+for `attribute.repository/<repository>`, and the provider mapped only the
+token's `repository` and `ref`. Every run of the repository could so
+exchange its GitHub identity token for either account of any project: a
+pull request's job, which a change to the workflow can point at any
+account, signed in as the deployer of Production. A job with `id-token:
+write` lets every step ask for that token, and Workload Identity
+Federation never checks a GitHub environment's required reviewers, so the
+reviewers D47 relies on guarded the job, not the account.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The provider maps two more attributes. `event_name` is the token's. `deploy_environment` is the GitHub environment of a `push` or `workflow_dispatch` run of the CI branch, `refs/heads/<branch>`: the end of the subject, `assertion.sub.extract(':environment:{environment}')`, and empty for every other run. The branch is the stack's `outputs.ci.github` branch, `main` unless set, which the CLI reads from the stack's config. | `assertion.environment`, a claim GitHub sets only for a job in an environment: whether the provider's CEL maps a missing claim to nothing or rejects the token is not documented, while the subject is always set. An IAM condition on each binding, which cannot read a federated principal's attributes. The branch on its own attribute, since a principal set names one attribute and the deploy needs the event, the branch and the environment together. |
+| Each binding names a principal set of one attribute: `attribute.event_name/pull_request` for a pull request's runs, `attribute.deploy_environment/<name>` for the branch's deploys in a GitHub environment. A `TypeServiceAccountIAMMember` per admission, `<role>.github.pull-request` and `deployer.github.environment.<name>`, replaces `<role>.github`. | One binding per account over a combined attribute, which would put every environment's rule into the provider's mapping. |
+| Bootstrap stays the project's, and reads the stack's environments on the target that share the project (`BootstrapRequest.Environments`, `Branch`), so every environment's bootstrap of a project applies the same graph. `planner` admits pull requests when an environment without parameters is in the project, for its `plan` job. `deployer` admits the branch's deploys in the GitHub environment of each environment without parameters in the project, for its `deploy` job, and pull requests when one with a single parameter is, for its `preview` job. An environment with more parameters has no CI job and admits nothing. | A graph from the bootstrapped environment alone, which the next environment's bootstrap of the same project would replace, dropping the first one's bindings. An account per environment: the deployer's roles are the project's, so a preview's deployer in a shared project could still change every resource in it. |
+| A pull request's run can act as a deployer only in a project a preview deploys to, and bootstrap refuses a `production` environment without parameters in such a project, naming both. | Warning and going on, which leaves Production's deployer to every pull request. |
+| A repository or branch the provider's CEL would quote must be a plain GitHub name, or bootstrap refuses it. | Escaping, for names GitHub does not allow. |
+
+A project bootstrapped before D69 keeps the bindings that admit every run
+of the repository until bootstrap runs again, for any environment in the
+project: its apply deletes `<role>.github` and creates the admissions
+above. Section 7.3 of `docs/stack-model.md` says so. A repository whose
+OIDC subject template has been customized gives `deploy_environment`
+another value, so its deploys sign in to nothing.
+
+Status: built. The bootstrap goldens, `Staging.json` (Staging and
+Preview's project) and the new `Production.json`, hold the provider's
+mapping and the admissions. `TestBootstrapAdmitsEachJob` checks whom each
+account of both projects admits, the branch in the mapping, the refusal of
+a production project a preview deploys to, and of a branch with a quote;
+`cli`'s stack test checks the branch and environments the CLI hands the
+target. No bootstrap has applied the new provider on Google Cloud, and no
+generated workflow has signed in through it on GitHub Actions: the CEL
+(`extract`, the ternary) is the form Google documents for attribute
+mappings, not one a test has run.
+
+Not built: a planner per pull request. `planner` admits every pull
+request of the repository, in every project with a plan job; it reads
+every resource and IAM policy, and no secret value.
 
 The rule is reversible until the first release.

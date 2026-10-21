@@ -302,6 +302,17 @@ func TestStackCommands(t *testing.T) {
 	out, err = run("bootstrap", "Staging", "--repository", "acme/shop")
 	require.NoError(t, err)
 	assert.Contains(t, ext.Provisioner.Calls(), "bootstrap Staging: repository acme/shop, credentials ")
+	// It hands the target the branch the CI deploys from, main for a
+	// stack with no outputs.ci, and the stack's environments on its
+	// target, resolved, which Dev's local target is not (D69), in the
+	// stack's order: by name, for a YAML schema that numbers none.
+	req := ext.Bootstrap.Requests[len(ext.Bootstrap.Requests)-1]
+	assert.Equal(t, "main", req.Branch)
+	var names []string
+	for _, env := range req.Environments {
+		names = append(names, env.Environment)
+	}
+	assert.Equal(t, []string{"Preview", "Staging"}, names)
 	assert.Equal(t, `projectNumber 123456789012: not recorded: bootstrap edits no YAML schema; in src/stack.schema.yaml, add projectNumber: "123456789012" beside project in the environment values of Staging`+"\n", out)
 	ext.Bootstrap.Values = nil
 

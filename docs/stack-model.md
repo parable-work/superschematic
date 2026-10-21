@@ -1564,9 +1564,30 @@ again: each step creates what is missing and leaves the rest.
      SQL instance, since an instance is not there at bootstrap;
    - Workload Identity Federation for the GitHub repository the git remote
      names: a pool, a provider for GitHub Actions' tokens that admits only
-     that repository, and the right of both accounts to be used from it.
-     Without a GitHub remote it is left out, `--repository` names one,
-     and `--repository ""` leaves it out.
+     that repository, and the right of each account to be used from the
+     jobs of the generated CI that sign in as it (section 11.3), and from
+     no other run of the repository (D69). The provider maps the token's
+     `event_name`, and `deploy_environment`: the GitHub environment a
+     `push` or `workflow_dispatch` run of the CI branch runs in, read from
+     the end of GitHub's default subject for a job in an environment,
+     `repo:<owner>/<repo>:environment:<name>`, and empty for every other
+     run. The branch is the stack's `outputs.ci.github` branch, `main`
+     unless set. Bootstrap reads the stack's environments on gcp that
+     share the project: `planner` admits a pull request's runs when one
+     of them has no parameter, for its `plan` job; `deployer` admits the
+     branch's runs in the GitHub environment of each one without
+     parameters, for its `deploy` job, and a pull request's runs when one
+     has a single parameter, for its `preview` job. An environment with
+     more parameters has no CI job and admits nothing. A pull request's
+     run can so act as `deployer` only in a project a preview deploys to,
+     and bootstrap refuses a `production` environment in such a project.
+     A repository whose OIDC subject template GitHub was told to change
+     gives `deploy_environment` another value, and its deploys sign in to
+     nothing until it is the default again. Without a GitHub remote it is
+     left out, `--repository` names one, and `--repository ""` leaves it
+     out. A project bootstrapped before D69 lets any run of the
+     repository act as either account: run bootstrap again, for any
+     environment in the project, to replace those bindings.
 4. It creates the secret of each platform credential the environment
    needs (a DNS platform's API token, section 6.9) in Secret Manager,
    where only `deployer` and `planner` can read it, and asks for each
@@ -1583,11 +1604,13 @@ again: each step creates what is missing and leaves the rest.
    compiler's syntax tree; for a JSON or YAML schema it prints the value to
    add (D47).
 
-The bootstrap graph is checked in as a golden,
-`extensions/gcp/testdata/golden/bootstrap/Staging.json`, and validates
-against the pinned schemas like any graph. The network a calling server's
-Direct VPC egress needs is not in it: it is in the environment's graph,
-which lowers it only when an edge needs it (section 7.2).
+The bootstrap graphs of Staging's project, which Preview shares, and of
+Production's are checked in as goldens,
+`extensions/gcp/testdata/golden/bootstrap/Staging.json` and
+`Production.json`, and validate against the pinned schemas like any
+graph. The network a calling server's Direct VPC egress needs is not in
+them: it is in the environment's graph, which lowers it only when an edge
+needs it (section 7.2).
 
 Environments that share a project share its bootstrap, so they share a
 region. The core drives bootstrap through the target's `Bootstrap` seam,
@@ -4725,8 +4748,18 @@ The GitHub workflow:
 
 Each cloud job signs in through the target's CI identity (`TargetSpec.CI`):
 on gcp, Workload Identity Federation through the pool bootstrap creates,
-as `<stack>-planner` or `<stack>-deployer`. The provider's name holds the
-project's number, `projectNumber` (section 7.1), which bootstrap records.
+as `<stack>-planner` or `<stack>-deployer`. Each account admits only the
+runs of the jobs that sign in as it (section 7.3, D69): a `plan` job's
+pull request as `planner`; a `deploy` job's push to the branch, or manual
+run of it, as the `deployer` of its project only in the GitHub
+environment of its name, so that environment's required reviewers stand
+between a pull request and the account; and a `preview` job's pull
+request as the `deployer` of the preview's project. `plan` and `preview`
+jobs run in no GitHub environment. A pull request that edits the workflow
+to name a GitHub environment or another account still runs as a pull
+request, which only the planners and the deployer of a preview's project
+admit. The provider's name holds the project's number, `projectNumber`
+(section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
 bootstrap to run. `google-github-actions/auth` signs in, and its
 credentials file gives superschematic and Pulumi application default
