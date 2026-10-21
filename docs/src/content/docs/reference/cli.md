@@ -760,13 +760,18 @@ answer, and a job whose scheduled run goes on; `stack dev`'s schedule
 skips the job's runs while this one goes on. Ctrl-C stops the run.
 
 On a cloud target, it runs the deployed job, with the image the deploy
-manifest records, through the target's job runner. It refuses a run whose
+manifest records, or the bundle for a job whose artifact is one, through
+the target's job runner. It builds nothing, and reads no `--prepared`
+directory. It refuses a run whose
 last deploy did not roll the job out, and a target that runs no job on
 demand. On gcp it runs an execution of the job's Cloud Run job as the
 last deploy left it, refusing one that runs another image than the
 manifest records, as during a deploy, and waits for it to end. When the
 last try fails, it reports that try's error, which it reads from the
-execution's logs in Cloud Logging, and the logs' URL.
+execution's logs in Cloud Logging, and the logs' URL. On cloudflare it
+starts an instance of the job's Workflow with the bundle the manifest
+records, refusing an instance that runs another bundle, waits for it to
+end, and reports the error the run threw.
 
 ```
 superschematic stack run Dev shop-orders-ship-orders

@@ -13,6 +13,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
@@ -277,5 +278,70 @@ func TestPrepareThenDeployABundle(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(program, ir.ArtifactsDir, stacktest.StorefrontServer, strings.TrimPrefix(bundle.Digest, "sha256:"), "main.js"))
 	if err != nil || string(data) != v1 {
 		t.Errorf("the placed main.js holds %q: %v", data, err)
+	}
+}
+
+// TestPrepareThenDeployRunsABundleJob: a job whose artifact is a bundle
+// and that runs on every deploy (D52 amended, D64 amended), as a Workflow
+// runs a cloudflare job, gets the bundle `stack prepare` built: a deploy
+// given the prepared directory runs no build, pins the prepared bundle,
+// and its jobs step hands the job runner that bundle's digest.
+func TestPrepareThenDeployRunsABundleJob(t *testing.T) {
+	f := newFixture(t)
+	services := stacktest.WithoutWorkers(stacktest.AcmeShop())
+	for i := range services {
+		if services[i].Name == stacktest.ShopOrders.Name {
+			// The fake cron platform connects to no Postgres and no
+			// server, so shop-orders keeps no edge of its own here.
+			services[i].Language = registry.APILanguageTypeScript
+			services[i].AuthDB, services[i].Dependencies, services[i].Calls, services[i].Buckets = nil, nil, nil, nil
+		}
+	}
+	on := true
+	s := stacktest.WithoutJobSettings(stacktest.WithoutWorkerSettings(stacktest.Shop()))
+	s.Environment("Staging").Settings = append(s.Environment("Staging").Settings, &ir.DeployableSettings{
+		Of: stacktest.JobOf(stacktest.ShopOrders, stacktest.ShipOrders.Name), Platform: stacktest.CronPlatform, OnDeploy: &on,
+	})
+	env := f.resolve(t, s, services, "Staging")
+	if d := env.Deployable(stacktest.ShipOrdersJob); d == nil || !d.HasBundle() {
+		t.Fatalf("Staging's %s = %+v, want a job that runs a bundle", stacktest.ShipOrdersJob, d)
+	}
+	f.ready(t, env)
+	const v1 = "export default { scheduled: () => {} };\n"
+	src := newBundleSources(t, stacktest.BundleScript, v1)
+	if _, err := stacktest.WriteBundlePackage(filepath.Join(src.root, "dist"), "shop-stack", stacktest.ShipOrdersJob, stacktest.BundleScript, v1); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "prepared")
+	if _, err := stackdeploy.Prepare(context.Background(), stackdeploy.PrepareOptions{
+		Stack: env.Stack, Environments: []*ir.ResolvedEnvironment{env}, Sources: src.sources(), Dir: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := stackdeploy.ReadPrepared(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := p.Bundles[stacktest.ShipOrdersJob]
+	if prepared == nil {
+		t.Fatalf("prepare kept no bundle of the job: %+v", p.Bundles)
+	}
+	imgs := images(1)
+	delete(imgs, stacktest.ShipOrdersJob)
+	o := deployOptions(f, t, env, nil, &planner{to: 1}, imgs)
+	o.Sources = &stackdeploy.Sources{Prepared: p, Run: noProjectCode(t)}
+	n := len(f.ext.Provisioner.Calls())
+	m, err := stackdeploy.Deploy(context.Background(), o)
+	if err != nil {
+		t.Fatalf("deploy: %v\n%s", err, f.log)
+	}
+	if b := m.Bundles[stacktest.ShipOrdersJob]; b == nil || b.Digest != prepared.Digest {
+		t.Fatalf("the deploy records the job's bundle as %+v, prepare %s", b, prepared.Digest)
+	}
+	if want := "run job " + stacktest.ShipOrdersJob + ": bundle " + prepared.Digest; !slices.Contains(f.calls(n), want) {
+		t.Errorf("the deploy ran:\n%s\nwant %s", strings.Join(f.calls(n), "\n"), want)
+	}
+	if !strings.Contains(f.log.String(), "  run job "+stacktest.ShipOrdersJob+" (bundle "+prepared.Digest+") and wait for it to end\n") {
+		t.Errorf("the log:\n%s", f.log)
 	}
 }
