@@ -248,3 +248,86 @@ func TestAProjectEngineArchiveInCheck(t *testing.T) {
 		t.Errorf("Orders, on another database, compiles with %q", s.Run)
 	}
 }
+
+// TestAnEngineCheckoutInCheck: a stack whose naming file's [paths] engine
+// keys name a superschematic checkout in the repository (D58). The
+// checkout's engine crates reach superscalar's core in a checkout git does
+// not hold, so check stands it up before the build; the project's engine
+// crate starts from the engine workspace's lock file; and before the
+// workspace's install it builds the checkout's TypeScript packages the
+// workspace takes in place of the published ones, so the TypeScript server
+// type-checks against the checkout's engine.
+func TestAnEngineCheckoutInCheck(t *testing.T) {
+	req := storefrontRequest()
+	req.Stack.Name, req.Stack.Dir = "desk-stack", "schemas/services/desk-stack"
+	req.Stack.TypeScriptImplementations = map[string]string{"desk-ts-api": "typescript/desk-ts-api"}
+	req.Stack.EngineArchives = map[string]string{"desk-db": "schemas/dist/engine/rust/desk-db/ffi"}
+	req.Stack.EngineCheckout = "vendor/superschematic"
+	env := *req.Environments[0].Environment
+	env.Stack = "desk-stack"
+	env.Deployables = []*ir.ResolvedDeployable{
+		{Name: "desk-api", Kind: ir.DeployableServer, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "desk-api", Kind: ir.SchemaKindAPI}}},
+		{Name: "desk-ts-api", Kind: ir.DeployableServer, Language: publicregistry.APILanguageTypeScript, Services: []ir.ServiceRef{{Name: "desk-ts-api", Kind: ir.SchemaKindAPI}}},
+		{Name: "desk-db-engine-runner", Kind: ir.DeployableRunner, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "desk-db", Kind: ir.SchemaKindDB}},
+			Runner: &ir.ResolvedRunner{Database: "desk-db", API: "desk-api", Instances: 1}},
+	}
+	env.Edges = []*ir.Edge{
+		{ID: "sql:desk-api->desk-db", Kind: ir.EdgeSQL, From: "desk-api", To: "desk-db", Service: ir.ServiceRef{Name: "desk-db", Kind: ir.SchemaKindDB}},
+		{ID: "sql:desk-ts-api->desk-db", Kind: ir.EdgeSQL, From: "desk-ts-api", To: "desk-db", Service: ir.ServiceRef{Name: "desk-db", Kind: ir.SchemaKindDB}},
+		{ID: "sql:desk-db-engine-runner->desk-db", Kind: ir.EdgeSQL, From: "desk-db-engine-runner", To: "desk-db", Service: ir.ServiceRef{Name: "desk-db", Kind: ir.SchemaKindDB}},
+	}
+	req.Environments[0].Environment = &env
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := files[0].Data
+	path := filepath.Join(t.TempDir(), "desk-stack.yml")
+	if err := os.WriteFile(path, got, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+
+	check := parseWorkflow(t, got).jobs["check"]
+	var names []string
+	for _, s := range check.Steps {
+		names = append(names, s.Name)
+	}
+	want := []string{
+		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Rust", "Set up Bun",
+		"Check out superscalar for the engine's checkout vendor/superschematic",
+		"Build the services", "Build the engine archive of desk-db", "Compile server desk-api", "Compile runner desk-db-engine-runner",
+		"Build the TypeScript packages of the engine's checkout vendor/superschematic",
+		"Install the TypeScript workspace from schemas/dist/bun.lock",
+		"Type-check server desk-ts-api", "Type-check the implementation of desk-ts-api",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
+	}
+	if s := check.step("Check out superscalar for the engine's checkout vendor/superschematic"); s.WorkingDirectory != "vendor/superschematic" || s.Run != "scripts/superscalar-dep.sh --checkout" {
+		t.Errorf("the superscalar step: %+v", s)
+	}
+	if s := check.step("Build the engine archive of desk-db"); !strings.Contains(s.Run, `test -f ../Cargo.lock || cp "$GITHUB_WORKSPACE/vendor/superschematic/runtime/engine/rust/Cargo.lock" ../Cargo.lock`) {
+		t.Errorf("the archive step seeds no lock file: %+v", s)
+	}
+	s := check.step("Build the TypeScript packages of the engine's checkout vendor/superschematic")
+	for _, want := range []string{
+		"(cd third_party/superscalar/bindings/typescript && bun install --frozen-lockfile",
+		"(cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)",
+		"(cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)",
+	} {
+		if s.WorkingDirectory != "vendor/superschematic" || !strings.Contains(s.Run, want) {
+			t.Errorf("the TypeScript packages step lacks %q: %+v", want, s)
+		}
+	}
+
+	// Without the checkout, check builds none of it.
+	req.Stack.EngineCheckout = ""
+	files, err = cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(files[0].Data, []byte("engine's checkout")) || bytes.Contains(files[0].Data, []byte("../Cargo.lock")) {
+		t.Errorf("a stack of no engine checkout builds one:\n%s", files[0].Data)
+	}
+}
