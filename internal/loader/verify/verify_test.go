@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parable-work/superschematic/extensions/platform"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -77,12 +76,10 @@ func TestForbiddenToolchainImportsUnderAnAlias(t *testing.T) {
 		"@acme/db":       "@superschematic/db",
 		"@acme/api":      "@superschematic/api",
 		"@acme/schema":   "@superschematic/schema",
-		"@acme/platform": "@superschematic/platform",
+		"@acme/grouping": "@test/grouping",
 	}
 	reg := registry.New(n)
-	if err := (platform.Extension{}).Register(reg); err != nil {
-		t.Fatal(err)
-	}
+	registerGrouping(t, reg)
 	cases := []struct {
 		kind ir.SchemaKind
 		pkg  string
@@ -95,8 +92,8 @@ func TestForbiddenToolchainImportsUnderAnAlias(t *testing.T) {
 		{ir.SchemaKindGeneral, "@acme/db"},
 		{ir.SchemaKindGeneral, "@superschematic/api"},
 		{ir.SchemaKindGeneral, "@acme/api"},
-		{ir.SchemaKindDB, "@superschematic/platform"},
-		{ir.SchemaKindDB, "@acme/platform"},
+		{ir.SchemaKindDB, "@test/grouping"},
+		{ir.SchemaKindDB, "@acme/grouping"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.kind)+"_"+tc.pkg, func(t *testing.T) {
@@ -119,8 +116,8 @@ func TestForbiddenToolchainImportsUnderAnAlias(t *testing.T) {
 		{ir.SchemaKindAPI, "@acme/api"},
 		{ir.SchemaKindGeneral, "@superschematic/schema"},
 		{ir.SchemaKindGeneral, "@acme/schema"},
-		{ir.SchemaKind(platform.Kind), "@superschematic/platform"},
-		{ir.SchemaKind(platform.Kind), "@acme/platform"},
+		{ir.SchemaKind("Grouping"), "@test/grouping"},
+		{ir.SchemaKind("Grouping"), "@acme/grouping"},
 	}
 	for _, tc := range allowed {
 		r := Run(ir.NewSchema("svc", tc.kind), Input{Registry: reg, Naming: n, ImportSites: []ImportSite{{Package: tc.pkg, File: "src/a.schema.ts"}}})
@@ -130,13 +127,14 @@ func TestForbiddenToolchainImportsUnderAnAlias(t *testing.T) {
 	}
 }
 
-// TestKindRestrictedPackageImportIsForbiddenElsewhere: an authoring package
-// whose only decorator is restricted to one kind cannot be imported by
-// another kind, with the same message and site as a ForbiddenPackages hit;
-// the kind it is restricted to imports it freely.
-func TestKindRestrictedPackageImportIsForbiddenElsewhere(t *testing.T) {
-	reg := registry.New(naming.Naming{})
-	if err := reg.RegisterKind(registry.KindSpec{Name: "Grouping", Extension: "test"}); err != nil {
+// registerGrouping registers a grouping kind the way an extension does:
+// Grouping, a kind with no sentinel, and its one decorator, @group, declared
+// in the authoring package @test/grouping and restricted to Grouping. The
+// package is an authoring package only because a decorator declares it, so
+// the kind rule reaches it through Registry.PackageAllowsKind.
+func registerGrouping(t *testing.T, reg *registry.Registry) {
+	t.Helper()
+	if err := reg.RegisterKind(registry.KindSpec{Name: "Grouping", Extension: "test", NoSentinel: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.RegisterDecorator(registry.DecoratorSpec{
@@ -146,6 +144,15 @@ func TestKindRestrictedPackageImportIsForbiddenElsewhere(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestKindRestrictedPackageImportIsForbiddenElsewhere: an authoring package
+// whose only decorator is restricted to one kind cannot be imported by
+// another kind, with the same message and site as a ForbiddenPackages hit;
+// the kind it is restricted to imports it freely.
+func TestKindRestrictedPackageImportIsForbiddenElsewhere(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	registerGrouping(t, reg)
 	sites := []ImportSite{{Package: "@test/grouping", File: "src/a.schema.ts", Line: 3, Col: 1}}
 	r := Run(ir.NewSchema("svc", ir.SchemaKindDB), Input{Registry: reg, ImportSites: sites})
 	if !hasError(r, "src/a.schema.ts:3:1: a DB schema cannot import @test/grouping") {
