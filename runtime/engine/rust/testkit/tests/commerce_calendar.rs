@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 use replicas_support::{as_replica, retrying};
 use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineErrorCode, Error, GetOptions,
-    InstanceRecord, PermissionMatcher, Principal, SchemaTarget, WriteOptions,
+    InstanceRecord, PermissionMatcher, Principal, SchemaTarget, ToolTarget, WriteOptions,
 };
 use superschematic_engine_commerce::supply::{HolderItem, ItemState};
 use superschematic_engine_testkit::commerce_fixtures::HoldsStandIn;
@@ -1592,6 +1592,53 @@ fn a_config_is_held_to_the_zone_the_hours_and_the_type() {
             let message = refused(config);
             assert!(message.contains(says), "{says}: {message}");
         }
+    }
+}
+
+#[test]
+fn the_guidance_says_the_hours_the_shape_of_a_hold_and_who_may_change_them() {
+    for target in targets("calendar_guidance") {
+        let engine = open(&target);
+        let described = engine
+            .tools()
+            .describe(&alice(), "Chair", ToolTarget::default())
+            .expect("describe");
+        let summary = described["behaviors"]
+            .as_array()
+            .expect("behaviors")
+            .iter()
+            .find(|behavior| behavior["name"] == "Calendar")
+            .map(|behavior| behavior["summary"].clone());
+        assert_eq!(
+            summary,
+            Some(json!("Each Chair is a resource whose time a claim books through its Holds: it opens mon 09:00-12:30, 13:30-17:30; tue 09:00-17:30; sat 10:00-16:00, in Europe/London unless an instance sets its own hours or zone, less its closures. It takes one hold at a time; a hold starts a whole number of 15 minutes after an opening time, lasts 15 minutes to 4 hours, starts at least 2 hours from now, and at most 60 days ahead. Each hold keeps 10 minutes after it free, which counts against capacity as the hold does. Wall times a daylight-saving change skips have no slot, and repeated ones are open twice."))
+        );
+        let guidance = |name: &str| -> Value {
+            described["operations"]
+                .as_array()
+                .expect("operations")
+                .iter()
+                .find(|operation| operation["name"] == name)
+                .map(|operation| operation["guidance"].clone())
+                .unwrap_or(Value::Null)
+        };
+        let codes = |name: &str| -> Vec<String> {
+            guidance(name)["errors"]
+                .as_array()
+                .map(|errors| {
+                    errors
+                        .iter()
+                        .map(|error| error["code"].as_str().unwrap_or_default().to_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        assert!(codes("holdFor").contains(&"outside_hours".to_owned()));
+        assert!(codes("addClosure").contains(&"has_bookings".to_owned()));
+        assert!(codes("findAvailability").contains(&"window_too_long".to_owned()));
+        assert!(codes("delete").contains(&"held".to_owned()));
+        let said = guidance("addClosure").to_string();
+        assert!(said.contains("calendar.manage"), "{said}");
     }
 }
 

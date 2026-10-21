@@ -36,6 +36,9 @@ pub(crate) fn duration(ms: i64) -> String {
     format!("{ms} ms")
 }
 
+const CLOSED_TO_ALL: &str =
+    "Do not use: the config names no permission, so the call is forbidden for every caller.";
+
 fn refusal(code: &str, correction: &str) -> GuidanceError {
     GuidanceError {
         code: code.to_owned(),
@@ -144,14 +147,20 @@ pub(crate) fn guidance(config: &CalendarConfig, target: &DescribeTarget) -> Beha
         Capacity::Fixed(count) => format!("{count} holds at once"),
         Capacity::Field(field) => format!("as many holds at once as its {field} says"),
     };
-    let buffers = match (config.buffer_before, config.buffer_after) {
-        (0, 0) => None,
-        (before, after) => Some(format!(
-            " Each hold keeps {} free before it and {} after it, which count as the hold does.",
-            duration(before),
-            duration(after)
-        )),
-    };
+    let kept: Vec<String> = [
+        (config.buffer_before, "before"),
+        (config.buffer_after, "after"),
+    ]
+    .into_iter()
+    .filter(|(ms, _)| *ms > 0)
+    .map(|(ms, side)| format!("{} {side} it", duration(ms)))
+    .collect();
+    let buffers = (!kept.is_empty()).then(|| {
+        format!(
+            " Each hold keeps {} free, which counts against capacity as the hold does.",
+            kept.join(" and ")
+        )
+    });
     let summary = format!(
         "Each {} is a resource whose time a claim books through its Holds: {}, in {} unless an instance sets its own hours or zone, less its closures. It takes {capacity}; {}.{} Wall times a daylight-saving change skips have no slot, and repeated ones are open twice.",
         target.type_name,
@@ -160,30 +169,27 @@ pub(crate) fn guidance(config: &CalendarConfig, target: &DescribeTarget) -> Beha
         shape(config),
         buffers.unwrap_or_default()
     );
-    let permission = config.permission.as_deref();
-    let manage = |what: &str| {
-        match permission {
+    // manage says one of the operations that need the config's permission.
+    let manage = |what: &str, codes: &[&str]| match config.permission.as_deref() {
         Some(permission) => said(
-            Some(format!("Use to {what}.")),
+            Some(format!(
+                "Use to {what}. It needs permission {permission}, else the call is forbidden."
+            )),
             None,
             None,
-            Vec::new(),
-        )
-        .with_note(format!("It needs permission {permission}, else the call is forbidden.")),
-        None => said(
-            None,
-            Some("Do not use: the config names no permission, so the call is forbidden for every caller.".to_owned()),
-            None,
-            Vec::new(),
+            errors(codes),
         ),
-    }
+        None => said(None, Some(CLOSED_TO_ALL.to_owned()), None, Vec::new()),
     };
-    let mut set_hours = manage("set this instance's own weekly hours or time zone; null goes back to the config's, and holds already made stay");
-    set_hours.errors = Vec::new();
-    let mut add = manage("close the resource for a holiday, a repair or a training day");
-    add.errors = errors(&["has_bookings"]);
-    let mut remove = manage("reopen the time a closure took");
-    remove.errors = errors(&["no_closure"]);
+    let set_hours = manage(
+        "set this instance's own weekly hours or time zone; null goes back to the config's, and holds already made stay",
+        &[],
+    );
+    let add = manage(
+        "close the resource for a holiday, a repair or a training day; force closes over held time, keeps the holds, and needs the permission's override",
+        &["has_bookings"],
+    );
+    let remove = manage("reopen the time a closure took", &["no_closure"]);
     let contract = |verb: &str| {
         said(
             None,
@@ -251,21 +257,6 @@ pub(crate) fn guidance(config: &CalendarConfig, target: &DescribeTarget) -> Beha
     BehaviorGuidance {
         summary,
         operations,
-    }
-}
-
-trait Note {
-    fn with_note(self, note: String) -> Self;
-}
-
-impl Note for OperationGuidance {
-    // with_note adds a sentence to useWhen.
-    fn with_note(mut self, note: String) -> Self {
-        self.use_when = Some(match self.use_when {
-            Some(text) => format!("{text} {note}"),
-            None => note,
-        });
-        self
     }
 }
 
