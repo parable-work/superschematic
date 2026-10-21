@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -740,9 +741,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 						arg := &endpoint.ScalarArgs[argIndex]
 						if _, ok := unionTypes[arg.typeName]; ok {
 							arg.UnionWrapper = "types." + arg.typeName + "Wrapper"
-							if !arg.IsMap && !arg.IsArrayOfArrays {
-								output.ValidatesUnionArgs = true
-							}
+							output.ValidatesUnionArgs = true
 						}
 					}
 					outputType := normalizeTypeName(endpoint.OutputType)
@@ -1004,14 +1003,17 @@ func collectReplacesFromDir(dir, sdkOutputDir string, seen map[string]struct{}) 
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"join": strings.Join,
-		// elementRef is what validateListElement takes for one element of
-		// an argument's list or map, expr: a pointer to it, so an object
-		// type's Validate qualifies, or a union element in its wrapper.
-		"elementRef": func(arg ScalarArg, expr string) string {
+		// elementCheck validates one element of an argument's list of lists
+		// or map, expr, at the argument's name and pathFormat: by its own
+		// validation through a pointer, so an object type's Validate
+		// qualifies, or, for a union, as the member its wrapper holds, a
+		// nil one required, as the route reports it.
+		"elementCheck": func(arg ScalarArg, pathFormat, pathArgs, expr string) string {
+			path := "fmt.Sprintf(" + strconv.Quote(arg.Name+pathFormat) + ", " + pathArgs + ")"
 			if arg.UnionWrapper != "" {
-				return "&" + arg.UnionWrapper + "{Value: " + expr + "}"
+				return "appendUnionValidationErrors(validationErrors, " + path + ", " + expr + " == nil, " + arg.UnionWrapper + "{Value: " + expr + "})"
 			}
-			return "&" + expr
+			return "validateListElement(validationErrors, " + path + ", &" + expr + ")"
 		},
 		"docLine": func(value, fallback string) string {
 			normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")

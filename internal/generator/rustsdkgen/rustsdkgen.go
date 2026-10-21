@@ -215,7 +215,8 @@ type ScalarArg struct {
 	IsMap       bool
 	ValueSchema string
 	// UnionValidator is the types crate's validate_<union> when the
-	// argument's type is a union it validates, alone or in a list, and ""
+	// argument's type is a union it validates, alone, in a list or in a
+	// map, and ""
 	// otherwise; WriteSDKWithTools sets it from the types crate's
 	// validators.rs. The argument is validated as the member the union
 	// picks, its errors at the argument's paths, as the route reports them.
@@ -233,6 +234,7 @@ type InputUnionField struct {
 	Name       string
 	Validator  string
 	ArrayDepth int
+	IsMap      bool
 }
 
 // NeedsRegex reports whether this namespace emits Regex-based validation.
@@ -1231,20 +1233,14 @@ func annotateUnionValidators(output *SDKOutput, apiOutput *apigen.APIOutput, typ
 			endpoint := &output.Namespaces[n].Endpoints[e]
 			for a := range endpoint.ScalarArgs {
 				arg := &endpoint.ScalarArgs[a]
-				if arg.IsMap || arg.ArrayDepth > 1 {
-					continue
-				}
 				if arg.UnionValidator = validatorOf(arg.typeName); arg.UnionValidator != "" {
 					output.ChecksUnions = true
 				}
 			}
 			endpoint.InputUnionFields = nil
 			for _, field := range endpoint.inputFields {
-				if field.IsMap || field.ArrayDepth() > 1 {
-					continue
-				}
 				if fn := validatorOf(field.Type); fn != "" {
-					endpoint.InputUnionFields = append(endpoint.InputUnionFields, InputUnionField{Name: field.Name, Validator: fn, ArrayDepth: field.ArrayDepth()})
+					endpoint.InputUnionFields = append(endpoint.InputUnionFields, InputUnionField{Name: field.Name, Validator: fn, ArrayDepth: field.ArrayDepth(), IsMap: field.IsMap})
 					output.ChecksUnions = true
 				}
 			}
