@@ -100,6 +100,13 @@ type Cloud interface {
 	// generation is live.
 	DeleteObjectGeneration(ctx context.Context, bucket, object string, generation int64) (deleted bool, err error)
 
+	// DeleteObjectVersion deletes one version of an object, the
+	// generation given, for good: in a bucket that keeps versions, as the
+	// state bucket does, a delete of the live object alone would keep it
+	// as a noncurrent version. A missing one is not an error. A queue
+	// operation's result is deleted so (D68, amended).
+	DeleteObjectVersion(ctx context.Context, bucket, object string, generation int64) error
+
 	// WriteSiteObject replaces an object of a site's bucket, which the
 	// site's load balancer serves with contentType and cacheControl
 	// (D55). It returns an error that wraps fs.ErrNotExist when the
@@ -588,6 +595,17 @@ func (c *googleCloud) DeleteObjectGeneration(ctx context.Context, bucket, object
 		return false, fmt.Errorf("gcp: delete gs://%s/%s: %w", bucket, object, err)
 	}
 	return true, nil
+}
+
+func (c *googleCloud) DeleteObjectVersion(ctx context.Context, bucket, object string, generation int64) error {
+	if err := c.clients(ctx); err != nil {
+		return err
+	}
+	err := c.storage.Bucket(bucket).Object(object).Generation(generation).Delete(ctx)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("gcp: delete gs://%s/%s#%d: %w", bucket, object, generation, err)
+	}
+	return nil
 }
 
 // preconditionFailed reports whether err is Cloud Storage's refusal of a

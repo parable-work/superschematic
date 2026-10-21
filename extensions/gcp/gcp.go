@@ -267,6 +267,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Builder:    imageBuilder{ext: e},
 		CI:         ciIdentities{},
 		Jobs:       jobRunner{ext: e},
+		Queues:     migrationRunner{ext: e},
 		Sites:      sitePublisher{ext: e},
 	})
 }
