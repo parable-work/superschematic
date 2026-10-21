@@ -52,7 +52,8 @@ macro_rules! export_engine_napi {
             use $crate::__private::napi;
             use $crate::__private::napi::bindgen_prelude::*;
             use $crate::__private::{
-                engine_routes as routes, CallTask, HostFunction, HttpAnswer, Native, StreamPull,
+                engine_routes as routes, CallTask, HostFunction, HttpAnswer, Native, OpenTask,
+                StreamPull,
             };
             use $crate::ABI_VERSION;
 
@@ -105,6 +106,15 @@ macro_rules! export_engine_napi {
                 #[napi(factory)]
                 pub fn open(env: Env, options: String, host: Option<HostFunction>) -> Result<NativeEngine> {
                     Native::open(env, &PROJECT, options, host).map(|native| NativeEngine { native })
+                }
+
+                /// Opens an engine as `open` does, off the JavaScript
+                /// thread, and returns a promise of it. Its options are
+                /// data alone: none hosts anything on the JavaScript
+                /// thread.
+                #[napi(ts_return_type = "Promise<NativeEngine>")]
+                pub fn open_async(env: Env, options: String) -> Result<AsyncTask<OpenTask<NativeEngine>>> {
+                    Native::open_async(&env, &PROJECT, options, |native| NativeEngine { native })
                 }
 
                 /// Whether the facade answers something of this engine on

@@ -43,9 +43,10 @@ import (
 // implementation alike in every root, and Bun, which refuses two members of
 // one name, finds one.
 //
-// A package depends on superscalar, the HTTP runtime and the version-graph
-// runtime by name. Where [paths] names a checkout of one, the root
-// overrides every dependency on it with a file: path from the root. A
+// A package depends on superscalar, the HTTP runtime, the version-graph
+// runtime and the behavior engine (D58) by name. Where [paths] names a
+// checkout of one, the root overrides every dependency on it with a file:
+// path from the root. A
 // member's own file: spec would do the same only from the member's depth,
 // which Bun 1.4 reads wrongly once members sit at different depths: a
 // types package at types/typescript/<name>, an API package at api/<name>,
@@ -225,6 +226,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		{n.ScalarNpmPackage, w.Paths.ScalarTypeScript},
 		{n.HTTPRuntimeNpmPackage, w.Paths.HTTPRuntimeTypeScript},
 		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScript},
+		{n.EngineNpmPackage, w.Paths.EngineTypeScript},
 	} {
 		rel, err := naming.PhysicalRelPath(w.OutputRoot, local.dir)
 		if err != nil {

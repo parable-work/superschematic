@@ -435,6 +435,13 @@ func RustAPIOfService(c GenerateContext, service string) (*RustAPI, error) {
 // internal/generator.APIDir.
 func APIDir(outputRoot, service string) string { return generator.APIDir(outputRoot, service) }
 
+// TypesDir is the directory the types generator writes service's types in
+// lang ("go", "typescript", "rust", ...) to under outputRoot; see
+// internal/generator.TypesDir.
+func TypesDir(outputRoot, lang, service string) string {
+	return generator.TypesDir(outputRoot, lang, service)
+}
+
 // RustIdentifier is name as a snake_case Rust identifier, a keyword
 // escaped, or fallback when nothing is left: how the Rust server and SDK
 // name an argument's field; see internal/generator/rustutil.Identifier.

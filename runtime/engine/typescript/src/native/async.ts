@@ -2,9 +2,18 @@
 openEngineAsync (D58): the engine's API with every call returning a
 promise, for a server on Postgres, where a call waits on the network and
 must not hold the JavaScript thread (the addon refuses a synchronous call
-there: sync_on_async_storage). Each call runs off the thread (the addon's
-call: tokio's blocking pool on Postgres, libuv's pool on SQLite) and its
-promise settles on it, with the package's error classes (src/errors.ts).
+there: sync_on_async_storage). It opens off the thread too (the addon's
+openAsync), since the open connects and migrates, and the connection may
+be one the thread itself carries: a Cloud SQL socket the server serves
+over the Node connector. Each call runs off the thread (the addon's call:
+tokio's blocking pool on Postgres, libuv's pool on SQLite) and its promise
+settles on it, with the package's error classes (src/errors.ts). Each
+member's methods are the synchronous engine's (Engine), each returning a
+promise of what that one returns.
+
+A server's calls are here too: deploy, which defines and publishes its
+schema documents as the engine's own principal before it reports ready,
+and health, what its readiness reads.
 
 Its options are data alone: a policy, a permission matcher, an id source
 or a behavior written in TypeScript answers on the JavaScript thread, in a
@@ -23,7 +32,7 @@ import type { EventWatcher } from '../types/events.js';
 import { DEFAULT_NAMESPACE } from '../types/namespaces.js';
 import { loadAddon, type Addon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import { carry } from './carry.js';
-import type { EngineRoute } from './engine.js';
+import type { Engine, EngineRoute } from './engine.js';
 import { restoreError } from './errors.js';
 import { nativeOptions, type EngineOptions } from './options.js';
 import { resolveToolOptions, type ResolvedToolOptions } from './tool-options.js';
@@ -39,17 +48,80 @@ function plainCall(call: Call, op: string): (...args: unknown[]) => Promise<unkn
   return (...args) => call(op, undefined, ...args);
 }
 
+/**
+ * The methods of a member of the synchronous engine (Engine), each taking
+ * what that one takes and returning a promise of what it returns.
+ */
+export type Promised<T> = {
+  [K in keyof T as T[K] extends (...args: never[]) => unknown ? K : never]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => Promise<Awaited<R>>
+    : never;
+};
+
+/** What deploy did with one schema document. */
+export interface DeployedSchema {
+  readonly name: string;
+  readonly namespace: string;
+  /** The live version after the deploy. */
+  readonly version: number;
+  /** False when the live version had the document's hash, and nothing was written. */
+  readonly defined: boolean;
+  /** True when the deploy minted a version. */
+  readonly published: boolean;
+}
+
+/** What deploy takes beside the documents. */
+export interface DeployOptions {
+  /** The namespace the documents are defined and published in: default unless set. */
+  readonly namespace?: string;
+}
+
+/** The engine's state as a server's readiness reads it (health). */
+export interface EngineHealth {
+  /** False once the engine closed or poisoned, or while its database does not answer a read. */
+  readonly ready: boolean;
+  readonly closed: boolean;
+  /** A panic inside a transaction poisoned the engine, which then refuses every call: restart the process. */
+  readonly poisoned: boolean;
+  readonly dialect: 'sqlite' | 'postgres';
+  /** Whether it listens for other processes' commits (Postgres). */
+  readonly listening: boolean;
+  /** Why the database does not answer, while it does not. */
+  readonly error?: string;
+}
+
 /** The engine's API with every call a promise (openEngineAsync). */
 export class AsyncEngine {
   readonly dialect: 'sqlite' | 'postgres';
-  readonly namespaces;
-  readonly schemas;
-  readonly instances;
-  readonly events;
-  readonly tools;
-  readonly runner;
-  readonly values;
-  readonly behaviors;
+  readonly namespaces: Promised<Pick<Engine['namespaces'], 'list' | 'get' | 'create' | 'archive' | 'unarchive'>> & {
+    /** The namespaces' names. */
+    names(): Promise<string[]>;
+    /** The namespace a call names, `default` when it names none. */
+    resolve(namespace: string | undefined): Promise<string>;
+  };
+  readonly schemas: Promised<
+    Pick<Engine['schemas'], 'define' | 'publish' | 'live' | 'draft' | 'version' | 'list' | 'capabilities' | 'validate' | 'behaviors'>
+  >;
+  readonly instances: Promised<Engine['instances']>;
+  readonly events: Promised<Pick<Engine['events'], 'read' | 'head' | 'floor'>> & {
+    /** Registers a watcher the engine calls after each commit that appended events, and once when it closes. */
+    watch(watcher: EventWatcher): () => void;
+    /** How many watchers are registered. */
+    readonly watching: number;
+  };
+  readonly tools: Promised<Pick<Engine['tools'], 'listBehaviors' | 'describeBehavior' | 'describe' | 'manifest' | 'call'>> & {
+    readonly options: ResolvedToolOptions;
+  };
+  readonly runner: Promised<Pick<Engine['runner'], 'start' | 'stop' | 'runDue' | 'prune' | 'status' | 'resume'>> & {
+    running(): Promise<boolean>;
+    /** When the runner next wakes, in epoch milliseconds, or null. */
+    nextWake(): Promise<number | null>;
+  };
+  readonly values: Promised<Pick<Engine['values'], 'get' | 'sweep'>> & {
+    thresholdBytes(): Promise<number>;
+    maxBytes(): Promise<number>;
+  };
+  readonly behaviors: Promised<Pick<Engine['behaviors'], 'has' | 'names' | 'declaration'>>;
   private readonly watchers = new Set<EventWatcher>();
   private head = 0;
   private started: Promise<void> | undefined;
@@ -83,7 +155,7 @@ export class AsyncEngine {
       create: principalCall(call, 'namespaces.create'),
       archive: principalCall(call, 'namespaces.archive'),
       unarchive: principalCall(call, 'namespaces.unarchive'),
-    };
+    } as unknown as AsyncEngine['namespaces'];
     this.schemas = {
       define: principalCall(call, 'schemas.define'),
       publish: principalCall(call, 'schemas.publish'),
@@ -94,7 +166,7 @@ export class AsyncEngine {
       capabilities: principalCall(call, 'schemas.capabilities'),
       validate: principalCall(call, 'schemas.validate'),
       behaviors: principalCall(call, 'schemas.behaviors'),
-    };
+    } as unknown as AsyncEngine['schemas'];
     this.instances = {
       create: principalCall(call, 'instances.create'),
       get: principalCall(call, 'instances.get'),
@@ -108,7 +180,7 @@ export class AsyncEngine {
         call('instances.operate', principal, schema, id, operation, params, options),
       invokeSchema: (principal: Principal, schema: string, operation: string, params: unknown = {}, options?: unknown) =>
         call('instances.invokeSchema', principal, schema, operation, params, options),
-    };
+    } as unknown as AsyncEngine['instances'];
     this.events = {
       read: principalCall(call, 'events.read'),
       head: plainCall(call, 'events.head') as () => Promise<number>,
@@ -118,7 +190,7 @@ export class AsyncEngine {
       get watching(): number {
         return watchersOf();
       },
-    };
+    } as unknown as AsyncEngine['events'];
     const watchersOf = () => this.watchers.size;
     this.tools = {
       options: toolOptions,
@@ -127,7 +199,7 @@ export class AsyncEngine {
       describe: principalCall(call, 'tools.describe'),
       manifest: principalCall(call, 'tools.manifest'),
       call: principalCall(call, 'tools.call'),
-    };
+    } as unknown as AsyncEngine['tools'];
     this.runner = {
       running: plainCall(call, 'runner.running') as () => Promise<boolean>,
       start: plainCall(call, 'runner.start') as () => Promise<void>,
@@ -137,32 +209,27 @@ export class AsyncEngine {
       status: plainCall(call, 'runner.status'),
       nextWake: plainCall(call, 'runner.nextWake') as () => Promise<number | null>,
       resume: plainCall(call, 'runner.resume'),
-    };
+    } as unknown as AsyncEngine['runner'];
     this.values = {
       get: principalCall(call, 'values.get'),
       sweep: plainCall(call, 'values.sweep'),
       thresholdBytes: plainCall(call, 'values.thresholdBytes') as () => Promise<number>,
       maxBytes: plainCall(call, 'values.maxBytes') as () => Promise<number>,
-    };
+    } as unknown as AsyncEngine['values'];
     this.behaviors = {
       has: plainCall(call, 'behaviors.has') as (name: string) => Promise<boolean>,
       names: plainCall(call, 'behaviors.names') as () => Promise<string[]>,
       declaration: plainCall(call, 'behaviors.declaration'),
-    };
+    } as unknown as AsyncEngine['behaviors'];
   }
 
-  /** open opens the engine on options that are data alone, its storage migrated. */
+  /**
+   * open opens the engine on options that are data alone, its storage
+   * migrated, on this thread: on Postgres it connects and migrates while
+   * the thread waits. openEngineAsync opens off it (openAsync).
+   */
   static open(options: EngineOptions): AsyncEngine {
-    if (options.policy === undefined || options.policy === null) {
-      throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
-    }
-    const { json, clock, hosted } = nativeOptions(options);
-    if (Object.keys(hosted).length > 0) {
-      throw new TypeError(
-        `openEngineAsync takes its options as data: ${Object.keys(hosted).join(', ')} written in TypeScript answers on the JavaScript thread, in a synchronous call (openEngine)`
-      );
-    }
-    const tools = resolveToolOptions(options.tools);
+    const { json, clock, tools } = asyncOptions(options);
     const loaded = loadAddon(options.addon);
     let addon: AddonEngine;
     try {
@@ -171,6 +238,42 @@ export class AsyncEngine {
       throw restoreError(error);
     }
     return new AsyncEngine(loaded, addon, clock, tools);
+  }
+
+  /**
+   * openAsync opens the engine on options that are data alone, its storage
+   * created if absent and migrated, off this thread: the promise settles
+   * once the engine is open, or with why it could not open (a database
+   * that does not answer, a migration refused).
+   */
+  static async openAsync(options: EngineOptions): Promise<AsyncEngine> {
+    const { json, clock, tools } = asyncOptions(options);
+    const loaded = loadAddon(options.addon);
+    let addon: AddonEngine;
+    try {
+      addon = await loaded.NativeEngine.openAsync(JSON.stringify(json));
+    } catch (error) {
+      throw restoreError(error);
+    }
+    return new AsyncEngine(loaded, addon, clock, tools);
+  }
+
+  /**
+   * deploy defines and publishes a server's schema documents, in order, as
+   * the engine's own principal, which the policy allows everything and no
+   * request can be: a document whose live version has its hash is left as
+   * it is, so a restart with the same documents writes nothing, and a
+   * changed one becomes its next version if the compatibility rule allows
+   * it. A server deploys its database's EngineDocument before it reports
+   * the engine ready.
+   */
+  deploy(documents: readonly unknown[], options: DeployOptions = {}): Promise<DeployedSchema[]> {
+    return this.call('deploy', undefined, [documents, options]) as Promise<DeployedSchema[]>;
+  }
+
+  /** health is the engine's state as a server's readiness reads it; it answers on a closed engine too. */
+  health(): Promise<EngineHealth> {
+    return this.call('health', undefined, []) as Promise<EngineHealth>;
   }
 
   /** search searches every schema the namespace reaches that composes Search. */
@@ -299,11 +402,29 @@ export class AsyncEngine {
   }
 }
 
+// asyncOptions are the options the addon opens with, the clock the facade
+// sets before each call, and the tool options with their defaults filled
+// in, refusing anything written in TypeScript, which answers on the
+// JavaScript thread alone.
+function asyncOptions(options: EngineOptions): { json: Record<string, unknown>; clock?: () => number; tools: ResolvedToolOptions } {
+  if (options.policy === undefined || options.policy === null) {
+    throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
+  }
+  const { json, clock, hosted } = nativeOptions(options);
+  if (Object.keys(hosted).length > 0) {
+    throw new TypeError(
+      `openEngineAsync takes its options as data: ${Object.keys(hosted).join(', ')} written in TypeScript answers on the JavaScript thread, in a synchronous call (openEngine)`
+    );
+  }
+  return { json, clock, tools: resolveToolOptions(options.tools) };
+}
+
 /**
- * openEngineAsync opens the engine with its API returning promises: on
- * Postgres (options.postgres), where a synchronous call is refused, or on
- * SQLite (options.path). Its options are data alone.
+ * openEngineAsync opens the engine with its API returning promises, off
+ * the JavaScript thread: on Postgres (options.postgres), where a
+ * synchronous call is refused, or on SQLite (options.path). Its options
+ * are data alone.
  */
 export async function openEngineAsync(options: EngineOptions): Promise<AsyncEngine> {
-  return AsyncEngine.open(options);
+  return AsyncEngine.openAsync(options);
 }

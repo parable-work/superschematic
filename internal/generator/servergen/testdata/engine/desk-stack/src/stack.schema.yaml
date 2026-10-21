@@ -1,0 +1,19 @@
+# desk-api runs on its default server, which opens the engine on desk-db,
+# an engine database, and the engine's runner of desk-db is a deployable
+# of its own, desk-db-engine-runner, in desk-api's Go (D58). Its one
+# environment, Local, runs on the local target.
+kind: Stack
+types:
+  Desk:
+    name: Desk
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: desk-api, kind: API }
+      expose:
+        - service: { name: desk-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

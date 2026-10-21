@@ -48,8 +48,11 @@ pub mod api;
 // axum feature, D58).
 #[cfg(feature = "axum")]
 pub mod axum;
+#[cfg(feature = "background")]
+pub mod background;
 pub mod behaviors;
 pub mod calls;
+mod deploy;
 mod engine;
 pub mod errors;
 mod events;
@@ -76,6 +79,7 @@ pub use behaviors::{
     json_config, Behavior, BehaviorSet, Behaviors, ConfigTarget, GuardRequest, Hooks,
     InstanceChange, InstanceCx, InstanceView, OperationCx, SchemaCx, ValidationRequest,
 };
+pub use deploy::Deployed;
 pub use engine::{
     seeded_uuid, Clock, CustomIds, Engine, EngineClock, EngineOptions, IdCounter, IdQueue,
     IdSource, Ids, MetaSchema, Storage, UuidSource, SCENARIO_SEED,

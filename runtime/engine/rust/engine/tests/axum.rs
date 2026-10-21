@@ -529,6 +529,33 @@ fn an_event_stream_is_a_body_that_wakes_for_a_commit_beats_and_ends_at_shutdown(
     }
 }
 
+#[test]
+fn an_event_stream_ends_when_the_host_stops_serving_and_the_engine_serves_on() {
+    for target in targets("axum_stream_done") {
+        let engine = engine(&target);
+        runtime().block_on(async {
+            let (stop, done) = tokio::sync::watch::channel(false);
+            // A heartbeat longer than the test, so only the host's stop ends
+            // the wait.
+            let routes = router(Arc::clone(&engine), streaming(60_000).done(done)).unwrap();
+            define(&routes, "").await;
+            let response = routes.clone().oneshot(events()).await.unwrap();
+            let mut chunks = response.into_body().into_data_stream();
+            let mut caught_up = String::new();
+            while !caught_up.contains("event: ready") {
+                caught_up.push_str(&next_text(&mut chunks).await.unwrap());
+            }
+            stop.send_replace(true);
+            assert_eq!(next_text(&mut chunks).await, None);
+            // The engine is open: a request in flight at the stop still
+            // gets its answer.
+            let (status, _, body) = send(&routes, get("/namespaces")).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            blocking(&engine, Engine::shutdown).await;
+        });
+    }
+}
+
 // served starts the router on a listener of its own, with a graceful
 // shutdown the returned sender starts; the handle finishes once every
 // connection has.

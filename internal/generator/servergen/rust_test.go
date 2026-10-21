@@ -880,7 +880,13 @@ func libpqSearchPath(t *testing.T, databaseURL string) string {
 	q := u.Query()
 	path := q.Get("search_path")
 	q.Del("search_path")
-	u.RawQuery = q.Encode() + "&options=" + strings.ReplaceAll(url.QueryEscape("-c search_path="+path), "+", "%20")
+	// No leading & when search_path was the URL's one parameter: the Rust
+	// runtime refuses a query with an empty parameter.
+	options := "options=" + strings.ReplaceAll(url.QueryEscape("-c search_path="+path), "+", "%20")
+	if rest := q.Encode(); rest != "" {
+		options = rest + "&" + options
+	}
+	u.RawQuery = options
 	return u.String()
 }
 

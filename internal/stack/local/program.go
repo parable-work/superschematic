@@ -155,7 +155,8 @@ type Migration struct {
 // runs from there, so Binary is empty (D57). A worker's process (Kind
 // "worker", D53) has no port and no URL, and is ready once it starts
 // (ReadinessStarted); it is built and run as a server in its language is,
-// a Rust one's crate included (D65).
+// a Rust one's crate included (D65). So is an engine's runner's (Kind
+// "runner", D58).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
@@ -621,8 +622,8 @@ func serverOf(res *ir.Resource) (*Server, error) {
 		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s, %s and %s servers", s.Language, LanguageGo, LanguageTypeScript, LanguageRust)
 	}
 	if kind, set := res.Properties["kind"]; set {
-		if s.Kind, ok = kind.(string); !ok || s.Kind != "worker" {
-			return nil, fmt.Errorf("its kind is %v; a process is a server's, or a worker's", kind)
+		if s.Kind, ok = kind.(string); !ok || (s.Kind != "worker" && s.Kind != "runner") {
+			return nil, fmt.Errorf("its kind is %v; a process is a server's, a worker's or an engine's runner's", kind)
 		}
 	}
 	s.Readiness, _ = res.Properties["readiness"].(string)

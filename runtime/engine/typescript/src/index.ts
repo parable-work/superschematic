@@ -14,6 +14,7 @@ export type { EngineRoute, EngineStorage, SchemaValidator } from './native/engin
 // The engine with every call a promise, for a server on Postgres (or SQLite);
 // its options are data.
 export { AsyncEngine, openEngineAsync } from './native/async.js';
+export type { DeployedSchema, DeployOptions, EngineHealth } from './native/async.js';
 export type { EngineOptions, PostgresOptions } from './native/options.js';
 export { UnsupportedError } from './native/errors.js';
 export type { UnsupportedGap } from './native/errors.js';

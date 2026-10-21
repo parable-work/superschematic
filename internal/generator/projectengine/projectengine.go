@@ -1,11 +1,14 @@
 // Package projectengine builds the project's engine crate of a schema
-// whose types compose an extension's behavior (D58). A project's engine is
-// a value its build assembles, not a registry the linker collects: the
+// whose types compose a behavior the core's engine archive does not run
+// (D58): the work queue's, or an extension's. A project's engine is a
+// value its build assembles, not a registry the linker collects: the
 // core's behaviors, the work queue's when the schema uses one of them, and
 // each extension behavior the schema composes, from the Rust crate its
 // BehaviorSpec names (registry.BehaviorRust). A schema that composes the
 // core's behaviors alone needs no crate: the release's engine carries
-// them.
+// them. The work queue's crate is the release's too, but the core's
+// archive, which a Go server links, leaves it out, so a schema that
+// composes one of its behaviors gets a crate whose archive holds it.
 //
 // The crate is <output root>/engine/rust/<schema>, named
 // Naming.RustEngineCrate(schema) (<prefix><schema>-engine):
@@ -242,11 +245,11 @@ type Registration struct {
 }
 
 // Build returns the project engine crate of a schema, or nil when it needs
-// none: no type composes an extension's behavior. A nil crate with a
-// non-empty reason is one the schema would need and Build cannot write,
-// because an extension behavior it composes names no Rust crate, or names
-// one the project does not hold. It fails when a type composes a behavior
-// the registry does not declare.
+// none: no type composes a behavior of the work queue or of an extension.
+// A nil crate with a non-empty reason is one the schema would need and
+// Build cannot write, because an extension behavior it composes names no
+// Rust crate, or names one the project does not hold. It fails when a type
+// composes a behavior the registry does not declare.
 func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 	reg := opts.Registry
 	if reg == nil {
@@ -298,7 +301,7 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Sprintf("no engine can run %s's behaviors, so no engine crate is written and an engine refuses the schema: %s (D58)", opts.SchemaName, strings.Join(missing, "; ")), nil
 	}
-	if len(crates) == 0 {
+	if len(crates) == 0 && c.WorkQueue == nil {
 		return nil, "", nil
 	}
 	for _, ext := range crates {

@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
 	"github.com/parable-work/superschematic/internal/generator/pysdkgen"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -686,6 +687,11 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	if e := apiOutput.Engine; e != nil {
+		// Deps holds the engine of the API's engine database, which a server
+		// opens in the background (D58).
+		tsDeps.Engine = &tsrestgen.DepsEngine{Database: e.Database, Namespace: e.Namespace, Package: r.Options.Naming.EngineNpmPackage}
+	}
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
@@ -871,6 +877,10 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	engine, err := r.engineDatabase(deps)
+	if err != nil {
+		return nil, err
+	}
 
 	output, err := apigen.Generate(r.Schema, apigen.Options{
 		SchemaName:         r.Config.Name,
@@ -888,6 +898,7 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		ToolHooks:          r.Registry.ToolHooks(),
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
+		Engine:             engine,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
@@ -1234,7 +1245,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	if output == nil {
 		return nil, nil, nil
 	}
-	rustDeps, err := r.rustDeps()
+	rustDeps, err := r.rustDeps(deps)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1266,7 +1277,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 // messages are the database's Rust types (rustQueueTypes, D65); and the
 // HTTP runtime's Bucket per buckets entry (D54), which needs nothing
 // generated either.
-func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
+func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
@@ -1279,6 +1290,29 @@ func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
 		}
 	} else if len(r.Schema.Workers) > 0 {
 		return deps, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
+	}
+	engine, err := r.engineDatabase(schemas)
+	if err != nil {
+		return deps, err
+	}
+	if engine != nil {
+		if r.Options.Paths.EngineRust == "" {
+			return deps, fmt.Errorf("generator: the Rust server of %s holds the engine of %s, its engine database, in its Deps (D58), whose crate the naming file's [paths] engine_rust names, and it is unset; set it to a checkout's runtime/engine/rust/engine", r.Config.Name, engine.Database)
+		}
+		path, err := naming.RelPath(apiDir, r.Options.Paths.EngineRust)
+		if err != nil {
+			return deps, fmt.Errorf("generator: the engine's crate from %s: %w", r.Config.Name, err)
+		}
+		deps.Engine = &rustrestgen.DepsEngine{Database: engine.Database, Namespace: engine.Namespace, Crate: projectengine.EngineCrate, Path: path, Policy: string(engine.Policy)}
+		// A database no Rust engine runs is the server's to refuse, not
+		// the API crate's.
+		if project, err := r.projectEngine(r.Config.Name, engine.Database); err == nil && project != nil {
+			rel, err := naming.RelPath(apiDir, project.Dir)
+			if err != nil {
+				return deps, fmt.Errorf("generator: the project's engine crate of %s from %s: %w", engine.Database, r.Config.Name, err)
+			}
+			deps.Engine.Project = &rustrestgen.DepsProject{Crate: project.Crate, Ident: project.Ident, Path: rel}
+		}
 	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {

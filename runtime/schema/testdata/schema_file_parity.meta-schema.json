@@ -2286,6 +2286,10 @@
           "default": "",
           "type": "string"
         },
+        "runner": {
+          "default": false,
+          "type": "boolean"
+        },
         "service": {
           "$ref": "#/$defs/ServiceRef"
         },

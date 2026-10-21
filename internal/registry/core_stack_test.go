@@ -121,6 +121,33 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 		t.Errorf("a job beside a class: %v", err)
 	}
 
+	// A runner's element names the engine's runner beside its database's
+	// handle and turns it on or off; its other keys are the runner
+	// platform's settings (D58).
+	runner := &ir.TypeDef{Name: "Runner"}
+	if err := applyStackDecorator(t, "environment", runner, map[string]any{"settings": []any{
+		map[string]any{"of": handle("shop-db", "DB"), "runner": true, "enabled": false, "platform": "gcp.cloudrunrunner", "memory": "1Gi"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantRunner := &ir.DeployableSettings{
+		Of: ir.DeployableRef{Service: &db, Runner: true}, Enabled: &off, Platform: "gcp.cloudrunrunner",
+		Values: map[string]any{"memory": "1Gi"},
+	}
+	if got := runner.Environment.Settings; len(got) != 1 || !reflect.DeepEqual(got[0], wantRunner) {
+		t.Errorf("@environment wrote runner settings %+v, want %+v", got, wantRunner)
+	}
+	if err := applyStackDecorator(t, "environment", &ir.TypeDef{Name: "E"}, map[string]any{"settings": []any{
+		map[string]any{"of": class("Data"), "runner": true},
+	}}); err == nil || !strings.Contains(err.Error(), "runner names the engine's runner of the DB service of names, but of names no service") {
+		t.Errorf("a runner beside a class: %v", err)
+	}
+	if err := applyStackDecorator(t, "environment", &ir.TypeDef{Name: "E"}, map[string]any{"settings": []any{
+		map[string]any{"of": handle("shop-db", "DB"), "runner": false},
+	}}); err == nil || !strings.Contains(err.Error(), "@environment argument") {
+		t.Errorf("runner: false: %v", err)
+	}
+
 	// A DNS platform with no values and an environment with no target
 	// values leave both out, as the data forms do.
 	manual := &ir.TypeDef{Name: "Manual"}
@@ -181,6 +208,7 @@ func (f *findings) Warnf(string, string, ...any) {}
 func TestVerifyStack(t *testing.T) {
 	spec, _ := New(naming.Naming{}).Kind(string(ir.SchemaKindStack))
 	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
+	shopDB := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	valid := func() *ir.Schema {
 		s := ir.NewSchema("shop-stack", ir.SchemaKindStack)
 		s.Types["Shop"] = &ir.TypeDef{Name: "Shop", Stack: &ir.StackDecl{Deploy: []ir.ServiceRef{api}, Expose: []ir.DeployableRef{{Deployable: "Backend"}}}}
@@ -248,6 +276,24 @@ func TestVerifyStack(t *testing.T) {
 		{"an exposed job", func(s *ir.Schema) {
 			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Job: "ShipOrders"}}
 		}, "@stack class Shop expose[0] names job ShipOrders; only a server is exposed"},
+		{"an exposed runner", func(s *ir.Schema) {
+			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &shopDB, Runner: true}}
+		}, "@stack class Shop expose[0] names an engine's runner; only a server is exposed"},
+		{"a runner of a declared database", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0].Of.Runner = true
+		}, "names the runner of deployable Backend; an engine's runner belongs to a DB service"},
+		{"a runner of an API", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Runner: true}}
+		}, "names the runner of shop-api, a API service; an engine's runner belongs to a DB service"},
+		{"a runner and a worker", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true, Worker: "FulfilOrders"}}
+		}, "names the runner and a job or a worker; an element names one"},
+		{"instances on a runner", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Instances: new(int)}
+		}, "sets instances, which only a worker takes"},
+		{"a schedule on a runner", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Schedule: "0 * * * *"}
+		}, "sets schedule, which only a job takes"},
 		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
 		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},
 	} {

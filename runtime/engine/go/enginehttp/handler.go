@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -114,6 +115,10 @@ type Options struct {
 	MCP engine.MCPOptions
 	// Serve is which routes the handler serves: all of them unless set.
 	Serve Serve
+	// Done, when set, is closed when the host stops serving: every event
+	// stream ends then, as when its client goes away, so a server's
+	// shutdown waits for no stream (http.Server.RegisterOnShutdown).
+	Done <-chan struct{}
 }
 
 // Handler serves the engine's routes. Mount it at Options.Prefix (chi's
@@ -260,9 +265,19 @@ func (h *handler) route(route engine.Route) http.HandlerFunc {
 			WriteProblem(w, http.StatusInternalServerError, "An unexpected error occurred", "internal_error", id, nil)
 			return
 		}
+		// The engine's headers replace what the host's middleware set under
+		// the same name (the request log's X-Request-Id): a route the
+		// timeout wraps gets them so, and a stream, which writes straight to
+		// w, must too, or it answers the header twice.
 		header := w.Header()
+		replaced := make(map[string]bool, len(response.Headers))
 		for _, pair := range response.Headers {
-			header.Add(pair[0], pair[1])
+			name := http.CanonicalHeaderKey(pair[0])
+			if !replaced[name] {
+				header.Del(name)
+				replaced[name] = true
+			}
+			header.Add(name, pair[1])
 		}
 		if response.Stream != nil {
 			h.stream(w, r, response)
@@ -288,6 +303,11 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request, response *engin
 	timer := time.NewTimer(h.pollEvery)
 	defer timer.Stop()
 	for {
+		select {
+		case <-h.options.Done:
+			return
+		default:
+		}
 		// Taken before the poll, so a commit while it reads wakes the
 		// wait after it.
 		changed := h.e.Changed()
@@ -307,6 +327,8 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request, response *engin
 		timer.Reset(h.pollEvery)
 		select {
 		case <-ctx.Done():
+			return
+		case <-h.options.Done:
 			return
 		case <-changed:
 		case <-timer.C:
@@ -370,4 +392,39 @@ func WriteProblem(w http.ResponseWriter, status int, detail, code, requestID str
 	header.Set("X-Request-Id", requestID)
 	w.WriteHeader(status)
 	_, _ = w.Write(bytes.TrimSuffix(body.Bytes(), []byte("\n")))
+}
+
+// Background serves the engine's routes for an engine a server opens in
+// the background (engine.Background): until it opens, every request under
+// the prefix is 503 unavailable ("The engine is not available"), and once
+// it opens, the routes Handler serves with options. Mount it at
+// options.Prefix as Handler.
+func Background(b *engine.Background, options Options) http.Handler {
+	requestID := options.RequestID
+	if requestID == nil {
+		requestID = defaultRequestID
+	}
+	pending := &pending{b: b, options: options, requestID: requestID}
+	return pending
+}
+
+// pending answers 503 until its engine opens, then hands every request to
+// the engine's Handler, built once.
+type pending struct {
+	b         *engine.Background
+	options   Options
+	requestID func(*http.Request) string
+
+	once    sync.Once
+	handler http.Handler
+}
+
+func (p *pending) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e, err := p.b.Engine()
+	if err != nil {
+		WriteProblem(w, http.StatusServiceUnavailable, "The engine is not available", "unavailable", p.requestID(r), nil)
+		return
+	}
+	p.once.Do(func() { p.handler = Handler(e, p.options) })
+	p.handler.ServeHTTP(w, r)
 }

@@ -159,7 +159,13 @@ TypeScript runtimes' (D51):
   (`GCE_METADATA_HOST` honoured) as the password, fetched for each new
   connection. The module re-exports `deadpool_postgres` and
   `tokio_postgres`. With `identity-postgres` too, `identity::PostgresPool`
-  runs the identity store over the same pool.
+  runs the identity store over the same pool. `sync_connection(&Database)`
+  is what a synchronous client, the engine's (D58), opens: the URL as it
+  is, or the instance's socket as a key-value string with a fresh access
+  token as each new connection's `password()`, fetched on the runtime it
+  was made on from the client's own thread.
+  `cors::Api::with_routes` gives routes a server mounts beside an API's,
+  the engine's, the site's CORS.
 - The `logging` feature's `logging` module: `init_json(stack, server)`
   installs a `tracing-subscriber` layer writing one JSON object per line on
   stdout at `info`, with the TypeScript `createLogger`'s members: `level`,

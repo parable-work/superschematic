@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine",
   "version": "0.0.0",
-  "description": "An engine that runs a schema with no generated code (D16): it takes schema-file documents as data, versions them, and stores their instances in a SQLite file or a Postgres schema. The engine is the Rust library every server links (D58), which this package loads as its Node-API addon: the platform package @superschematic/engine-<target>, an optional dependency, or a project's own (the addon option). Runs on Node.js 24 and Bun. Needs @superschematic/http-runtime next to it in node_modules, and superscalar, which the runtime imports; see scripts/link-local-deps.mjs. The main entry point imports the HTTP runtime's framework-free entry point for its default permission matcher; the ./http subpath serves an engine over HTTP on the HTTP runtime and Hono, and the ./mcp subpath its MCP endpoint there too, both the engine's own routes. Hono is an optional peer dependency. The ./client subpath is a typed client for the HTTP API, its event stream and the controller pattern over it, which imports nothing of the server side, Node.js or the HTTP runtime, so it runs in a browser or a worker runtime. The ./testing subpath defines behaviors in TypeScript for tests, which the engine's test addon runs.",
+  "description": "An engine that runs a schema with no generated code (D16): it takes schema-file documents as data, versions them, and stores their instances in a SQLite file or a Postgres schema. The engine is the Rust library every server links (D58), which this package loads as its Node-API addon: the platform package @superschematic/engine-<target>, an optional dependency, or a project's own (the addon option). Runs on Node.js 24 and Bun. Needs @superschematic/http-runtime next to it in node_modules, and superscalar, which the runtime imports; see scripts/link-local-deps.mjs. The main entry point imports the HTTP runtime's framework-free entry point for its default permission matcher; the ./http subpath serves an engine over HTTP on the HTTP runtime and Hono, and the ./mcp subpath its MCP endpoint there too, both the engine's own routes. Hono is an optional peer dependency. The ./server subpath is what a generated server opens and mounts (D58): openEngineInBackground, which opens the engine off the JavaScript thread and retries until its database answers, and engineApp and engineMcp over the engine it opens. The ./client subpath is a typed client for the HTTP API, its event stream and the controller pattern over it, which imports nothing of the server side, Node.js or the HTTP runtime, so it runs in a browser or a worker runtime. The ./testing subpath defines behaviors in TypeScript for tests, which the engine's test addon runs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +17,10 @@
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "import": "./dist/mcp/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
     },
     "./client": {
       "types": "./dist/client/index.d.ts",

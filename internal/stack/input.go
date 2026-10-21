@@ -122,6 +122,12 @@ type Service struct {
 	// Queues are the names of a DB service's queues, its `@queue` classes
 	// (D53), sorted. A worker's queue is one of its API's database.
 	Queues []string
+
+	// Engine reports that a DB service is an engine database (D58): a type
+	// of it composes a behavior. The servers of the APIs that connect to it
+	// open the engine on its database, and the stack runs the engine's
+	// runner over it, a deployable of its own.
+	Engine bool
 }
 
 // Operation is what admits a caller to one operation of an API service.

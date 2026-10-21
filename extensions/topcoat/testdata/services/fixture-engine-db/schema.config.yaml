@@ -1,0 +1,8 @@
+# The Topcoat extension's engine database (D58): its Note composes the
+# core's Comments, so it is an engine type, beside a table of its own.
+name: fixture-engine-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    rust: { enabled: true }

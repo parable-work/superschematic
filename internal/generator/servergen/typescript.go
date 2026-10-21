@@ -36,7 +36,9 @@ import (
 // descriptor its TypeScript types export, and the API's identity service
 // from its identity config field. A server whose APIs list a
 // bucket opens each on GCS through the HTTP runtime's ./gcs entry, and
-// depends on GCS's Node client (D54).
+// depends on GCS's Node client (D54). One whose API's database is an
+// engine database opens the engine on it through the engine's ./server
+// entry, and mounts its routes (D58; typescript_engine.go).
 
 // BunVersion is the oven/bun image a TypeScript server's Dockerfile runs it
 // on: tools.env's BUN_VERSION, the Bun the repository's checks run on.
@@ -174,6 +176,17 @@ type TypeScriptInput struct {
 	// Worker, when set, plans the entrypoint of a worker of the one API in
 	// APIs (D53): Server is then the worker's deployable.
 	Worker *WorkerInput
+
+	// Runner, when set, plans the entrypoint of an engine's runner (D58):
+	// APIs is empty, and Server is the runner's deployable.
+	Runner *TypeScriptRunnerInput
+
+	// EngineProject is the project's engine crate the entrypoint's engine
+	// loads its addon from, nil when the core's addon runs every behavior
+	// its engine database composes (D58): one that composes an extension's
+	// gets the crate's napi member, which the checkout's Dockerfile builds
+	// in the core's addon's place.
+	EngineProject *EngineProject
 }
 
 // TypeScriptServer is a planned TypeScript entrypoint, what the templates
@@ -184,7 +197,7 @@ type TypeScriptServer struct {
 	Package string
 	Naming  naming.Naming
 
-	// Kind is "server", "job" or "worker".
+	// Kind is "server", "job", "worker" or "runner".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
@@ -194,6 +207,16 @@ type TypeScriptServer struct {
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D53).
 	Worker *TypeScriptWorker
+
+	// Runner is what an engine's runner's entrypoint runs, nil for every
+	// other (D58).
+	Runner *TypeScriptRunner
+
+	// Engines are the engines the entrypoint opens, one per engine
+	// database it connects to (D58). With one, the package depends on the
+	// engine's package and the database's TypeScript types, whose
+	// engineDocument it opens the engine with.
+	Engines []*TypeScriptEngine
 
 	// RustVersion and BunVersion are the toolchain pins.
 	RustVersion string
@@ -254,11 +277,11 @@ type TypeScriptWorker struct {
 	Package    string
 }
 
-// Background reports whether the entrypoint is a job's or a worker's,
-// which serves no request: it mounts no routes, listens on no port, and
-// verifies no end user or caller.
+// Background reports whether the entrypoint is a job's, a worker's or an
+// engine's runner's, which serves no request: it mounts no routes, listens
+// on no port, and verifies no end user or caller.
 func (s *TypeScriptServer) Background() bool {
-	return s.Job != nil || s.Worker != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil
 }
 
 // NpmDependency is a package.json dependency.
@@ -329,6 +352,16 @@ type TypeScriptAPI struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []TypeScriptBucketUse
+
+	// Engine is the engine Deps holds, of the API's engine database (D58),
+	// nil without one; MountsEngine is true for the API whose callers its
+	// routes admit, the first on the database, on a server, and
+	// ServiceAuthenticator the variable of the service authenticator over
+	// its callers field that its router and the engine's routes share,
+	// when it has one.
+	Engine               *TypeScriptEngine
+	MountsEngine         bool
+	ServiceAuthenticator string
 }
 
 // TypeScriptCall is a client in an API's Deps.
@@ -374,6 +407,10 @@ type TypeScriptDatabase struct {
 	Descriptor        string
 	DescriptorModule  string
 	DescriptorPackage string
+
+	// Engine is the engine the entrypoint opens on the database, an engine
+	// database (D58); nil for every other.
+	Engine *TypeScriptEngine
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -417,6 +454,10 @@ type TypeScriptDocker struct {
 	HTTPRuntime string
 	ScalarLink  string
 
+	// Engine is where the engine stage builds the engine's Node-API addon
+	// from, nil when the entrypoint opens no engine (D58).
+	Engine *tsEngineDocker
+
 	// Runtime are the directories the image copies from the build stage:
 	// the workspace's root, then every package the server reaches outside
 	// it, each with the node_modules the install linked into it.
@@ -441,6 +482,11 @@ var tsReserved = []string{
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency", "loopbackServiceAuth", "Loopback",
+	"openEngineInBackground", "engineApp", "engineMcp", "engineRouteSpecs", "AsyncEngine", "EngineBackground",
+	"EngineHttpOptions", "EngineOptions", "Principal", "Logger", "cloudSqlSocket", "loadDatabase",
+	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
+	"EngineDocumentOf", "OpenedEngine", "EngineSetup", "EngineCallers", "ENGINE_TIMEOUT_SECONDS", "principal", "alive",
+	"stopped", "closeEngines",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -503,6 +549,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
+	case in.Runner != nil:
+		if len(in.APIs) != 0 {
+			return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s and serves no API", in.Stack, in.Server, in.Runner.Database)
+		}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -524,6 +574,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	databases := map[string]*TypeScriptDatabase{}
 	clients := map[string]*TypeScriptClient{}
 	buckets := map[string]*TypeScriptBucket{}
+	mounts := map[string]string{}
+	if in.Runner != nil {
+		if err := s.planTypeScriptRunner(in, taken); err != nil {
+			return nil, err
+		}
+	}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := varStem(o.SchemaName)
@@ -596,6 +652,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 			api.Database = d
+		}
+		if a.Routes != nil && a.Routes.Engine != nil {
+			if err := s.planTypeScriptEngine(in, api, a.Routes.Engine, o.SchemaName, taken, mounts); err != nil {
+				return nil, err
+			}
 		}
 		if s.Worker != nil {
 			if api.Database == nil {
@@ -729,6 +790,8 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		out = append(out, "identity: "+a.Identity)
 	}
 	switch {
+	case a.ServiceAuthenticator != "":
+		out = append(out, "authenticateService: "+a.ServiceAuthenticator)
 	case a.Callers != "" && a.Loopback != "":
 		out = append(out, "authenticateService: serviceAuthenticator("+a.Loopback+".accept("+a.Config+"."+a.Callers+"))")
 	case a.Callers != "":
@@ -736,6 +799,21 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	}
 	if a.ManualRoutes != "" {
 		out = append(out, "manualRoutes: "+a.ManualRoutes)
+	}
+	return out
+}
+
+// EngineCallers are the members of the callers main.ts mounts the engine's
+// routes behind (D58): the API's identity service, which authenticates the
+// end user, and its service authenticator, whose verified service stands
+// in for one.
+func (a *TypeScriptAPI) EngineCallers() []string {
+	var out []string
+	if a.Identity != "" {
+		out = append(out, "identity: "+a.Identity)
+	}
+	if a.ServiceAuthenticator != "" {
+		out = append(out, "authenticateService: "+a.ServiceAuthenticator)
 	}
 	return out
 }
@@ -756,6 +834,9 @@ func (s *TypeScriptServer) AnyCORS() bool {
 // main entry.
 func (s *TypeScriptServer) RuntimeImports() []string {
 	out := []string{"createLogger"}
+	if s.Runner != nil {
+		out = append(out, "loadDatabase")
+	}
 	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.Callers != "" }) {
 		out = append(out, "serviceAuthenticator")
 	}
@@ -774,7 +855,20 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	if len(s.Clients) > 0 {
 		out = append(out, "type Service")
 	}
+	if len(s.Engines) > 0 {
+		out = append(out, "type Logger")
+	}
 	return out
+}
+
+// ImportsPostgres reports whether main.ts imports the HTTP runtime's
+// ./postgres entry: for its pools, or, for a runner, for the Cloud SQL
+// socket it serves the engine on.
+func (s *TypeScriptServer) ImportsPostgres() bool {
+	if s.Runner != nil {
+		return len(s.CloudSQL) > 0
+	}
+	return len(s.Databases) > 0
 }
 
 // planPackage plans package.json's dependencies: each served API package,
@@ -807,11 +901,17 @@ func (s *TypeScriptServer) planPackage() {
 		// main.ts imports the queue's definition from the database's types.
 		deps[s.Worker.Package] = "workspace:*"
 	}
+	for _, e := range s.Engines {
+		// main.ts opens the engine through the engine's ./server entry, with
+		// the engine document of the database's types (D58).
+		deps[s.Naming.EngineNpmPackage] = "*"
+		deps[e.DocumentPackage] = "workspace:*"
+	}
 	dev := map[string]string{
 		"@types/node": tsrestgen.NodeTypesVersion,
 		"typescript":  tsrestgen.TypeScriptVersion,
 	}
-	if len(s.Databases) > 0 {
+	if s.ImportsPostgres() {
 		deps["pg"] = pgVersion
 		dev["@types/pg"] = tsrestgen.PGTypesVersion
 	}
@@ -931,14 +1031,37 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	d.Include = append(d.Include, d.ScalarTypeScript, d.HTTPRuntime,
 		d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
-	if in.Paths.VersionGraphTypeScript != "" {
+	if versionGraph := in.Paths.VersionGraphTypeScript; versionGraph != "" {
 		// The workspace's root overrides the version-graph runtime too, so
 		// an install reads its manifest, though no server imports it.
-		vg, ok := rel(in.Paths.VersionGraphTypeScript)
+		vg, ok := rel(versionGraph)
 		if !ok {
-			return nil, outside("the version-graph runtime's TypeScript package", in.Paths.VersionGraphTypeScript), nil
+			return nil, outside("the version-graph runtime's TypeScript package", versionGraph), nil
 		}
 		d.Include = append(d.Include, vg+"/package.json")
+	}
+	if len(s.Engines) > 0 {
+		// The engine stage builds the engine's Node-API addon from the Cargo
+		// workspace beside its package, and the build stage emits its
+		// ./server entry, which the workspace's root overrides the package
+		// with (D58).
+		if in.Paths.EngineTypeScript == "" {
+			return nil, fmt.Sprintf("the %s opens the engine (D58), and the naming file's [paths] engine_typescript, the engine's npm package, whose Cargo workspace the image builds the engine's Node-API addon from, is unset; set it to a superschematic checkout's runtime/engine/typescript", s.Kind), nil
+		}
+		engine, why := planEngineDocker(in.Paths.EngineTypeScript, in.EngineProject, root, rel, "the engine's npm package")
+		if engine == nil {
+			return nil, why, nil
+		}
+		d.Engine = &tsEngineDocker{TypeScript: engine.Go, Workspace: engine.Workspace, Crates: engine.Crates}
+		d.Include = append(d.Include, engine.Go, engine.Workspace)
+		d.Include = append(d.Include, engine.Crates...)
+		if p := in.EngineProject; p != nil {
+			d.Engine.Project, d.Engine.ProjectCrates = engine.Project, engine.ProjectCrates
+			d.Engine.ProjectLib = "lib" + strings.ReplaceAll(p.Crate+"-napi", "-", "_") + ".so"
+			d.Engine.Addon = p.Crate + "-napi.node"
+			d.Include = append(d.Include, engine.Project)
+			d.Include = append(d.Include, engine.ProjectCrates...)
+		}
 	}
 	slices.Sort(d.Include)
 	d.Include = slices.Compact(d.Include)
@@ -946,6 +1069,9 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	d.Runtime = append([]string{d.Workspace}, slices.Compact(runtime)...)
 	// What a checkout builds, which the image builds again.
 	d.Exclude = []string{d.ScalarTypeScript + "/dist", d.ScalarTypeScript + "/native", d.HTTPRuntime + "/dist"}
+	if d.Engine != nil {
+		d.Exclude = append(d.Exclude, d.Engine.TypeScript+"/dist", d.Engine.TypeScript+"/native")
+	}
 	return d, "", nil
 }
 
@@ -997,6 +1123,8 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		main = "job.ts.tmpl"
 	case s.Worker != nil:
 		main = "worker.ts.tmpl"
+	case s.Runner != nil:
+		main = "runner.ts.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, TypeScriptMainFile},

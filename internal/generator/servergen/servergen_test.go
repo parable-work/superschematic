@@ -178,6 +178,14 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 		SchemaRuntimeGo: filepath.Join(repoRoot, "runtime", "schema", "go"),
 		HTTPRuntimeGo:   filepath.Join(repoRoot, "runtime", "http", "go"),
 		VersionGraphGo:  filepath.Join(repoRoot, "runtime", "versiongraph", "go"),
+		EngineGo:        filepath.Join(repoRoot, "runtime", "engine", "go"),
+		// The engine's crates, which a project's engine crate depends on
+		// (D58).
+		EngineRust:          filepath.Join(repoRoot, "runtime", "engine", "rust", "engine"),
+		EngineBehaviorsRust: filepath.Join(repoRoot, "runtime", "engine", "rust", "behaviors"),
+		EngineWorkQueueRust: filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust"),
+		EngineABIRust:       filepath.Join(repoRoot, "runtime", "engine", "rust", "abi"),
+		EngineNapiRust:      filepath.Join(repoRoot, "runtime", "engine", "rust", "napi"),
 	}
 }
 
@@ -778,7 +786,8 @@ func freePort(t *testing.T) string {
 type started struct {
 	cmd  *exec.Cmd
 	base string
-	out  *strings.Builder
+	// out is what the process wrote, which a test may read while it runs.
+	out interface{ String() string }
 }
 
 // start runs binary with env and waits for /healthz.
@@ -790,14 +799,14 @@ func start(t *testing.T, binary string, env ...string) *started {
 // startOn is start on port.
 func startOn(t *testing.T, port, binary string, env ...string) *started {
 	t.Helper()
-	var out strings.Builder
+	out := &syncBuilder{}
 	cmd := exec.Command(binary)
 	cmd.Env = append(os.Environ(), append(env, "PORT="+port)...)
-	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &started{cmd: cmd, base: "http://127.0.0.1:" + port, out: &out}
+	s := &started{cmd: cmd, base: "http://127.0.0.1:" + port, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
 	for {

@@ -18,7 +18,7 @@ var _ migrate.Granter = (*Driver)(nil)
 // sequences outside the system schemas, owned by the user or a role it
 // inherits, which no extension owns, with the schema of each and whether
 // the user may give USAGE on that schema. $1 lists the tables to leave
-// out.
+// out, and $2 the schemas.
 const grantable = `
 SELECT n.nspname, c.relname, c.relkind::text,
        has_schema_privilege(n.oid, 'USAGE WITH GRANT OPTION')
@@ -28,6 +28,7 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S')
   AND n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'
   AND pg_has_role(c.relowner, 'USAGE')
   AND NOT (c.relname = ANY($1::text[]) AND c.relkind IN ('r', 'p'))
+  AND NOT n.nspname = ANY($2::text[])
   AND NOT EXISTS (
     SELECT 1 FROM pg_depend d
     WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
@@ -41,6 +42,7 @@ ORDER BY n.nspname, c.relname`
 // role). On Cloud SQL the database's owner, cloudsqlsuperuser, a role the
 // migrator is granted, holds CREATE on the public schema from
 // pg_database_owner: that grant is the platform's, not one a job gave.
+// $1 lists the schemas to leave out, their objects' grants and their own.
 const grantees = `
 WITH RECURSIVE mine(oid) AS (
   SELECT oid FROM pg_roles WHERE rolname = current_user
@@ -58,6 +60,7 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S')
   AND pg_has_role(a.grantor, 'USAGE')
   AND a.grantee <> c.relowner
   AND a.grantee NOT IN (SELECT oid FROM mine)
+  AND NOT n.nspname = ANY($1::text[])
 UNION
 SELECT r.rolname
 FROM pg_namespace n
@@ -69,20 +72,22 @@ WHERE n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'
   AND a.grantee <> n.nspowner
   AND a.privilege_type = 'USAGE'
   AND a.grantee NOT IN (SELECT oid FROM mine)
+  AND NOT n.nspname = ANY($1::text[])
 ORDER BY 1`
 
 // GrantReadWrite gives each role USAGE on the schemas that hold the
 // database's objects, SELECT, INSERT, UPDATE and DELETE on its tables,
 // SELECT on its views and USAGE and SELECT on its sequences, and takes
 // every privilege on them back from any other role the connection's user
-// gave privileges to, all in one transaction. It leaves out the tables of
-// except, extensions' objects and objects of system schemas, and a schema
-// the user may not give USAGE on, such as one only PUBLIC may use.
-func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except []string) (*migrate.Grants, error) {
+// gave privileges to, all in one transaction. It leaves out the tables
+// and the schemas of except, extensions' objects and objects of system
+// schemas, and a schema the user may not give USAGE on, such as one only
+// PUBLIC may use.
+func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except migrate.Except) (*migrate.Grants, error) {
 	out := &migrate.Grants{}
 	err := d.Transact(ctx, migrate.TxOptions{}, func(ctx context.Context, c migrate.Conn) error {
 		var tables, views, sequences, schemas []string
-		err := c.Query(ctx, grantable, []any{exceptArray(except)}, func(scan func(dest ...any) error) error {
+		err := c.Query(ctx, grantable, []any{exceptArray(except.Tables), exceptArray(except.Schemas)}, func(scan func(dest ...any) error) error {
 			var schema, name, kind string
 			var schemaGrant bool
 			if err := scan(&schema, &name, &kind, &schemaGrant); err != nil {
@@ -107,7 +112,7 @@ func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except []st
 			return fmt.Errorf("postgres: list the objects to grant on: %w", err)
 		}
 		var others []string
-		err = c.Query(ctx, grantees, nil, func(scan func(dest ...any) error) error {
+		err = c.Query(ctx, grantees, []any{exceptArray(except.Schemas)}, func(scan func(dest ...any) error) error {
 			var role string
 			if err := scan(&role); err != nil {
 				return err
@@ -168,7 +173,7 @@ func (d *Driver) GrantReadWrite(ctx context.Context, roles []string, except []st
 	return out, nil
 }
 
-// exceptArray is except as a Postgres text array literal argument.
+// exceptArray is except as a Postgres text array argument.
 func exceptArray(except []string) []string {
 	if except == nil {
 		return []string{}
