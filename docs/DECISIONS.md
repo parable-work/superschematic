@@ -6156,24 +6156,23 @@ microsecond (Rust) and the nanosecond, trailing zeros dropped (Go). A
 request with no credential, which the TypeScript runtime refuses before
 the engine, answers as the engine does. CI's `engine-servers` job runs it
 with the engine entrypoint tests in the full tier, on Postgres
-(`make engine-servers`). Not proved by it: a Rust server's engine routes
-have no timeout, which no transcript shows, and the TypeScript runtime's
+(`make engine-servers`). Not proved by it: the TypeScript runtime's
 1 MiB body limit on the engine's body routes, which the script's bodies
-stay under.
+stay under, and the engine routes' timeout, which no step of it can hold
+the engine past (a Rust server's, which had none, is the amendment
+below's).
 
 Not built yet: a project's engine crate built against a release, with
 no `[paths]` engine keys, since a release ships no engine crate (the
 amendment on the local target's project engine says what it lacks), so a
 release's image of a server on it gets no Dockerfile and `stack dev`
-refuses it; a timeout on a Rust server's
-engine routes, which the Go and TypeScript servers' have; a retention
-policy for the event log, which the runner keeps whole, and retention
-settings on the runner's element;
-and a live run: no server has run on Cloud Run against Cloud SQL, nor has
-the migration job readied an engine's schema there. The local target's
-project engine, the generated CI against an engine checkout and the
-image test of a TypeScript server on a project's addon are built (the
-amendment on the local target's project engine).
+refuses it; and a live run: no server has run on Cloud Run against Cloud
+SQL, nor has the migration job readied an engine's schema there. The
+local target's project engine, the generated CI against an engine
+checkout and the image test of a TypeScript server on a project's addon
+are built (the amendment on the local target's project engine), as are a
+Rust server's engine route timeout and the event log's retention (the
+amendment on them).
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 
@@ -8329,3 +8328,49 @@ No generated workflow has run on GitHub's runners against an engine
 checkout.
 
 The rule is reversible until the first release.
+
+### D58, amended: a Rust server's engine routes time out as the others' do, and the event log's retention is the engine database's setting, which its runner prunes
+
+The generated servers mount the engine (the amendment above) with two
+gaps: a Rust server's engine routes had no timeout, where a Go and a
+TypeScript server's take the server's 30 seconds; and the event log grew
+for good in a stack, since nothing opened the engine with retention, which
+the engine has had since D16 (amended) and its Rust port.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The axum router takes the host's timeout, `axum::Options::timeout`, as `enginehttp.Options.Timeout` and `engineApp`'s `timeoutSeconds` do: every route but the event stream's and MCP's (a `Route` whose `stream` or `mcp` is set), whose responses last as long as their clients, answers 504 `gateway_timeout` once the request, from the body's read through the caller to the engine's call, has taken longer. The answer is the HTTP runtimes' problem, `{"type": "about:blank", "title": "Gateway Timeout", "status": 504, "detail": "Gateway Timeout", "code": "gateway_timeout", "requestId"}`, `no-store`. An engine call already on the blocking pool runs to its end there and its answer is let go, as a Go handler past its timeout runs on. A generated Rust server's `engine.rs` sets it to the server's 30 seconds (`ENGINE_TIMEOUT`). | A tower `TimeoutLayer` around the router, which a host would have to keep off the stream and MCP by itself, and whose answer is not the runtimes' problem; leaving a Rust server's engine routes unbounded |
+| Retention is `outputs.engine.retention` in the engine database's config, beside `mount` and `policy`: the engine's own `RetentionOptions` as JSON, `{maxAgeMs?, maxEvents?, maxHoldMs?, everyMs?, batchSize?}`, an age, a count or both, every member an integer in the engine's range. The build checks it as the engine does, so that no entrypoint opens an engine that refuses it and retries for good; `apigen.EngineInfo.Retention` carries it, and every Go, TypeScript and Rust server, job, worker and runner opens the engine on the database with it. | The runner's settings element, per environment, which the servers, the jobs and the workers would not see, and whose settings are a platform's; durations as text (`30d`), a second notion of what the engine reads; a setting per namespace, when one database's engine types live in one namespace |
+| Retention is off unless set, as the engine's own option is. The log is the instances' history: what a client reads back, what a reaction's `before()` folds, a record of who changed what. Pruning it deletes data no deployment chose to lose, and a default would delete it on the first runner pass after an upgrade. | A default age, say 30 days, which bounds the log for a deployment that never thinks of it, at the cost of the history of one that does not expect to lose it |
+| Only the runner prunes, in the process that holds the runner's lease: the started runner prunes at its first pass and every `everyMs` after, a batch of `batchSize` events per transaction under the namespace's writer lock, on Postgres only while its process holds the lease and on SQLite in the one process that writes the file. In a stack that is the database's runner deployable; a server, a job and a worker open the engine with the same retention and never start the runner, so they never prune. A runner turned off prunes nothing until it is on again. `Runner::prune`, which a host may call, needs no lease, and no generated entrypoint calls it. | Every server instance pruning, which retention's per-process count and the lease were not built for; a prune job on a schedule, a deployable more, when the runner already holds the one lease a database has |
+| What an event is still needed for: a reaction that has yet to handle it. A namespace's hold is the cursor of its least advanced subscription, active, retrying, halted, archived or whose behavior the engine no longer runs, and retention prunes none of the namespace's events after it (`maxHoldMs`, when set, bounds a subscription that does not advance). A schedule, Timers' deadlines among them, needs no event: it reads its own rows. A live event stream holds nothing: one caught up reads each event as its commit wakes it, and one that falls behind the floor, a client that stopped reading for longer than retention keeps, ends. | Holding the log for open streams, which on Postgres needs each server instance to record its streams' cursors in the database, a write per stream at every heartbeat, and a crashed instance's rows bounded by a timeout, as `maxHoldMs` bounds a stuck subscription; a client that went away holds no stream to keep anything for anyway |
+| A read or a stream from a cursor retention pruned past is the engine's stale cursor today: 410 `cursor_expired`, `details: {after, floor, head}`, a stream's resume from its `Last-Event-ID` included, and a stream retention passes while it is open ends, so its reconnect gets the 410. A client that can take the gap reads on from `floor`; one that cannot starts again from `head`. | A reset event on the stream, which every `EventSource` client would have to learn, and which a JSON read could not carry |
+
+Status: built. The axum router's timeout and its exemptions are
+`tests/axum.rs`'s
+`a_route_past_the_hosts_timeout_is_504_but_the_event_stream_and_mcp_run_on`,
+on SQLite and Postgres, and the generated Rust server's `engine.rs` sets
+it (the servergen goldens). The HTTP corpus cannot hold a timeout case: a
+step's answer is the engine's, and no step can hold the engine past a
+host's timeout while the next waits. `TestEngineRetentionSetting` holds
+the build's check of `outputs.engine.retention`; desk-db, the servergen
+fixture, keeps 30 days, so every engine golden carries it into the Go,
+TypeScript and Rust server, job and runner, and the entrypoint tests open
+the engine with it. `retention.rs`'s
+`a_stream_the_started_runner_prunes_past_ends_and_its_resume_is_410_cursor_expired`
+prunes with the started runner past a stream on SQLite and Postgres, and
+`replicas_runner.rs`'s
+`only_the_runner_that_holds_the_lease_prunes_and_a_stream_it_prunes_past_resumes_to_410`
+runs two engines with retention on one Postgres database: the lease
+holder prunes, the other does not, a stream the other serves ends and its
+resume is 410, and once the holder stops, the other takes the lease and
+prunes.
+
+`replicas_runner.rs`'s handover test failed under heavy load (2 runs in
+20 beside a release build) waiting for the second runner to take the
+lease: the first's own runner took it again with a new session, woken by
+the notices of its own last commits, which is one runner holding the
+lease as it should, not a delay in the handover. The test now ends the
+holder's new session too until the other takes the lease
+(`hand_over`), and held in 20 runs of 20 beside a release build, the
+first taking its lease again in two of them.
