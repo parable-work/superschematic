@@ -1,0 +1,12 @@
+# A TypeScript API with no database that calls ts-pricing, whose quotes
+# admit only calling services. ts-till-stack's server Till serves both on
+# Workers, so ts-checkout's calls of ts-pricing stay in process with Till's
+# loopback credential (D64, D37 amended).
+name: ts-checkout
+kind: API
+calls:
+  - { name: ts-pricing, kind: API }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

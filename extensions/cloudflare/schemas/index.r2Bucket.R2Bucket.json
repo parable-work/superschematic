@@ -1,0 +1,31 @@
+{
+  "token": "cloudflare:index/r2Bucket:R2Bucket",
+  "terraform": {
+    "type": "cloudflare_r2_bucket",
+    "renames": {
+      "accountId": "account_id",
+      "storageClass": "storage_class"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "jurisdiction": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "storageClass": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "name"
+  ]
+}

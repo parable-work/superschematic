@@ -41,7 +41,8 @@ and a Go SDK. The build refuses the config without it.
 ## Install the CLI
 
 The CLI is `superschematic`: the core with the official extensions linked,
-the gcp target, the Cloudflare DNS platform and the Pulumi provisioner. It
+the gcp target, the Cloudflare DNS platform and target, and the Pulumi
+provisioner. It
 is the Go module
 `github.com/parable-work/superschematic/cmd/superschematic`.
 

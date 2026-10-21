@@ -583,8 +583,8 @@ their own, `/console` unless it names another:
 topcoat: { enabled: true, pages: { enabled: true, prefix: "/console" } },
 ```
 
-The acme shop builds its configs with the core binary, which refuses
-`outputs.topcoat`, so it sets `pages_prefix` beside `services` in
+The acme shop builds its configs with the installed binary, which does
+not link `extensions/topcoat` and refuses `outputs.topcoat`, so it sets `pages_prefix` beside `services` in
 `superschematic.toml`'s `[extension.topcoat]` instead:
 
 <Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_prefix" />

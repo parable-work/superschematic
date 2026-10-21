@@ -26,7 +26,7 @@ The core has ten commands: `build`, `build-all`, `migrate`,
 `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-the Pulumi provisioner), which add none. The migration runner,
+target, and the Pulumi provisioner), which add none. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
@@ -173,7 +173,13 @@ stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
 scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
-`go.mod` beside a Go one when no module holds the package. A build never
+`go.mod` beside a Go one when no module holds the package. A TypeScript
+server some environment places on Cloudflare Workers also gets `fetch.ts`,
+its Workers entrypoint, `bundle.ts`, which a deploy runs as `bun bundle.ts
+<dir>` and `bun bundle.ts --check` runs into a temporary directory, and
+`workers.d.ts`, beside the `main.ts` that `stack dev` runs (D64); a
+TypeScript job there gets `scheduled.ts`, its Cron Trigger entrypoint, in
+place of `fetch.ts`. A build never
 removes the output root's `bun.lock`, the lockfile of its Bun workspace,
 which the project commits. When git ignores it, the build of a stack with
 a TypeScript server prints one line naming the rule and saying to ignore
@@ -549,9 +555,9 @@ types schemas that link to each other.
 ## `stack init [<services-root>]`
 
 Write a Stack service over a tree that already has API services, with a
-local environment, a gcp one when given a project and a region, and the
-ignore rules a stack needs. It writes files and nothing else. The design
-is section 11.1 of
+local environment, a gcp one when given a project and a region or a
+cloudflare one when given an account, and the ignore rules a stack needs.
+It writes files and nothing else. The design is section 11.1 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
 and D59 records it; [Stacks](/superschematic/guides/stacks/#start-a-stack)
 walks through it.
@@ -568,9 +574,10 @@ walks through it.
    that has a `tsconfig.json` also has one, `tsconfig.json` extending
    that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
    `@stack` deploys every API and every Site service and exposes as step 2
-   decided, with `Dev` on the local target and the gcp environment, and,
-   for a gcp environment, `src/gcp-target.ts`, the gcp target's values and
-   settings types read from the JSON Schemas it registers.
+   decided, with `Dev` on the local target and the cloud environment, and
+   the cloud target's values and settings types read from the JSON Schemas
+   it registers: `src/gcp-target.ts` for a gcp environment,
+   `src/cloudflare-target.ts` for a cloudflare one (D64).
 5. Add the ignore rules to the `.gitignore` that covers the schemas root,
    the nearest at or above it in its repository, else a new one in the
    schemas root, anchored there: `/dist/*`, `!/dist/bun.lock` and
@@ -587,22 +594,27 @@ walks through it.
    find it on their own.
 
 At a terminal, init asks for the name, whether to add a gcp environment
-and its name, project and region, whether to turn the GitHub workflow on,
-and what to expose. Each question shows its default in brackets: the
+and its name, project and region, and, when you add none, whether to add
+a cloudflare environment and its name and account, whether to turn the
+GitHub workflow on, and what to expose. Each question shows its default in brackets: the
 tree's, or the project and region gcloud's active configuration names
 (`project`, then `run/region` or `compute/region`), read with no stdin and
 a ten-second deadline, and skipped without `gcloud`. Without a terminal,
 each value comes from its flag or its default, and a gcp environment needs
-both `--gcp-project` and `--region`.
+both `--gcp-project` and `--region`. A cloudflare environment's one value
+is its account, 32 hexadecimal digits from the dashboard; bootstrap
+records the rest.
 
 It refuses a tree with no API service; a tree with a Stack service, unless
-`--force`; a name that is another kind of service's; and a gcp
-environment in a binary that does not link the gcp target, the core
-alone.
+`--force`; a name that is another kind of service's; a gcp project
+beside a Cloudflare account, since init writes one cloud environment; and
+a gcp or cloudflare environment in a binary that does not link its target,
+the core alone.
 
 ```
 superschematic stack init
 superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+superschematic stack init --cloudflare-account 0123456789abcdef0123456789abcdef --ci github
 superschematic stack init ./schemas/services --name shop-stack --expose shop-api --force
 ```
 
@@ -611,7 +623,8 @@ superschematic stack init ./schemas/services --name shop-stack --expose shop-api
 | `--name` | the first word the deployed services' names share, then `-stack`; else the naming file's `npm_scope`, then `-stack`; else the project directory's | the Stack service's name and directory |
 | `--gcp-project` | none | the Google Cloud project of a gcp environment |
 | `--region` | none | the gcp environment's region, such as `us-east1` |
-| `--environment` | `Staging` | the gcp environment's name, a class name |
+| `--cloudflare-account` | none | the Cloudflare account of a cloudflare environment: its id, 32 hexadecimal digits |
+| `--environment` | `Staging` | the cloud environment's name, a class name |
 | `--ci` | none | the CI renderer `outputs.ci` turns on, `github` |
 | `--expose` | the APIs end users and sites call | the API services to expose, comma-separated, or `none` |
 | `--force` | false | write the stack though the tree has one: replace the Stack service of the same name, its config and `src`, or add another |
@@ -870,10 +883,31 @@ image builds run as, the `migrator` account the migration job runs as,
 and Workload Identity Federation for the GitHub repository, and creates
 the secret of each platform credential the environment needs.
 
+On cloudflare it runs with your token in `CLOUDFLARE_API_TOKEN`, once per
+account: it verifies the token, creates the R2 buckets
+`superschematic-state`, which holds the state, and
+`superschematic-bootstrap`, which holds bootstrap's own state, finds or
+creates the account's Secrets Store, and applies the `<stack>-deployer`,
+`<stack>-planner` and `<stack>-preview` account tokens. On the account's
+first bootstrap it generates two passphrases and prints each once, on
+standard output: the state's, which you set in `PULUMI_CONFIG_PASSPHRASE`
+for every later command, and bootstrap's own, which you set in
+`SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE` for every later bootstrap and which
+no CI job holds. Keep both in your password manager. A later run checks
+each passphrase in the shell and refuses another. With `--github` it sets
+the tokens the environment's jobs read and the state's passphrase as the
+repository's GitHub Actions secrets through `gh`, at the scopes the
+[generated workflow](/superschematic/guides/stacks/#generated-ci) reads
+them from, creating the deploy job's GitHub environment when it is
+missing; without `gh` on PATH, signed in, it prints the `gh secret set`
+commands and each token once instead.
+
 Then it records in the stack's schema the values only the cloud knows: on
 gcp, the project's number, as `projectNumber` in the gcp values of the
 environment whose declaration sets `project`, the bootstrapped one or the
-nearest one it extends. It writes the value when the schema has none,
+nearest one it extends; on cloudflare, `secretsStoreId` and
+`workersSubdomain` beside `accountId`. An account with no workers.dev
+subdomain yet is told to choose one in the dashboard. It writes the value when the schema has none,
 writes it again when it differs, and leaves the file alone when it
 matches. A TypeScript schema changes in that property's text alone; a
 JSON or YAML schema is not edited. It prints one line per value on
@@ -893,6 +927,7 @@ for each credential with no value, with the terminal's echo off.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name`; `""` leaves Workload Identity Federation out |
+| `--github` | false | set what the generated CI signs in with as the repository's GitHub Actions secrets, through `gh`: the cloudflare target's tokens and passphrase. gcp's CI signs in with no secret and ignores it |
 
 ### `stack secrets set <environment> [Type.FIELD]`
 
@@ -951,14 +986,18 @@ serves sites from, under their digest, when they are new; they serve
 nothing until a deploy takes them. A server, job or worker whose platform
 runs a bundle builds with `bun bundle.ts` in its package after the same
 install, and the target keeps its files under their digest when they are
-new. It prints each image, each site's files and each bundle as a
-`stack deploy` flag:
+new; on cloudflare that is the account's state bucket, under
+`superschematic/bundles/<stack>/<deployable>/<hex>/`. It prints each image,
+each site's files and each bundle as a `stack deploy` flag:
 
 ```
 $ superschematic stack build Staging
 --image Orders=us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:...
 --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
 --site shop-web=sha256:...
+
+$ superschematic stack build Staging --stack schemas/services/storefront-stack
+--bundle shop-storefront=sha256:...
 ```
 
 A build writes no deploy manifest.
@@ -1003,8 +1042,8 @@ that connects to a database its privileges. A rollout that fails runs no
 phases.
 
 The deploy holds the run's deploy lock, kept by the target's state store
-(on gcp the object `superschematic/locks/<stack>/<run>.json` of the state
-bucket), from before it reads the manifest until it ends, whether it
+(on gcp and on cloudflare the object
+`superschematic/locks/<stack>/<run>.json` of the state bucket), from before it reads the manifest until it ends, whether it
 succeeds or fails. A second deploy or a destroy of the run meanwhile
 fails at once, naming who holds the lock, the host, the process, the CI
 run and since when. Ctrl-C stops the step under way, records the failure

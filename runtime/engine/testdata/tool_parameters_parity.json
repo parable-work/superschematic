@@ -78,6 +78,14 @@
         "languagePrimitive": "string",
         "name": "Finance.Money"
       },
+      "Generic.Boolean": {
+        "languagePrimitive": "string",
+        "name": "Generic.Boolean"
+      },
+      "Generic.Float64": {
+        "languagePrimitive": "string",
+        "name": "Generic.Float64"
+      },
       "Generic.Int64": {
         "languagePrimitive": "string",
         "name": "Generic.Int64"
@@ -93,6 +101,10 @@
       "Generic.StringMap": {
         "languagePrimitive": "string",
         "name": "Generic.StringMap"
+      },
+      "Generic.Text": {
+        "languagePrimitive": "string",
+        "name": "Generic.Text"
       },
       "Geo.Location": {
         "languagePrimitive": "string",
@@ -639,6 +651,18 @@
             }
           },
           {
+            "name": "catalogGenericBoolean",
+            "typeRef": {
+              "name": "Generic.Boolean"
+            }
+          },
+          {
+            "name": "catalogGenericFloat64",
+            "typeRef": {
+              "name": "Generic.Float64"
+            }
+          },
+          {
             "name": "catalogGenericInt64",
             "typeRef": {
               "name": "Generic.Int64"
@@ -660,6 +684,12 @@
             "name": "catalogGenericStringMap",
             "typeRef": {
               "name": "Generic.StringMap"
+            }
+          },
+          {
+            "name": "catalogGenericText",
+            "typeRef": {
+              "name": "Generic.Text"
             }
           },
           {
@@ -1256,6 +1286,22 @@
             ],
             "x-superschematic-scalar": "Finance.Money"
           },
+          "catalogGenericBoolean": {
+            "description": "True or false",
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "x-superschematic-scalar": "Generic.Boolean"
+          },
+          "catalogGenericFloat64": {
+            "description": "A finite 64-bit floating-point number",
+            "type": [
+              "number",
+              "null"
+            ],
+            "x-superschematic-scalar": "Generic.Float64"
+          },
           "catalogGenericInt64": {
             "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
             "maximum": 9007199254740991,
@@ -1295,6 +1341,14 @@
               "null"
             ],
             "x-superschematic-scalar": "Generic.StringMap"
+          },
+          "catalogGenericText": {
+            "description": "Text with no further shape",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "Generic.Text"
           },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
@@ -1564,9 +1618,9 @@
             "x-superschematic-scalar": "Temporal.Time"
           },
           "catalogTemporalTimeZone": {
-            "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+            "description": "IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.",
             "maxLength": 100,
-            "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+            "pattern": "^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$",
             "type": [
               "string",
               "null"
@@ -2002,7 +2056,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:305a42db05000b750a42c6168b30d873abbe328a9eacc3873c60adbd0c469ba3"
+      "inputSchemaDigest": "sha256:096e29570da6c02299afa83fb6ccf3c95ddb92fa1ebdb1887adfa853852193f3"
     },
     {
       "name": "a distribution's keys",
@@ -2409,6 +2463,22 @@
             ],
             "x-acme-scalar": "Finance.Money"
           },
+          "catalogGenericBoolean": {
+            "description": "True or false",
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "x-acme-scalar": "Generic.Boolean"
+          },
+          "catalogGenericFloat64": {
+            "description": "A finite 64-bit floating-point number",
+            "type": [
+              "number",
+              "null"
+            ],
+            "x-acme-scalar": "Generic.Float64"
+          },
           "catalogGenericInt64": {
             "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
             "maximum": 9007199254740991,
@@ -2448,6 +2518,14 @@
               "null"
             ],
             "x-acme-scalar": "Generic.StringMap"
+          },
+          "catalogGenericText": {
+            "description": "Text with no further shape",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "Generic.Text"
           },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
@@ -2717,9 +2795,9 @@
             "x-acme-scalar": "Temporal.Time"
           },
           "catalogTemporalTimeZone": {
-            "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+            "description": "IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.",
             "maxLength": 100,
-            "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+            "pattern": "^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$",
             "type": [
               "string",
               "null"
@@ -3157,7 +3235,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:7c855e0d5879f67fddbe4b87aae77a2b77acb08d99f3969c6c7584c226524e43"
+      "inputSchemaDigest": "sha256:6d153068cca17d88de14643f37bd09320495baff46c8be25e87b0dab6a92c591"
     },
     {
       "name": "no keys",
@@ -3537,6 +3615,20 @@
               "null"
             ]
           },
+          "catalogGenericBoolean": {
+            "description": "True or false",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "catalogGenericFloat64": {
+            "description": "A finite 64-bit floating-point number",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "catalogGenericInt64": {
             "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
             "maximum": 9007199254740991,
@@ -3570,6 +3662,13 @@
             "description": "A string-to-string map stored as JSON",
             "type": [
               "object",
+              "null"
+            ]
+          },
+          "catalogGenericText": {
+            "description": "Text with no further shape",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -3814,9 +3913,9 @@
             ]
           },
           "catalogTemporalTimeZone": {
-            "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+            "description": "IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.",
             "maxLength": 100,
-            "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+            "pattern": "^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$",
             "type": [
               "string",
               "null"
@@ -4231,7 +4330,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:78777cf2f7016bc32d0d2280a9876bd65ecba931a8b401819fe6155b2b2a93d5"
+      "inputSchemaDigest": "sha256:f8065218cc64d43323b7bf9a2c9cae6662b1bf5d0db94ecf5e848f96c847b994"
     }
   ],
   "defaults": {

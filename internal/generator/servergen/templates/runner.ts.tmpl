@@ -49,7 +49,12 @@ async function main(): Promise<void> {
 
   let {{ $db.Var }}: Database;
   try {
-    {{ $db.Var }} = loadDatabase({{ tsQuote $db.Field }});
+    const connection = loadDatabase({{ tsQuote $db.Field }});
+    if ('d1' in connection) {
+      // Only a Worker reaches a D1 binding, and the engine runs on none (D64).
+      throw new Error({{ tsQuote (printf "%s is a D1 binding, which only a Worker reaches; set %s_URL" $db.Field $db.Field) }});
+    }
+    {{ $db.Var }} = connection;
   } catch (error) {
     throw new Error(`database {{ $db.Service }}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }

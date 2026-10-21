@@ -42,8 +42,8 @@ github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsRe
 github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e h1:hQ6YbfU4am85irvTZHTtI6FZDkoJ5CoI4A4bUnDC+vI=
-github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
+github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921 h1:nLdd70vOHiwo9CHJCl0XFpH0sds9e90fYoF5e6/gwfU=
+github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=

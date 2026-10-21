@@ -152,6 +152,11 @@ type (
 	PlannedChange    = registry.PlannedChange
 	StackEnvironment = registry.StackEnvironment
 
+	// A Provisioner that is a SecretOutputReader reads a secret output of
+	// an applied node, which a bootstrap hands on: the cloudflare target's
+	// CI tokens (D64).
+	SecretOutputReader = registry.SecretOutputReader
+
 	// The seams the cloud half of the `stack` commands drives
 	// (docs/stack-model.md, sections 7.3 and 11): a target's StateStore
 	// keeps its provisioner's state backend and each Run's deploy
@@ -184,6 +189,15 @@ type (
 	// step (D46).
 	MigrationPreparer = registry.MigrationPreparer
 
+	// A target's MigrationRunner that is a DeployingMachineMigrations runs
+	// superschematic-migrate on the deploying machine, so a generated CI
+	// job that deploys a database installs the runner (D64).
+	DeployingMachineMigrations = registry.DeployingMachineMigrations
+
+	// A target's MigrationRunner that is a PrivilegelessMigrations grants
+	// no roles, so a deploy prepares it only for steps to migrate (D64).
+	PrivilegelessMigrations = registry.PrivilegelessMigrations
+
 	// A target's StateStore that is a StateLocker keeps each run's
 	// DeployLock beside its manifest, which a deploy and a destroy hold
 	// while they run; a lock another holds is refused with a
@@ -210,6 +224,11 @@ type (
 	BundlePublisher = registry.BundlePublisher
 	ArtifactFetcher = registry.ArtifactFetcher
 	DestroyPreparer = registry.DestroyPreparer
+
+	// UnrealizableError is a platform's refusal of a deployable it cannot
+	// realize, which Unrealizable makes: resolution reports it as
+	// unrealizable rather than as a failed lowering (D64).
+	UnrealizableError = registry.UnrealizableError
 
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
 	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack, with
@@ -308,6 +327,11 @@ var (
 	ErrSecretNotCreated = registry.ErrSecretNotCreated
 	ErrLockHeld         = registry.ErrLockHeld
 )
+
+// Unrealizable returns the error a platform's Lower returns for a
+// deployable it cannot realize, such as a name its provider refuses, whose
+// reason is the format applied to args (D64).
+func Unrealizable(format string, args ...any) error { return registry.Unrealizable(format, args...) }
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:
 // invocationPolicy, auto or ask, auto by default.

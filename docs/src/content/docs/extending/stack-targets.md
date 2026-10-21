@@ -7,8 +7,8 @@ sidebar:
 
 A [stack](/superschematic/guides/stacks/) deploys through registrations.
 The core registers one target, `local`, which `stack dev` runs, and one
-CI renderer, `github`; the gcp target, the Cloudflare DNS platform and the
-Pulumi provisioner are extensions like any other, so a new cloud, DNS
+CI renderer, `github`; the gcp target, the Cloudflare DNS platform and
+target, and the Pulumi provisioner are extensions like any other, so a new cloud, DNS
 provider, infrastructure tool or CI system needs no core edit.
 [A deploy target](/superschematic/extending/write-an-extension/#a-deploy-target)
 lists the six registrations. This page covers what each function you
@@ -327,7 +327,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | --- | --- | --- |
 | `State` | `StateStore` | gives the provisioner's state backend for an environment, and reads, writes and deletes each run's deploy manifest |
 | `Secrets` | `SecretStore` | sets, gets, lists and checks secret values, keyed by a secret's identity (`PaymentsSecrets.STRIPE_KEY`) or a platform credential's secret name |
-| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`) |
+| `Bootstrap` | `Bootstrapper` | prepares a cloud project once, with the provisioner, the program directory and the credentials the environment needs, and returns the values only the cloud knows, each a `BootstrapValue` the core records in the schema beside the value it belongs with (gcp's `projectNumber`, beside `project`; cloudflare's `secretsStoreId` and `workersSubdomain`, beside `accountId`) |
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
@@ -372,7 +372,8 @@ rollback, a `--no-build` deploy, `stack plan` and `stack destroy`, checks
 it against the digest and places it beside the program. A
 `SitePublisher` that is an `ArtifactFetcher` has each site's files placed
 there too, at `artifacts/<site>/<hex>/`, for a provider that uploads them
-from the program; gcp's is not one. The gcp target fills all seven: its migrations run
+from the program; gcp's is not one. The gcp target fills each but
+`Bundles` and `PreDestroy`: its migrations run
 each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
 takes a runner of your own instead), its builder builds each changed
@@ -383,13 +384,38 @@ from Cloud Logging (D52). Each operation works on a
 `registry.Run`: the resolved environment and the values of its
 parameters.
 
+The cloudflare target fills each but `Builder`, since its servers, jobs
+and sites ship as bundles and files rather than images, and `Jobs`, so
+`stack run` refuses its environments (D64). Its bundle and site
+publishers keep files in R2 by their digest and are `ArtifactFetcher`s,
+its `PreDestroy` empties each bucket of a parameterized member, and its
+migration runner runs `superschematic-migrate` on the deploying machine
+against each D1 database. Its state store's `Backend` hands each run, in
+`StateBackend.Env`, the S3 credentials of the shell's token and the
+passphrase of its secrets provider, and refuses a run without either
+before the provisioner starts. Its secret store's `Get` refuses, since
+the Secrets Store gives a value only to a Worker. A `BootstrapRequest`
+carries two fields for a target like it: `GitHub`, set by `stack
+bootstrap --github`, asks the bootstrap to store what the generated CI
+signs in with as the repository's Actions secrets, and `Reveal` is where
+it prints what it shows the person once, such as a passphrase it
+generated; the progress `Log` holds no secret. Its bootstrap reads the CI's
+tokens from its own graph's state through `registry.SecretOutputReader`,
+which a provisioner may implement beside `Provisioner`: the Pulumi
+provisioner's reads one top-level output of an applied node, decrypted,
+which `Outputs` leaves out.
+
 A `CIIdentity` is a kind and its fields, which a CI renderer turns into
 its own sign-in steps. gcp's kind is `gcp-workload-identity`, with
 `provider`, the workload identity provider bootstrap creates, and
 `account`, the role's service account. Its `Identity` is pure, and nil
 until the environment's values hold what the identity names, as gcp's is
-until bootstrap records `projectNumber`. A renderer refuses a kind it
-does not know, so a target with a new kind of sign-in teaches the
+until bootstrap records `projectNumber`. cloudflare's kind is
+`cloudflare-api-token`, whose `token` and `passphrase` name GitHub Actions
+secrets and whose `environment`, when set, names the GitHub environment
+that holds them; `github` writes no step for it, but the job's `env` from
+those secrets, and asks for no identity token. A renderer refuses a kind
+it does not know, so a target with a new kind of sign-in teaches the
 renderers it is used with.
 
 ## A DNS platform
@@ -408,7 +434,9 @@ variable and what the engineer enters. Resolution writes them into
 graph. The `stack` commands read them through `stackdeploy.CredentialsOf`:
 bootstrap asks for each and stores it in the target's secret store, and
 `plan`, `deploy`, `destroy` and `outputs` hand each to the provisioner for
-that run.
+that run. `DNSContext.Environment.Target` names the environment's target,
+so a DNS platform may name none where the target's own credential carries
+the zone, as Cloudflare's does on the cloudflare target.
 
 ## A provisioner
 
@@ -496,6 +524,7 @@ extensions/cloudflare/
   schemas/
     pulumi-cloudflare.json               the pin: package, version, upstream digests, types
     index.dnsRecord.DnsRecord.json       one file per pinned type
+    index.accountToken.AccountToken.json
     schemas.go                           embeds them; ResourceTypes(version)
   internal/tools/providerschemas/main.go pintool.Main(schemas.PinFile)
 ```
@@ -518,7 +547,11 @@ written by `go run ./internal/tools/providerschemas` from the repository's
 root. pulumi-tls is bridged through the Terraform plugin framework, whose
 bridge metadata has no auto-aliasing table, so the tool takes the
 Terraform type from the metadata's renames table and refuses a list
-property there, whose Terraform name it cannot know. A connector that
+property there, whose Terraform name it cannot know. pulumi-cloudflare
+6 is bridged the same way but keeps an auto-aliasing table, which lists a
+single nested attribute's list fields directly under it, with no element;
+the tool reads those too, so the account token's `condition.requestIp.ins`
+pins as Terraform's `in`. A connector that
 emits a type no target registers brings its schema in
 `ConnectorSpec.ResourceTypes`, as a DNS platform does.
 
@@ -588,6 +621,7 @@ cli.New(cli.Config{Name: "my-schematic"},
 )
 ```
 
-The installed `superschematic` links `gcp.Extension{}` and the pulumi
-provisioner pinned to the gcp provider, and not the Cloudflare extension:
-a binary that uses Cloudflare DNS links it, as above.
+The installed `superschematic` links `gcp.Extension{}`,
+`cloudflare.Extension{}` and the pulumi provisioner pinned to both
+providers and to the generic connector's key provider
+(`stack.GenericKeyProviderVersion`).

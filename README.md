@@ -208,7 +208,7 @@ superschematic --help
 
 `bin/superschematic` is the binary a release ships: the core with the
 official extensions linked, the gcp target, the Cloudflare DNS platform
-and the Pulumi provisioner.
+and target, and the Pulumi provisioner.
 `go install github.com/parable-work/superschematic/cmd/superschematic@<version>`
 does not work, because the Go modules carry `replace` directives and `go
 install` at a version refuses them; build from a checkout as above, or
@@ -336,8 +336,8 @@ func main() {
 ```
 
 The installed `superschematic` (`cmd/superschematic`) is that call with the
-official extensions (the gcp target, the Cloudflare DNS platform and the
-Pulumi provisioner), and the core alone
+official extensions (the gcp target, the Cloudflare DNS platform and
+target, and the Pulumi provisioner), and the core alone
 (`internal/cmd/superschematic-core`) is the call with none. The
 naming file, `superschematic.toml` at
 the root of your schemas, gives the generated packages their module paths,

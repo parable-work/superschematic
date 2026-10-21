@@ -70,6 +70,39 @@ func (s *siteSources) sources() *stackdeploy.Sources {
 	}
 }
 
+// TestDeployInstallsAPartialWorkspaceWithoutSaving: an output root built
+// for one stack leaves out the implementations and sites whose packages it
+// lacks (D51, amended), whose lockfile, pinning the whole workspace, a
+// frozen install refuses; the deploy installs it with --no-save, which
+// keeps the lockfile as it is, and says so.
+func TestDeployInstallsAPartialWorkspaceWithoutSaving(t *testing.T) {
+	f := newFixture(t)
+	env := f.siteEnv(t, "Staging")
+	f.ready(t, env)
+	src := newSiteSources(t)
+	sources := src.sources()
+	if err := os.MkdirAll(sources.OutputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name": "@acme/workspace", "private": true, "workspaces": ["api/*", "../../typescript/*", "../../web/*", "!../../typescript/shop-wishlist"]}` + "\n"
+	if err := os.WriteFile(filepath.Join(sources.OutputRoot, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := f.options(t, env, nil)
+	o.Dir = t.TempDir()
+	if _, err := stackdeploy.Deploy(context.Background(), stackdeploy.DeployOptions{
+		Options: o, Images: images(1), Sources: sources, Planner: (&planner{to: 1}).plan, Now: fixedNow,
+	}); err != nil {
+		t.Fatalf("deploy: %v\n%s", err, f.log)
+	}
+	if got := strings.Join(src.ran, "; "); got != "schemas/dist: bun install --no-save; web/shop-web: bun run build" {
+		t.Errorf("the deploy ran %s", got)
+	}
+	if want := "the TypeScript workspace leaves out ../../typescript/shop-wishlist"; !strings.Contains(f.log.String(), want) {
+		t.Errorf("the deploy's log lacks %q:\n%s", want, f.log)
+	}
+}
+
 // TestDeployPublishesASite: a deploy builds the site after a frozen
 // install of the workspace, publishes its files and its config, shop-api's
 // public address, before the wave that rolls it out, pins the site's node

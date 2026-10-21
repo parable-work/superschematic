@@ -1,0 +1,25 @@
+name: ts-checkout
+kind: API
+types:
+  Checkout:
+    name: Checkout
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: cents
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: Checkouts
+    operations:
+      - name: getCheckout
+        typeRef: { name: Checkout }
+        required: true
+        httpMethod: GET
+        restPath: checkouts/{sku}
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true

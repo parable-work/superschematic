@@ -16,6 +16,13 @@
 // loadCallers read the same variables with the same refusals (D51). The vectors in
 // runtime/http/testdata/stackconfig_parity.json, which this package's
 // tests write with -update, hold both to one encoding.
+//
+// The members a Worker alone reads (D64) are refused here, with a message
+// that says so: a database's D1 binding (field_D1_BINDING,
+// field_D1_DATABASE), a service's binding (field_BINDING_NAME,
+// field_BINDING_WORKER), and a bucket's R2 binding and credential
+// (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN).
+// The TypeScript runtime reads them for its Workers entry.
 package stackconfig
 
 import (
@@ -121,20 +128,23 @@ func (c *Credential) HeaderNames() []string {
 }
 
 // LoadDatabase reads the database field named field from the environment:
-// field_URL, or the three field_CLOUD_SQL_ variables.
+// field_URL, or the three field_CLOUD_SQL_ variables. A D1 binding, which
+// only a Worker reads, is refused.
 func LoadDatabase(field string) (Database, error) {
 	return loadDatabase(field, os.Getenv)
 }
 
 // LoadService reads the service field named field from the environment:
 // field_URL, and the field_CREDENTIAL_ variables when field_CREDENTIAL_SOURCE
-// is set.
+// is set. A service binding, which only a Worker reads, is refused.
 func LoadService(field string) (Service, error) {
 	return loadService(field, os.Getenv)
 }
 
 // LoadBucket reads the bucket field named field from the environment:
 // field_NAME, and field_ENDPOINT when an emulator serves the bucket (D54).
+// An R2 binding and its credential, which only a Worker reads, are
+// refused.
 func LoadBucket(field string) (Bucket, error) {
 	return loadBucket(field, os.Getenv)
 }
@@ -143,7 +153,29 @@ func LoadBucket(field string) (Bucket, error) {
 // URL with a host.
 var endpointPattern = regexp.MustCompile(`^https?://[^/?#]+`)
 
+// workerOnly refuses the variables of members only a Worker reads (D64),
+// naming each that is set and what they encode, or returns nil when none
+// is set.
+func workerOnly(getenv func(string) string, what string, names ...string) error {
+	var set []string
+	for _, name := range names {
+		if getenv(name) != "" {
+			set = append(set, name)
+		}
+	}
+	switch len(set) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("environment variable %s is set: only a Worker reads %s (D64)", set[0], what)
+	}
+	return fmt.Errorf("environment variables %s are set: only a Worker reads %s (D64)", strings.Join(set, ", "), what)
+}
+
 func loadBucket(field string, getenv func(string) string) (Bucket, error) {
+	if err := workerOnly(getenv, "an R2 binding", field+"_BINDING", field+"_R2_ACCOUNT", field+"_R2_ACCESS_KEY_ID", field+"_R2_TOKEN"); err != nil {
+		return Bucket{}, err
+	}
 	name := getenv(field + "_NAME")
 	endpoint := getenv(field + "_ENDPOINT")
 	var errs []error
@@ -160,6 +192,9 @@ func loadBucket(field string, getenv func(string) string) (Bucket, error) {
 }
 
 func loadDatabase(field string, getenv func(string) string) (Database, error) {
+	if err := workerOnly(getenv, "a D1 binding", field+"_D1_BINDING", field+"_D1_DATABASE"); err != nil {
+		return Database{}, err
+	}
 	url := getenv(field + "_URL")
 	cloud := []string{field + "_CLOUD_SQL_INSTANCE", field + "_CLOUD_SQL_DATABASE", field + "_CLOUD_SQL_USER"}
 	values := make([]string, len(cloud))
@@ -186,6 +221,9 @@ func loadDatabase(field string, getenv func(string) string) (Database, error) {
 }
 
 func loadService(field string, getenv func(string) string) (Service, error) {
+	if err := workerOnly(getenv, "a service binding", field+"_BINDING_NAME", field+"_BINDING_WORKER"); err != nil {
+		return Service{}, err
+	}
 	url := getenv(field + "_URL")
 	if url == "" {
 		return Service{}, fmt.Errorf("required environment variable %s_URL is not set", field)

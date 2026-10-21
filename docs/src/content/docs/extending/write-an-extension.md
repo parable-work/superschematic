@@ -8,7 +8,7 @@ sidebar:
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The installed
 binary (`cmd/superschematic`) passes the official ones (the gcp target, the
-Cloudflare DNS platform and the Pulumi provisioner), and the core alone
+Cloudflare DNS platform and target, and the Pulumi provisioner), and the core alone
 (`internal/cmd/superschematic-core`) passes none. Everything project-specific
 registers here: kinds, decorators, scalar catalogs, documents, generators,
 build-all hooks, auth providers, checks, OpenAPI hooks, tool hooks,
@@ -1028,7 +1028,8 @@ A stack deploys a schema tree through a target, and the target's resources
 through a provisioner (D30 in `docs/DECISIONS.md`; section 6 of
 `docs/stack-model.md` is the design). The official extensions are the
 examples: `extensions/gcp` registers the `gcp` target with its platforms,
-connectors and Cloud DNS platform, `extensions/cloudflare` a DNS platform,
+connectors and Cloud DNS platform, `extensions/cloudflare` the
+`cloudflare` target with its platforms and connectors and a DNS platform,
 and `extensions/pulumi` the provisioner. Six registrations make up the
 surface, each spec carrying the extension's `Name()`:
 

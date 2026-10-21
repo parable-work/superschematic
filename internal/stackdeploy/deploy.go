@@ -167,7 +167,7 @@ func Deploy(ctx context.Context, o DeployOptions) (m *Manifest, err error) {
 	if err := s.checkDeployJobs(); err != nil {
 		return nil, err
 	}
-	if p, ok := s.target.Migrations.(registry.MigrationPreparer); ok && runsMigrations(s.env, prev, plans, pending) {
+	if p, ok := s.target.Migrations.(registry.MigrationPreparer); ok && preparesMigrations(s.target.Migrations, s.env, prev, plans, pending) {
 		if err := p.PrepareMigrations(ctx, s.run, s.log); err != nil {
 			return nil, fmt.Errorf("the migration runner of target %s: %w", s.target.Name, err)
 		}
@@ -296,6 +296,23 @@ func runsMigrations(env *ir.ResolvedEnvironment, prev *Manifest, plans []*Databa
 		}
 	}
 	return false
+}
+
+// preparesMigrations reports whether a deploy that starts from prev
+// prepares runner: when it runs a phase through it (runsMigrations), but
+// for a runner with no privileges to grant, only when a phase has steps
+// or is pending, since a phase whose connecting servers alone changed
+// does nothing there (D64).
+func preparesMigrations(runner registry.MigrationRunner, env *ir.ResolvedEnvironment, prev *Manifest, plans []*DatabasePlan, pending map[string][]*PendingMigration) bool {
+	if _, ok := runner.(registry.PrivilegelessMigrations); !ok {
+		return runsMigrations(env, prev, plans, pending)
+	}
+	for _, p := range pending {
+		if len(p) > 0 {
+			return true
+		}
+	}
+	return hasSteps(plans)
 }
 
 // step runs one step of the deploy order.
@@ -474,7 +491,7 @@ func engineDatabase(env *ir.ResolvedEnvironment, service string) bool {
 // it records each plan's phase as pending on the schema the database
 // held before.
 func (d *deploy) runPhase(ctx context.Context, database string, phase ir.MigrationPhase, plans []*DatabasePlan) error {
-	req := registry.MigrationRequest{Run: d.run, Database: database, Phase: phase, Log: d.log}
+	req := registry.MigrationRequest{Run: d.run, Database: database, Phase: phase, Log: d.log, Outputs: d.outputs}
 	var names []string
 	for _, plan := range plans {
 		req.Plans = append(req.Plans, registry.MigrationPlan{
@@ -508,6 +525,16 @@ func (d *deploy) runPhase(ctx context.Context, database string, phase ir.Migrati
 		d.manifest.setApplied(database, plan.Service, applied)
 	}
 	return nil
+}
+
+// outputs reads the outputs of the graph the run has applied so far, which
+// a migration runner reads through MigrationRequest.Outputs.
+func (d *deploy) outputs(ctx context.Context) (map[string]map[string]any, error) {
+	outputs, err := d.prov.Outputs(ctx, d.req)
+	if err != nil {
+		return nil, fmt.Errorf("read the outputs of %s: %w", d.run.Name(), err)
+	}
+	return outputs, nil
 }
 
 // ensureSecrets checks, once, that every secret of the environment has a

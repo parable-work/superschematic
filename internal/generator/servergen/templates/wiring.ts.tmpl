@@ -85,6 +85,28 @@ async function connect(service: string, field: string, db: Database): Promise<Po
 }
 {{- end }}
 
+{{- define "ts-open-sqlite" -}}
+/**
+ * Opens the database of the database field named field, whose DB service
+ * lists sqlite first (D64): the environment sets field_URL to a sqlite:
+ * URL, and the local target points it at a file under the environment's
+ * state directory. Deps.db is the file as a SqlDatabase, D1's interface. On
+ * Workers a D1 binding takes its place, which only a Worker's entry reaches,
+ * so a D1 binding is refused here, and so is a Cloud SQL configuration.
+ */
+function openDatabase(service: string, field: string, db: DatabaseConnection): SqliteDatabase {
+  if (!('url' in db)) {
+    const what = 'd1' in db ? 'a D1 binding, which only a Worker reaches' : 'a Cloud SQL connector configuration';
+    throw new Error(`${field} is ${what}; database ${service} lists sqlite first, so set ${field}_URL to a sqlite: URL`);
+  }
+  try {
+    return openSqlite(sqliteFile(db.url));
+  } catch (error) {
+    throw new Error(`database ${service}, from ${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+{{- end }}
+
 {{- define "ts-loopback" }}
 {{- if .Loopback }}
 
@@ -146,7 +168,27 @@ function {{ .Constructor }}(endpoint: Service, fetch: Telemetry['fetch']): {{ .M
   const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}());
 {{- end }}
 {{- end }}
-{{- if .Databases }}
+{{- if .SQLiteDatabases }}
+{{- if .PostgresDatabases }}
+
+  // One connection per database: a pool, which connects when it is first
+  // used, or for a database whose DB service lists sqlite first the SQLite
+  // file its URL names (D64).
+{{- else }}
+
+  // One SQLite file per database, the file its URL names: its DB service
+  // lists sqlite first (D64).
+{{- end }}
+{{- range .Databases }}
+{{- if .SQLite }}
+  const {{ .Var }} = openDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+  pools.push({ end: async () => {{ .Var }}.close() });
+{{- else }}
+  const {{ .Var }} = await connect({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+  pools.push({{ .Var }});
+{{- end }}
+{{- end }}
+{{- else if .Databases }}
 
   // One pool per database, which connects when it is first used.
 {{- range .Databases }}

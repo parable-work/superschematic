@@ -28,7 +28,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | Built | Not built yet |
 | --- | --- |
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
-| [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON; an environment on a target other than gcp |
+| [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp or cloudflare environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON |
 | `calls` in an API's config, and a build ordered by output | |
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
 | [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell, and on gcp to Cloud Trace or a collector when the environment's `telemetry` turns it on | metrics and logs |
@@ -36,11 +36,12 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers) and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; `stack run` and queue workers on Workers |
+| `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution | |
-| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger | a job on every deploy on cloudflare, whose Worker a deploy cannot run on demand yet |
+| [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
 
 The design is
@@ -97,7 +98,10 @@ export abstract class Staging {}
   project and a region, a second environment runs on gcp, `Staging`
   unless `--environment` names it, and `src/gcp-target.ts` types its
   values and settings for tsc ([Type a target's values](#type-a-targets-values)).
-  Only the installed binary links gcp; the core alone refuses one.
+  Given a Cloudflare account's id instead, `--cloudflare-account <id>`,
+  it runs on [cloudflare](#deploy-to-cloudflare), with
+  `src/cloudflare-target.ts`. Only the installed binary links gcp and
+  cloudflare; the core alone refuses either.
 - **The name** is `--name`, else the first word the deployed services'
   names share and `-stack`, else the naming file's `npm_scope`, else the
   project's directory.
@@ -119,8 +123,8 @@ repository's `dist/` still hides the lockfile, init adds `!/dist/` to take
 the directory back. Running init again adds nothing.
 
 At a terminal it asks for each value no flag gives: the name, whether to
-add a gcp environment, its name, project and region, CI, and what to
-expose, each with a default from the tree or from `gcloud config`.
+add a gcp environment, its name, project and region, or else a cloudflare
+one and its account, CI, and what to expose, each with a default from the tree or from `gcloud config`.
 Without a terminal it takes the flags and the defaults, so `stack init`
 alone writes `Dev` alone. A tree with a Stack service already needs
 `--force`, which replaces the stack of the same name or writes another
@@ -278,6 +282,14 @@ upper snake case.
 | `SHOP_DB_DATABASE` | `SHOP_DB_DATABASE_URL`, or `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `_CLOUD_SQL_DATABASE` and `_CLOUD_SQL_USER` |
 | `SHOP_API_SERVICE` | `SHOP_API_SERVICE_URL`; with a credential, `SHOP_API_SERVICE_CREDENTIAL_SOURCE` and the members that source reads (`_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY`), and `_HEADERS`, joined by commas |
 | `SHOP_MEDIA_BUCKET` | `SHOP_MEDIA_BUCKET_NAME`, and `SHOP_MEDIA_BUCKET_ENDPOINT` for a bucket an emulator serves |
+
+On Cloudflare Workers a field also names the binding a Worker reaches its
+database, callee or bucket through: `SHOP_DB_DATABASE_D1_BINDING` and
+`_D1_DATABASE` in place of a URL, `SHOP_API_SERVICE_BINDING_NAME` and
+`_BINDING_WORKER` beside the callee's URL, and `SHOP_MEDIA_BUCKET_BINDING`
+with `_R2_ACCOUNT`, `_R2_ACCESS_KEY_ID` and `_R2_TOKEN`, the credential
+that signs the bucket's URLs. Only the TypeScript runtime reads them; the
+Go and Rust readers refuse them.
 
 The names come from the naming file's
 [`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
@@ -713,7 +725,9 @@ schedule skips the job's runs, and while a scheduled run goes on, it
 refuses to start. On a cloud environment it runs the deployed job, with
 the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
-Cloud](#deploy-to-google-cloud)).
+Cloud](#deploy-to-google-cloud)). The cloudflare target runs a job only
+on its Cron Trigger, and `stack run` refuses it ([Jobs on Cron
+Triggers](#jobs-on-cron-triggers)).
 
 ## Queues and workers
 
@@ -908,7 +922,10 @@ which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
 `shop-orders`' `ShipOrders` and `shop-stock`'s `OrderRestocks`, in
 Rust, as jobs; and `shop-web`, a static site whose browser code calls
-`shop-api`, as a site. `shop-orders` calls
+`shop-api`, as a site. A second stack, `storefront-stack`, deploys the
+storefront alone, on Bun in its `Dev` and on Cloudflare Workers in its
+`Staging` ([Servers on Workers](#servers-on-workers)), so each `stack`
+command run from the example names its stack. `shop-orders` calls
 `shop-stock`, whose reservations admit only `shop-orders`' server
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
@@ -935,7 +952,8 @@ call its `create_workers(deps)` and `create_jobs(deps)`.
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
 the storefront's.
 
-From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
+From `examples/acme-shop`, `superschematic stack dev
+schemas/services/shop-stack` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
 `shop-media`, both Go servers on their generated entrypoints, `shop-stock`'s
 on its generated crate, which cargo builds, the storefront's on Bun, each
@@ -1008,7 +1026,9 @@ says how to install it). It then:
 2. starts one Postgres container for the environment, published on
    127.0.0.1 only, and creates a database per DB schema; and, when the
    stack has a bucket, one fake-gcs-server container, with a bucket per
-   Bucket service;
+   Bucket service. A DB schema that lists `sqlite` first is instead a
+   SQLite file under the environment's state directory, which needs no
+   Docker ([Databases on D1](#databases-on-d1));
 3. migrates each database from the model it recorded to its schema's,
    expand and contract back to back;
 4. builds each Go server's entrypoint module with `go build`, runs `bun
@@ -1028,7 +1048,8 @@ says how to install it). It then:
    Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the containers, which keep
-their data for the next run; `--remove-data` removes them instead.
+their data for the next run, as the SQLite files stay; `--remove-data`
+removes them and the SQLite files instead.
 
 A Go server, job or worker links superscalar's static archive through
 cgo. In a project whose naming file names no superscalar checkout
@@ -1069,10 +1090,10 @@ leaves it and its data, and prints the `docker rm` that removes it.
 | server | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo |
 | job | a Go process per run, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | worker | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
-| database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another |
+| database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another; for a DB schema that lists `sqlite` first, a SQLite file, `<schemas-root>/.superschematic/local/<stack>/<environment>/databases/<database>.sqlite` |
 | bucket | a bucket on the checkout's one fake-gcs-server container for the environment, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
 | bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |
-| sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
+| sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable`, or for a SQLite file `REVIEWS_DB_DATABASE_URL=sqlite:<state directory>/databases/reviews_db.sqlite` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
 | secret | a line in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`: `PaymentsSecrets.STRIPE_KEY=sk_test_...` |
 | port | a server's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout; otherwise a hash of the stack, the environment and the server, which the checkout shifts, the same on every run |
@@ -1175,7 +1196,9 @@ calling server's credential against the API's callers field,
 
 A TypeScript server's package, beside the Go servers' modules, holds a
 `main.ts` that does the same on [Bun](https://bun.sh): it loads each API's
-config with `loadEnvConfig()`, opens one `pg` Pool per database, builds
+config with `loadEnvConfig()`, opens one `pg` Pool per database, or for
+a database whose DB service lists `sqlite` first the SQLite file its
+`sqlite:` URL names ([Databases on D1](#databases-on-d1)), builds
 one TypeScript SDK client per API called with the credential its endpoint
 names, calls each implementation's `create(deps)`, its
 `authenticate(deps)` where a route needs an end user, and its
@@ -1213,7 +1236,10 @@ install` in `schemas/dist` writes, so the image, the
 [generated CI](#generated-ci) and every engineer install the same
 versions. Write it after `build-all`, which builds every service, so it
 names every package; `stack dev` brings it up to date as you change the
-schemas. The rest of `schemas/dist` stays ignored, but git cannot take
+schemas. An output root built for one stack, as `stack dev --out` builds
+a fresh one, holds only that stack's packages: its workspace leaves out
+each implementation or site that needs a package the root lacks, and its
+install leaves the lockfile as it is. The rest of `schemas/dist` stays ignored, but git cannot take
 back a file under an ignored directory, so ignore the output root's
 contents, not the directory:
 
@@ -1546,6 +1572,380 @@ and the URL of its logs, where the runner's error is. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
 
+## Deploy to Cloudflare
+
+The cloudflare target is `extensions/cloudflare`, linked in the installed
+binary beside its DNS platform (D64). An environment on it runs on one
+Cloudflare account, which its values name:
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
+})
+export abstract class Staging {}
+```
+
+`accountId` is 32 hexadecimal digits, from the dashboard. `stack
+bootstrap` records `workersSubdomain`, the account's workers.dev
+subdomain, and `secretsStoreId`, its Secrets Store's, beside it, and you
+may correct either by hand. A domain must be on the `cloudflare` DNS
+platform, the target's default: the rule `domain-on-cloudflare` refuses
+any other. On this target the DNS platform names no credential, since the
+run's own token reaches the zone. `stack init --cloudflare-account <id>`
+writes the environment and `src/cloudflare-target.ts`.
+
+The target places TypeScript servers on Workers
+([Servers on Workers](#servers-on-workers)), which call each other
+through service bindings ([Calls between Workers](#calls-between-workers)),
+buckets on R2 ([Buckets on R2](#buckets-on-r2)), databases on D1
+([Databases on D1](#databases-on-d1)), TypeScript jobs on Cron Triggers
+([Jobs on Cron Triggers](#jobs-on-cron-triggers)) and sites on Workers'
+static assets ([Sites on Workers](#sites-on-workers)). What every deploy
+goes through:
+
+- **The token and the passphrase.** Every `stack` command reads the API
+  token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
+  `PULUMI_CONFIG_PASSPHRASE`, in the shell, as gcp's commands read
+  application default credentials; `stack bootstrap` also reads its own
+  passphrase from `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`. None is ever
+  written to a file. The run's AWS session token, profile and shared
+  files are kept from the state's S3 backend.
+- **Names.** One account may hold several stacks and environments, so
+  each Worker, D1 database, R2 bucket and bucket token is named
+  `<stack>-<env>-<name>` in kebab case, `acme-shop-staging-shop-api`,
+  with each parameter's name and value after it in a member of a
+  parameterized environment. A name too long for Cloudflare is refused,
+  naming its longest part to shorten.
+- **The state.** One R2 bucket per account, `superschematic-state`, holds
+  Pulumi's state for every stack in it, through Pulumi's S3 backend on
+  `https://<accountId>.r2.cloudflarestorage.com`, region `auto`,
+  path-style. Each run verifies the token, and hands the provisioner the
+  token's S3 credentials, its id and the SHA-256 of its value, and the
+  passphrase, which encrypts the secrets in the state. A run without a
+  token or a passphrase is refused before Pulumi starts. The deploy
+  manifests are in the same bucket under
+  `superschematic/manifests/<stack>/`, each written twice, as
+  `<run>.json` and as a copy under `<run>/` named by the time it was
+  written, since R2 keeps no versions. A deploy or a destroy holds the
+  run's deploy lock, `superschematic/locks/<stack>/<run>.json` in the
+  same bucket, and `stack unlock` removes one a killed deploy left.
+- **Secrets.** Each secret is one in the account's Secrets Store per
+  environment, `<Stack>-<Environment>-<Type>-<FIELD>`, which the members
+  of a parameterized environment share. `stack secrets set` writes it,
+  and needs no deploy first, only bootstrap. Nothing reads a value back:
+  the Secrets Store gives it only to a Worker that binds it.
+
+`stack bootstrap <environment>` runs once per account with your own token,
+one that reads the account, creates R2 buckets and account API tokens,
+and creates or reads the Secrets Store. It is safe to run again:
+
+1. it verifies the token, an account token or a user token;
+2. it creates the state bucket and `superschematic-bootstrap`, where it
+   keeps its own state, the CI's tokens among its secrets;
+3. on the account's first bootstrap, it generates two passphrases, 32
+   random bytes each, and prints each once: the state's, which you set
+   in `PULUMI_CONFIG_PASSPHRASE` from then on and the CI holds too, and
+   the bootstrap's own, which you set in
+   `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE` to bootstrap again and no CI job
+   ever holds. Keep both in your password manager. Each later run checks
+   each passphrase in the shell against `superschematic/passphrase-check`
+   in its bucket, a key PBKDF2-SHA256 derives from it, and refuses
+   another. Set a passphrase of your own before the first run to have it
+   take that one instead. Two first runs at once cannot both write a
+   check: the one that loses is refused;
+4. it finds the account's Secrets Store, or creates it;
+5. it applies three account tokens for the CI in the Pulumi project
+   `<stack>-bootstrap`, a stack per account: `<stack>-deployer`, which
+   edits the account's Workers scripts, D1, R2, Secrets Store and account
+   API tokens and the Workers routes and DNS of its zones;
+   `<stack>-planner`, which reads Workers scripts, D1, the Secrets Store's
+   names, account tokens, routes and DNS, and writes the objects of the
+   state bucket alone, since a preview takes the stack's lock; and
+   `<stack>-preview`, which deploys and destroys a pull request's member
+   and writes no secret's value. For an environment with a bucket, it
+   first checks that the account lists the permission group each bucket
+   edge's token holds, by the id Cloudflare publishes. An account whose
+   bootstrap state an earlier release kept in the state bucket is
+   refused, with the tokens to delete and the objects to remove before
+   it runs again;
+6. with `--github`, it sets the tokens the environment's jobs read and the
+   state's passphrase as the repository's GitHub Actions secrets with
+   `gh`, at the scopes the [generated CI](#generated-ci) reads them from,
+   and creates the deploy job's GitHub environment when it is missing.
+   Without `gh` on PATH, signed in, it prints the `gh secret set` commands
+   and each token once;
+7. it records `secretsStoreId` and `workersSubdomain` beside `accountId`.
+   An account with no workers.dev subdomain yet is told to choose one in
+   the dashboard.
+
+### Servers on Workers
+
+A TypeScript server on the cloudflare target is a Worker of
+`cloudflare.workers`, named after the stack, the environment and the
+deployable, `acme-shop-staging-shop-api`, with a suffix per parameter in
+a member of a parameterized environment. Its artifact is a
+bundle, not an image: a deploy runs `bun bundle.ts <dir>` in the server's
+package after the workspace's frozen install, and keeps the files in the
+state bucket under `superschematic/bundles/<stack>/<deployable>/<hex>/`
+when their digest is new. The Worker is three nodes: the `worker`, in
+infrastructure; a `workerVersion` per rollout, which uploads `main.js`,
+`main.js.map` and `superscalar_wasm_bg.wasm` from beside the program, each with
+its pinned SHA-256; and a `workersDeployment` that sends it all traffic.
+`--bundle shop-storefront=sha256:...` rolls the server back to an earlier
+bundle with no build.
+
+Its settings:
+
+| Setting | Default | |
+| --- | --- | --- |
+| `logs` | `true` | Workers Logs |
+| `compatibilityDate` | the extension's, `2026-09-15` | the Workers runtime's compatibility date |
+| `cpuMs` | Cloudflare's | the CPU time a request may take, in milliseconds |
+| `placement` | none | `"smart"` for Smart Placement |
+
+The server's config reaches it as bindings: each setting and derived
+variable as plain text, a `Secret<T>` field as a binding to its Secrets
+Store secret, a signing key as a secret text binding from the deploy's
+state. An exposed server under a domain gets a custom domain,
+`<server>.<domain>`, whose record and certificate Cloudflare writes; one
+without a domain is at `https://<worker>.<workersSubdomain>.workers.dev`,
+its Worker's name, which needs bootstrap's `workersSubdomain`. An internal
+server has no route at all. The rule `nothing-public-unless-exposed`
+refuses workers.dev, preview URLs, a Worker that leaves both to
+Cloudflare's defaults, a custom domain or a route for a server that is
+not exposed.
+
+The stack's build writes `fetch.ts`, the Worker's entrypoint, `bundle.ts`
+and `workers.d.ts` beside the server's `main.ts`, which `stack dev` still
+runs on Bun. `fetch.ts` reads each API's config from the bindings when
+Cloudflare loads the version, so a config the API refuses fails the
+upload; builds the APIs on an isolate's first request, and again after a
+failure; and gives the runtime the client's address from
+`CF-Connecting-IP`. An isolate's memory is its own, and Cloudflare runs
+many: the storefront's carts live per isolate. `bundle.ts` bundles for
+workerd with Bun, and fails on a `node:` import, Bun's global, or a
+WebAssembly module other than superscalar's; `bun bundle.ts --check`,
+which the generated CI's `check` runs, bundles into a temporary
+directory. Resolution refuses a Go or Rust server, a name over 63
+characters and an API over the user model on Workers, whose runtime has
+no argon2.
+
+`examples/acme-shop`'s `storefront-stack` runs the storefront this way:
+
+<Snippet file="schemas/services/storefront-stack/src/stack.schema.ts" />
+
+### Calls between Workers
+
+A server on Workers reaches a server it calls through a service binding,
+exposed or not, so an internal callee needs no route. The caller's
+`SHOP_PRICING_SERVICE` holds the callee's address, `https://<callee's
+Worker>`, the host the binding's requests carry; the binding, named after
+the field, to the callee's Worker; and a signed token, as the generic
+connector's: the binding admits the caller, and the token identifies it.
+Each edge has an Ed25519 key, a `tls` `PrivateKey` node in the deploy's
+state. Its private key reaches the caller as a secret text binding, and
+its public key goes into the callee's callers field, with the caller as
+its issuer and subject, the callee as the audience, EdDSA, and tokens that
+live at most 300 seconds. No runtime reads a service binding's
+`ctx.props`.
+
+The callee's Worker is in infrastructure, and the caller's version names
+it through the Worker node's output, so the callee exists before the
+caller binds it, and the rollout waves put the callee's version first.
+The caller's Worker depends on the callee's, so a destroy removes the
+caller, with its bindings, before the callee. A call between two APIs one
+server serves stays in process: `fetch.ts` hands it to the server's own
+app, with no binding and no credential from the connector. When the
+callee has a service clause, the client sends the server's loopback
+credential, a key the isolate generates as it builds the server, which
+the callee accepts beside its callers field, as `main.ts` does on Bun
+([service callers](#service-callers)).
+
+### Buckets on R2
+
+A bucket on the cloudflare target is a private R2 bucket of
+`cloudflare.r2`, `<stack>-<env>-<bucket>`, with a suffix per parameter in a
+member of a parameterized environment, which gets a bucket of its own.
+Its settings:
+
+| Setting | Default | |
+| --- | --- | --- |
+| `locationHint` | none | `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc`: where R2 places the bucket |
+| `storageClass` | `Standard` | `InfrequentAccess` for new objects |
+| `deleteAfterDays` | none | a lifecycle rule deletes each object that many days after it was written |
+
+There is no `jurisdiction`: a jurisdiction's bucket is reached at another
+S3 host, which the R2 credential does not carry yet, and no `versioning`,
+which R2 lacks.
+
+Each server that lists the bucket gets an `r2_bucket` binding named after
+its field, `SHOP_MEDIA_BUCKET`, through which it puts, gets, deletes and
+lists objects, and an account token of its own, minted by the edge, that
+holds Workers R2 Storage Bucket Item Write on that bucket's objects alone.
+The token's id and value reach the server as `_R2_ACCESS_KEY_ID` and
+`_R2_TOKEN`, the value as a secret text binding, and the runtime's
+`signedUrl` presigns S3 URLs at
+`https://<accountId>.r2.cloudflarestorage.com/<bucket>/<object>` with
+them. The rule `buckets-never-public` refuses an r2.dev managed domain or
+a custom domain on a bucket.
+
+`stack destroy` of a member of a parameterized environment empties its
+buckets first, since Cloudflare deletes only an empty bucket. Any other
+environment's bucket keeps its objects, and its destroy fails on one that
+holds some. `stack dev` keeps the bucket on the storage emulator, through
+the same `Bucket` interface.
+
+### Databases on D1
+
+A database on the cloudflare target is on `cloudflare.d1`, in SQLite: a
+D1 database per DB service it hosts, named `<stack>-<env>-<db>`, with each
+parameter's name and value after it in a member of a parameterized
+environment, so each preview migrates databases of its own. A DB service
+that does not list `sqlite` is refused there. Its settings:
+
+| Setting | |
+| --- | --- |
+| `locationHint` | where the primary lives: `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc` |
+| `jurisdiction` | where the data stays: `eu`, `fedramp` or `us`. D1 ignores the location hint under a jurisdiction, so setting both is refused |
+
+List `sqlite` first for a DB service a TypeScript API on Workers uses:
+
+```ts
+// schemas/services/reviews-db/schema.config.ts
+export default defineConfig({
+  name: "reviews-db",
+  kind: SchemaKind.DB,
+  outputs: {
+    types: { [TargetLanguage.TypeScript]: { enabled: true } },
+    sql: { dialects: ["sqlite", "postgres"] }
+  }
+});
+```
+
+The API's `Deps.db` is then the HTTP runtime's `SqlDatabase`, D1's
+interface: `prepare(sql).bind(...).first()`, `all()`, `run()` and
+`raw()`, `batch([...])`, which runs its statements in one transaction,
+and `exec(script)`. Placeholders are `?` and `?N`. D1 has no interactive
+transaction, so write what must be atomic as one `batch`. `bind` refuses
+`undefined`, so bind an optional field as `value ?? null`, and a BLOB
+reads back as an array of its bytes, under `stack dev` as on D1. On Workers the
+server's `fetch.ts` takes it from the Worker's d1 binding, which the sql
+edge's connector derives as `{type: "d1", name: "REVIEWS_DB_DATABASE",
+id: <the database's uuid>}`, and `/readyz` pings it. The same code
+runs under `stack dev`, where the database is a SQLite file under the
+environment's state directory, `databases/<database>.sqlite`, and the
+server opens the `sqlite:` URL its edge derives with the runtime's
+`openSqlite`. Resolution refuses a TypeScript API whose database runs in
+another dialect than its first, a Go or Rust API on a SQLite database,
+and a TypeScript API over the user model on a sqlite-first one.
+
+A deploy migrates each D1 database from your machine, or the CI job's,
+between its steps: it finds `superschematic-migrate` on `PATH`, or where
+`SUPERSCHEMATIC_MIGRATE` says, reads the database's uuid from the outputs
+of what the deploy applied, and runs the runner's job at `d1://<accountId>/<uuid>` with the run's
+`CLOUDFLARE_API_TOKEN`. The expand phase runs before the rollout and the
+contract phase after it, as on gcp. D1 has no roles, so every Worker
+bound to a database reads and writes all of it; the runner gives no
+privileges, a deploy that only changes which servers connect needs
+neither the runner nor a token for it, and the D1 driver's lease keeps
+two deploys apart. The
+generated CI's deploy and preview jobs install `superschematic-migrate`
+from the release, checked against `SHA256SUMS`.
+
+The D1 driver has run against a fake of D1's REST API, not yet against
+D1. To check it against a real database, make a scratch one and run
+`go test -run TestRealD1 -v .` in `runtime/migrate/go` with
+`SUPERSCHEMATIC_MIGRATE_TEST_D1_URL=d1://<account id>/<database uuid>` and
+a `CLOUDFLARE_API_TOKEN` that may edit D1.
+
+`examples/acme-shop`'s `wishlist-stack` runs a D1-backed API this way:
+`shop-wishlist`, a TypeScript API over `shop-wishlist-db`, which lists
+`sqlite` first and holds a shopper's kept products:
+
+<Snippet file="schemas/services/wishlist-stack/src/stack.schema.ts" />
+
+`superschematic stack dev schemas/services/wishlist-stack` runs its `Dev`
+with no Docker, over a SQLite file it creates and migrates, and the
+implementation in `typescript/shop-wishlist` runs the same statements
+there that it runs on D1 in `Staging`. The example's check runs the
+Worker's bundle under workerd with a stand-in for its d1 binding, since
+workerd runs no D1. `testdata/wishlist-v2` is the wishlist's second
+version, whose plan adds a column in expand and drops one in contract;
+the example's README walks through deploying both versions to an account
+of your own, and rolling back.
+
+### Jobs on Cron Triggers
+
+A TypeScript job on the cloudflare target is a Worker of its own on
+`cloudflare.cron`, named as a server's is, `acme-shop-staging-shop-storefront-sweep-carts`,
+never exposed. Its bundle is built and kept as a server's is, from
+`scheduled.ts`, which the stack's build writes in the job's package with
+`bundle.ts` and `workers.d.ts`, beside the `main.ts` that `stack dev`
+still runs. A schedule the environment runs is a Cron Trigger on the
+Worker, `<job>.schedule`; a job with no schedule, or one its environment
+turns off, has the Worker and no trigger.
+
+| Setting | Default | |
+| --- | --- | --- |
+| `logs` | `true` | Workers Logs |
+| `cpuMs` | Cloudflare's, 30 seconds | the CPU time a run may take, in milliseconds, up to 300000 |
+
+A job's edges are its API's, as a server's are on Workers: it calls
+another server through a service binding with a key of its own, which
+the callee's callers field admits, even an API the server of its own API
+serves, since a job has no app to call in process; it reaches a bucket
+through an `r2_bucket` binding and a token of its own; and its database,
+on D1, through its d1 binding.
+
+At each firing, the Worker's `scheduled` handler runs the job's tries one
+after the other, as `stack dev` does: each builds the API's `Deps` from
+the Worker's bindings, as a server's `fetch.ts` does, calls your
+`createJobs`, and runs the job's method with a signal that aborts at the
+job's timeout. It logs `job started`, then `job done` or `job failed`
+with how long the try took, and throws after the last failure, so
+Cloudflare records the run as failed.
+
+Cloudflare reads every schedule in UTC and stops a Cron Trigger's run
+after 15 minutes. So resolution refuses a job whose schedule runs in
+another time zone, and one whose timeout times its tries is over 15
+minutes: give such a job a shorter timeout or fewer retries, since the
+default timeout, ten minutes, leaves no room for a retry. The target runs
+no job on demand, so `stack run` refuses it.
+
+### Sites on Workers
+
+A site on the cloudflare target is a Worker of `cloudflare.sites`, named
+as a server's is, that serves the site's build as static assets. A
+deploy builds the site after the workspace's frozen install, keeps its
+files in the state bucket under
+`superschematic/sites/<stack>/<site>/<hex>/` when their digest is new,
+and places them beside the program, from which the Worker's version
+uploads them; `--site shop-web=sha256:...` serves an earlier build with
+no build, its files fetched back from R2. The version also holds:
+
+- `SITE_CONFIG`, the site's config for the environment: each API it calls
+  with its public address, which the target composes from names, so the
+  graph holds it and no step writes it;
+- `SITE_FALLBACK`, the site's `fallback`, when it has one;
+- a script the extension embeds, the same in every release, which
+  Cloudflare runs for a path that names no file.
+
+The script answers `/__superschematic/config.json` with the config,
+`no-store`, even when the build holds a file there; a directory, `/`
+among them, with its `index.html`; and any other path with the fallback
+at 200, or 404 without one. Files are served with Cloudflare's asset
+caching, which revalidates each by its ETag.
+
+A site is always exposed: under a domain at `https://<site>.<domain>`, a
+custom domain whose record and certificate Cloudflare writes, and
+without one at `https://<worker>.<workersSubdomain>.workers.dev`, its
+Worker's name, which needs bootstrap's `workersSubdomain`. That address is the site's origin
+in the CORS field of each API it calls, each of which must be a server on
+Workers, exposed.
+
 ## Generated CI
 
 A stack opts in to a generated CI workflow in its config, under the name
@@ -1651,6 +2051,27 @@ run:
 gcp: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1" }
 ```
 
+On cloudflare a job signs in with a long-lived account token, since
+Cloudflare offers no federation, and the state's passphrase, each a
+GitHub Actions secret `stack bootstrap --github` sets. No action signs
+in: the `env` of each step that runs a `stack` command, and of no other
+step, reads them into `CLOUDFLARE_API_TOKEN` and
+`PULUMI_CONFIG_PASSPHRASE`, so a pull request's package install never
+sees them, and the job asks GitHub for no identity token.
+
+| Job | Token | Passphrase |
+| --- | --- | --- |
+| a plain environment's deploy job | `CLOUDFLARE_DEPLOYER_TOKEN_<STACK>_<ENV>`, a secret of the GitHub environment of its name: the deployer's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, in the same GitHub environment |
+| a plan job | `CLOUDFLARE_PLANNER_TOKEN_<STACK>_<ENV>`, a repository secret: the planner's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
+| a preview job | `CLOUDFLARE_PREVIEW_TOKEN_<STACK>_<ENV>`, a repository secret: the preview's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
+
+`<STACK>` and `<ENV>` are the stack's and the environment's names in
+upper case, their words joined by underscores: `acme-shop`'s `Staging` is
+`ACME_SHOP_STAGING`, so two stacks of one repository never set each
+other's secrets. A plan job's credentials decrypt the
+state, and so every secret in it, so they are as sensitive as the
+deployer's.
+
 The cloud jobs also install the tools the environment's provisioner runs:
 the `pulumi` CLI at the release of the Pulumi SDK the binary links.
 
@@ -1701,7 +2122,9 @@ never a value.
 The installed binary links the Cloudflare extension, with its provider
 pin. `stack bootstrap` asks for the token and stores it in the target's
 secret store, and `plan`, `deploy`, `destroy` and `outputs` set
-`CLOUDFLARE_API_TOKEN` from it for each run. A distribution of your own
+`CLOUDFLARE_API_TOKEN` from it for each run. An environment on the
+[cloudflare target](#deploy-to-cloudflare) names no such credential: the
+token in the shell, or CI's, reaches the zone. A distribution of your own
 links it the same way:
 
 ```go

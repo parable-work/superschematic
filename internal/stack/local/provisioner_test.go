@@ -308,6 +308,13 @@ func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName
 	if err := prov.Render(env, dir); err != nil {
 		t.Fatal(err)
 	}
+	// The port of a server of the shop, or 0 for a stack without it.
+	port := func(name string) int {
+		if d := env.Deployable(name); d != nil {
+			return local.ServerPort(senv, *d)
+		}
+		return 0
+	}
 	return &fixture{
 		env:         env,
 		req:         registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)},
@@ -318,8 +325,8 @@ func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName
 		checkout:    checkout,
 		pgPort:      local.PostgresPort(senv),
 		stPort:      local.StoragePort(senv),
-		apiPort:     local.ServerPort(senv, *env.Deployable("shop-api")),
-		ordPort:     local.ServerPort(senv, *env.Deployable("Orders")),
+		apiPort:     port("shop-api"),
+		ordPort:     port("Orders"),
 		pgName:      local.ContainerName(env.Stack, env.Environment, checkout),
 		stName:      local.StorageContainerName(env.Stack, env.Environment, checkout),
 	}
@@ -692,6 +699,42 @@ func TestApplyRunsATypeScriptServer(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("bun install ran %d times, want once", count)
+	}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
+	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestApplyInstallsAPartialWorkspaceWithoutSaving: an output root built
+// for one stack leaves out the implementations whose packages it lacks
+// (D51, amended), and its install runs with --no-save, so it keeps the
+// lockfile, which pins the whole workspace, as it is.
+func TestApplyInstallsAPartialWorkspaceWithoutSaving(t *testing.T) {
+	f := newFixtureOf(t, storefront(), "Dev")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	manifest := `{"name": "@acme/workspace", "private": true, "workspaces": ["server/*/*", "../typescript/*", "!../typescript/shop-wishlist", "!../web/shop-web"]}` + "\n"
+	if err := os.WriteFile(filepath.Join(f.req.OutputRoot, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	var installs []string
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/bun" && len(cmd.Args) > 0 && cmd.Args[0] == "install" {
+			installs = append(installs, strings.Join(cmd.Args, " "))
+		}
+	}
+	if len(installs) != 1 || installs[0] != "install --no-save" {
+		t.Errorf("bun ran %q, want install --no-save once", installs)
+	}
+	want := "install the TypeScript workspace: bun install --no-save in " + f.req.OutputRoot + ", which leaves out ../typescript/shop-wishlist, ../web/shop-web, whose packages this output root lacks, and keeps its lockfile as it is"
+	if !strings.Contains(f.out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, f.out)
 	}
 	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
 	if err := f.prov.Destroy(context.Background(), f.req); err != nil {

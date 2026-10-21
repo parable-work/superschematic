@@ -60,6 +60,21 @@ var (
 // right before its stack commands (cloudSetup).
 const gcpWorkloadIdentity = "gcp-workload-identity"
 
+// cloudflareAPIToken is the identity kind of the cloudflare target's CI
+// seam (D64): a long-lived account token and the state's passphrase, each
+// a secret of the workflow, whose names its fields `token` and
+// `passphrase` give. No action signs in with it: the env of each step that
+// runs a stack command reads both secrets, CLOUDFLARE_API_TOKEN for the
+// provider and the state store, and PULUMI_CONFIG_PASSPHRASE for the
+// state's secrets, and no other step sees them: not the install of a
+// pull request's lockfile, whose packages' scripts run with the step's
+// environment.
+const cloudflareAPIToken = "cloudflare-api-token"
+
+// secretName is a GitHub Actions secret's name: letters, digits and
+// underscores, not beginning with a digit.
+var secretName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // pulumiTool is the pulumi provisioner's CLI, which pulumi/actions
 // installs.
 const pulumiTool = "pulumi"
@@ -101,10 +116,19 @@ type job struct {
 	needs       string
 	cond        string
 	environment string
-	// cloud jobs sign in, so they may ask GitHub for an identity token.
+	// cloud jobs sign in with an identity token they ask GitHub for.
 	cloud       bool
 	concurrency string
 	steps       []step
+}
+
+// signedIn is how a cloud job signs in: a step, which may ask GitHub for
+// an identity token, or environment variables that each step running a
+// stack command reads from the workflow's secrets (D64).
+type signedIn struct {
+	step    *step
+	idToken bool
+	env     [][2]string
 }
 
 // step is one step of a job.
@@ -114,7 +138,10 @@ type step struct {
 	uses *action
 	dir  string
 	with [][2]string
-	run  string
+	// env is the step's environment variables, in order: what a stack
+	// command signs in with when the identity is a secret (D64).
+	env [][2]string
+	run string
 }
 
 func (g github) render() ([]byte, error) {
@@ -246,9 +273,11 @@ func (g github) header(w *yamlWriter, notes []string) {
 // commits, which fails when the lockfile is missing or does not match the
 // packages the build wrote, type-checks each TypeScript server's, job's,
 // worker's and runner's package and the implementation each imports (D51,
-// amended; D52, D53), and builds each site with its build script, as
-// `stack deploy` does, so a site that does not build fails the pull
-// request (D55). For the Rust ones it
+// amended; D52, D53), bundles each one some environment places on Workers
+// with its bundle.ts --check, as `stack deploy` bundles it (D64), and
+// builds each site with its build script, as `stack deploy` does, so a
+// site that does not build fails the pull request (D55). For the Rust
+// ones it
 // sets up the Rust release tools.env pins before the build, which brings
 // the output root's Cargo lockfile up to date with it, refuses a lockfile
 // git does not track or the build changed, and checks each one's crate,
@@ -319,6 +348,13 @@ func (g github) check() job {
 				run:  typeCheck,
 			})
 		}
+		for _, p := range g.bundled() {
+			steps = append(steps, step{
+				name: "Bundle " + string(p.kind) + " " + p.name + " for Workers",
+				dir:  path.Join(st.OutputRoot, "server", st.Name, p.name),
+				run:  bundleCheck,
+			})
+		}
 		for _, service := range slices.Sorted(maps.Keys(st.TypeScriptImplementations)) {
 			steps = append(steps, step{
 				name: "Type-check the implementation of " + service,
@@ -346,6 +382,13 @@ func (g github) check() job {
 	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
 }
+
+// bundleCheck bundles a server, job or worker some environment places on a
+// platform whose artifact is a bundle, Cloudflare Workers, as a deploy
+// does, into a temporary directory, and fails on what a Worker cannot run:
+// a node: import, Bun's global, or a WebAssembly module other than
+// superscalar's (docs/stack-model.md, section 18.5, D64).
+const bundleCheck = "bun bundle.ts --check"
 
 // goEngines are the Go servers, jobs, workers and engine runners of the
 // stack (modules) whose engine database's deployables link a project's
@@ -504,17 +547,17 @@ func (g github) typeScriptWorkspace() step {
 // as planner: levels 5 and 6.
 func (g github) plan(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIPlanner, nil)
+	steps, in, err := g.cloudSetup(env, registry.CIPlanner, nil)
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, step{name: "Plan " + e.Environment, run: g.stackCommand("plan", e.Environment)})
+	steps = append(steps, step{name: "Plan " + e.Environment, env: in.env, run: g.stackCommand("plan", e.Environment)})
 	return job{
 		id:          "plan-" + jobID(e.Environment),
 		name:        "plan " + e.Environment,
 		needs:       "check",
 		cond:        strings.Join([]string{onPullRequest, notClosed, sameRepository}, " && "),
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-plan-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
 		steps:       steps,
 	}, nil
@@ -530,14 +573,14 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		s.cond = notClosed
 		builds = append(builds, s)
 	}
-	steps, err := g.cloudSetup(env, registry.CIDeployer, builds)
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer, builds)
 	if err != nil {
 		return job{}, err
 	}
 	param := "--param " + e.Parameters[0] + "=" + prNumber
 	steps = append(steps,
-		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
-		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
+		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, env: in.env, run: g.stackCommand("deploy", e.Environment, param)},
+		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, env: in.env, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
 	)
 	return job{
 		id:    "preview-" + jobID(e.Environment),
@@ -546,7 +589,7 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		// check does not run when the pull request closes, and the
 		// destroy must run all the same.
 		cond:        fmt.Sprintf("!cancelled() && %s && %s && (%s || needs.check.result == 'success')", onPullRequest, sameRepository, closed),
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
 		steps:       steps,
 	}, nil
@@ -556,18 +599,18 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 // after the job before it.
 func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIDeployer, g.builds(env))
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer, g.builds(env))
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
+	steps = append(steps, step{name: "Deploy " + e.Environment, env: in.env, run: g.stackCommand("deploy", e.Environment)})
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
 		needs:       after,
 		cond:        fmt.Sprintf("github.event_name != 'pull_request' && github.ref == 'refs/heads/%s'", g.branch),
 		environment: e.Environment,
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: g.req.Stack.Name + "-" + e.Environment,
 		steps:       steps,
 	}, nil
@@ -575,30 +618,38 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 
 // cloudSetup is the steps a cloud job takes before its commands: the
 // checkout, superschematic, the schemas root's packages, Bun for a
-// deployer of an environment with a site, the provisioner's tools, the
-// job's builds, and last the sign-in as role. Every step before the
+// deployer of an environment with a site or a bundle, the provisioner's
+// tools, the job's builds, and last the sign-in as role: a step, or the
+// env the steps that run the stack's commands take. Every step before the
 // sign-in runs with no credentials, as check does: the installs, which
 // run the lockfiles and scripts of the pull request, and the builds. Only
 // the stack commands after it read the credentials the sign-in leaves.
-func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole, builds []step) ([]step, error) {
+func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole, builds []step) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
+	if role == registry.CIDeployer && env.Migrate {
+		// The target migrates from the deploying machine (D64).
+		steps = append(steps, g.installMigrate())
+	}
 	steps = append(steps, g.packages()...)
-	if role == registry.CIDeployer && hasSite(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
+	if role == registry.CIDeployer && buildsWithBun(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
 		steps = append(steps, setupBun())
 	}
 	for _, tool := range env.Tools {
 		s, err := toolStep(tool)
 		if err != nil {
-			return nil, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
+			return nil, signedIn{}, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
 		}
 		steps = append(steps, s)
 	}
 	steps = append(steps, builds...)
-	s, err := signIn(env.Identity(role), role)
+	in, err := signIn(env.Identity(role), role)
 	if err != nil {
-		return nil, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
+		return nil, signedIn{}, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
 	}
-	return append(steps, s), nil
+	if in.step != nil {
+		steps = append(steps, *in.step)
+	}
+	return steps, in, nil
 }
 
 func (g github) checkout() step {
@@ -623,6 +674,36 @@ func (g github) install() step {
 		run: strings.Join([]string{
 			"set -euo pipefail",
 			`dir="$RUNNER_TEMP/superschematic"`,
+			`mkdir -p "$dir"`,
+			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
+			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
+			`curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"`,
+			`(cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)`,
+			fmt.Sprintf(`tar -xzf "$dir/%s.tar.gz" -C "$dir"`, dist),
+			fmt.Sprintf(`echo "$dir/%s" >> "$GITHUB_PATH"`, dist),
+		}, "\n"),
+	}
+}
+
+// installMigrate downloads the release's migration runner,
+// superschematic-migrate, a tarball of its own beside the CLI's, checks
+// it against the release's SHA256SUMS and puts it on PATH, where a target
+// that migrates from the deploying machine finds it (D64). A checkout
+// build is no release, so its step fails, as install's does.
+func (g github) installMigrate() step {
+	v := g.req.Version
+	if v == "" {
+		return step{
+			name: "Install superschematic-migrate",
+			run:  `echo "A superschematic built from a checkout generated this workflow, and it names no release of superschematic-migrate to install; generate this workflow again with a released superschematic" && exit 1`,
+		}
+	}
+	dist := fmt.Sprintf("superschematic-migrate_%s_linux-x64", v)
+	return step{
+		name: "Install superschematic-migrate " + v,
+		run: strings.Join([]string{
+			"set -euo pipefail",
+			`dir="$RUNNER_TEMP/superschematic-migrate"`,
 			`mkdir -p "$dir"`,
 			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
 			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
@@ -713,6 +794,41 @@ func hasSite(env registry.CIEnvironment) bool {
 	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.Kind == ir.DeployableSite })
 }
 
+// hasBundle reports whether env places a server, a job or a worker on a
+// platform whose artifact is a bundle (D64), which `stack deploy` builds
+// on the runner with `bun bundle.ts` after a frozen install of the output
+// root's workspace, as it builds a site.
+func hasBundle(env registry.CIEnvironment) bool {
+	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.HasBundle() })
+}
+
+// buildsWithBun reports whether a deploy of env builds a site or a bundle
+// on the runner with Bun, so its deploy and preview jobs set up Bun and
+// install the workspace from the committed lockfile first.
+func buildsWithBun(env registry.CIEnvironment) bool { return hasSite(env) || hasBundle(env) }
+
+// bundled are the stack's servers, jobs and workers some environment
+// places on a platform whose artifact is a bundle, each sorted by name in
+// its kind, which check bundles as a deploy does (D64).
+func (g github) bundled() []deployable {
+	var out []deployable
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
+		var names []string
+		for _, env := range g.req.Environments {
+			for _, d := range env.Environment.Deployables {
+				if d.Kind == kind && d.HasBundle() && !slices.Contains(names, d.Name) {
+					names = append(names, d.Name)
+				}
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			out = append(out, deployable{kind, name})
+		}
+	}
+	return out
+}
+
 // build builds every service of the services root, the stack's included,
 // to the default output root: it resolves every environment and checks its
 // graph, and writes each server's entrypoint and Dockerfile, which a
@@ -736,11 +852,11 @@ func (g github) buildSteps() []step {
 
 // builds are the steps a deploy or preview job of env takes before it
 // signs in: the build, and the frozen install of the output root's
-// workspace for an environment with a site, which stack deploy builds on
-// the runner from it (D55).
+// workspace for an environment with a site or a bundle, which stack
+// deploy builds or bundles on the runner from it (D55, D64).
 func (g github) builds(env registry.CIEnvironment) []step {
 	steps := g.buildSteps()
-	if hasSite(env) {
+	if buildsWithBun(env) {
 		steps = append(steps, g.typeScriptWorkspace())
 	}
 	return steps
@@ -798,21 +914,34 @@ func toolStep(tool registry.CLITool) (step, error) {
 	return step{}, fmt.Errorf("the %s CI renderer has no step that installs tool %s", GitHubRenderer, tool.Name)
 }
 
-// signIn is the step that signs in as role with identity.
-func signIn(identity *registry.CIIdentity, role registry.CIRole) (step, error) {
+// signIn is how a job signs in as role with identity: Workload Identity
+// Federation's step, which asks GitHub for an identity token, or a
+// Cloudflare token and the state's passphrase, which the env of the steps
+// that run the stack's commands reads from the workflow's secrets with no
+// action (D64).
+func signIn(identity *registry.CIIdentity, role registry.CIRole) (signedIn, error) {
 	switch identity.Kind {
 	case gcpWorkloadIdentity:
 		provider, account := identity.Fields["provider"], identity.Fields["account"]
 		if provider == "" || account == "" {
-			return step{}, fmt.Errorf("a %s identity needs a provider and an account", identity.Kind)
+			return signedIn{}, fmt.Errorf("a %s identity needs a provider and an account", identity.Kind)
 		}
-		return step{
+		return signedIn{idToken: true, step: &step{
 			name: "Sign in to Google Cloud as " + string(role),
 			uses: &actionGoogleAuth,
 			with: [][2]string{{"workload_identity_provider", provider}, {"service_account", account}},
-		}, nil
+		}}, nil
+	case cloudflareAPIToken:
+		token, passphrase := identity.Fields["token"], identity.Fields["passphrase"]
+		if !secretName.MatchString(token) || !secretName.MatchString(passphrase) {
+			return signedIn{}, fmt.Errorf("a %s identity needs a token and a passphrase, each the name of a GitHub Actions secret, not %q and %q", identity.Kind, token, passphrase)
+		}
+		return signedIn{env: [][2]string{
+			{"CLOUDFLARE_API_TOKEN", "${{ secrets." + token + " }}"},
+			{"PULUMI_CONFIG_PASSPHRASE", "${{ secrets." + passphrase + " }}"},
+		}}, nil
 	}
-	return step{}, fmt.Errorf("the %s CI renderer cannot sign in with a CI identity of kind %q", GitHubRenderer, identity.Kind)
+	return signedIn{}, fmt.Errorf("the %s CI renderer cannot sign in with a CI identity of kind %q", GitHubRenderer, identity.Kind)
 }
 
 // jobID is an environment's name as a job id: lower case, words joined by
@@ -879,6 +1008,12 @@ func (s step) write(w *yamlWriter) {
 	if len(s.with) > 0 {
 		w.line(4, "with:")
 		for _, kv := range s.with {
+			w.line(5, kv[0]+": "+scalar(kv[1]))
+		}
+	}
+	if len(s.env) > 0 {
+		w.line(4, "env:")
+		for _, kv := range s.env {
 			w.line(5, kv[0]+": "+scalar(kv[1]))
 		}
 	}

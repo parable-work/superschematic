@@ -5254,8 +5254,9 @@ the deploy and preview jobs of an environment with a site. #349 reads
 the CORS field on a Rust server (D57), and #344 lets the identity runtime
 answer its trusted origins on an API a site calls (the amendment below).
 
-Not built: a site's SDK clients in the browser, which wait on
-superscalar's browser build (the first amendment below).
+A site's SDK clients in the browser waited on superscalar's browser
+build (the first amendment below), and came with it (the last D55
+amendment, below D66).
 
 The rule is reversible until the first release.
 
@@ -5287,7 +5288,8 @@ from superscalar, at the commit `superscalar.pin` names:
 | What superscalar needs, in its own repository: a `browser` condition on `.` and `./scalars` that takes a build importing the browser backend (or a package `browser` map from `./dist/esm/backend.js` to `./dist/esm/backend.browser.mjs`); and a browser backend that instantiates its module without a bundler's integration, such as wasm-pack's `web` target initialized with top-level `await`, or the bytes inlined and `initSync`. superschematic then builds that target in `scripts/superscalar-dep.sh` and pins the commit. | |
 
 Status: built with the rest of D55's first half. The acme shop's
-`web/shop-web` calls shop-api with `fetch` through `loadApis()`.
+`web/shop-web` called shop-api with `fetch` through `loadApis()`. The last
+D55 amendment, below D66, lifts this one.
 
 The rule is reversible until the first release.
 
@@ -7080,6 +7082,248 @@ when the storefront and a D1-backed API have run live. Section 18 of
 
 Status: the core's artifacts are built, proved on `stack/stacktest`'s `fake.bundle` platform and fake bundle store: `PlatformSpec.Artifact` and the deployable's `artifact`; `{bundle-digest}`, `{bundle-sha256:<file>}` and `PinBundles`; the bundle's build, digest and publish through `TargetSpec.Bundles`, and its fetch (`registry.ArtifactFetcher`, also on a `SitePublisher`) and placement under the program's `artifacts/`; the manifest's `bundles` and `--bundle`; `StateBackend.Env`; and `TargetSpec.PreDestroy`. The cloudflare target itself is not built.
 
+### D64, amended: the CI's tokens reach every zone of the account, and bootstrap reads them from its graph's state
+
+Building the target's values, state, secrets, bootstrap and CI identity
+met four questions section 18 left open: which zones the CI's tokens
+reach when bootstrap's graph is one per account, how bootstrap reads the
+tokens its graph made when the provisioner's `Outputs` leaves secrets
+out, where it prints what it shows the person once, and how a GitHub
+environment's secrets are set before the environment exists.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The deployer's and the planner's zone permissions reach every zone of the account (`com.cloudflare.api.account.zone.*` under the account). | Each environment's zone, which bootstrap knows only for the environment it runs for: two environments of one account with domains in different zones would swap the list at each bootstrap of the one graph. |
+| A provisioner may also be a `registry.SecretOutputReader`, `SecretOutput(ctx, req, output)`, which reads one top-level output of an applied node, decrypted. The Pulumi provisioner reads it from `stack export --show-secrets`. Bootstrap's `--github` reads the two tokens' `value` with it; the deploy never calls it. | The tokens created through the API outside the graph, which section 18.3 rejected. Exporting the token values as stack outputs, which writes every secret a second time and lets `stack output --show-secrets` read them. Rotating the tokens at each `--github`, which breaks the CI between the rotation and the secrets' write. |
+| `BootstrapRequest` gains `GitHub`, set by `stack bootstrap --github`, and `Reveal`, where a bootstrap prints what it shows the person once: the CLI's stdout. The progress `Log` still holds no secret. A bootstrap that would generate a passphrase and has no `Reveal` refuses before it makes one. | The log, which the CLI writes to stderr beside progress that the promise says holds no secret. A file, which outlives the terminal. |
+| `--github` creates the deploy job's GitHub environment when it is missing (`gh api --method PUT repos/<repo>/environments/<name>`), and sets each secret with `gh secret set`, its value on stdin. A plain environment gets its planner's and deployer's secrets, a parameterized one its deployer's alone. Without `--github`, bootstrap touches no token. | Asking the person to create the environment, which `gh secret set --env` needs first. Printing the tokens on every bootstrap without `--github`, which repeats a long-lived secret on each run. |
+| The `cloudflare-api-token` identity's optional `environment` field names the GitHub environment that holds a deploy job's secrets, which bootstrap's scopes read. A job with such an identity gets no `id-token: write`. | One field set per kind, leaving bootstrap to know the renderer's rule for scopes. |
+| The Secrets Store bootstrap keeps is the one `secretsStoreId` names, else `default_secrets_store`, else the account's only one; with several it refuses. The secret store needs `secretsStoreId` for every call, so `stack secrets set` needs bootstrap first. | Choosing the first store an account lists, which may be another project's. |
+| `pintool` reads a single nested attribute's list fields, which pulumi-cloudflare 6's auto-aliasing table lists with no element, so the account token's `condition.requestIp.ins` pins as Terraform's `in`. | Leaving `condition` out of the pin, which the tool cannot do for one property. |
+
+Status: built, proven offline in `extensions/cloudflare` against a fake
+`Cloud`, a fake `gh` and a fake provisioner; the REST and S3 calls against
+a local stand-in, the S3 signature against AWS's published examples; and
+in `extensions/pulumi`, `SecretOutput` with the random provider and the
+state store's backend reaching the CLI, which signs its first request to a
+local S3 stand-in path-style with the token's id in region `auto`. No call
+has reached Cloudflare or GitHub.
+
+### D64, amended: a platform refuses what it cannot realize, workers.dev needs bootstrap's subdomain, and a bundle's digest does not depend on where it was written
+
+Building the Workers platform, the bundle store, `fetch.ts` and
+`bundle.ts`, and acme-shop's `storefront-stack` met questions section 18
+left open: how a platform refuses a deployable as unrealizable, which only
+the core could do; how resolution knows an API runs the identity runtime
+when the platform's `Lower` does not; what happens to an exposed Worker
+with no domain before bootstrap; why the same code got a new bundle on
+every deploy; and how an example with two stacks runs `stack dev`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A platform's `Lower` refuses a deployable it cannot realize with `registry.Unrealizable`, which resolution reports with code `unrealizable`, as it reports a language the platform does not run. The Workers platform refuses a Worker name over 63 characters this way, or under a parameter 63 before the value. | A refusal as a failed lowering, the code a platform's bug gets. A length check in the core, which knows no provider's limits. |
+| `PlatformSpec.NoIdentity` says why a server platform runs no identity runtime, and resolution refuses a server of an API over the user model on it as unrealizable, with the reason. `cloudflare.workers` sets it: the TypeScript identity runtime hashes with `node:crypto`'s argon2. The server generator refuses the same server, for a binary whose platforms do not. | Setting `IdentityConfig` so that `Lower` sees a binding, which reuses a seam for what it does not mean. A refusal in the generator alone, after the environment resolved. |
+| An environment that exposes a Worker without a domain needs `workersSubdomain`, which bootstrap records: resolution refuses it, saying to run bootstrap, since the public address, which a site's config and a CORS field hold, is composed from names. A secret binding needs `secretsStoreId` the same way. An internal Worker needs neither. | The worker's `subdomain.url` output as the address, which the graph knows only after the apply and which a site's config, composed from names, cannot hold. A deploy-time refusal, after a build that wrote an address with no host. |
+| The platform renders the binding a derived value names by the value's shape: `d1: {binding, database}` a `d1` binding, `binding: {name, worker}` a `service` binding, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. The D1, Workers-to-Workers and R2 connectors derive them. | A binding list the connectors return beside the value, which no connector of another target needs. |
+| `bundle.ts` rewrites the source map's `sources` relative to the server's package. Bun writes them relative to the output directory, which a deploy makes anew, so the same code had a new digest, and a new upload and version, on every deploy. | Building into a fixed directory under the package, which two deploys at once would share. Leaving the source map out of the bundle, which loses Workers' mapped stack traces. |
+| The source map is `linked`, with its `sourceMappingURL` comment. Every WebAssembly module stays external, superscalar's under its own name, `superscalar_wasm_bg.wasm`, which its `workerd` build imports, and bundle.ts copies it from where the build's metafile says it was imported. The refusals of a `node:` or `bun:` import and another WebAssembly module read that metafile, since Bun's browser target swaps a `node:` module for an empty one; Bun's global is found through `define`, a `typeof` test allowed. They apply to every bundle, not to `--check` alone. | Refusing them only under `--check`, which lets a deploy upload what workerd refuses. Reading `node:` imports from the bundle's text, where they leave no trace. Renaming the module `superscalar.wasm` and rewriting the import, a name no other tool expects. |
+| `fetch.ts` imports `cloudflare:workers`, whose `env` the generated `workers.d.ts` declares: TypeScript allows an ambient module only in a file with no import. A build that fails answers the request 503 and builds again on the next. | Types from a Workers types package, a dependency for one declaration. |
+| An API whose config has a `Secret<T>` field loads its config on the isolate's first request alone, from `stackEnvWithSecrets`; the others load theirs at module scope too, so a refused config fails the upload. A Secrets Store secret is read only within a request, and `loadEnvConfig` reads every field. | A module-scope load with a placeholder per secret, which a secret of another type than a string refuses. A loader of the string fields alone, a second loader per API for one check. |
+| The bundle store's marker is `__superschematic/files` under each digest's prefix, and each file carries its SHA-256 beside its mode, so a fetch checks each file before the core checks the whole. | Checking the whole digest alone, which names no file that differs. |
+| The compatibility date the extension pins is 2026-09-15, older than the workerd its tests run on, which refuses a date after its own. | Today's date, which a workerd pinned two weeks back refuses. |
+| acme-shop's `storefront-stack` sits beside `shop-stack`, so a `stack` command run from the example names its stack (`stack dev schemas/services/shop-stack`), and its check builds with the installed binary, which links the cloudflare target, where it built with the core alone. | Another services root for the storefront's stack, which would build its services twice. Teaching the core to skip an environment whose target it does not link, which hides a misspelt target. |
+
+Status: built, proven offline. `extensions/cloudflare` resolves a Workers
+fixture in Staging, Production and Preview and acme-shop's
+`storefront-stack` against golden files, each node checked against its
+pinned type, refuses a Go server, a long name, an API over the user
+model, a missing subdomain and a missing Secrets Store, checks
+`nothing-public-unless-exposed`, publishes and fetches a bundle over a
+fake `Cloud`, and deploys the storefront with the core's bundle build and
+placement; `extensions/pulumi` renders the storefront's program with its
+bundle pinned. servergen writes `fetch.ts`, `bundle.ts` and
+`workers.d.ts` for a server on the fake bundle platform against golden
+files, type-checks them against the runtime's `./workers` entry, bundles
+them twice to the same bytes and refuses a `node:fs` import; cigen bundles
+them in `check`. acme-shop's check bundles the storefront (`main.js` 110
+KiB, `superscalar_wasm_bg.wasm` 2.1 MiB) and runs it under the runtime's
+pinned workerd, where a tester Worker puts two teas in a cart through a
+service binding. No call has reached Cloudflare.
+
+### D64, amended: a binding names its callee by the callee's node, a call within one Worker stays in process, and a bucket's token names its permission group by the id Cloudflare publishes
+
+Building the connector of calls between Workers and the R2 platform met
+questions section 18 left open: how a destroy removes a callee that
+another Worker binds, which Cloudflare refuses while the binding stands;
+how a server on Workers calls an API it serves itself with no loopback;
+how a token minted in the graph names a permission group when only
+bootstrap lists the account's groups; what a bucket's jurisdiction
+needs; and how a member's bucket is emptied when the provider has no
+`forceDestroy` for R2.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The connector `cloudflare.workers-workers` derives the binding's `worker` as the output `name` of the callee's `worker` node, and the caller's `worker` node depends on each Worker its service bindings name. The key is the generic connector's `tls` node, whose type the core registers; the `stack` package exports its algorithm, outputs, lifetime and ID, and the extension pins no `tls` type. | The callee's name as a string, which leaves the graph no edge, so a destroy could delete the callee before the caller, and Cloudflare refuses that while a binding names it. Deleting with `force`, which deletes the bindings that name the Worker with it. A `tls` pin in the extension beside the core's, two pins of one provider (D63). |
+| A call between two APIs one server serves derives the server's own address alone, with no binding and no credential, and `fetch.ts` builds that client with a fetch that hands each request to the server's own app, which the build sets once every router is mounted. | A service binding of the Worker to itself, a second invocation and a subrequest for a call that needs neither. Refusing the call on Workers, which the other targets serve on loopback. |
+| The bucket edge's token names Workers R2 Storage Bucket Item Write by the id Cloudflare publishes, the same in every account (`R2ObjectsWriteGroup`). Bootstrap, which lists the account's groups, refuses an environment with a bucket edge when the account does not list that id under that name. | Listing the groups when resolving, a call resolution never makes. A value bootstrap records beside `accountId`, a constant in every environment's values. Granting the deployer's account-wide R2 permission, which reaches every bucket. |
+| A bucket on R2 takes `locationHint`, `storageClass` and `deleteAfterDays`, and no `jurisdiction`. | A jurisdiction, whose bucket is reached at `<account>.<jurisdiction>.r2.cloudflarestorage.com`: the R2 credential would need a member for it in three runtimes and the parity vectors, for a setting no example needs. A jurisdiction without that member, whose signed URLs would name the wrong host. |
+| `TargetSpec.PreDestroy` lists and deletes every object of each bucket of a member of a parameterized environment, through `Cloud`'s S3 calls with the run's token, before the provisioner destroys the member; a bucket that is gone is empty. A plain environment's bucket keeps its objects, and its destroy fails on one that holds some, as gcp's does. | Emptying every environment's buckets, which deletes what a lasting environment kept. A provider option, which `r2Bucket` does not have. |
+| A bucket name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, or under a parameter 63 before its value, and the name of the state bucket, are refused as unrealizable. | Leaving them to the deploy, which would fail after the build, or, for the state bucket, take it over. |
+
+Status: built, proven offline. `extensions/cloudflare`'s calls fixture,
+`calls-stack`, resolves a storefront Worker calling an internal pricing
+Worker and listing a bucket in Staging, Production and Preview against
+golden files, each node checked against its pin; the tests read the
+key, the endpoint, the bindings, the callers field, the dependencies and
+the waves, a call in process, the bucket, its lifecycle and its token,
+the refusals, Dev on the storage emulator, `buckets-never-public`,
+bootstrap's check of the permission group, and `PreDestroy` over the fake
+`Cloud` and through `stack.Destroy` after a deploy of a Preview member.
+`extensions/pulumi` renders the fixture's Preview. servergen writes the
+in-process client into `fetch.ts`. The HTTP runtime's workerd harness
+runs the fixture's two Workers with the bindings its Staging gives them,
+which the extension's tests hold to the golden file: the storefront's call
+through the service binding with a token signed by the edge's key is
+accepted, one with no credential and one signed by another key are
+refused 401, a call in process answers, and an object goes into an R2
+stand-in and gets a signed PUT URL. No call has reached Cloudflare. A live
+run must check that a destroy removes the caller before the callee, that
+the deployer may mint the bucket edge's token and that the token reaches
+the bucket's objects and nothing else, and a presigned PUT and GET
+against R2.
+
+### D64, amended: a target names a database platform per dialect, a sqlite-first database is a SQLite file under stack dev, and D1 migrates from the deploying machine
+
+Building D1 met questions section 18 left open: how a local environment
+places a sqlite-first database when its target names one database
+platform, what URL the local target derives for a SQLite file and where
+the file lives, what a Go or Rust API does on one, how D1 names a
+database per hosted schema and per member, and how a CI job that deploys
+D1 finds the runner.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A target may name a database platform per SQL dialect, `TargetSpec.DatabasePlatforms`. A database that no settings platform places, and whose hosted DB services all list one dialect first, goes on that dialect's platform; any other on the kind's. `RegisterTarget` refuses an unknown dialect, `Finalize` a platform that does not run the dialect it is named for. The local target names `local.sqlite` for `sqlite`. | `local.postgres` running both dialects, with resolution preferring the services' first dialect over the platform's order: a sqlite database on a platform named for Postgres, and a rule that changes what "in order of preference" means for every platform. A settings `platform` in every local environment, which every sqlite-first stack would repeat. |
+| `local.sqlite` lowers a hosted DB schema to `databases/<database>.sqlite` under the environment's state directory, beside its secrets and keys, and derives `url` as a reference to the node's `url` output, `sqlite:<absolute path>`, which the provisioner resolves. The runner and the runtime's `sqliteFile` read the same form. The file is created readable by its owner alone; Destroy keeps it and Purge removes it. | The path in `environment.json`, which would hold one machine's state directory. The output root, which a build empties. `file:` URIs, which `bun:sqlite` does not read and a query would make ambiguous. |
+| Resolution refuses a Go or Rust server, job or worker whose database resolves to `sqlite`, beside the TypeScript rule: the Go ORM and the Rust pool reach Postgres alone. A TypeScript API over the user model is refused on a sqlite-first database wherever it runs. | Letting a Go server start on a `sqlite:` URL and fail. |
+| The generator types the TypeScript database field as `DatabaseConnection` for a sqlite-first database and keeps `Database` otherwise; `main.ts` and a job's open the file with `openSqlite(sqliteFile(url))`, refusing a D1 binding and a Cloud SQL configuration by the variable's name, and a Postgres-only server's output stays as it was. | `DatabaseConnection` for every database, which would change every Postgres API's config and entrypoint for a case only Workers read. |
+| A D1 database is `<stack>-<db>` per hosted DB schema, with each parameter's name and value appended, the node `<database>.d1.<db>`. `jurisdiction` takes `eu`, `fedramp` and `us`, as the provider documents, and a database that sets it with `locationHint` is refused, since D1 ignores the hint under a jurisdiction. | One D1 database per deployable, which two DB schemas could not share. Accepting both settings and letting Cloudflare drop one. |
+| The runner writes its job document and plans to a temporary directory on the deploying machine and removes it, looks each uuid up by name (`GET /accounts/{id}/d1/database?name=`, matched exactly), and runs no job for a phase without steps. `PrepareMigrations` refuses a run without the runner or a token before the deploy changes anything. | Recording each uuid in the schema, as bootstrap records values, which a parameterized member's database could not hold. Keeping the job document in R2, which no one reads after the run. |
+| A `MigrationRunner` that runs on the deploying machine is a `registry.DeployingMachineMigrations`; `CIEnvironment.Migrate` is set for an environment on such a target that holds a database, and the github renderer installs `superschematic-migrate` from the release, its own tarball, checked against `SHA256SUMS`, in each deploy and preview job. | Putting the runner in the CLI's tarball, which would ship the database drivers to every user of the CLI (D27). |
+| acme-shop proves it with a stack of its own, `wishlist-stack`: `shop-wishlist`, a TypeScript API with no user model, over `shop-wishlist-db`, which lists `sqlite` first, on Bun over a SQLite file in `Dev` and on Workers over D1 in `Staging`, on the placeholder account. Its check runs the Worker's bundle under workerd with an in-memory stand-in for the d1 binding, and `testdata/wishlist-v2` is a second version whose plan adds a column in expand and drops one in contract, which both implementations run across on a SQLite file. | A database for `storefront-stack`'s storefront, whose carts live per isolate by design. Adding the wishlist to `shop-stack`, whose environment is Postgres-first and needs Docker. A Durable Object's SQLite as workerd's D1, which needs storage on disk and kept `workerd test` from ending. |
+
+Status: built and proven offline: the resolution rules in `internal/stack`;
+`local.sqlite` against a fake machine and, with Bun and the runner built
+from the checkout, for real; the generator's goldens and, with the
+TypeScript checks, a sqlite-first server and job that type-check and keep
+notes in a SQLite file, and whose `fetch.ts` takes a D1 binding and
+bundles for workerd; `cloudflare.d1`'s goldens against the pin, with a
+Worker's `d1` binding through `cloudflare.workers-d1`; the runner
+against a fake account and a stand-in runner; the CI's install in a
+golden workflow; a job document of the runner's form against the fake
+D1; and acme-shop's `wishlist-stack`, whose `Dev` runs under `stack dev`
+in `TestStackDevRunsTheWishlist`, whose bundle runs under workerd over the
+stand-in, and whose second version migrates a SQLite file across both
+phases. No call has reached Cloudflare, and `TestRealD1` has not run.
+
+### D64, amended: a site's Worker answers its config path first and a directory with its index, and a job's tries run within one Cron Trigger run of at most 15 minutes
+
+Building the site and Cron platforms met questions sections 18.8 and 18.9
+left open: what a site's Worker does with `/`, which `htmlHandling:
+"none"` matches to no file; whether a build's file at the config's path
+hides the config; how the script reaches the version; where a job's
+timeout and retries come from on a platform that runs no process per
+try; what Cloudflare's limit for a scheduled run is; and when a time zone
+other than UTC is refused.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site script answers a path that names no file with its directory's `index.html` first, which it asks the assets binding for, then the fallback, then 404, as `stack dev`'s file server does. | `htmlHandling: "auto-trailing-slash"`, Cloudflare's default, which redirects `/about.html` to `/about` and `/index.html` to `/`, where `stack dev` and gcp serve the file. Leaving `/` to the fallback, which a site without one answers 404. |
+| The version's assets run the script first for `/__superschematic/*` (`runWorkerFirst`), so the config's path is the script's even when a build holds a file there, as `stack dev` answers it first. | Refusing a build with a file under `__superschematic/`, a rule only this target would have. Letting the file win, so the site reads a config of its build's in every environment. |
+| The script, `site.js`, is the version's one module, inline as `contentBase64`: the bytes the extension embeds, the same in every release. | A `contentFile` beside the program, which the deploy places only for a bundle or a site's files, under a digest the core checks; the script is neither. Putting it among the site's files, which would change their digest and make it an asset. |
+| `scheduled.ts` runs every try of a firing within that one run, each building `Deps` anew and bounded by the job's timeout, a signal that aborts and a try that fails when it does. The timeout and retries are the `@job`'s, the same in every environment, so the build writes them into `scheduled.ts`; it fills them from the service's `@job`, since `stack.Jobs` resolves no environment. A try that times out cannot be stopped, and its method may run on beside the next. | Cloudflare's own retries, which a Cron Trigger does not offer. The timeout and retries as bindings, a value per environment for what no environment changes. |
+| Cloudflare stops a Cron Trigger's run after 15 minutes of wall time, on both plans (the Duration table of the Workers limits, read on 2026-10-20): `MaxScheduledRunSeconds`. The platform refuses, as unrealizable, a job whose timeout times its tries exceeds it; CPU time is limited apart, by `cpuMs`. | The CPU limit, 30 seconds by default and 15 minutes for a schedule of an hour or more, which bounds work, not waiting, and which a job's timeout does not measure. |
+| A time zone other than UTC (or `Etc/UTC`) is refused only for a schedule the environment runs: a member of a preview that runs none, or an environment that turns it off, resolves. | Refusing the `@job`'s time zone wherever it is placed, which stops a preview that runs no schedule. |
+| A job's edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, which register the server's connect functions, whose values read nothing of the caller's platform: a job gets a key of its own per callee, which the callee's callers field admits, and a token of its own per bucket. A job calls even an API its server's other API serves through a service binding, since it has no app to call in process, and its `worker` node depends on each Worker it binds, as a server's does. `scheduled.ts` opens a sqlite-first database through its d1 binding as `fetch.ts` does; the server generator refuses a job whose database lists postgres first. | Connect functions of the job's own, which would restate the server's. |
+| `stacktest` gains `fake.cron`, a bundle platform for jobs, on which the generator's tests place one. | |
+| The core's `stack.PinSites` is public beside `PinBundles`, so a provisioner's tests render a site's program pinned as a deploy pins it. | |
+
+Status: built, proven offline. `extensions/cloudflare` resolves a web
+fixture, a server, its job and a site calling it, in Staging, Production
+and Preview against golden files, each node checked against its pin,
+`workersCronTrigger` among them at 6.22.0; refuses a time zone, a timeout
+over the limit, a long name, a Go job and a site without a public
+address; checks `nothing-public-unless-exposed` on a job's Worker;
+publishes and fetches a site's files over the fake `Cloud`, deploys the
+site and fetches its files back with `--no-build`; refuses `stack run`;
+renders the workflow; and runs `site.js` under the runtime's pinned
+workerd beside a stand-in for the assets: the config uncached, a
+directory's index, the fallback at 200, 404 without one, 405 for a POST.
+`extensions/pulumi` renders the fixture's program with the site's files
+and both bundles pinned. servergen writes `scheduled.ts` for a job on
+`fake.cron` against golden files, type-checks and bundles it, and runs
+the bundle under workerd, where a tester fires four Workers' `scheduled`
+handlers as a Cron Trigger fires them: one succeeds, one on its retry,
+and one whose tries fail and one whose tries outlive the timeout throw,
+each try logged. A job of the calls fixture binds its callee and its
+bucket with a key and a token of its own, and one of the D1 fixture its
+database, and servergen's `scheduled.ts` opens a sqlite-first database
+through its d1 binding: the sqlite fixture's job, on `fake.cron` beside
+its server on `fake.bundle`, type-checks, bundles and runs under workerd
+over a stand-in for the binding, pruning through it at each firing. The
+CI's go job installs the pinned workerd. No call has reached Cloudflare.
+
+### D64, amended: every name in an account holds its stack and its environment, bootstrap keeps its state where no CI token reads it, a preview job holds a token of its own, and a token reaches only the steps that run the stack
+
+A review of the target found that two plain environments of one account
+made the same Workers, D1 databases, R2 buckets and bucket tokens; that
+the planner's token, which wrote every object of the state bucket, and
+the passphrase CI holds together decrypted bootstrap's state, the
+deployer's token among its secrets; that a preview job held the
+deployer's token, in a job-level `env` a pull request's package install
+read; that the passphrase's check was an unstretched HMAC, written with
+no guard against a second first bootstrap; that the shell's AWS session
+token and profile reached the state's S3 backend; that a deploy whose D1
+databases only changed their connecting servers still demanded the
+runner and a token; that `nothing-public-unless-exposed` read
+`subdomain.enabled` alone; and that two stacks of one repository set
+GitHub secrets of the same names.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every name an environment gives a resource in its account is `<stack>-<env>-<name>` (`AccountName`): a Worker of a server, a job or a site, `<stack>-<env>-<deployable>`; a D1 database, `<stack>-<env>-<db>`; an R2 bucket, `<stack>-<env>-<bucket>`; a bucket edge's token, `<stack>-<env>-<caller>-<bucket>`. Each part is in kebab case with nothing but lowercase letters, digits and single hyphens, and a member of a parameterized environment appends its parameters' names and values as before. A workers.dev host is the Worker's name, so addresses, site configs and CORS origins follow it. A custom domain's host stays the deployable's label under the environment's domain, which tells environments apart already. A Secrets Store secret already held both, and bootstrap's tokens are the stack's in the account, so neither changes. | The environment alone, which two stacks in one account still share. A hash suffix, which no person can read back to the stack. The stack and environment in a custom domain's host too, `acme-shop-staging-shop-api.staging.acme.dev`, a host no one would choose. |
+| A Worker name over 63 characters, or a bucket name over R2's, is still refused as unrealizable, and the refusal lists each part of the name with its length and names the longest to shorten. | Truncating, which can make two names one. |
+| The migration runner reads each D1 database's uuid from the graph the deploy applied, through a new `MigrationRequest.Outputs`, which the deploy fills from the provisioner's `Outputs`: the node's `uuid`, which a Worker's d1 binding references, else its `id`, which the provider sets to the same uuid and the program exports for every node. `Cloud.D1Database`, the lookup by name, is gone. | Looking up the environment-qualified name, matched exactly, which works but asks the API what the graph knows. Recording each uuid in the schema, which a member's database could not hold. |
+| Bootstrap keeps its own Pulumi state in a bucket of its own, `superschematic-bootstrap`, under a passphrase of its own, `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`, which it generates on an account's first run, prints once and checks as it checks the state's, and which no CI job holds. The planner no longer holds `Workers R2 Storage Read`, whose read reaches every bucket's objects; it writes the state bucket's objects alone. The deployer and the preview, whose account-wide `Workers R2 Storage Write` reaches every bucket, can read the bootstrap bucket's ciphertext and hold no key to it. A rerun needs one more variable set. | The bootstrap's state in its own bucket under the state's passphrase, which a preview job, holding that passphrase and account-wide R2, could still decrypt. A passphrase derived from the state's, which anyone holding the state's derives too. |
+| An account whose bootstrap state an earlier release kept in the state bucket (`.pulumi/stacks/<stack>-bootstrap/`) is refused, saying to delete the stack's three tokens in the dashboard, since the planner's could read them, and the project's objects under `.pulumi/`, and to run bootstrap again, which mints new tokens. A check of the earlier form is refused, saying to delete it. No real account ran the earlier release. | Moving the state with `pulumi stack export` and `import` and `change-secrets-provider`, which keeps tokens that were readable. Reading the old check and rewriting it, for an account that is refused anyway. |
+| Bootstrap's graph mints a third token, `<stack>-preview`, which a parameterized environment's preview job reads as `CLOUDFLARE_PREVIEW_TOKEN_<STACK>_<ENV>`: `Workers Scripts Write`, `D1 Write`, `Workers R2 Storage Write`, `Account API Tokens Write` and `Secrets Store Read` on the account, `Workers Routes Write` and `DNS Write` on its zones. It is revoked alone and writes no Secrets Store value. It still mints tokens, since a member's bucket edge does, so like the deployer it may grant itself more; the graph is one per account, so its permissions cannot depend on whether the stack's previews have buckets. | The deployer's token in the preview job, which a pull request from the repository could read. One preview token per parameterized environment, which bootstrapping a plain environment, applying the same graph, would delete. |
+| A passphrase's check is `{kdf: "pbkdf2-sha256", iterations, salt, key}`: a 32-byte key PBKDF2-HMAC-SHA256 derives from the passphrase over a 32-byte salt, written with 600,000 iterations and read with its own count, from 100,000 to 10,000,000 (Go's `crypto/pbkdf2`). | The HMAC, one hash per guess for a reader of the object. scrypt or argon2 from `x/crypto`, a dependency the extension does not have. |
+| A first bootstrap writes each check with `If-None-Match: *` (`Cloud.CreateObject`) and reads it back: when another bootstrap's check is there for another passphrase, it refuses, saying to run again with that bootstrap's passphrase, and prints none it generated. A bucket that holds Pulumi state and no check gets no generated passphrase. | Writing unconditionally, so the last of two first runs wins and the first prints a passphrase that decrypts nothing. |
+| The github renderer writes `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE` into the `env` of the steps that run `stack plan`, `deploy` or `destroy`, and no other; D1's migrations run within `stack deploy`. gcp's sign-in, a step whose short-lived credentials file later steps read, is its own path and does not change. | The job's `env`, which every step, a lockfile's install scripts included, reads. |
+| Every GitHub secret's name ends with `_<STACK>_<ENV>`: `CLOUDFLARE_DEPLOYER_TOKEN_*` and `PULUMI_CONFIG_PASSPHRASE_*` in the deploy job's GitHub environment, `CLOUDFLARE_PLANNER_TOKEN_*`, `CLOUDFLARE_PREVIEW_TOKEN_*` and the passphrase as repository secrets. | Refusing or warning when two stacks would collide, which bootstrap cannot see: GitHub lists secrets' names, not whose they are. |
+| `StateBackend.Env` clears `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_PROFILE` and `AWS_DEFAULT_PROFILE`, and points `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at the null device. | Leaving the shell's: a session token is signed with beside R2's key and fails every request, and a profile the machine lacks stops the backend. |
+| A runner that is a `registry.PrivilegelessMigrations`, as D1's is, is readied only for steps to migrate or a pending phase. | Readying it for a change of connecting servers, whose phase does nothing on D1. |
+| `nothing-public-unless-exposed` also refuses, for a deployable that is not exposed, a Worker whose preview URLs are not off and one with no `subdomain`, which leaves workers.dev and previews to Cloudflare's defaults. | Trusting the platform, which sets both, against a graph another platform or a hand writes. |
+
+Status: built, proven offline. `extensions/cloudflare`'s goldens hold the
+new names; a test resolves Staging and Production of the calls, D1, web
+and Workers fixtures, each pair in one account, and finds no name of one
+in the other; the refusals name the part to shorten; the runner reads a
+uuid, and a node's `id`, from the outputs; bootstrap's tests cover both
+buckets and passphrases, the three tokens and their policies, the refusal
+of a state in the old place and of an old check, a lost race and a won
+one, and the stack in every secret's name; the cigen test holds the
+secrets to the stack commands' steps, and actionlint passes the
+workflows; `extensions/pulumi`'s test runs the CLI with a stale session
+token and a missing profile in its environment; and the core's deploy
+test readies a privilegeless runner for steps alone and hands each phase
+the outputs. No call has reached Cloudflare or GitHub. A live run must
+check that the preview's permissions deploy and destroy a member,
+buckets and their tokens included, that `Secrets Store Read` lets a
+version bind a secret, that the planner plans without account-wide R2
+read, that the provider's `id` of a D1 database is its uuid, and R2's
+answer to a conditional write that finds an object.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the
@@ -7887,6 +8131,94 @@ empty one. The tests are these:
 
 The rule is reversible until the first release.
 
+### D55, amended: a site's typed browser config hands out a client of each API's SDK, since superscalar bundles for the browser
+
+The first D55 amendment kept every SDK out of a site's typed browser
+config until superscalar bundled for the browser, and said what
+superscalar needed. superscalar's #72 built it, and `superscalar.pin` now
+names that commit (`bab3060b`):
+
+- `.`, `./scalars`, `./validation`, `./backend` and `./wasm` carry
+  `browser` and `workerd` export conditions. Each resolves into a build
+  whose backend is the WebAssembly core's, so no relative `./backend`
+  import reaches the Node backend.
+- The browser build inlines the module as base64 and instantiates it
+  synchronously when it is imported, so a bundler needs no WebAssembly
+  support. The workerd build imports the module as a `WebAssembly.Module`,
+  as a Worker's upload gives it (D64).
+- `scripts/superscalar-dep.sh` builds both: wasm-pack's `web` target with
+  the size-tuned profile into `wasm-web/`, then the two tsc passes and
+  `build-web.mjs`. `tools.env` pins wasm-pack (`WASM_PACK_VERSION`), and
+  every CI job and `make setup` that runs the script in full installs it,
+  with the `wasm32-unknown-unknown` target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `config.generated.ts` imports the SDK of each API the site calls. `loadApis()` returns each API with its `service`, its public `baseUrl` and `client(options)`, which builds the SDK's root class at the base URL with the SDK's other options (`auth`, `credentials`, `fetch`, a timeout). An API whose config generates no TypeScript SDK keeps its address alone (`ApiAddress`), and the config's comment says to enable `outputs.sdk.typescript`. The scaffold's `package.json` depends on each SDK with `workspace:*`. | `client(create)` kept, a factory every site writes for the same constructor. Refusing a site that calls an API with no TypeScript SDK, which would break a site that calls it with `fetch`. |
+| `bun build --target=browser` takes superscalar's browser build through the `browser` condition, with no plugin. The bundle carries the module inlined: acme's page is 3.0 MB, 1.0 MB gzipped. | A Bun build plugin, which the first amendment refused. The module as a file the page fetches before its first call, which every SDK call would await. |
+| A page's Content-Security-Policy must allow `'wasm-unsafe-eval'` in `script-src`, since the browser build compiles its module. superschematic serves no Content-Security-Policy of its own; the static sites guide says so. | |
+| The SDK's client encodes and decodes base64 with `btoa` and `atob`, which browsers, Workers, Bun and Node.js all have, not with Node's `Buffer`, so a site whose tsconfig names no Node types type-checks it. | `@types/node` in every site, for one fallback no browser takes. |
+
+Status: built.
+- `TestASiteBundlesItsAPIsSDKForTheBrowser` builds the TypeScript
+  fixture's site, whose config hands out ts-shop's SDK and whose scaffold
+  depends on it. It type-checks the site with no Node types, builds the
+  scaffold, and bundles a script with `bun build --target=browser`. The
+  bundle imports nothing from `node:` and carries superscalar's module.
+  Node runs the bundle as a browser would: the script reads the site's
+  config, calls ts-shop through the client at the address the config
+  names, and parses an address through superscalar.
+- acme's `web/shop-web` lists shop-api's products through
+  `shopApi.client({ auth: { token } }).product.listProducts`.
+  `scripts/check.sh` type-checks and builds it, and checks its bundle
+  imports nothing from `node:` and carries the module.
+
+The rule is reversible until the first release.
+
+### D51, amended: the workspace leaves out what the output root cannot resolve, and a partial workspace installs without saving the lockfile
+
+D51's root took in every package under the implementation and site
+templates. An output root holds only the packages of the services built
+into it: `stack dev` builds its stack's services and what they need, and
+nothing else. An implementation depends on its API's generated packages
+with `workspace:*`, and Bun refuses the whole install when one member's
+`workspace:` dependency is missing, even with `--filter`. So a fresh
+`stack dev --out`, or the first `stack dev` of one stack in a clone of a
+project with several, failed at the install. acme-shop's three stacks
+showed it: `typescript/shop-wishlist` needs `@acme/shop-wishlist-api`,
+which `shop-stack` does not build. The workaround ran `build-all` into
+the root first, and the README and the Go tutorial told readers to do
+the same.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The root keeps its patterns and appends a `!` pattern (`tsgen.LeftOutPattern`) for each package the implementation or site pattern takes in whose `workspace:` dependencies, in any of the four dependency fields, are neither a generated package on disk nor another member, until no more resolve, so a package that needs a left-out one is left out too. Generated packages need no such pattern: their patterns match only what a build wrote, and a build writes what each depends on. Once every service is built nothing is left out, and the root is the same bytes as before, which the committed lockfile pins. | Filtering the install to the stack's packages, which Bun refuses as it refuses the whole install. Listing the members one by one, which changes every manifest a full build writes. `stack dev` building every service, which is `build-all` inside every run. |
+| The root depends on the packages on disk, so it is no longer the same bytes on every build of one output root. Each build still writes it beside its packages; `build-all` writes it once more when every service is in place, as it already did for restored services, and a stack's build runs its closure in order, so the last write sees every package. | A file lock around a recomputation in each build, which `build-all`'s last write already makes unnecessary. |
+| A partial workspace, one whose root leaves something out (`tsgen.WorkspaceLeftOut`), installs with `bun install --no-save`: `stack dev` and a deploy's or `stack build`'s install of sites and bundles. Bun 1.4.2 drops from the lockfile the members a plain install no longer finds, and a frozen install refuses a lockfile that names members the manifest leaves out ("lockfile had changes"). `--no-save` installs the versions the lockfile pins and leaves it as the project committed it, pinning the whole workspace. Each command prints what the root leaves out. A full workspace installs as before: plain under `stack dev`, frozen under a deploy. | A plain install, which would rewrite the committed lockfile without the other stacks' packages and resolve them afresh on the next full install. A frozen install of the partial workspace, which always fails against a full lockfile. Refusing a partial deploy, which would bring back "run `build-all` first". |
+| A partial deploy does not check that the lockfile is current. The generated CI runs `build-all` before its frozen install, so the CI check still refuses a stale lockfile. | |
+
+The README and the Go tutorial no longer tell readers to build every
+service before `stack dev`. Since D65's amendment below, another output
+root lists the mirrors of its own stack's implementations, `impl/*`, in
+place of the project's packages, so it has nothing to leave out, and a
+`!` pattern is written only in the default root, `<schemas-root>/dist`,
+which the first `stack dev` of one stack in a fresh clone fills
+partially.
+
+Status: built. `TestWorkspaceRootLeavesOutWhatItCannotResolve` leaves out
+an implementation and a site whose API is gone, and an implementation
+that depends on a left-out one. It writes the full manifest again once
+the API is back. `TestPartialWorkspaceInstallKeepsTheLockfile` runs Bun:
+a full install writes the lockfile, the partial root installs with
+`--no-save` and the lockfile stays the same bytes, and a frozen install
+of the full root accepts it.
+`TestApplyInstallsAPartialWorkspaceWithoutSaving` and
+`TestDeployInstallsAPartialWorkspaceWithoutSaving` check the install
+commands of `stack dev` and of a deploy. acme's
+`TestStackDevRunsTheShop` ran its second `stack dev` into a fresh root
+over the committed `bun.lock`, leaving out `typescript/shop-wishlist`,
+until D65's amendment below made that root a mirrored one.
+
 ### D46, amended: a deploy holds a lock per run, on the target's state store
 
 Two `stack deploy`s, or a deploy and a `stack destroy`, of one environment
@@ -8019,6 +8351,32 @@ Not built:
 - `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
+
+The rule is reversible until the first release.
+
+### D64, amended: a Worker's call within itself carries the loopback credential, and the state store on R2 keeps the deploy lock
+
+D37's amendment gave a server that calls an API it serves a loopback key,
+and D46's gave each run a deploy lock on the target's state store; both
+waited for this target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `fetch.ts` generates the loopback key within the isolate's build, as `main.ts` does at start, and an API with a service clause accepts it beside its callers field. The call stays in process, through the isolate's own app, and its endpoint is the Worker's address, which is no loopback URL, so the in-process client sends `loopback.credential` whenever its endpoint carries none. The request never leaves the isolate, so neither does the token. A job's `scheduled.ts` holds no key, since an API a job calls is another deployable's. | `credentialFor(url)`, which would send nothing to `https://<server>`. A credential from the connector, which would put a key in the Worker's bindings for a call that never leaves it. |
+| The cloudflare state store is a `registry.StateLocker`: the lock is `superschematic/locks/<stack>/<run>.json` in `superschematic-state`, written with `If-None-Match: *` (`Cloud.CreateObject`), so R2 creates it for one writer; a write that loses to another in flight finds no lock and writes again, up to three times. `Unlock` reads the lock back and deletes it only when it holds the ID asked for. | A conditional DELETE (`If-Match` on the ETag read): whether R2 honors one has not been checked, so a plain DELETE follows the read. A lock that `stack unlock` removed and another deploy took between that read and that delete would go too; only a person's `stack unlock` of a lock its holder still holds opens that window. |
+
+Status: built. servergen's
+`TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey` builds
+`ts-till-stack`, whose server Till serves `ts-checkout` and `ts-pricing` on
+stacktest's fake bundle platform (its new `fake.bundle-bundle` connector
+keeps a call within one server in process), type-checks it, runs
+`bundle.ts --check` and runs the bundle under workerd: a checkout reaches
+the quote as Till, and a quote with no credential or a forged token is
+401. cloudflare's `lock_test.go` takes, refuses, reads and releases the
+lock over the fake `Cloud`, retries after a write in flight, refuses a
+second deploy naming the holder while the first runs, and `stack.Unlock`
+removes a crash's lock. No lock has been taken on R2, and no loopback call
+has run on Cloudflare.
 
 The rule is reversible until the first release.
 

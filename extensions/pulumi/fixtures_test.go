@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -56,6 +57,68 @@ func gcpGolden(t *testing.T, stackName, name string) *ir.ResolvedEnvironment {
 		t.Fatal(err)
 	}
 	return env
+}
+
+// cloudflareGoldenRoot is the output root of extensions/cloudflare's
+// golden environment.json files, beside this module as gcpGoldenRoot is.
+var cloudflareGoldenRoot = filepath.Join("..", "cloudflare", "testdata", "golden")
+
+// storefrontEnvironment reads the cloudflare target's golden Staging of
+// acme-shop's storefront-stack, shop-storefront on Workers (D64), and pins
+// its bundle as a deploy does, to a bundle of fixed files.
+func storefrontEnvironment(t *testing.T) *ir.ResolvedEnvironment {
+	t.Helper()
+	data, err := os.ReadFile(stack.EnvironmentPath(cloudflareGoldenRoot, "storefront-stack", "Staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := stack.Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for i, name := range []string{"main.js", "main.js.map", "superscalar_wasm_bg.wasm"} {
+		files[name] = strings.Repeat(string(rune('a'+i)), 64)
+	}
+	pinned, err := stack.PinBundles(env, map[string]stack.Bundle{
+		"shop-storefront": {Digest: "sha256:" + strings.Repeat("0123456789abcdef", 4), Files: files},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pinned
+}
+
+// webEnvironment reads the cloudflare target's golden Staging of its web
+// fixture, shop-storefront on Workers, its job SweepCarts on Cron
+// Triggers and the site storefront-web on Workers' static assets (D64),
+// and pins the site's files and both bundles as a deploy does.
+func webEnvironment(t *testing.T) *ir.ResolvedEnvironment {
+	t.Helper()
+	data, err := os.ReadFile(stack.EnvironmentPath(cloudflareGoldenRoot, "web-stack", "Staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := stack.Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := stack.PinSites(env, map[string]string{"storefront-web": "sha256:" + strings.Repeat("5e", 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for i, name := range []string{"main.js", "main.js.map", "superscalar_wasm_bg.wasm"} {
+		files[name] = strings.Repeat(string(rune('a'+i)), 64)
+	}
+	bundles := map[string]stack.Bundle{}
+	for i, deployable := range []string{"shop-storefront", "shop-storefront-sweep-carts"} {
+		bundles[deployable] = stack.Bundle{Digest: "sha256:" + strings.Repeat(string(rune('1'+i)), 64), Files: files}
+	}
+	if pinned, err = stack.PinBundles(pinned, bundles); err != nil {
+		t.Fatal(err)
+	}
+	return pinned
 }
 
 // RandomVersion is the random provider the integration test pins.

@@ -14,6 +14,15 @@
     }
   ],
   "types": [
-    "cloudflare:index/dnsRecord:DnsRecord"
+    "cloudflare:index/accountToken:AccountToken",
+    "cloudflare:index/d1Database:D1Database",
+    "cloudflare:index/dnsRecord:DnsRecord",
+    "cloudflare:index/r2Bucket:R2Bucket",
+    "cloudflare:index/r2BucketLifecycle:R2BucketLifecycle",
+    "cloudflare:index/worker:Worker",
+    "cloudflare:index/workerVersion:WorkerVersion",
+    "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
+    "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
+    "cloudflare:index/workersDeployment:WorkersDeployment"
   ]
 }

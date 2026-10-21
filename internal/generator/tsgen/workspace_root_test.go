@@ -441,3 +441,151 @@ func TestSiteDir(t *testing.T) {
 		t.Errorf("SiteDir in a mirrored root = %s, %v; want %s", got, err, mirror)
 	}
 }
+
+// writePackageJSON writes a package.json into dir.
+func writePackageJSON(t *testing.T, dir, manifest string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// partialWorkspace is a repository whose output root holds the generated
+// API packages of a and b, which the implementations a and b and the site
+// shop depend on with workspace:*; c depends on a's implementation, d on
+// b's, and e names no workspace package.
+func partialWorkspace(t *testing.T) (WorkspaceRoot, string) {
+	t.Helper()
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(repo, "schemas", "dist")
+	writePackageJSON(t, filepath.Join(out, "api", "a"), `{"name": "@acme/a-api", "version": "0.0.0"}`)
+	writePackageJSON(t, filepath.Join(out, "api", "b"), `{"name": "@acme/b-api", "version": "0.0.0"}`)
+	writePackageJSON(t, filepath.Join(repo, "typescript", "a"), `{"name": "@acme/a-implementation", "version": "0.0.0", "dependencies": {"@acme/a-api": "workspace:*"}}`)
+	writePackageJSON(t, filepath.Join(repo, "typescript", "b"), `{"name": "@acme/b-implementation", "version": "0.0.0", "dependencies": {"@acme/b-api": "workspace:*"}}`)
+	writePackageJSON(t, filepath.Join(repo, "typescript", "c"), `{"name": "@acme/c", "version": "0.0.0", "devDependencies": {"@acme/a-implementation": "workspace:*"}}`)
+	writePackageJSON(t, filepath.Join(repo, "typescript", "d"), `{"name": "@acme/d", "version": "0.0.0", "dependencies": {"@acme/b-implementation": "workspace:^"}}`)
+	writePackageJSON(t, filepath.Join(repo, "typescript", "e"), `{"name": "@acme/e", "version": "0.0.0"}`)
+	writePackageJSON(t, filepath.Join(repo, "web", "shop"), `{"name": "@acme/shop-site", "version": "0.0.0", "dependencies": {"@acme/b-api": "workspace:*"}}`)
+	return WorkspaceRoot{OutputRoot: out, RepositoryRoot: repo, Naming: naming.Naming{NpmScope: "@acme"}}, filepath.Join(out, "api", "b")
+}
+
+// manifestWorkspaces returns the members the root's manifest names.
+func manifestWorkspaces(t *testing.T, w WorkspaceRoot) []string {
+	t.Helper()
+	got, err := w.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal([]byte(got), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Workspaces
+}
+
+// TestWorkspaceRootLeavesOutWhatItCannotResolve: an output root built for
+// one stack holds only the packages of its services, and the root leaves
+// out each implementation or site that depends with workspace: on a
+// package neither on disk nor a member, and each that depends on one it
+// leaves out (D51, amended); once every package is built, it leaves out
+// nothing, and is the manifest it was.
+func TestWorkspaceRootLeavesOutWhatItCannotResolve(t *testing.T) {
+	w, b := partialWorkspace(t)
+	full := []string{"types/typescript/*", "sdk/typescript/*", "api/*", "server/*/*", "../../typescript/*", "../../web/*"}
+	if got := manifestWorkspaces(t, w); fmt.Sprint(got) != fmt.Sprint(full) {
+		t.Fatalf("every package built: workspaces %q, want %q", got, full)
+	}
+	fullManifest, err := w.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(b); err != nil {
+		t.Fatal(err)
+	}
+	partial := append(append([]string(nil), full...), "!../../typescript/b", "!../../typescript/d", "!../../web/shop")
+	if got := manifestWorkspaces(t, w); fmt.Sprint(got) != fmt.Sprint(partial) {
+		t.Fatalf("b's API not built: workspaces %q, want %q", got, partial)
+	}
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	leftOut, err := WorkspaceLeftOut(w.OutputRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"../../typescript/b", "../../typescript/d", "../../web/shop"}; fmt.Sprint(leftOut) != fmt.Sprint(want) {
+		t.Errorf("WorkspaceLeftOut = %q, want %q", leftOut, want)
+	}
+
+	writePackageJSON(t, b, `{"name": "@acme/b-api", "version": "0.0.0"}`)
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(w.OutputRoot, "package.json")); err != nil || string(got) != fullManifest {
+		t.Fatalf("every package built again: %s (%v), want\n%s", got, err, fullManifest)
+	}
+	if leftOut, err := WorkspaceLeftOut(w.OutputRoot); err != nil || len(leftOut) != 0 {
+		t.Errorf("WorkspaceLeftOut = %q, %v; want none", leftOut, err)
+	}
+}
+
+// TestPartialWorkspaceInstallKeepsTheLockfile runs Bun on the roots
+// TestWorkspaceRootLeavesOutWhatItCannotResolve writes: the full workspace
+// installs and writes its lockfile; with b's API gone, the partial root
+// installs with --no-save, as stack dev and a deploy install it, and the
+// lockfile, which pins the whole workspace, is the same bytes; with every
+// package built again, a frozen install accepts it.
+func TestPartialWorkspaceInstallKeepsTheLockfile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping bun install check in -short mode")
+	}
+	bunPath, err := exec.LookPath("bun")
+	if err != nil {
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	w, b := partialWorkspace(t)
+	w.Paths = testpaths.Local(t)
+	install := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(bunPath, append([]string{"install"}, args...)...)
+		cmd.Dir = w.OutputRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("bun install %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	install()
+	lockfile := filepath.Join(w.OutputRoot, LockfileName)
+	full, err := os.ReadFile(lockfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	install("--no-save")
+	if got, err := os.ReadFile(lockfile); err != nil || string(got) != string(full) {
+		t.Fatalf("the partial workspace's install changed the lockfile (%v):\n%s\nwant:\n%s", err, got, full)
+	}
+
+	writePackageJSON(t, b, `{"name": "@acme/b-api", "version": "0.0.0"}`)
+	if err := w.Write(); err != nil {
+		t.Fatal(err)
+	}
+	install("--frozen-lockfile")
+}

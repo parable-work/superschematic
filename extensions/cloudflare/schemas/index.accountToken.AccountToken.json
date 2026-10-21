@@ -1,0 +1,106 @@
+{
+  "token": "cloudflare:index/accountToken:AccountToken",
+  "terraform": {
+    "type": "cloudflare_account_token",
+    "renames": {
+      "accountId": "account_id",
+      "condition.requestIp": "request_ip",
+      "condition.requestIp.ins": "in",
+      "condition.requestIp.notIns": "not_in",
+      "expiresOn": "expires_on",
+      "notBefore": "not_before",
+      "policies.permissionGroups": "permission_groups"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "condition": {
+      "$ref": "#/types/cloudflare:index/AccountTokenCondition:AccountTokenCondition"
+    },
+    "expiresOn": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "notBefore": {
+      "type": "string"
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/AccountTokenPolicy:AccountTokenPolicy"
+      }
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "name",
+    "policies"
+  ],
+  "types": {
+    "cloudflare:index/AccountTokenCondition:AccountTokenCondition": {
+      "type": "object",
+      "properties": {
+        "requestIp": {
+          "$ref": "#/types/cloudflare:index/AccountTokenConditionRequestIp:AccountTokenConditionRequestIp"
+        }
+      }
+    },
+    "cloudflare:index/AccountTokenConditionRequestIp:AccountTokenConditionRequestIp": {
+      "type": "object",
+      "properties": {
+        "ins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notIns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cloudflare:index/AccountTokenPolicy:AccountTokenPolicy": {
+      "type": "object",
+      "properties": {
+        "effect": {
+          "type": "string"
+        },
+        "permissionGroups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/AccountTokenPolicyPermissionGroup:AccountTokenPolicyPermissionGroup"
+          }
+        },
+        "resources": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect",
+        "permissionGroups",
+        "resources"
+      ]
+    },
+    "cloudflare:index/AccountTokenPolicyPermissionGroup:AccountTokenPolicyPermissionGroup": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  }
+}

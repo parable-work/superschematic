@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -433,6 +434,15 @@ type BootstrapOptions struct {
 	// values the target's bootstrap returns (D47). Without one, it says
 	// what to add by hand.
 	Source *SchemaSource
+
+	// GitHub has the target's bootstrap store what the generated CI signs
+	// in with as the repository's Actions secrets (registry.BootstrapRequest,
+	// D64).
+	GitHub bool
+
+	// Reveal receives what the target's bootstrap shows the person once:
+	// a passphrase it generated, a token it could not store (D64).
+	Reveal io.Writer
 }
 
 // Bootstrap prepares the cloud project an environment deploys to
@@ -465,7 +475,9 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error)
 			Credentials: creds,
 			Provisioner: s.prov,
 			Dir:         s.dir,
+			GitHub:      o.GitHub,
 			Log:         s.log,
+			Reveal:      o.Reveal,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)

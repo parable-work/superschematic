@@ -135,6 +135,9 @@ func (s *TypeScriptServer) planTypeScriptEngine(in TypeScriptInput, api *TypeScr
 	if d == nil || d.Service != info.Database {
 		return fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s is not the database its Deps holds", in.Stack, s.Kind, in.Server, schema, info.Database)
 	}
+	if d.SQLite {
+		return fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s lists sqlite first; a TypeScript entrypoint opens the engine on Postgres, and one over SQLite or on Cloudflare is not built (D58, D64)", in.Stack, s.Kind, in.Server, schema, info.Database)
+	}
 	if d.Engine == nil {
 		d.Engine = s.newTypeScriptEngine(d, info, taken)
 	}

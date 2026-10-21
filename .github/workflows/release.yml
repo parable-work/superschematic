@@ -514,6 +514,20 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
+
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 

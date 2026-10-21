@@ -1,0 +1,11 @@
+# The database of ts-notes, which lists sqlite first (D64): ts-notes'
+# Deps.db is a SqlDatabase, D1's interface, and its server opens the SQLite
+# file its sqlite: URL names. Postgres stays listed, as every DB service's
+# dialects must.
+name: ts-notes-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+  sql: { dialects: [sqlite, postgres] }

@@ -1,0 +1,3 @@
+name: ts-cron-stack
+kind: Stack
+outputs: {}

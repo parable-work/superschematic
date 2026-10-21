@@ -247,8 +247,22 @@ type BootstrapRequest struct {
 	Provisioner Provisioner
 	Dir         string
 
+	// GitHub asks the bootstrap to store what the generated CI signs in
+	// with as the GitHub repository's Actions secrets, at the scopes the
+	// target's CI seam names: the cloudflare target's tokens and its
+	// state's passphrase, through `gh` (D64). A target whose CI signs in
+	// without a secret, as gcp's does, ignores it.
+	GitHub bool
+
 	// Log receives progress. Nothing secret is written to it.
 	Log io.Writer
+
+	// Reveal receives what the bootstrap shows the person once and keeps
+	// nowhere they can read it back: a passphrase it generated, or a token
+	// it could not hand to `gh` (D64). The CLI writes it to stdout. A
+	// bootstrap that would need it and has none refuses before it makes the
+	// value.
+	Reveal io.Writer
 }
 
 // Bootstrapper prepares the cloud project an environment deploys to, once,
@@ -332,6 +346,14 @@ type MigrationRequest struct {
 	// Plans are the plans to run, in service order.
 	Plans []MigrationPlan
 
+	// Outputs reads the applied graph's outputs, by node ID and output
+	// name, as the provisioner's Outputs reads them after the steps before
+	// this one: a runner that reaches a database by an id its node
+	// outputs, as the cloudflare target's reaches a D1 database by its
+	// uuid (D64), reads it here rather than looking the database up by
+	// name. The deploy sets it; a runner that reads no output ignores it.
+	Outputs func(ctx context.Context) (map[string]map[string]any, error)
+
 	// Log receives progress.
 	Log io.Writer
 }
@@ -342,6 +364,27 @@ type MigrationRequest struct {
 // the runner resumes a plan a failed run left part-way.
 type MigrationRunner interface {
 	Migrate(ctx context.Context, req MigrationRequest) error
+}
+
+// DeployingMachineMigrations is a MigrationRunner that runs
+// superschematic-migrate on the deploying machine rather than as a job on
+// the target: the cloudflare target's, against D1's REST API (D64). A
+// generated CI job that deploys an environment with a database then
+// installs the runner beside superschematic (CIEnvironment.Migrate).
+type DeployingMachineMigrations interface {
+	MigrationRunner
+	MigratesOnTheDeployingMachine()
+}
+
+// PrivilegelessMigrations is a MigrationRunner whose databases have no
+// roles, so the plan of a phase without steps, which the deploy hands the
+// runner when the servers that connect changed, has nothing to grant: the
+// cloudflare target's, on D1 (D64). The deploy prepares such a runner
+// (MigrationPreparer) only for a run with steps to migrate or a phase
+// left pending, not for a change of the servers that connect alone.
+type PrivilegelessMigrations interface {
+	MigrationRunner
+	GrantsNoPrivileges()
 }
 
 // MigrationPreparer is a MigrationRunner that readies, before a deploy

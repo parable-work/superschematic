@@ -946,17 +946,87 @@ func TestSitesInTheWorkflow(t *testing.T) {
 	}
 }
 
-// TestCloudJobsSignInLast: every cloud job of every golden workflow signs
-// in after its installs and builds, which run the pull request's
-// lockfiles and scripts, so none of them finds the credentials file or
-// the environment google-github-actions/auth leaves for the later steps;
-// only the stack commands run after it.
+// TestBundlesInTheWorkflow: check bundles each TypeScript server some
+// environment places on a platform whose artifact is a bundle with
+// bundle.ts --check after type-checking it, as a deploy bundles it, and no
+// server only on images; the deploy and preview jobs of an environment
+// with a bundle set up Bun and install the workspace before they deploy,
+// since the deploy runs bundle.ts on the runner, and the plan job, which
+// builds nothing, does neither (D64).
+func TestBundlesInTheWorkflow(t *testing.T) {
+	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
+	env := func(name string, artifact ir.Artifact, params ...string) *ir.ResolvedEnvironment {
+		return &ir.ResolvedEnvironment{Stack: "edge-stack", Environment: name, Target: stacktest.Target, Parameters: params, Deployables: []*ir.ResolvedDeployable{
+			{Name: "shop-storefront", Kind: ir.DeployableServer, Language: publicregistry.APILanguageTypeScript, Artifact: artifact},
+			{Name: "shop-pricing", Kind: ir.DeployableServer, Language: publicregistry.APILanguageTypeScript, Artifact: ir.ArtifactImage},
+		}}
+	}
+	req := publicregistry.CIRequest{
+		Stack: publicregistry.CIStack{
+			Name: "edge-stack", Dir: "schemas/services/edge-stack", ServicesRoot: "schemas/services", SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			PackageManager: publicregistry.PackageManagerNPM,
+		},
+		Options: publicregistry.CIOptions{Branch: "main"},
+		Version: version,
+		Environments: []publicregistry.CIEnvironment{
+			{Environment: env("Dev", ir.ArtifactImage), HasSeam: true, Planner: identity, Deployer: identity},
+			{Environment: env("Staging", ir.ArtifactBundle), HasSeam: true, Planner: identity, Deployer: identity},
+			{Environment: env("Preview", ir.ArtifactBundle, "pr"), HasSeam: true, Planner: identity, Deployer: identity},
+		},
+	}
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "edge-stack.yml")
+	if err := os.WriteFile(path, files[0].Data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+
+	w := parseWorkflow(t, files[0].Data)
+	check := w.jobs["check"]
+	bundle := "Bundle server shop-storefront for Workers"
+	if s := check.step(bundle); s == nil || s.WorkingDirectory != "schemas/dist/server/edge-stack/shop-storefront" || s.Run != "bun bundle.ts --check" {
+		t.Errorf("check bundles the storefront with %+v", s)
+	}
+	if i, j := check.index("Type-check server shop-storefront"), check.index(bundle); i < 0 || j < i {
+		t.Errorf("check bundles the storefront at step %d, before it type-checks it at step %d", j, i)
+	}
+	if check.step("Bundle server shop-pricing for Workers") != nil {
+		t.Error("check bundles shop-pricing, which every environment runs from an image")
+	}
+	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
+	for _, id := range []string{"deploy-staging", "preview-preview"} {
+		job := w.jobs[id]
+		if job.step("Set up Bun") == nil || job.step(install) == nil {
+			t.Errorf("%s does not set up Bun and install the workspace before it bundles", id)
+		}
+	}
+	for _, id := range []string{"deploy-dev", "plan-staging"} {
+		if job := w.jobs[id]; job.step("Set up Bun") != nil || job.step(install) != nil {
+			t.Errorf("%s sets up Bun or installs the workspace, though it bundles nothing", id)
+		}
+	}
+}
+
+// TestCloudJobsSignInLast: every cloud job of every golden workflow, the
+// gcp ones here and the cloudflare target's, takes its credentials after
+// its installs and builds, which run the pull request's lockfiles and
+// scripts, so none of them finds the credentials file or the environment
+// google-github-actions/auth leaves for the later steps, or a secret:
+// only the stack commands run after the sign-in, and only they read a
+// secret (D47, amended; D64).
 func TestCloudJobsSignInLast(t *testing.T) {
 	goldens, err := filepath.Glob("testdata/golden/*.yml")
 	if err != nil || len(goldens) == 0 {
 		t.Fatalf("no golden workflows: %v", err)
 	}
-	for _, path := range goldens {
+	cloudflare, err := filepath.Glob("../../../extensions/cloudflare/testdata/golden/ci/*.yml")
+	if err != nil || len(cloudflare) == 0 {
+		t.Fatalf("no cloudflare golden workflows: %v", err)
+	}
+	for _, path := range append(goldens, cloudflare...) {
 		w := parseWorkflow(t, readFile(t, path))
 		for _, id := range w.order {
 			j := w.jobs[id]
@@ -964,16 +1034,32 @@ func TestCloudJobsSignInLast(t *testing.T) {
 			if (at >= 0) != (j.Permissions["id-token"] == "write") {
 				t.Errorf("%s: %s signs in at step %d with permissions %v", path, id, at, j.Permissions)
 			}
-			if at < 0 {
-				continue
+			if at >= 0 {
+				commands := j.Steps[at+1:]
+				if len(commands) == 0 {
+					t.Errorf("%s: %s signs in and runs nothing after", path, id)
+				}
+				for _, s := range commands {
+					if !strings.HasPrefix(s.Run, "superschematic stack ") {
+						t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
+					}
+				}
 			}
-			commands := j.Steps[at+1:]
-			if len(commands) == 0 {
-				t.Errorf("%s: %s signs in and runs nothing after", path, id)
+			for k, v := range j.Env {
+				if strings.Contains(v, "secrets.") {
+					t.Errorf("%s: %s gives every step the secret %s", path, id, k)
+				}
 			}
-			for _, s := range commands {
-				if !strings.HasPrefix(s.Run, "superschematic stack ") {
-					t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
+			for _, s := range j.Steps {
+				for k, v := range s.Env {
+					if strings.Contains(v, "secrets.") && !strings.HasPrefix(s.Run, "superschematic stack ") {
+						t.Errorf("%s: %s, %s reads the secret %s, which only a stack command does", path, id, s.Name, k)
+					}
+				}
+				for k, v := range s.With {
+					if strings.Contains(v, "secrets.") {
+						t.Errorf("%s: %s, %s hands the secret %s to an action", path, id, s.Name, k)
+					}
 				}
 			}
 		}
@@ -1004,6 +1090,7 @@ type parsedJob struct {
 	If          string            `yaml:"if"`
 	Environment string            `yaml:"environment"`
 	Permissions map[string]string `yaml:"permissions"`
+	Env         map[string]string `yaml:"env"`
 	Concurrency struct {
 		Group            string `yaml:"group"`
 		CancelInProgress bool   `yaml:"cancel-in-progress"`
@@ -1017,6 +1104,7 @@ type parsedStep struct {
 	Uses             string            `yaml:"uses"`
 	WorkingDirectory string            `yaml:"working-directory"`
 	With             map[string]string `yaml:"with"`
+	Env              map[string]string `yaml:"env"`
 	Run              string            `yaml:"run"`
 }
 
@@ -1060,4 +1148,102 @@ func parseWorkflow(t *testing.T, data []byte) parsed {
 		out.jobs[id] = j
 	}
 	return out
+}
+
+// TestAPITokenIdentity: a job whose identity is a cloudflare-api-token
+// (D64) signs in with no action and asks for no identity token: the env of
+// each step that runs a stack command, and of no other step and not the
+// job's, reads the token and the state's passphrase from the workflow's
+// secrets the identity names, a deploy job's from its GitHub environment,
+// a plan's and a preview's from the repository's. A field that is no
+// secret's name is refused.
+func TestAPITokenIdentity(t *testing.T) {
+	identity := func(token, passphrase string) *publicregistry.CIIdentity {
+		return &publicregistry.CIIdentity{Kind: "cloudflare-api-token", Fields: map[string]string{"token": token, "passphrase": passphrase}}
+	}
+	env := func(name string, params ...string) *ir.ResolvedEnvironment {
+		return &ir.ResolvedEnvironment{Stack: "edge-stack", Environment: name, Target: "edge", Provisioner: "pulumi", Parameters: params}
+	}
+	tools := []publicregistry.CLITool{pulumi}
+	request := func(envs ...publicregistry.CIEnvironment) publicregistry.CIRequest {
+		return publicregistry.CIRequest{
+			Stack: publicregistry.CIStack{
+				Name: "edge-stack", Dir: "schemas/services/edge-stack", ServicesRoot: "schemas/services",
+				SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			},
+			Environments: envs,
+			Options:      publicregistry.CIOptions{Branch: "main"},
+			Version:      version,
+		}
+	}
+	files, err := cigen.GitHub().Render(request(
+		publicregistry.CIEnvironment{
+			Environment: env("Staging"), HasSeam: true, Tools: tools,
+			Planner:  identity("CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"),
+			Deployer: identity("CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"),
+		},
+		publicregistry.CIEnvironment{
+			Environment: env("Preview", "pr"), HasSeam: true, Tools: tools,
+			Deployer: identity("CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"),
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := parseWorkflow(t, files[0].Data)
+	if want := []string{"check", "plan-staging", "preview-preview", "deploy-staging"}; !slices.Equal(w.order, want) {
+		t.Fatalf("jobs = %v, want %v", w.order, want)
+	}
+	for id, want := range map[string]struct {
+		secrets  [2]string
+		commands []string
+	}{
+		"plan-staging":    {[2]string{"CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"}, []string{"Plan Staging"}},
+		"preview-preview": {[2]string{"CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"}, []string{"Deploy Preview for the pull request", "Destroy Preview for the pull request"}},
+		"deploy-staging":  {[2]string{"CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"}, []string{"Deploy Staging"}},
+	} {
+		j := w.jobs[id]
+		if j.Env != nil {
+			t.Errorf("%s: the job's env is %v, which every step would see", id, j.Env)
+		}
+		var withEnv []string
+		for _, s := range j.Steps {
+			if s.Env == nil {
+				continue
+			}
+			withEnv = append(withEnv, s.Name)
+			if got := s.Env; len(got) != 2 || got["CLOUDFLARE_API_TOKEN"] != "${{ secrets."+want.secrets[0]+" }}" || got["PULUMI_CONFIG_PASSPHRASE"] != "${{ secrets."+want.secrets[1]+" }}" {
+				t.Errorf("%s, %s: env %v, want the secrets %v", id, s.Name, got, want.secrets)
+			}
+			if !strings.HasPrefix(s.Run, "superschematic stack ") {
+				t.Errorf("%s, %s: a step that runs %q reads the secrets", id, s.Name, s.Run)
+			}
+		}
+		if !slices.Equal(withEnv, want.commands) {
+			t.Errorf("%s: the steps that read the secrets are %v, want %v", id, withEnv, want.commands)
+		}
+		if j.Permissions != nil {
+			t.Errorf("%s asks for permissions %v; the token needs no identity token", id, j.Permissions)
+		}
+		for _, s := range j.Steps {
+			if strings.HasPrefix(s.Name, "Sign in") {
+				t.Errorf("%s has a sign-in step %q", id, s.Name)
+			}
+		}
+	}
+	if w.jobs["deploy-staging"].Environment != "Staging" {
+		t.Errorf("deploy-staging runs in GitHub environment %q, whose secrets it reads", w.jobs["deploy-staging"].Environment)
+	}
+	if w.jobs["check"].Env != nil {
+		t.Errorf("check has env %v", w.jobs["check"].Env)
+	}
+
+	_, err = cigen.GitHub().Render(request(publicregistry.CIEnvironment{
+		Environment: env("Staging"), HasSeam: true, Tools: tools,
+		Planner:  identity("CLOUDFLARE_PLANNER_TOKEN_STAGING", "PASS }} ${{ github.token"),
+		Deployer: identity("CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"),
+	}))
+	if err == nil || !strings.Contains(err.Error(), "the name of a GitHub Actions secret") {
+		t.Errorf("a passphrase field that is no secret's name: %v", err)
+	}
 }
