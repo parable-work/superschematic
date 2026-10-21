@@ -263,13 +263,35 @@ func cargoArtifact(out []byte, manifest, kind string) (string, error) {
 }
 
 // stage copies built into dir/<its SHA-256's first 16 hex digits>/name,
-// unless an earlier run staged the same bytes there, and returns its path.
+// unless an earlier run staged the same bytes there, removes what earlier
+// runs staged in dir under other digests, and returns its path. A process
+// that loaded an addon removed so keeps it.
 func stage(built, dir, name string) (string, error) {
+	dest, err := stageDigest(built, dir, name)
+	if err != nil {
+		return "", err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		if entry.Name() != filepath.Base(filepath.Dir(dest)) {
+			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				return "", err
+			}
+		}
+	}
+	return dest, nil
+}
+
+// stageDigest is stage's copy.
+func stageDigest(built, dir, name string) (string, error) {
 	f, err := os.Open(built)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
