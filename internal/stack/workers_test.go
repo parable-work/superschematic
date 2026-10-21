@@ -158,7 +158,7 @@ func TestWorkerRefusals(t *testing.T) {
 		s, services := workerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).Instances = intp(2)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances or concurrency on server shop-api; only a worker takes them")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances on server shop-api; only a worker takes instances, maxInstances and concurrency")
 	})
 	t.Run("a schedule on a worker", func(t *testing.T) {
 		s, services := workerShop()
@@ -182,7 +182,7 @@ func TestWorkerRefusals(t *testing.T) {
 		s, services := workerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).MaxInstances = intp(2)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances or concurrency on server shop-api; only a worker takes them")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets maxInstances on server shop-api; only a worker takes instances, maxInstances and concurrency")
 	})
 	t.Run("a concurrency of none", func(t *testing.T) {
 		s, services := workerShop()

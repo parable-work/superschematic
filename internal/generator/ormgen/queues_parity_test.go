@@ -31,6 +31,8 @@ var queueParitySubtests = []string{
 	"AttemptsAndStatesAgree",
 	"BackoffGrowsForEverySide",
 	"EachPrunesTheOthersDoneMessages",
+	"UnreadableRowFailsAlone",
+	"Base62UUIDsGoHyphenated",
 	"LocationsAndDurationsAgree",
 }
 
@@ -69,6 +71,12 @@ var queueParitySubtests = []string{
 //   - EachPrunesTheOthersDoneMessages: each side's prune deletes, a batch
 //     at a time, the messages the other two completed past the retention,
 //     and leaves one done within it and a dead one;
+//   - UnreadableRowFailsAlone: for each side, a claim of a good message and
+//     a row whose JSON column holds no JSON returns the good one and fails
+//     the other alone, recording Unreadable, so the batch is not stranded;
+//   - Base62UUIDsGoHyphenated: each side enqueues a message whose UUID is
+//     base62, which every side writes hyphenated and reads back as the same
+//     UUID;
 //   - LocationsAndDurationsAgree: on DeliveryPlanned, each side reads the
 //     locations and durations each enqueues, a duration truncated to its
 //     microseconds, and an interval written with days and months as their
@@ -1185,7 +1193,69 @@ func TestQueueParity(t *testing.T) {
 	t.Run("AttemptsAndStatesAgree", testAttemptsAndStatesAgree)
 	t.Run("BackoffGrowsForEverySide", testBackoffGrowsForEverySide)
 	t.Run("EachPrunesTheOthersDoneMessages", testEachPrunesTheOthersDoneMessages)
+	t.Run("UnreadableRowFailsAlone", testUnreadableRowFailsAlone)
+	t.Run("Base62UUIDsGoHyphenated", testBase62UUIDsGoHyphenated)
 	t.Run("LocationsAndDurationsAgree", testLocationsAndDurationsAgree)
+}
+
+// testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL
+// writes a row whose ship_to, a JSON column, holds no JSON. The side's
+// claim of both returns the good message alone; the bad row, claimed and
+// unread, is failed with Unreadable and why, ready again after one
+// attempt, and its batch is not stranded.
+func testUnreadableRowFailsAlone(t *testing.T) {
+	for _, name := range []string{"Go", "TypeScript", "Rust"} {
+		t.Run(name, func(t *testing.T) {
+			p := newParity(t)
+			s := p.sides()[name]
+			const good, bad = "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e", "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
+			s.enqueue(orderJSON(good))
+			p.exec(p.dialectSQL(
+				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ($1::uuid, 'low', 1, '{not json')",
+				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES (?1, 'low', 1, '{not json')",
+			), bad)
+			claims := s.claim(5)
+			if len(claims) != 1 || !sameMessage(claims[0].Message, order(good)) {
+				t.Fatalf("%s claimed %+v, want the good message alone", name, claims)
+			}
+			var state, lastError string
+			var attempts int
+			p.queryRow(p.dialectSQL(
+				"SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE order_id = $1::uuid",
+				"SELECT state, attempts, COALESCE(last_error, '') FROM order_placed_queue WHERE order_id = ?1",
+			), []any{bad}, &state, &attempts, &lastError)
+			if state != "ready" || attempts != 1 || !strings.HasPrefix(lastError, Unreadable+": ") {
+				t.Errorf("the unreadable row is %s after %d attempts with %q; want ready after one, failed as %q", state, attempts, lastError, Unreadable)
+			}
+		})
+	}
+}
+
+// testBase62UUIDsGoHyphenated: each side enqueues a message whose order ID is
+// base62, as a TypeScript or Rust type may hold it; every side writes it
+// hyphenated, and Go reads each back as the same UUID.
+func testBase62UUIDsGoHyphenated(t *testing.T) {
+	p := newParity(t)
+	for _, s := range p.sides() {
+		s.enqueue(orderJSON("3Nf1lmBDcdDKfsC9ccR4DG"))
+	}
+	var stored string
+	p.queryRow(p.dialectSQL(
+		"SELECT string_agg(DISTINCT order_id::text, ',') FROM order_placed_queue",
+		"SELECT group_concat(DISTINCT order_id) FROM order_placed_queue",
+	), nil, &stored)
+	if stored != "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e" {
+		t.Fatalf("the order IDs are stored as %q, want each hyphenated", stored)
+	}
+	claims, err := p.queue.Claim(p.ctx, 5, time.Minute)
+	if err != nil || len(claims) != 3 {
+		t.Fatalf("Go's Claim = %+v, %v, want the three messages", claims, err)
+	}
+	for _, c := range claims {
+		if !sameMessage(c.Message, order("6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e")) {
+			t.Errorf("Go read %+v", c.Message)
+		}
+	}
 }
 
 // testGoAndTypeScript: the Go ORM enqueues a message, which the TypeScript

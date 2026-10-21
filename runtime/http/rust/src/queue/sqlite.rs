@@ -8,7 +8,10 @@
 //!
 //! [`enqueue_sqlite`] writes a message through the caller's connection,
 //! inside its transaction when it holds one (a rusqlite `Transaction` is a
-//! `Connection`), so the message commits with the writes that caused it. A
+//! `Connection`), so the message commits with the writes that caused it;
+//! begin it IMMEDIATE (`TransactionBehavior::Immediate`), so a transaction
+//! that reads before it writes waits for another connection's write lock
+//! rather than failing on a stale snapshot. A
 //! [`SqliteQueue`] claims, completes, fails, extends, releases and prunes
 //! messages for a worker, on a connection of its own, each call on tokio's
 //! blocking pool, since rusqlite's calls block and a statement may wait for
@@ -42,7 +45,9 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::duration::{format_duration, parse_duration};
-use super::{unset, Claim, QueueDefinition, QueueError, QueueField, QueueStatements, CLAIM_LOST};
+use super::{
+    unset, Claim, QueueDefinition, QueueError, QueueField, QueueStatements, CLAIM_LOST, UNREADABLE,
+};
 use crate::civil::{from_days, to_days};
 use crate::error::chain;
 use crate::uuid62::parse_uuid;
@@ -166,14 +171,17 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     }
 
     /// The claims of the queue `definition` describes on the SQLite file
-    /// at `path`, which it opens with foreign keys on and a statement
+    /// at `path`, which it opens with foreign keys on, in write-ahead
+    /// logging, so a reader never waits for a writer, and a statement
     /// waiting up to [`BUSY_TIMEOUT`] for another connection's lock.
     pub fn open(path: impl AsRef<Path>, definition: QueueDefinition) -> Result<Self, QueueError> {
         let context = format!("open the SQLite database of {}", definition.table);
         let connection = Connection::open(path).map_err(|err| failed(&context, &err))?;
         connection
             .busy_timeout(BUSY_TIMEOUT)
-            .and_then(|()| connection.execute_batch("PRAGMA foreign_keys = ON"))
+            .and_then(|()| {
+                connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+            })
             .map_err(|err| failed(&context, &err))?;
         Self::new(connection, definition)
     }
@@ -211,9 +219,12 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
         .map_err(|err| QueueError::Failed(format!("{context}: {err}")))?
     }
 
-    /// Marks dead each message whose last attempt's claim expired, then
-    /// claims up to `n` due messages for `lease`, and reads each. A message
-    /// that does not read as `M` fails the claim.
+    /// Reads whether a message is due, and when one is, marks dead each
+    /// message whose last attempt's claim expired, then claims up to `n`
+    /// due messages for `lease`, and reads each: an idle poll takes no
+    /// write lock. A message that does not read as `M` is claimed already,
+    /// so it is failed alone, its cause [`UNREADABLE`] and why, and the
+    /// others are returned.
     pub async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<M>>, QueueError> {
         if n == 0 {
             return Ok(Vec::new());
@@ -221,6 +232,15 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
         let context = format!("claim on {}", self.definition.table);
         self.with(context, move |connection, definition, context| {
             let statements = sqlite_statements(definition)?;
+            if !statements.due.is_empty() {
+                let due = connection
+                    .prepare_cached(&statements.due)
+                    .and_then(|mut s| s.exists([]))
+                    .map_err(|err| failed(context, &err))?;
+                if !due {
+                    return Ok(Vec::new());
+                }
+            }
             connection
                 .prepare_cached(&statements.expire)
                 .and_then(|mut s| s.execute([i64::from(definition.retries)]))
@@ -233,11 +253,28 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
                 .query(rusqlite::params![n, lease.as_secs_f64()])
                 .map_err(|err| failed(context, &err))?;
             let mut claims = Vec::new();
+            let mut unreadable = Vec::new();
             while let Some(row) = rows.next().map_err(|err| failed(context, &err))? {
-                claims.push(claim_of(definition, row).map_err(|err| match err {
-                    ClaimRead::Sql(err) => failed(context, &err),
-                    ClaimRead::Message(message) => QueueError::Failed(message),
-                })?);
+                match claim_of(definition, row) {
+                    Ok(claim) => claims.push(claim),
+                    Err(ClaimRead::Sql(err)) => return Err(failed(context, &err)),
+                    Err(ClaimRead::Unreadable { id, token, reason }) => {
+                        unreadable.push((id, token, reason));
+                    }
+                }
+            }
+            drop(rows);
+            drop(statement);
+            // Each row is claimed already: one that does not read fails
+            // alone, and a failure to record that leaves it to its lease.
+            for (id, token, reason) in unreadable {
+                let _ = fail_row(
+                    connection,
+                    definition,
+                    &id,
+                    &token,
+                    &format!("{UNREADABLE}: {reason}"),
+                );
             }
             Ok(claims)
         })
@@ -258,23 +295,7 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
         let context = format!("fail message {id} on {}", self.definition.table);
         let (id, token, cause) = (id.to_string(), token.to_string(), cause.to_string());
         self.with(context, move |connection, definition, context| {
-            let statements = sqlite_statements(definition)?;
-            let state: Option<String> = connection
-                .prepare_cached(&statements.fail)
-                .and_then(|mut s| {
-                    s.query_row(
-                        rusqlite::params![
-                            id,
-                            token,
-                            i64::from(definition.retries),
-                            i64::try_from(definition.backoff_seconds).unwrap_or(i64::MAX),
-                            cause,
-                            i64::try_from(definition.max_backoff_seconds).unwrap_or(i64::MAX),
-                        ],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                })
+            let state = fail_row(connection, definition, &id, &token, &cause)?
                 .map_err(|err| failed(context, &err))?;
             match state {
                 None => Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}"))),
@@ -361,11 +382,43 @@ impl<M: DeserializeOwned + Send + 'static> SqliteQueue<M> {
     }
 }
 
+/// Runs the fail statement on the message `id` while `token` claims it:
+/// the state it leaves, or `None` for a lost claim.
+fn fail_row(
+    connection: &Connection,
+    definition: &QueueDefinition,
+    id: &str,
+    token: &str,
+    cause: &str,
+) -> Result<Result<Option<String>, rusqlite::Error>, QueueError> {
+    let statements = sqlite_statements(definition)?;
+    Ok(connection
+        .prepare_cached(&statements.fail)
+        .and_then(|mut s| {
+            s.query_row(
+                rusqlite::params![
+                    id,
+                    token,
+                    i64::from(definition.retries),
+                    i64::try_from(definition.backoff_seconds).unwrap_or(i64::MAX),
+                    cause,
+                    i64::try_from(definition.max_backoff_seconds).unwrap_or(i64::MAX),
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+        }))
+}
+
 /// Why a claimed row did not read: a column SQLite would not give, or a
-/// message that does not read as its type.
+/// message, whose ID and token it read, that does not read as its type.
 enum ClaimRead {
     Sql(rusqlite::Error),
-    Message(String),
+    Unreadable {
+        id: String,
+        token: String,
+        reason: String,
+    },
 }
 
 /// A claimed row, `[id, token, attempt, ...the message's columns]`, as its
@@ -381,18 +434,21 @@ fn claim_of<M: DeserializeOwned>(
     let mut members = Map::new();
     for (i, field) in definition.fields.iter().enumerate() {
         let column = row.get_ref(3 + i).map_err(ClaimRead::Sql)?;
-        let value = member_value(column, field).map_err(|err| {
-            ClaimRead::Message(format!(
-                "message {id} of {table}: field {}: {err}",
-                field.name
-            ))
+        let value = member_value(column, field).map_err(|err| ClaimRead::Unreadable {
+            id: id.clone(),
+            token: token.clone(),
+            reason: format!("message {id} of {table}: field {}: {err}", field.name),
         })?;
         if let Some(value) = value {
             members.insert(field.name.clone(), value);
         }
     }
-    let message = serde_json::from_value(Value::Object(members))
-        .map_err(|err| ClaimRead::Message(format!("message {id} of {table}: {err}")))?;
+    let message =
+        serde_json::from_value(Value::Object(members)).map_err(|err| ClaimRead::Unreadable {
+            id: id.clone(),
+            token: token.clone(),
+            reason: format!("message {id} of {table}: {err}"),
+        })?;
     Ok(Claim {
         attempt: u32::try_from(attempt).unwrap_or(0),
         id,

@@ -133,7 +133,14 @@ func (r *resolver) resolveWorkerRef(where string, ref ir.DeployableRef) (*deploy
 func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *ir.DeployableSettings) bool {
 	if d.res.Kind != ir.DeployableWorker {
 		if entry.Instances != nil || entry.Concurrency != nil || entry.MaxInstances != nil {
-			r.fail(CodeInvalidSettings, "%s sets instances or concurrency on %s %s; only a worker takes them, named beside its API's handle with `worker`", where, d.res.Kind, d.res.Name)
+			var set []string
+			for name, on := range map[string]bool{"instances": entry.Instances != nil, "maxInstances": entry.MaxInstances != nil, "concurrency": entry.Concurrency != nil} {
+				if on {
+					set = append(set, name)
+				}
+			}
+			slices.Sort(set)
+			r.fail(CodeInvalidSettings, "%s sets %s on %s %s; only a worker takes instances, maxInstances and concurrency, named beside its API's handle with `worker`", where, strings.Join(set, " and "), d.res.Kind, d.res.Name)
 			return true
 		}
 		return false

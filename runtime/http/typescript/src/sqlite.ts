@@ -20,7 +20,9 @@ It keeps D1's behaviors that an implementation could come to rely on:
 placeholders ? and ?N, booleans bound as 1 and 0, bind refusing undefined
 and any other value D1 refuses with D1's D1_TYPE_ERROR, a BLOB read back as
 an Array of its bytes rather than bun:sqlite's Uint8Array, foreign keys
-enforced, batch in one transaction that rolls back when a statement fails,
+enforced, batch in one IMMEDIATE transaction, which takes the write lock as
+it begins and rolls back when a statement fails, the file in write-ahead
+logging,
 and exec running a script one line per statement. Each run reports changes,
 the last row id and its duration, as D1's meta does.
 */
@@ -131,6 +133,10 @@ class SqliteConnection implements SqliteDatabase {
     this.db = new Database(path, { create: true });
     this.db.run('PRAGMA foreign_keys = ON');
     this.db.run(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMs ?? 5000))}`);
+    // Write-ahead logging: a reader never waits for a writer, as a server
+    // and a worker on one file do (D53, amended). The mode is the file's,
+    // so every connection after the first finds it set.
+    this.db.run('PRAGMA journal_mode = WAL');
   }
 
   /** The prepared statement of sql, prepared once. */
@@ -176,7 +182,10 @@ class SqliteConnection implements SqliteDatabase {
       }
       return statement;
     });
-    return this.db.transaction(() => own.map(statement => this.execute<T>(statement)))();
+    // IMMEDIATE: the batch takes the write lock as it begins, waiting for it
+    // within the busy timeout, so a batch that reads before it writes never
+    // fails to upgrade its lock while another connection writes.
+    return this.db.transaction(() => own.map(statement => this.execute<T>(statement))).immediate();
   }
 
   async exec(sql: string): Promise<SqlExecResult> {

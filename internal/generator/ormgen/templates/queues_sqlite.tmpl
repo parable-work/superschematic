@@ -8,7 +8,12 @@ package orm
 // the TypeScript types' queues.ts and the Rust types' queues.rs carry too,
 // so a message one language enqueues another claims alike. The ORM imports
 // no driver: the caller opens the database with one, modernc.org/sqlite
-// among them.
+// among them, in write-ahead logging and with a busy timeout, which a
+// connection of database/sql's pool otherwise lacks, so it waits for another
+// process's write lock: file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL).
+// A transaction that reads before it enqueues begins IMMEDIATE
+// (_txlock=immediate), so it takes the write lock as it begins rather than
+// failing on a stale snapshot.
 //
 // SQLite has one writer at a time, so a claim needs no FOR UPDATE SKIP
 // LOCKED: each statement is one UPDATE or DELETE, which holds the write lock
@@ -124,11 +129,21 @@ func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) 
 	return nil
 }
 
-// claim marks dead each message whose last attempt's claim expired, then
-// claims up to n due messages for lease, each with its message's JSON.
+// claim reads whether a message is due, so an idle poll takes no write
+// lock, and when one is marks dead each message whose last attempt's claim
+// expired, then claims up to n due messages for lease, each with its
+// message's JSON. A row whose columns do not read it fails alone, recording
+// Unreadable and why.
 func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease time.Duration) ([]sqliteClaimed, error) {
 	if n <= 0 {
 		return nil, nil
+	}
+	var one int
+	switch err := db.QueryRowContext(ctx, t.statements.due).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 	}
 	if _, err := db.ExecContext(ctx, t.statements.expire, t.retries); err != nil {
 		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
@@ -139,6 +154,7 @@ func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease ti
 	}
 	defer rows.Close()
 	var claims []sqliteClaimed
+	var unreadable []*queueUnreadable
 	for rows.Next() {
 		var c sqliteClaimed
 		var attempt int64
@@ -151,25 +167,45 @@ func (t sqliteQueueTable) claim(ctx context.Context, db *sql.DB, n int, lease ti
 			return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 		}
 		c.attempt = int(attempt)
-		members := map[string]any{}
-		for i, f := range t.fields {
-			value, err := sqliteMemberValue(columns[i], f)
-			if err != nil {
-				return nil, fmt.Errorf("claim on %s: message %s field %s: %w", t.name, c.id, f.name, err)
-			}
-			if value != nil {
-				members[f.name] = value
-			}
-		}
-		if c.message, err = json.Marshal(members); err != nil {
-			return nil, fmt.Errorf("claim on %s: message %s: %w", t.name, c.id, err)
+		if c.message, err = t.messageOf(c.id, columns); err != nil {
+			unreadable = append(unreadable, &queueUnreadable{id: c.id, token: c.token, err: err})
+			continue
 		}
 		claims = append(claims, c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("claim on %s: %w", t.name, err)
 	}
+	_ = rows.Close()
+	for _, u := range unreadable {
+		t.unreadable(ctx, db, u)
+	}
 	return claims, nil
+}
+
+// messageOf is a claimed row's columns as its message's JSON.
+func (t sqliteQueueTable) messageOf(id string, columns []any) ([]byte, error) {
+	members := map[string]any{}
+	for i, f := range t.fields {
+		value, err := sqliteMemberValue(columns[i], f)
+		if err != nil {
+			return nil, fmt.Errorf("message %s field %s: %w", id, f.name, err)
+		}
+		if value != nil {
+			members[f.name] = value
+		}
+	}
+	data, err := json.Marshal(members)
+	if err != nil {
+		return nil, fmt.Errorf("message %s: %w", id, err)
+	}
+	return data, nil
+}
+
+// unreadable fails a claimed message that did not read, alone: a failure
+// to record that leaves it to its lease.
+func (t sqliteQueueTable) unreadable(ctx context.Context, db *sql.DB, u *queueUnreadable) {
+	_, _ = t.fail(ctx, db, u.id, u.token, Unreadable+": "+u.err.Error())
 }
 
 // fail records cause on a claimed message and makes it due again after the
@@ -432,18 +468,21 @@ func New{{ .Name }}SQLiteQueue(db *sql.DB) *{{ .Name }}SQLiteQueue {
 }
 
 // Claim claims up to n due messages for lease, each read from its JSON form
-// as the types read it.
+// as the types read it; one that does not read it fails alone.
 func (q *{{ .Name }}SQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]{{ .Name }}Claim, error) {
 	rows, err := {{ lowerFirst .Name }}SQLiteQueue.claim(ctx, q.db, n, lease)
 	if err != nil {
 		return nil, err
 	}
-	claims := make([]{{ .Name }}Claim, len(rows))
-	for i, row := range rows {
-		claims[i] = {{ .Name }}Claim{ID: row.id, Token: row.token, Attempt: row.attempt}
-		if err := json.Unmarshal(row.message, &claims[i].Message); err != nil {
-			return nil, fmt.Errorf("claim on %s: message %s: %w", {{ lowerFirst .Name }}SQLiteQueue.name, row.id, err)
+	claims := make([]{{ .Name }}Claim, 0, len(rows))
+	for _, row := range rows {
+		claim := {{ .Name }}Claim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			{{ lowerFirst .Name }}SQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
 		}
+		claims = append(claims, claim)
 	}
 	return claims, nil
 }

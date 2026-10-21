@@ -1,7 +1,9 @@
 import pg from 'pg';
 import {
+  canonicalUUID,
   ClaimLostError,
   errorMessage,
+  UNREADABLE,
   formatDuration,
   parseDuration,
   unset,
@@ -110,6 +112,8 @@ function columnValue(value: unknown, field: QueueField): unknown {
   if (field.json) return JSON.stringify(value);
   if (field.point) return pointText(value);
   if (field.interval) return intervalText(value);
+  // A UUID, hyphenated or base62, goes hyphenated, as Go and Rust send it.
+  if (field.uuid) return field.list && Array.isArray(value) ? value.map(canonicalUUID) : canonicalUUID(value);
   return value;
 }
 
@@ -124,7 +128,7 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
     }
     if (!result.rowCount) throw new ClaimLostError(`${what} message ${id} on ${queue.table}: ${new ClaimLostError().message}`);
   };
-  return {
+  const claims: PostgresQueue<M> = {
     name: queue.name,
     leaseSeconds: queue.leaseSeconds,
     async claim(n, leaseSeconds = queue.leaseSeconds) {
@@ -136,7 +140,16 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
       } catch (error) {
         throw new Error(`claim on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }
-      return rows.map(row => claimOf(queue, row as readonly unknown[]));
+      // Each row is claimed already: one that does not read fails alone.
+      const out: QueueClaim<M>[] = [];
+      for (const row of rows as (readonly unknown[])[]) {
+        try {
+          out.push(claimOf(queue, row));
+        } catch (error) {
+          await claims.fail(String(row[0]), String(row[1]), `${UNREADABLE}: ${errorMessage(error)}`).catch(() => undefined);
+        }
+      }
+      return out;
     },
     complete: (id, token) => update('complete', queue.statements.complete, id, token),
     async fail(id, token, cause) {
@@ -165,6 +178,7 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
       }
     },
   };
+  return claims;
 }
 
 /** A claimed row, [id, token, attempt, ...the message's columns], as its claim. */
