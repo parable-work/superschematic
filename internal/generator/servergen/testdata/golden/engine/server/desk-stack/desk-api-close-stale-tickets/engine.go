@@ -54,11 +54,13 @@ func (o *openedEngine) Close() error {
 
 // openEngine opens, in the background, the engine of the engine database
 // service on the database the field named field holds, db, with document,
-// its EngineDocument, and the access policy policy, as JSON. runner, for
-// an engine's runner, is the principal its reactions and schedules act as.
+// its EngineDocument, the access policy policy, as JSON, and the event
+// log's retention, as JSON, empty when the log keeps every event: only a
+// started runner prunes, while it holds the runner's lock. runner, for an
+// engine's runner, is the principal its reactions and schedules act as.
 // setup runs on the engine once it opens; nil sets nothing up. Each attempt
 // that fails is logged with the wait before the next.
-func openEngine(ctx context.Context, logger *zap.Logger, service, field string, db stackconfig.Database, document, policy string, runner *engine.Principal, setup engineSetup) (*openedEngine, error) {
+func openEngine(ctx context.Context, logger *zap.Logger, service, field string, db stackconfig.Database, document, policy, retention string, runner *engine.Principal, setup engineSetup) (*openedEngine, error) {
 	var doc engineDocument
 	if err := json.Unmarshal([]byte(document), &doc); err != nil {
 		return nil, fmt.Errorf("the engine document of %s: %w", service, err)
@@ -73,6 +75,12 @@ func openEngine(ctx context.Context, logger *zap.Logger, service, field string, 
 		Namespaces: &engine.Namespaces{Names: []string{doc.Namespace}},
 		MetaSchema: doc.MetaSchema,
 		Tools:      doc.Tools,
+	}
+	if retention != "" {
+		cfg.Retention = &engine.Retention{}
+		if err := json.Unmarshal([]byte(retention), cfg.Retention); err != nil {
+			return nil, fmt.Errorf("the event log's retention of %s: %w", service, err)
+		}
 	}
 	if runner != nil {
 		cfg.Runner = &engine.Runner{Principal: *runner}

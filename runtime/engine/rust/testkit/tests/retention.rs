@@ -3,8 +3,10 @@
 //! pruned a namespace at a time and never past an event a subscription has
 //! yet to handle; a read from before a namespace's floor is
 //! `cursor_expired`; a reaction's `before()` and an instance's sequence
-//! carry on from what retention kept; and a value only pruned events held
-//! goes with them. On SQLite and, with the variable set, on Postgres.
+//! carry on from what retention kept; a value only pruned events held
+//! goes with them; and an event stream the started runner prunes past
+//! ends, its resume answered 410 `cursor_expired`. On SQLite and, with the
+//! variable set, on Postgres.
 
 mod support;
 
@@ -811,6 +813,89 @@ fn the_started_runner_prunes() {
         }
         engine.runner().stop();
         assert_eq!(floor(&engine, None), 2);
+    }
+}
+
+#[test]
+fn a_stream_the_started_runner_prunes_past_ends_and_its_resume_is_410_cursor_expired() {
+    use std::time::{Duration, Instant};
+    use superschematic_engine::api::{
+        handle, start_stream, ApiOptions, Caller, Pull, Request, StreamOptions,
+    };
+    for target in targets("retention_stream") {
+        let (engine, _) = open(&target, |options| {
+            options.clock = Clock::System;
+            options.retention = Some(count(2));
+        });
+        let engine = engine.shared();
+        publish(&engine, &plain_document("Note"), None);
+        // Caught up at the head, its client then reads nothing while the
+        // log grows and the runner prunes.
+        let mut stream = start_stream(
+            &engine,
+            &StreamOptions {
+                page_size: Some(1),
+                heartbeat_ms: Some(60_000),
+            },
+            &alice(),
+            &ReadEvents {
+                after: Some(EventsAfter::Head),
+                ..ReadEvents::default()
+            },
+        )
+        .unwrap();
+        let ready = head(&engine);
+        for id in ["n1", "n2", "n3", "n4"] {
+            create(&engine, "Note", id, json!({"title": id}), None);
+        }
+        engine.runner().start().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while floor(&engine, None) <= ready {
+            assert!(Instant::now() < deadline, "the runner did not prune");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        engine.runner().stop();
+        let (floor_at, head_at) = (floor(&engine, None), head(&engine));
+        assert_eq!(floor_at, head_at - 2, "the newest two are kept");
+        loop {
+            match stream.next(Duration::from_millis(100)) {
+                Pull::End => break,
+                Pull::Data(bytes) => {
+                    let text = String::from_utf8(bytes).unwrap();
+                    assert!(
+                        text.starts_with(": open") || text.starts_with("event: ready"),
+                        "no event the runner pruned is sent: {text}"
+                    );
+                }
+                Pull::Pending => {}
+            }
+            assert!(Instant::now() < deadline, "the stream did not end");
+        }
+        let resumed = handle(
+            &engine,
+            &ApiOptions::default(),
+            &Request {
+                method: "GET".to_owned(),
+                path: "/namespaces/default/events".to_owned(),
+                headers: vec![
+                    ("accept".to_owned(), "text/event-stream".to_owned()),
+                    ("last-event-id".to_owned(), ready.to_string()),
+                ],
+                caller: Caller {
+                    principal: Some(alice()),
+                    ..Caller::default()
+                },
+                request_id: "r1".to_owned(),
+                ..Request::default()
+            },
+        );
+        assert_eq!(resumed.status, 410);
+        let problem: Value = serde_json::from_slice(resumed.bytes()).unwrap();
+        assert_eq!(problem["code"], "cursor_expired", "{problem}");
+        assert_eq!(
+            problem["details"],
+            json!({"after": ready, "floor": floor_at, "head": head_at})
+        );
     }
 }
 

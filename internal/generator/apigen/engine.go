@@ -31,6 +31,12 @@ type EngineInfo struct {
 	// outputs.engine.policy, else "permission".
 	Policy json.RawMessage
 
+	// Retention is how long the event log keeps events, as compact JSON
+	// the engine reads: outputs.engine.retention, nil when unset, which
+	// keeps every event. Every entrypoint opens the engine with it; only
+	// the runner, while it holds the runner's lease, prunes.
+	Retention json.RawMessage
+
 	// Types are the engine types, by name, sorted.
 	Types []string
 

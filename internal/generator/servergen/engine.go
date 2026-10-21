@@ -48,11 +48,13 @@ type Engine struct {
 	Service string
 	Var     string
 
-	// Namespace, Mount and Policy are what apigen.EngineInfo holds of it;
-	// Policy is the access policy's JSON.
+	// Namespace, Mount, Policy and Retention are what apigen.EngineInfo
+	// holds of it; Policy is the access policy's JSON, and Retention the
+	// event log's, empty when it keeps every event.
 	Namespace string
 	Mount     string
 	Policy    string
+	Retention string
 
 	// Types are the engine types, sorted, which the runner's principal
 	// holds as its permissions: a permission covers the actions under it.
@@ -81,6 +83,15 @@ func (e *Engine) PolicyLiteral() string {
 		return strconv.Quote(e.Policy)
 	}
 	return "`" + e.Policy + "`"
+}
+
+// RetentionLiteral is the event log's retention as a Go string literal,
+// "" when it keeps every event.
+func (e *Engine) RetentionLiteral() string {
+	if e.Retention == "" || strings.Contains(e.Retention, "`") {
+		return strconv.Quote(e.Retention)
+	}
+	return "`" + e.Retention + "`"
 }
 
 // planEngines gives each database an API of s connects to whose engine
@@ -139,6 +150,7 @@ func newEngine(d *Database, info *apigen.EngineInfo, taken names) *Engine {
 		Namespace: info.Namespace,
 		Mount:     info.Mount,
 		Policy:    string(info.Policy),
+		Retention: string(info.Retention),
 		Types:     slices.Clone(info.Types),
 		Database:  d,
 	}

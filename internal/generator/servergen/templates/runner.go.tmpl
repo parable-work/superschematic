@@ -63,7 +63,7 @@ func run(logger *zap.Logger) error {
 		Subject:     {{ quote .RunnerSubject }},
 		Permissions: []string{ {{- range $i, $t := $engine.Types }}{{ if $i }}, {{ end }}{{ quote $t }}{{ end -}} },
 	}
-	{{ $engine.Var }}, err := openEngine(ctx, logger, {{ quote $db.Service }}, {{ quote $db.Field }}, {{ $db.Var }}, {{ $db.Types }}.EngineDocument, {{ $engine.PolicyLiteral }}, principal, startRunner)
+	{{ $engine.Var }}, err := openEngine(ctx, logger, {{ quote $db.Service }}, {{ quote $db.Field }}, {{ $db.Var }}, {{ $db.Types }}.EngineDocument, {{ $engine.PolicyLiteral }}, {{ $engine.RetentionLiteral }}, principal, startRunner)
 	if err != nil {
 		return fmt.Errorf("engine of {{ $db.Service }}: %w", err)
 	}

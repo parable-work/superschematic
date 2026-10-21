@@ -28,7 +28,10 @@ const projectengineGenerator = "projectengine"
 // refuses one. mount is a path of one or more segments, which a server of
 // an API on the database mounts the engine's routes under; policy is the
 // engine's access policy, a shorthand or its rules, which the engine
-// checks when a server opens it (D58).
+// checks when a server opens it; retention is the event log's, the
+// engine's RetentionOptions with its ranges, an age, a count or both,
+// checked here so that no entrypoint opens an engine that refuses it
+// (D58).
 var engineOutputSchema = []byte(`{
 	"type": "object",
 	"additionalProperties": false,
@@ -43,7 +46,19 @@ var engineOutputSchema = []byte(`{
 				"additionalProperties": false,
 				"properties": {"rules": {"type": "array", "items": {"type": "object"}}}
 			}
-		]}
+		]},
+		"retention": {
+			"type": "object",
+			"additionalProperties": false,
+			"anyOf": [{"required": ["maxAgeMs"]}, {"required": ["maxEvents"]}],
+			"properties": {
+				"maxAgeMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+				"maxEvents": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+				"maxHoldMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+				"everyMs": {"type": "integer", "minimum": 1000, "maximum": 9007199254740991},
+				"batchSize": {"type": "integer", "minimum": 1, "maximum": 10000}
+			}
+		}
 	}
 }`)
 
@@ -188,6 +203,7 @@ func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, err
 		Namespace: namespace,
 		Mount:     outputs.EngineMount(db),
 		Policy:    outputs.EnginePolicy(),
+		Retention: outputs.EngineRetention(),
 	}
 	for _, td := range types {
 		info.Types = append(info.Types, td.Name)

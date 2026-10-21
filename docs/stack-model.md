@@ -1758,7 +1758,10 @@ database's engine document (`EngineDocument` of its Go types) in the
 document's namespace, under the engine's lock, writing nothing when the
 live versions have its hash. `/readyz` names `<db> engine` until it has.
 The access policy is `outputs.engine.policy` of the database's config,
-`permission` unless set. The first API on the database, by name, mounts
+`permission` unless set, and the event log's retention
+`outputs.engine.retention`, none unless set, which every entrypoint on the
+database opens the engine with and the database's runner alone prunes
+with. The first API on the database, by name, mounts
 the engine's routes, its event stream and its MCP endpoint at
 `outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
 its own routes and behind its middleware: the request log, and the
@@ -2806,9 +2809,11 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   routes (`axum::background_router`, 503 `unavailable` until it opens) at
   `outputs.engine.mount` before the API router's fallback, behind the
   API's identity session and service caller, with the identity config's
-  trusted origins' CORS and a calling site's. At SIGTERM it ends every
-  event stream as it stops taking connections, then shuts the engine down
-  off the runtime. A job and a worker open the engine for their `Deps`
+  trusted origins' CORS and a calling site's; each route but the event
+  stream's and MCP's takes a 30-second timeout (`ENGINE_TIMEOUT`, 504
+  `gateway_timeout` past it), as a Go or a TypeScript server's do. At
+  SIGTERM it ends every event stream as it stops taking connections, then
+  shuts the engine down off the runtime. A job and a worker open the engine for their `Deps`
   and deploy nothing; the database's runner, when the first API on it is
   Rust, is a crate of its own whose `main.rs` reads the database's field
   alone and runs the engine's runner as its deployable.

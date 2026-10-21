@@ -62,8 +62,10 @@ impl Document {
 
 /// Opens, in the background, the engine of the engine database `service`
 /// on the database the field named `field` holds, `database`, with
-/// `document`, its ENGINE_DOCUMENT, and the access policy `policy`, as
-/// JSON: a connection string as it is, or a Cloud SQL instance over the
+/// `document`, its ENGINE_DOCUMENT, the access policy `policy`, as JSON,
+/// and the event log's `retention`, as JSON, none when the log keeps every
+/// event, which only a started runner prunes, while it holds the runner's
+/// lock: a connection string as it is, or a Cloud SQL instance over the
 /// socket Cloud Run mounts for it, an access token from the metadata server
 /// as each new connection's password. Once it opens, it starts the engine's
 /// runner, acting as RUNNER. Each attempt that fails is logged
@@ -74,6 +76,7 @@ pub fn open(
     database: &Database,
     document: &str,
     policy: &str,
+    retention: Option<&str>,
 ) -> Result<Background, Failure> {
     let document = Arc::new(Document::parse(service, document)?);
     let connection = postgres::sync_connection(database)
@@ -81,7 +84,7 @@ pub fn open(
     let connection = Arc::new(connection);
     let policy: Value = serde_json::from_str(policy)
         .map_err(|err| format!("the access policy of the engine of {service}: {err}"))?;
-    let config = json!({
+    let mut config = json!({
         "postgres": { "url": connection.url },
         "policy": policy,
         "namespaces": { "names": [document.namespace] },
@@ -89,6 +92,11 @@ pub fn open(
         "tools": document.tools,
         "runner": { "principal": { "subject": RUNNER, "permissions": PERMISSIONS } },
     });
+    if let Some(retention) = retention {
+        config["retention"] = serde_json::from_str(retention).map_err(|err| {
+            format!("the event log's retention of the engine of {service}: {err}")
+        })?;
+    }
     let options = move || -> superschematic_engine::Result<EngineOptions> {
         let mut options = EngineOptions::from_json(&config)?;
         options.behaviors = superschematic_engine_behaviors::core();
