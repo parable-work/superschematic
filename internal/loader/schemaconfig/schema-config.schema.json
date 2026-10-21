@@ -122,31 +122,87 @@
       "description": "An engine's access policy (D58): a shorthand, or ordered rules, each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold or allowing or refusing outright. The engine checks the rules when a server opens it."
     },
     "EngineRetention": {
-      "additionalProperties": false,
-      "description": "The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired.",
-      "properties": {
-        "batchSize": {
-          "description": "Events pruned in one transaction: an integer from 1 to 10000. Unset is 1000.",
-          "type": "number"
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "batchSize": {
+              "description": "Events pruned in one transaction. Unset is 1000.",
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "everyMs": {
+              "description": "How often the runner prunes, in milliseconds. Unset is 60000.",
+              "maximum": 9007199254740991,
+              "minimum": 1000,
+              "type": "integer"
+            },
+            "maxAgeMs": {
+              "description": "Events older than this many milliseconds, by when they were written, are pruned.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxEvents": {
+              "description": "A namespace's events past its newest this many are pruned.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxHoldMs": {
+              "description": "The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds events retention lets go, in milliseconds. Unset, one that has run holds them until it advances, and one that has not holds none.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "maxAgeMs"
+          ],
+          "type": "object"
         },
-        "everyMs": {
-          "description": "How often the runner prunes, in milliseconds: an integer from 1000. Unset is 60000.",
-          "type": "number"
-        },
-        "maxAgeMs": {
-          "description": "Events older than this many milliseconds, by when they were written, are pruned: an integer from 1.",
-          "type": "number"
-        },
-        "maxEvents": {
-          "description": "A namespace's events past its newest this many are pruned: an integer from 1.",
-          "type": "number"
-        },
-        "maxHoldMs": {
-          "description": "The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds events retention lets go, in milliseconds. Unset, it holds them until it advances.",
-          "type": "number"
+        {
+          "additionalProperties": false,
+          "properties": {
+            "batchSize": {
+              "description": "Events pruned in one transaction. Unset is 1000.",
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "everyMs": {
+              "description": "How often the runner prunes, in milliseconds. Unset is 60000.",
+              "maximum": 9007199254740991,
+              "minimum": 1000,
+              "type": "integer"
+            },
+            "maxAgeMs": {
+              "description": "Events older than this many milliseconds, by when they were written, are pruned.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxEvents": {
+              "description": "A namespace's events past its newest this many are pruned.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxHoldMs": {
+              "description": "The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds events retention lets go, in milliseconds. Unset, one that has run holds them until it advances, and one that has not holds none.",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "maxEvents"
+          ],
+          "type": "object"
         }
-      },
-      "type": "object"
+      ],
+      "description": "The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired."
     },
     "ExtensionKind": {
       "description": "The name of a kind an extension registers (\"Catalog\"). The authoring packages cannot see the registry, so the name is any string here; superschematic checks it against the registered kinds when it loads the config.",
