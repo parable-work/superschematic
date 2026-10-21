@@ -40,6 +40,33 @@ export function icon(_name: string): PropertyDecorator {
   return noopPropertyDecorator;
 }
 
+/**
+ * The control a schema form draws for a field, in place of the one it picks
+ * from the field's type and `Validate` limits: `uiControl` in the IR.
+ *
+ * - `slider`, `number-field`: a number. A slider needs a finite min and max.
+ * - `switch`, `segmented`, `radio`, `select`, `combobox`: an enum. A switch
+ *   needs two values that read as on and off.
+ * - `checkboxes`, `combobox`: an array of an enum.
+ * - `input`, `textarea`: a string.
+ * A form ignores a control that does not fit the field and picks its own.
+ */
+export type UIControl =
+  | 'slider'
+  | 'number-field'
+  | 'switch'
+  | 'segmented'
+  | 'radio'
+  | 'select'
+  | 'combobox'
+  | 'checkboxes'
+  | 'input'
+  | 'textarea';
+
+export function uiControl(_control: UIControl): PropertyDecorator {
+  return noopPropertyDecorator;
+}
+
 export function source(_target: unknown): ClassDecorator {
   return () => {};
 }

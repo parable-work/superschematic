@@ -68,6 +68,11 @@ const sampleIR = {
           uiHidden: true,
         },
         {
+          name: 'level',
+          typeRef: { name: 'Generic.Int64' },
+          uiControl: 'slider',
+        },
+        {
           name: 'occurredAt',
           typeRef: { name: 'Temporal.DateTime' },
           temporalFormat: 'unix_millis',
@@ -129,6 +134,11 @@ test('maps field directive metadata and array typeRefs', () => {
   assert.strictEqual(hidden.uiHidden, true);
   assert.strictEqual(hidden.required, false);
   assert.strictEqual(hidden.jsonKey, 'secretNote');
+  assert.strictEqual(hidden.uiControl, undefined);
+
+  // A form-control hint is carried as is; absent stays absent.
+  const level = fields.find((f) => f.name === 'level');
+  assert.strictEqual(level.uiControl, 'slider');
 
   // Declared epoch unit survives the IR wire form.
   const occurredAt = fields.find((f) => f.name === 'occurredAt');

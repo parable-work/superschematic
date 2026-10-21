@@ -142,6 +142,7 @@ function parseIRField(raw: unknown, path: string): FieldDef {
   const purpose = asString(field.purpose);
   const icon = asString(field.icon);
   const placeholder = asString(field.placeholder);
+  const uiControl = asString(field.uiControl);
 
   const fieldDef: FieldDef = {
     name,
@@ -192,6 +193,9 @@ function parseIRField(raw: unknown, path: string): FieldDef {
   }
   if (placeholder) {
     fieldDef.placeholder = placeholder;
+  }
+  if (uiControl) {
+    fieldDef.uiControl = uiControl;
   }
   return fieldDef;
 }

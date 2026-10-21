@@ -12,7 +12,8 @@ import (
 // docsDecorators returns the documentation decorators: @docs on an
 // operation writes FieldDef.Docs, @mcp writes FieldDef.MCP and @icon writes
 // FieldDef.Icon; on a field, @docs({ title }), @purpose and @icon write
-// FieldDef.Title, Purpose and Icon. What values an extension accepts on top
+// FieldDef.Title, Purpose and Icon, and @uiControl writes FieldDef.UIControl,
+// one of ir.UIControls. What values an extension accepts on top
 // of the shape checked here (an audience vocabulary, an icon set, which
 // operations must declare @mcp) is a CheckSpec the extension registers.
 // invocation returns the registry's tool invocation policy, which decides
@@ -41,6 +42,22 @@ func docsDecorators(invocation func() ToolInvocationPolicy) []DecoratorSpec {
 		Name: "icon", Packages: []string{pkgSchema}, Target: TargetField,
 		Apply: func(n Node, args []any, _ Site) error {
 			return setFieldText(n.Field, "icon", &n.Field.Icon, args)
+		},
+	}, {
+		Name: "uiControl", Packages: []string{pkgSchema}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.UIControl != "" {
+				return fmt.Errorf("field %s has more than one @uiControl decorator", n.Field.Name)
+			}
+			var control string
+			if err := setFieldText(n.Field, "uiControl", &control, args); err != nil {
+				return err
+			}
+			if err := ir.ValidateUIControl(control); err != nil {
+				return ArgErrorf(0, "invalid field @uiControl: %s", err)
+			}
+			n.Field.UIControl = control
+			return nil
 		},
 	}, {
 		Name: "docs", Packages: []string{pkgAPI}, Target: TargetOperation,
@@ -300,8 +317,8 @@ func fieldDocsTitle(args []any) (string, error) {
 	return title, nil
 }
 
-// setFieldText applies a single-string field decorator (@purpose, @icon)
-// once per field.
+// setFieldText applies a single-string field decorator (@purpose, @icon,
+// @uiControl) once per field.
 func setFieldText(field *ir.FieldDef, name string, target *string, args []any) error {
 	if *target != "" {
 		return fmt.Errorf("field %s has more than one @%s decorator", field.Name, name)

@@ -165,15 +165,18 @@ func TestFieldPresentationDecoratorsWriteTheField(t *testing.T) {
 	if err := applyField(t, "icon", f, "globe"); err != nil {
 		t.Fatal(err)
 	}
-	if f.Title != "Region" || f.Purpose != "Where orders **ship** from." || f.Icon != "globe" {
+	if err := applyField(t, "uiControl", f, "select"); err != nil {
+		t.Fatal(err)
+	}
+	if f.Title != "Region" || f.Purpose != "Where orders **ship** from." || f.Icon != "globe" || f.UIControl != "select" {
 		t.Fatalf("field = %+v", f)
 	}
 	// Any icon name: an icon set is an extension's check.
 	if err := applyField(t, "icon", &ir.FieldDef{}, "Not A Glyph"); err != nil {
 		t.Fatalf("core rejected an icon name: %v", err)
 	}
-	for _, name := range []string{"docs", "purpose", "icon"} {
-		args := []any{"again"}
+	for _, name := range []string{"docs", "purpose", "icon", "uiControl"} {
+		args := []any{"radio"}
 		if name == "docs" {
 			args = []any{map[string]any{"title": "Again"}}
 		}
@@ -199,6 +202,9 @@ func TestFieldPresentationDecoratorsRejectBadArguments(t *testing.T) {
 		{"purpose", []any{""}, "@purpose takes a non-empty string literal"},
 		{"icon", []any{"globe", "solid"}, "@icon takes exactly one string argument"},
 		{"icon", []any{true}, "@icon takes a non-empty string literal"},
+		{"uiControl", nil, "@uiControl takes exactly one string argument"},
+		{"uiControl", []any{""}, "@uiControl takes a non-empty string literal"},
+		{"uiControl", []any{"dial"}, `invalid field @uiControl: unknown control "dial"; use one of slider, number-field`},
 	}
 	for _, test := range tests {
 		f := &ir.FieldDef{Name: "region"}
@@ -206,7 +212,7 @@ func TestFieldPresentationDecoratorsRejectBadArguments(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Errorf("@%s%v: err = %v, want %q", test.decorator, test.args, err, test.want)
 		}
-		if f.Title != "" || f.Purpose != "" || f.Icon != "" {
+		if f.Title != "" || f.Purpose != "" || f.Icon != "" || f.UIControl != "" {
 			t.Errorf("@%s%v wrote %+v", test.decorator, test.args, f)
 		}
 	}

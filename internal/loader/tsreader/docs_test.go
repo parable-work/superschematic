@@ -170,3 +170,41 @@ func TestInvalidDisplayIsALocatedSchemaError(t *testing.T) {
 		t.Fatalf("diagnostic should carry file:line:col, got: %s", msg)
 	}
 }
+
+// TestFieldUIControl: @uiControl names one known control, at most once, and
+// lands on the field's IR.
+func TestFieldUIControl(t *testing.T) {
+	tests := []struct {
+		name       string
+		decorators string
+		want       string
+		wantErr    string
+	}{
+		{name: "known control", decorators: `@uiControl("radio")`, want: "radio"},
+		// The UIControl type refuses it in TypeScript. ValidateUIControl
+		// refuses it in a JSON or YAML schema, which has no type check.
+		{name: "unknown control", decorators: `@uiControl("dial")`, wantErr: `"dial"`},
+		{name: "duplicate", decorators: `@uiControl("radio") @uiControl("select")`, wantErr: "field value has more than one @uiControl decorator"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "import { uiControl } from \"@superschematic/schema\";\n\nexport abstract class Record {\n  " +
+				test.decorators + "\n  value: string;\n}\n"
+			dir := decoratorTestService(t, "General", map[string]string{"src/record.schema.ts": source})
+			schema, _, err := LoadService(dir)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadService: %v", err)
+			}
+			record := schema.Types["Record"]
+			if record == nil || len(record.Fields) != 1 || record.Fields[0].UIControl != test.want {
+				t.Fatalf("Record fields = %+v, want UIControl %q", record, test.want)
+			}
+		})
+	}
+}
