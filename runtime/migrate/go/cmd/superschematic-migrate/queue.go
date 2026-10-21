@@ -62,29 +62,53 @@ func queue(ctx context.Context, args []string, o options) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", *ref, err)
 	}
-	driver, closeDriver, err := queueDriver(ctx, q, conn, *database, *urlFlag, o)
+	// The result's place is reserved before the operation runs, so a
+	// runner that may not write it there changes nothing.
+	var reserved resultReservation
+	if *resultRef != "" {
+		if reserved, err = o.resultWriter().Reserve(ctx, *resultRef); err != nil {
+			return fmt.Errorf("queue %s of %s: %w; the queue was not changed", q.Queue, q.Service, err)
+		}
+	}
+	out, err := runQueueDocument(ctx, q, conn, *database, *urlFlag, o)
 	if err != nil {
+		if reserved != nil {
+			reserved.Abandon()
+		}
 		return err
+	}
+	if reserved == nil {
+		_, err = o.stdout.Write(out)
+		return err
+	}
+	if err := reserved.Write(ctx, out); err != nil {
+		if q.Operation == migrate.QueueDead {
+			return err
+		}
+		return fmt.Errorf("queue %s of %s: the %s was applied, and its result was not written: %w; superschematic stack queue dead lists the dead messages as they are now",
+			q.Queue, q.Service, q.Operation, err)
+	}
+	_, err = fmt.Fprintf(o.stdout, "queue %s of %s: wrote the result of %s to %s\n", q.Queue, q.Service, q.Operation, *resultRef)
+	return err
+}
+
+// runQueueDocument runs q on its database and returns its result as
+// indented JSON.
+func runQueueDocument(ctx context.Context, q *migrate.QueueDocument, conn *migrate.CloudSQLConnection, database, urlFlag string, o options) ([]byte, error) {
+	driver, closeDriver, err := queueDriver(ctx, q, conn, database, urlFlag, o)
+	if err != nil {
+		return nil, err
 	}
 	defer closeDriver()
 	result, err := migrate.RunQueue(ctx, driver, q)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	out = append(out, '\n')
-	if *resultRef == "" {
-		_, err = o.stdout.Write(out)
-		return err
-	}
-	if err := o.resultWriter().WriteResult(ctx, *resultRef, out); err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(o.stdout, "queue %s of %s: wrote the result of %s to %s\n", q.Queue, q.Service, q.Operation, *resultRef)
-	return err
+	return append(out, '\n'), nil
 }
 
 // queueDriver opens the Postgres database a queue document runs on: on
@@ -122,10 +146,21 @@ func queueDriver(ctx context.Context, q *migrate.QueueDocument, conn *migrate.Cl
 	return openDriver(ctx, url, o)
 }
 
-// resultWriter writes a queue operation's result where --result names it.
-// storageWriter is the real one; tests fake it.
+// resultWriter reserves the place --result names before the operation
+// runs, and the reservation writes the result there after it: a write the
+// runner may not make then fails before the queue changes. storageWriter
+// is the real one; tests fake it.
 type resultWriter interface {
-	WriteResult(ctx context.Context, ref string, data []byte) error
+	Reserve(ctx context.Context, ref string) (resultReservation, error)
+}
+
+// resultReservation is a reserved place for a result.
+type resultReservation interface {
+	// Write writes the result to the place.
+	Write(ctx context.Context, data []byte) error
+	// Abandon gives up the place when the operation failed. An object's
+	// marker stays, for whoever reads the result to delete.
+	Abandon()
 }
 
 func (o options) resultWriter() resultWriter {
@@ -135,36 +170,76 @@ func (o options) resultWriter() resultWriter {
 	return storageWriter{o: o}
 }
 
+// reservedSuffix ends the name of the empty object that reserves a
+// result's object: <object>.reserved. The runner may create objects there
+// and not delete them, so whoever reads the result deletes the marker too.
+const reservedSuffix = ".reserved"
+
 // storageWriter writes a result to a Cloud Storage object a gs:// URL
 // names, with application default credentials (on Cloud Run, the account
-// the job runs as), or to a file. Either must not exist yet: the object is
+// the job runs as), or to a file. Either must not exist yet: an object is
 // written with ifGenerationMatch=0, which only object create permission
-// allows, and the file is created with mode 0600.
+// allows, and a file is created with mode 0600. An object is reserved by
+// an empty marker beside it, written the same way, which proves the
+// runner may create objects there before the operation runs; a file by
+// its creation.
 type storageWriter struct{ o options }
 
 // readWriteScope is the OAuth scope a gs:// write needs.
 const readWriteScope = "https://www.googleapis.com/auth/devstorage.read_write"
 
-func (w storageWriter) WriteResult(ctx context.Context, ref string, data []byte) error {
-	rest, ok := strings.CutPrefix(ref, "gs://")
-	if !ok {
+func (w storageWriter) Reserve(ctx context.Context, ref string) (resultReservation, error) {
+	if !strings.HasPrefix(ref, "gs://") {
 		f, err := os.OpenFile(ref, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
-			return fmt.Errorf("write the result to %s: %w", ref, err)
+			return nil, fmt.Errorf("reserve %s for the result: %w", ref, err)
 		}
-		if _, err := f.Write(data); err != nil {
-			_ = f.Close()
-			return fmt.Errorf("write the result to %s: %w", ref, err)
-		}
-		return f.Close()
+		return fileReservation{f: f}, nil
 	}
-	bucket, object, _ := strings.Cut(rest, "/")
+	if err := w.upload(ctx, ref+reservedSuffix, nil); err != nil {
+		return nil, fmt.Errorf("reserve %s for the result: %w", ref, err)
+	}
+	return objectReservation{w: w, ref: ref}, nil
+}
+
+type fileReservation struct{ f *os.File }
+
+func (r fileReservation) Write(_ context.Context, data []byte) error {
+	if _, err := r.f.Write(data); err != nil {
+		_ = r.f.Close()
+		return fmt.Errorf("write the result to %s: %w", r.f.Name(), err)
+	}
+	return r.f.Close()
+}
+
+func (r fileReservation) Abandon() {
+	_ = r.f.Close()
+	_ = os.Remove(r.f.Name())
+}
+
+type objectReservation struct {
+	w   storageWriter
+	ref string
+}
+
+func (r objectReservation) Write(ctx context.Context, data []byte) error {
+	if err := r.w.upload(ctx, r.ref, data); err != nil {
+		return fmt.Errorf("write the result to %s: %w", r.ref, err)
+	}
+	return nil
+}
+
+func (objectReservation) Abandon() {}
+
+// upload creates the object ref names with data, only where none is.
+func (w storageWriter) upload(ctx context.Context, ref string, data []byte) error {
+	bucket, object, _ := strings.Cut(strings.TrimPrefix(ref, "gs://"), "/")
 	if bucket == "" || object == "" {
 		return fmt.Errorf("%s: want gs://<bucket>/<object>", ref)
 	}
 	base, token, err := w.o.storage(ctx, readWriteScope)
 	if err != nil {
-		return fmt.Errorf("write the result to %s: %w", ref, err)
+		return err
 	}
 	u := base + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&ifGenerationMatch=0&name=" + url.QueryEscape(object)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
@@ -177,7 +252,7 @@ func (w storageWriter) WriteResult(ctx context.Context, ref string, data []byte)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("write the result to %s: %w", ref, err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -185,11 +260,11 @@ func (w storageWriter) WriteResult(ctx context.Context, ref string, data []byte)
 	case http.StatusOK:
 		return nil
 	case http.StatusPreconditionFailed:
-		return fmt.Errorf("write the result to %s: %w", ref, fs.ErrExist)
+		return fmt.Errorf("%s: %w", ref, fs.ErrExist)
 	}
 	msg := strings.TrimSpace(string(body))
 	if len(msg) > 300 {
 		msg = msg[:300]
 	}
-	return errors.New("write the result to " + ref + ": " + resp.Status + ": " + msg)
+	return errors.New(ref + ": " + resp.Status + ": " + msg)
 }

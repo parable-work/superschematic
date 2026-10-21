@@ -384,7 +384,12 @@ where it went: a listing holds the messages' columns, which may hold
 personal data, and a job's stdout and stderr go to Cloud Logging. The
 object is written with `ifGenerationMatch=0`, so the runner needs only
 `storage.objects.create`, and an object that exists already is refused;
-a file is created with mode 0600 and must not exist. An error, on stderr,
+a file is created with mode 0600 and must not exist. Before the operation
+runs the runner reserves the place, with an empty `<object>.reserved`
+marker written the same way, or by creating the file, so a runner that
+may not write there fails saying the queue was not changed. The reader
+of the result deletes the marker too. A write that fails after a retry
+or a drop committed says the operation was applied. An error, on stderr,
 names no message's columns.
 
 ## Layout
