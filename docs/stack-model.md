@@ -3102,10 +3102,15 @@ export abstract class FulfilOrders {}
   8.4): the document under the run's migration documents, and
   `superschematic-migrate queue --cloud-sql <instance> --cloud-sql-user
   <migrator> --database <name> --result gs://<state>/superschematic/queue/<stack>/<run>/<id>.json`,
-  `<id>` 128 random bits. The runner writes its result to that object in
-  place of stdout, since a listing's columns may hold personal data and the
-  job's output goes to Cloud Logging; the command reads it once and
-  deletes its version. Bootstrap lets `migrator` create objects under its
+  `<id>` 128 random bits. The job runs as the last deploy left it: the
+  command never changes it, since the stack's deploys share it, and
+  refuses a stack with no job yet. The runner reserves that object with an
+  empty `<id>.json.reserved` marker before the queue changes, so a
+  migrator that may not write it stops first, then writes its result there
+  in place of stdout, since a listing's columns may hold personal data and
+  the job's output goes to Cloud Logging; the command reads it once and
+  deletes its version and the marker's. A deleted result stays
+  restorable for the bucket's soft-delete window, seven days by default. Bootstrap lets `migrator` create objects under its
   stack's `superschematic/queue/<stack>/` alone, which it cannot read or
   replace, and gives the state bucket a rule that deletes what is under
   `superschematic/queue/` a day after it was written; the command sets

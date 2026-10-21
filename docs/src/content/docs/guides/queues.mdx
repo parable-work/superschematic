@@ -378,12 +378,18 @@ A dead message's columns may hold personal data, so the runner never
 prints them where Cloud Logging would keep them: it writes its result to
 an object of the state bucket, under a random name, which the command
 reads once and deletes. If the command dies before it does, the bucket's
-lifecycle deletes the object a day after it was written. The `migrator`
-account may create objects there and read none. A project bootstrapped
-before this needs `superschematic stack bootstrap` once more, which grants
-that and sets the lifecycle rule. `--timeout`, 30 minutes unless set,
-bounds the wait, which includes building the runner's image the first
-time a release runs it.
+lifecycle deletes the object a day after it was written. A deleted
+result stays restorable, by an account that may restore objects, for the
+bucket's soft-delete window, seven days unless your project set another.
+The `migrator` account may create objects there and read none.
+
+The command runs the job as your last deploy left it and never changes
+it, since your deploys share it: deploy with the release you run `stack
+queue` from first, or it says the job's runner is too old. A project
+bootstrapped before this needs `superschematic stack bootstrap` once
+more, which lets the migrator write the result; without it the runner
+stops before it changes the queue, and says so. `--timeout`, 30 minutes
+unless set, bounds the wait.
 
 ## Change it per environment
 

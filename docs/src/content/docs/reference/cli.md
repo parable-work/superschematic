@@ -803,8 +803,13 @@ was never deployed. On gcp the operation is one execution of the stack's
 migration job, `<stack>-migrate`, which a deploy's migrations run as: the
 runner reaches Cloud SQL as the `migrator` and writes its result to the
 state bucket, under `superschematic/queue/<stack>/<run>/` with a random
-128-bit id, in place of its stdout. The command reads that object once and
-deletes it, and the bucket's lifecycle deletes one it did not after a day.
+128-bit id, in place of its stdout, after it has reserved that name with
+an empty marker, so a runner that may not write there stops before the
+queue changes. The command reads that object once and deletes it, and the
+bucket's lifecycle deletes one it did not after a day; a deleted result
+stays restorable for the bucket's soft-delete window, seven days by
+default. The command runs the job as the last deploy left it and never
+changes its image, so deploy with the release you run it from first.
 A listing's messages may hold personal data, so they never reach the
 execution's logs; an execution that fails reports the runner's error, read
 from Cloud Logging as a failed migration's is. The `deployer` account, or

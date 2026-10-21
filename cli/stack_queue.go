@@ -88,12 +88,15 @@ the queue's database, from another terminal.
 On a cloud target it runs on the database of the deployed run, --param
 naming a member of a parameterized environment, through the target's
 queue runner. On gcp that is an execution of the stack's migration job,
-which a deploy's migrations run as: the runner reaches Cloud SQL as the
-migrator and writes what it did to an object of the state bucket under a
-name no one can guess, which the command reads once and deletes, and which
-the bucket's lifecycle deletes after a day when the command does not. A
-listing's messages may hold personal data, so they are never written to
-the execution's logs. A target with no queue runner is refused, as is a
+as the last deploy left it, which the command does not change: deploy
+with this release first. The runner reaches Cloud SQL as the migrator and
+writes what it did to an object of the state bucket under a name no one
+can guess, which it reserves before the queue changes, which the command
+reads once and deletes, and which the bucket's lifecycle deletes after a
+day when the command does not. A deleted result stays restorable for the
+bucket's soft-delete window, seven days by default. A listing's messages
+may hold personal data, so they are never written to the execution's
+logs. A target with no queue runner is refused, as is a
 run that was never deployed. --timeout bounds the wait; an execution it
 stops waiting for may still finish.`
 
