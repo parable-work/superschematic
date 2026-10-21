@@ -154,7 +154,7 @@ func writeScheduled(t *testing.T, in servergen.TypeScriptInput) string {
 func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 	scheduled := writeScheduled(t, cronInput(t, nil))
 	for _, want := range []string{
-		"import { env } from 'cloudflare:workers';",
+		"import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';",
 		"import { createLogger, serviceCredentialFor, type Service } from '@superschematic/http-runtime';",
 		"import { binding, serviceFetch, stackEnvOf, stackEnvWithSecrets } from '@superschematic/http-runtime/workers';",
 		"import { openR2Bucket } from '@superschematic/http-runtime/r2';",
@@ -169,13 +169,21 @@ func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 		"pricing: shopPricingClient,",
 		"media: shopMediaBucket,",
 		"return construct('shop-api', 'jobs', () => shopApiImpl.createJobs(shopApiDeps));",
-		"await untilAborted(jobs.reindex(signal), signal);",
-		"async scheduled(controller: ScheduledController): Promise<void> {",
-		"logger.info('job started', { api: 'shop-api', class: 'Reindex', cron: controller.cron, try: attempt, tries: TRIES });",
+		"telemetry.job('Reindex', () => jobs.reindex(signal)),",
+		"async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {",
+		"ctx.waitUntil(telemetry.flush());",
+		"const telemetry = startWorkersTelemetry(env, { service: 'shop-api-reindex', stack: 'edge-stack', kind: 'job', logger });",
+		"await runTries({ cron: controller.cron });",
+		"logger.info('job started', { api: 'shop-api', class: 'Reindex', ...fields, try: attempt, tries: TRIES });",
+		// The job's Workflow (D64, amended).
+		"export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {",
+		"const running = env['SUPERSCHEMATIC_BUNDLE'];",
+		"await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {",
+		"await runTries({ instance: event.instanceId });",
 		"logger.info('job done', { took: (Date.now() - started) / 1000, try: attempt });",
 		"logger.error('job failed', { took: (Date.now() - started) / 1000, try: attempt, tries: TRIES, error });",
 		"throw new Error(`job shop-api-reindex failed on each of its ${TRIES} tries:",
-		"fetch: serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service')),",
+		"fetch: telemetry.traced(serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service'))),",
 	} {
 		if !strings.Contains(scheduled, want) {
 			t.Errorf("scheduled.ts does not hold %q:\n%s", want, scheduled)
@@ -303,7 +311,11 @@ export const createJobs: JobsConstructor = deps => ({
 // Under the runtime's pinned workerd, the bundle's scheduled handler runs
 // as a Cron Trigger fires it (testdata/workerd/cron): a run that succeeds,
 // one that succeeds on its retry, one whose tries all fail and one whose
-// tries outlive the job's timeout, which throw, each try logged (D64).
+// tries outlive the job's timeout, which throw, each try logged (D64); and
+// its Workflow, JobRun, runs as Cloudflare's engine runs an instance,
+// through a binding to the entrypoint: it runs the tries within one step
+// for the bundle its Worker runs, refuses another bundle before any step,
+// and throws the last try's error (D64, amended).
 func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -390,7 +402,7 @@ func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 		t.Logf("workerd test cron.capnp:\n%s", output)
 	}
 	for _, want := range []string{
-		"the job under workerd: ok, flaky after a retry, broken and hung failed",
+		"the job under workerd: ok, flaky after a retry, broken and hung failed; its Workflow ran ok, refused another bundle and failed hung",
 		`"msg":"job started","stack":"ts-cron-stack","job":"ts-reports-compile-reports","api":"ts-reports","class":"CompileReports","cron":"0 4 * * *","try":2,"tries":2}`,
 		`"msg":"job done"`,
 		`"msg":"job failed"`,

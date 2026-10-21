@@ -110,8 +110,9 @@ func (Extension) Name() string { return Name }
 // its platforms and connectors, with the pinned schema of every type they
 // and bootstrap emit, and the target's deploy seams: the state in R2, the
 // Secrets Store, bootstrap, the bundles in R2, the emptying of a member's
-// buckets before its destroy, D1's migration runner, and the generated
-// CI's sign-in with an account token (D64).
+// buckets before its destroy, D1's migration runner, the job runner over
+// each job's Workflow, and the generated CI's sign-in with an account token
+// (D64).
 func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
@@ -146,6 +147,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:          Target,
 		Extension:     Name,
 		Platforms:     platforms,
+		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNS,
 		Provisioner:   Provisioner,
@@ -162,9 +164,15 @@ func (e Extension) Register(r *registry.Registry) error {
 		Sites:      siteStore{ext: e},
 		PreDestroy: destroyPreparer{ext: e},
 		Migrations: migrationRunner{ext: e},
+		Jobs:       jobRunner{ext: e},
 		CI:         ciIdentities{},
 	})
 }
+
+// noWorkers is why the target places no queue worker (D53 amended, D64),
+// which resolution says when it refuses one.
+const noWorkers = "a queue worker claims its queue's messages from Postgres in a loop that lasts as long as its process (D53), and a Worker runs only per request or per firing and reaches no Postgres; " +
+	"run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target"
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension

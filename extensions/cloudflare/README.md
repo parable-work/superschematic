@@ -108,6 +108,20 @@ An environment names its account; bootstrap records the rest beside it:
 export abstract class Staging {}
 ```
 
+`telemetry: { endpoint, sampleRatio? }` beside `accountId` turns trace
+export on for each server and job, to that OTLP/HTTP collector: each gets
+`plain_text` bindings `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+`OTEL_RESOURCE_ATTRIBUTES` (the environment, `cloud.provider=cloudflare`,
+`cloud.platform=cloudflare_workers`, the account and
+`service.version=sha256:{bundle-digest}`, which the deploy pins), and
+with a ratio the sampler's two. A server's or a job's `telemetry: false`
+or `true` turns its own off or on; on with no endpoint is refused, and so
+is a config field of one of those names.
+
+The target places no queue worker, and says why when it refuses one
+(`TargetSpec.Unplaced`): a worker's claim loop needs a long-lived process
+and Postgres, which gcp's `gcp.cloudrunworker` and `stack dev` give.
+
 | File | |
 | --- | --- |
 | `cloudflare.go`, `target.go` | the registration, the values, the state's layout in R2 (`StateBucket`, `StateURL`, and bootstrap's own `BootstrapBucket`, `BootstrapURL`) |
@@ -123,7 +137,9 @@ export abstract class Staging {}
 | `r2.go` | the `cloudflare.r2` platform, `cloudflare.workers-r2`, the connector of a bucket edge, `buckets-never-public`, and `PreDestroy`, which empties a member's buckets |
 | `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<env>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
 | `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs (`MigrationRequest.Outputs`); a deploy that only changes which servers connect needs no runner (`PrivilegelessMigrations`) |
-| `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker and its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
+| `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker, its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run, and its Workflow; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
+| `jobs.go` | the job runner (`Jobs`): an instance of a job's Workflow through Cloudflare's API, for `stack run` and a job on every deploy |
+| `telemetry.go` | trace export: the environment's `telemetry` and a deployable's, as `OTEL_` bindings, and `WorkersCompatibilityFlags`, `nodejs_als` |
 | `sites.go`, `site.js` | the `cloudflare.sites` platform: a site as a Worker with static assets and the script it embeds; the `cloudflare.site-workers` connector; and the site store, each build's files in the state bucket under their digest, and back |
 | `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed`, which also refuses an internal Worker's preview URLs and a Worker with no `subdomain` |
 
@@ -145,8 +161,11 @@ DNS platform names no credential: the run's token carries the zone.
   `main.js.map` and `superscalar_wasm_bg.wasm`, each a `contentFile` under the
   program's `artifacts/<server>/{bundle-digest}/` with its
   `{bundle-sha256:<file>}`, which the deploy pins; `mainModule: main.js`;
-  `CompatibilityDate` unless `compatibilityDate` is set; `cpuMs` and
-  `placement` from the settings; and the config as bindings;
+  `CompatibilityDate` unless `compatibilityDate` is set;
+  `compatibilityFlags: ["nodejs_als"]`, which the runtime's
+  `./workers-telemetry` needs for `AsyncLocalStorage`; `cpuMs` and
+  `placement` from the settings; the config as bindings; and the `OTEL_`
+  bindings when the server exports;
 - `<server>.deployment`, a `workersDeployment` sending 100% to the version;
 - for an exposed server under a domain, `<server>.domain`, a
   `workersCustomDomain` for `<server>.<domain>` in the exposure step.
@@ -157,6 +176,7 @@ DNS platform names no credential: the run's token carries the zone.
 | `compatibilityDate` | `YYYY-MM-DD` | the runtime's compatibility date, `CompatibilityDate` by default |
 | `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
 | `placement` | `"smart"` | Smart Placement |
+| `telemetry` | boolean | trace export, the environment's by default |
 
 Config is bindings: `plain_text` for a literal, a parameter and each
 derived variable; `secret_text`, its text a reference to the output, for a
@@ -216,29 +236,39 @@ rule deletes each object that many days after it was written.
 | `locationHint` | `wnam`, `enam`, `weur`, `eeur`, `apac`, `oc` | the bucket's `location` |
 | `storageClass` | `Standard`, `InfrequentAccess` | the class of new objects |
 | `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
+| `jurisdiction` | `eu`, `fedramp` | the bucket's and the lifecycle's `jurisdiction`; refused beside `locationHint` |
 
 `cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
 `<caller>.r2.<bucket>.token`, an `accountToken` named
 `<stack>-<env>-<caller>-<bucket>` whose one policy allows
 Workers R2 Storage Bucket Item Write (`R2ObjectsWriteGroup`, the id
 Cloudflare publishes, which bootstrap checks against the account's list)
-on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`, and derives
-`{name, binding, r2: {account, accessKeyId, token}}`, the bucket's name,
-the `r2_bucket` binding's name, and the token's `id` and `value`, the
-value a `secret_text` binding. `buckets-never-public` refuses an
+on `com.cloudflare.edge.r2.bucket.<account>_<jurisdiction>_<bucket>`
+(`default` unless the bucket names one), and derives
+`{name, binding, r2: {account, jurisdiction?, accessKeyId, token}}`, the
+bucket's name, the `r2_bucket` binding's name, the bucket's jurisdiction,
+whose S3 host, `<account>.<jurisdiction>.r2.cloudflarestorage.com`, the
+runtime signs URLs for, and the token's `id` and `value`, the value a
+`secret_text` binding. `buckets-never-public` refuses an
 `r2ManagedDomain` or an `r2CustomDomain` on a Bucket service's bucket.
 The target's `PreDestroy` empties each bucket of a member of a
-parameterized environment through `Cloud`'s S3 calls before its destroy.
+parameterized environment through `Cloud`'s S3 calls before its destroy,
+at its jurisdiction's S3 host (`JurisdictionCloud`).
 
 ## Jobs on Cron Triggers
 
 `cloudflare.cron` places a TypeScript job, its artifact a bundle built
 from the generated `scheduled.ts` (section 18.9 of the design). It lowers
 a job to its Worker's three nodes, as a server's, with workers.dev off,
-and for a schedule the environment runs:
+its version binding `SUPERSCHEMATIC_BUNDLE` (`BundleBinding`) to
+`{bundle-digest}`, which the deploy pins, and:
 
-- `<job>.schedule`, a `cloudflare:index/workersCronTrigger:WorkersCronTrigger`
-  on the Worker's name with the job's schedule, after the deployment.
+- `<job>.workflow`, a `cloudflare:index/workflow:Workflow` named as the
+  Worker, of the class `JobRun` (`WorkflowClass`) that `scheduled.ts`
+  exports, on the Worker's name, after the deployment;
+- for a schedule the environment runs, `<job>.schedule`, a
+  `cloudflare:index/workersCronTrigger:WorkersCronTrigger` on the
+  Worker's name with the job's schedule, after the deployment.
 
 A job's edges are its API's: `cloudflare.cron-workers`,
 `cloudflare.cron-r2` and `cloudflare.cron-d1` derive them with the
@@ -251,12 +281,23 @@ binds (`bindingDependencies`).
 | --- | --- | --- |
 | `logs` | boolean | Workers Logs, on by default |
 | `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
+| `telemetry` | boolean | trace export, the environment's by default |
 
 It refuses, as unrealizable, a job in another language, a Worker name
 over 63 characters, a schedule in a time zone other than UTC, and a
 timeout times tries over `MaxScheduledRunSeconds`, 15 minutes, since
-`scheduled.ts` runs every try of a firing within one run. The target has
-no `Jobs` seam, so `stack run` refuses it.
+`scheduled.ts` runs every try of a firing within one run.
+
+The target's `Jobs` seam (`jobs.go`) runs a job once, for `stack run` and
+for a job with `onDeploy`: it starts an instance of the job's Workflow
+(`Cloud.CreateWorkflowInstance`, `POST
+/accounts/<id>/workflows/<name>/instances`) with the run's token, its
+payload `{"bundle": "<hex>"}`, the bundle the deploy manifest records or
+the rollout pinned, and reads it (`Cloud.WorkflowInstance`) every two
+seconds until it ends. `JobRun` refuses a bundle other than its version's
+`SUPERSCHEMATIC_BUNDLE`, then runs the job's tries in one step; the runner
+returns the error an instance that errored threw, which names the last
+try's, and says to deploy when the Workflow is not there.
 
 ## Sites on Workers
 
@@ -307,8 +348,8 @@ digest of each upstream file and the types the DNS platform and the
 target emit: the DNS record, the account token of bootstrap's graph and
 of a bucket edge, a Worker's `worker`, `workerVersion`,
 `workersDeployment`, `workersCustomDomain` and `workersCronTrigger`, a
-bucket's `r2Bucket` and `r2BucketLifecycle`, and the D1 database,
-`d1Database`. A call's key node is the core's `tls` type, which the
+job's `workflow`, a bucket's `r2Bucket` and `r2BucketLifecycle`, and the
+D1 database, `d1Database`. A call's key node is the core's `tls` type, which the
 generic connector pins.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
@@ -346,6 +387,12 @@ jobs install `superschematic-migrate`. It resolves the web fixture
 `web-stack`, a server, its job and a site, in the same three
 environments, deploys its site with the site store, checks its workflow,
 and gives a job of the calls and D1 fixtures their edges.
+The job runner runs a fake Workflow through `stack run` and a deploy's
+jobs step, and reports an errored, a terminated and a missing one;
+the telemetry tests read the `OTEL_` bindings, the compatibility flag
+and the refusals; and `TestCloudS3InAJurisdiction` signs object calls for
+`<account>.eu.r2.cloudflarestorage.com` against a TLS stand-in that signs
+them again from the Host it received.
 `TestSiteScriptUnderWorkerd` runs `site.js` under the HTTP runtime's
 pinned workerd (`testdata/workerd/site`), which
 `bun install --frozen-lockfile` in `runtime/http/typescript/test/workerd`

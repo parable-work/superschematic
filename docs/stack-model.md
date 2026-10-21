@@ -3061,8 +3061,8 @@ export abstract class ShipOrders {}
   job may still read what the contract drops, and the contract's
   tightenings, a column made `NOT NULL` among them, hold only after it.
   The deploy runs each job through the target's `JobRunner`, as `stack
-  run` does, with the image the rollout gave it, waits for the run, its
-  retries included, and fails at the jobs step when its last try fails,
+  run` does, with the image, or the bundle, the rollout gave it, waits for
+  the run, its retries included, and fails at the jobs step when its last try fails,
   with that try's error: the contract does not run, the manifest records
   the failure and the model between the phases, as for a failed rollout
   (section 11.2), and the next deploy runs the job again. Every deploy
@@ -3070,8 +3070,10 @@ export abstract class ShipOrders {}
   idempotent. The setting merges over the `extends` chain as any setting
   does, so a member of a parameterized environment inherits it, unlike a
   schedule, and `onDeploy: false` turns it off; a server's or a worker's
-  `onDeploy` is refused. A target with no `JobRunner`, or a job whose
-  artifact is a bundle (D64), has its deploy refused before any step.
+  `onDeploy` is refused. A target with no `JobRunner` has its deploy
+  refused before any step. A job whose artifact is a bundle (D64) runs
+  with the bundle the rollout pinned, through its Workflow on cloudflare
+  (section 18.9, D64, amended).
   `stack plan` lists the jobs a deploy runs. `stack dev` runs each one
   once the environment is up, after the last rollout wave, waits for it,
   logs its end, and, as with every run of a job, a failure never stops
@@ -3100,9 +3102,9 @@ export abstract class ShipOrders {}
   job in the environment's state directory keeps its runs apart: the
   schedule skips a run while `stack run`'s goes on, and `stack run` refuses
   to start while the schedule's does. On a cloud target it runs the
-  deployed job, with the image the deploy manifest records, through the
-  target's `Jobs` seam (section 11.1), and refuses a target without one
-  and a run whose last deploy did not roll the job out.
+  deployed job, with the image or the bundle the deploy manifest records,
+  through the target's `Jobs` seam (section 11.1), and refuses a target
+  without one and a run whose last deploy did not roll the job out.
 - **gcp.** The job platform is `gcp.cloudrunjob` (section 7.2), with
   connectors from it to Cloud SQL and to Cloud Run that share the server's
   `Connect`.
@@ -3813,6 +3815,14 @@ when it calls another server. An account that does not export holds no
 trace role, so code that calls Cloud Trace itself turns its deployable's
 `telemetry` on. An `http` endpoint under `googleapis.com` is refused.
 Metrics and logs are not exported.
+
+On cloudflare an environment's `telemetry` value, `{ endpoint,
+sampleRatio? }`, turns export on for each server and job, to that
+collector, and a server's or a job's `telemetry` setting turns its own off
+or on; the target sets the same variables as `plain_text` bindings, with
+`cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`,
+`cloud.account.id` and the bundle's digest as `service.version`, and the
+runtime's `./workers-telemetry` reads them (section 18.5, D64, amended).
 
 
 ## 9. End-user auth and service auth
@@ -4573,12 +4583,15 @@ eight seams on its `TargetSpec` (D45, D46, D47, D52, D68):
   fields, which a CI renderer turns into its own steps, or none yet.
   Workload Identity Federation on gcp;
 - `Jobs`, a job runner (`JobRunner`): a request is a run, a job and the
-  image the deploy manifest records for it, and the runner runs the
+  image the deploy manifest records for it, or for a job whose artifact
+  is a bundle, the bundle's digest (`Bundle`), and the runner runs the
   deployed job once, as its platform runs it on its schedule, and returns
   when the run ends, with the last try's error when it fails (section
   8.7). Without it, `stack run` refuses the target's environments. On
   gcp, an execution of the job's Cloud Run job, whose error the runner
-  reads from Cloud Logging as the migration job's;
+  reads from Cloud Logging as the migration job's; on cloudflare, an
+  instance of the job's Workflow, whose error is the one its run threw
+  (section 18.9);
 - `Queues`, a queue runner (`QueueRunner`): a request is a run, a
   database, its DB service and a queue document, and the runner runs the
   document where `superschematic-migrate` reaches the database and returns
@@ -5420,6 +5433,9 @@ export abstract class Staging {}
     which an exposed Worker without a domain is reached;
   - `secretsStoreId` names the account's Secrets Store, which every
     secret binding names.
+- **`telemetry`** is optional: `{ endpoint }` turns trace export on for
+  each server and job, to that OTLP/HTTP collector, with `sampleRatio`
+  the share of traces sampled (section 18.5).
 - **`domain`** is optional. With a domain, `dns` must be `cloudflare`, the
   target's default DNS platform, and its zone must be in the same account.
 - **Secrets** come through `stack secrets set`.
@@ -5439,35 +5455,36 @@ account when no gcp one is added. Every line is built:
 declare module "@superschematic/stack" {
   interface Targets {
     cloudflare: {
-      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string };
-      server: { logs?: boolean; compatibilityDate?: string; cpuMs?: number; placement?: "smart" };
+      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string; telemetry?: { endpoint: string; sampleRatio?: number } };
+      server: { logs?: boolean; compatibilityDate?: string; cpuMs?: number; placement?: "smart"; telemetry?: boolean };
       database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" };
-      job: { cpuMs?: number; logs?: boolean };
+      job: { cpuMs?: number; logs?: boolean; telemetry?: boolean };
       site: {};
-      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
+      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp" };
     };
   }
 }
 ```
 
-There is no `worker` key: resolution refuses the kind on this target.
+There is no `worker` key: resolution refuses the kind on this target,
+saying why and where a worker runs (`TargetSpec.Unplaced`, section 18.15).
 
 ### 18.2 Realization
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
+| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
 | database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
 | sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. |
 | migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
-| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint` and its `storageClass` theirs. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
-| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<env>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`: the bucket's objects alone. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
+| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
+| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<env>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_<jurisdiction>_<bucket>`, `default` for a bucket in no jurisdiction: the bucket's objects alone. The value is `{name, binding, r2: {account, jurisdiction?, accessKeyId: <token id>, token: <token value, secret>}}`. |
 | site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
-| job | A Worker of `cloudflare.cron` per job, named as a server's is, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there. A job with no schedule has a Worker and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
+| job | A Worker of `cloudflare.cron` per job, named as a server's is, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there, and a `workflow` (`<job>.workflow`) named as the Worker, of the class `JobRun` its bundle exports, through which the job runner runs it once; the version binds `SUPERSCHEMATIC_BUNDLE` to its bundle's digest. A job with no schedule has a Worker, its Workflow and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
 | exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<label>.<domain>`, the label the deployable's name with a suffix under a parameter, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, the Worker's name, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
 | parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
@@ -5770,7 +5787,11 @@ a `--bundle <deployable>=sha256:<hex>` flag, which `stack deploy` and
 - `target: 'browser'`, `format: 'esm'`, and `conditions: ['workerd',
   'worker', 'browser']`, which select superscalar's `workerd` build;
 - `minify`, a `linked` source map, `main.js.map`, which `main.js` names in
-  its `sourceMappingURL` comment, and `external: ['cloudflare:*']`;
+  its `sourceMappingURL` comment, and `external: ['cloudflare:*',
+  'node:*']`: Bun's browser target swaps a `node:` module that only its own
+  name keeps external for an empty one, so `node:async_hooks` stays an
+  import through the wider pattern, and every other `node:` import is
+  refused below;
 - `external: ['*.wasm']`, with superscalar's `superscalar_wasm_bg.wasm`
   copied beside the bundle under its own name, which the bundle imports
   as `./superscalar_wasm_bg.wasm`. superscalar's `workerd` build imports
@@ -5787,13 +5808,13 @@ names the platform lists, and bundle.ts prints each one's size. It
 rewrites the source map's `sources` relative to the server's package: Bun
 names them relative to the output directory, which a deploy makes anew,
 so the same code would otherwise get a new digest on every deploy. Every
-bundle fails on a `node:` or `bun:` import, another `.wasm`, a use of
+bundle fails on a `node:` import but `node:async_hooks`, a `bun:` import, another `.wasm`, a use of
 Bun's global, superscalar's `workerd` build not resolving, or a file
 beside the three. It reads the imports from the build's metafile, not the
 bundle's text: Bun's browser target replaces a `node:` module with a
 polyfill or an empty one, so `node:fs` leaves no trace in the output.
 `runtime/http/typescript/scripts/workers-check.mjs` checks the runtime's
-own entries that way. With `--check`, it writes to a temporary directory
+own entries that way, `./workers-telemetry` among them. With `--check`, it writes to a temporary directory
 and removes it.
 
 The package also holds `workers.d.ts`, which declares the
@@ -5859,6 +5880,38 @@ will: the storefront's carts live per isolate there.
 
 Logs are `createLogger`'s JSON lines on `console.log`, which Workers Logs
 reads. A server needs no `nodejs_compat`. Rate limits are per isolate.
+
+**Traces** (D67, D64 amended). `fetch.ts` and `scheduled.ts` call the
+runtime's `startWorkersTelemetry(env, { service, stack, kind, logger })`
+from `./workers-telemetry` at module scope, so an `OTEL_` binding the
+runtime refuses fails the version's upload. Export is off unless an
+endpoint binding names a collector, which the environment's `telemetry`
+sets (section 18.1); off, every hook only calls through. On:
+- the context of a request's span reaches the calls its code makes
+  through `AsyncLocalStorage`, `node:async_hooks`, which workerd gives
+  under the `nodejs_als` compatibility flag without the rest of Node:
+  every server's and job's version names it, whatever the environment
+  exports, since the bundle is one for every environment. workerd gives
+  `node:` modules with no flag from compatibility date 2026-08-04, the
+  pinned date among them; the flag keeps a server whose settings name an
+  earlier date running;
+- the server's Hono app runs the middleware first, a server span per
+  request but the probes; each client's transport, a service binding's or
+  the in-process app's, is traced, a client span that carries
+  `traceparent`; and a job's try runs its method in a span named after
+  its `@job` class;
+- an isolate may not run I/O outside a request, so nothing exports on a
+  timer: ended spans wait in the isolate, at most 2048, and `flush()`
+  sends them in one OTLP/HTTP protobuf export, which `fetch.ts` hands to
+  each request's `waitUntil`, and a scheduled run and a Workflow's step
+  await at their end. The runtime posts the body itself, built by
+  OpenTelemetry's serializer, since OpenTelemetry's browser exporter sends
+  with `fetch` options workerd refuses.
+
+The bindings follow OpenTelemetry's variables as on Bun, with the same
+refusals, and a member of `OTEL_RESOURCE_ATTRIBUTES` or of a headers
+variable without `=` is refused too. A collector that needs a header from
+a secret is not built, as on gcp.
 There is no drain: Cloudflare finishes requests in flight on a new
 deployment.
 
@@ -5868,7 +5921,9 @@ gzipped. Cloudflare's script limit is 64 MiB on both plans, with no
 compressed limit, since September 2026. Every Worker, servers and jobs
 alike, carries its own copy. acme-shop's storefront uploads `main.js`,
 113 KB (36 KB gzipped), its source map, 563 KB (124 KB), and the module,
-2.2 MB (662 KB): 2.9 MB, 822 KB gzipped. Instantiation takes tens of milliseconds
+2.2 MB (662 KB): 2.9 MB, 822 KB gzipped. OpenTelemetry's SDK, which every
+bundle carries since `./workers-telemetry` (D64, amended), took `main.js`
+to 162 KiB and its source map to 904 KiB. Instantiation takes tens of milliseconds
 against the one-second startup limit, and the first parse of a phone
 number or URL costs about 80 ms once. The deploy logs each version's
 `startupTimeMs`.
@@ -5995,7 +6050,9 @@ The runtime's `./r2` entry implements D54's `Bucket`:
   when it knows its length, and a delete asks for the object's head
   first, since R2's delete answers alike whether or not it was there.
 - **`signedUrl`** presigns a V4 query-string URL for
-  `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
+  `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>`, or
+  `https://<account>.<jurisdiction>.r2.cloudflarestorage.com/...` for a
+  bucket in a jurisdiction, with
   WebCrypto HMAC, for at most seven days. The access key is the edge's
   token id, and the secret is the hex SHA-256 of the token's value, which
   the runtime computes once.
@@ -6012,10 +6069,13 @@ bucket's CORS; that gap is shared with gcp and lands for both later.
 The `cloudflare.r2` platform (D64, amended):
 - **Settings** are `locationHint`, the region R2 places the bucket in
   when it creates it, `storageClass`, `Standard` or `InfrequentAccess`
-  for new objects, and `deleteAfterDays`, as gcp's. There is no
-  `jurisdiction`: a jurisdiction's bucket is reached at
-  `<account>.<jurisdiction>.r2.cloudflarestorage.com`, which the R2
-  credential does not name. There is no `versioning`, which R2 lacks.
+  for new objects, `deleteAfterDays`, as gcp's, and `jurisdiction`, `eu`
+  or `fedramp`, where R2 keeps the bucket's data (D64, amended): the
+  bucket and its lifecycle name it, the edge's token names the bucket's
+  objects under it, and the R2 credential names it (`<FIELD>_R2_JURISDICTION`),
+  so the runtime signs URLs for the jurisdiction's S3 host,
+  `<account>.<jurisdiction>.r2.cloudflarestorage.com`. A jurisdiction beside
+  a location hint is refused. There is no `versioning`, which R2 lacks.
 - **The token's permission group** is Workers R2 Storage Bucket Item
   Write, `2efd5506f9c8494dacb1fa10a3e7d5b6`, the id Cloudflare publishes
   for every account. Resolution calls nothing, so the connector names the
@@ -6028,7 +6088,8 @@ The `cloudflare.r2` platform (D64, amended):
   member's own buckets through R2's S3 API with the run's token before
   the provisioner destroys the member; a bucket that is gone is empty.
   Any other environment's bucket keeps its objects, and its destroy
-  fails on one that holds some, as gcp's does.
+  fails on one that holds some, as gcp's does. A bucket in a jurisdiction
+  is emptied at its jurisdiction's S3 host.
 
 ### 18.8 Sites on Workers static assets
 
@@ -6126,9 +6187,35 @@ read on 2026-10-20), and every try runs within that one run, so a job
 whose timeout times its tries exceeds 15 minutes is refused: ten minutes,
 the default timeout, leaves no room for a retry. CPU time is limited
 apart, 30 seconds by default, and `cpuMs` raises `limits.cpuMs` to 5
-minutes. Cloudflare starts a run at each firing, as Cloud Run does. No
-`Jobs` seam is built for this target, so `stack run` refuses it before
-it reads any state.
+minutes. Cloudflare starts a run at each firing, as Cloud Run does.
+
+**A run on demand** (D52 and D64, amended). Cloudflare has no call that
+fires a deployed Worker's scheduled handler, and a job's Worker has no
+public address to call, so every job's Worker is also a Workflow,
+`<job>.workflow`, named as the Worker, of the class `JobRun`, which
+`scheduled.ts` exports, on the Worker once its deployment is there. The
+target's job runner, its `Jobs` seam, runs the job once for `stack run`
+and for a job that runs on every deploy:
+1. it starts an instance of the Workflow through Cloudflare's API
+   (`POST /accounts/<id>/workflows/<name>/instances`) with the run's
+   token, which `Workers Scripts Write` covers, its payload
+   `{"bundle": "<hex>"}`, the bundle the deploy manifest records;
+2. the instance's run compares that digest with the version's
+   `SUPERSCHEMATIC_BUNDLE` binding, which the deploy pins, and fails naming
+   both when they differ: a deploy under way, or a version made outside
+   one, as gcp's runner refuses an image the manifest does not record;
+3. it runs the job's tries within one step, which retries nothing itself
+   and may take every try's timeout and a minute, as a firing runs them,
+   each logged to Workers Logs;
+4. the runner reads the instance every two seconds until it is
+   `complete`, `errored` or `terminated`, and returns the error the run
+   threw, which names the job and its last try's error, as gcp's runner
+   returns the last try's from Cloud Logging. A Workflow that is not
+   there says to deploy first.
+
+A Workflow runs the Worker's current deployment, so a run takes the
+version the last rollout deployed; the bundle check makes a run that
+would take another one fail rather than run it.
 
 ### 18.10 Service auth on Workers
 
@@ -6235,10 +6322,14 @@ runtime tests run fixture bundles under the `workerd` binary.
 
 ### 18.15 Not built
 
-- `stack run` on this target.
-- Queue workers: Workers runs no claim loop, so `cloudflare.d1` refuses
-  a worker of a queue on it (D53, amended). A Worker or a Cron job
-  enqueues on D1 with `enqueueStatement` in its batch.
+- Queue workers. A worker's claim loop runs as long as its process, on
+  Postgres or a SQLite file (D53, amended), and a Worker runs per request
+  or per firing: resolution refuses a worker on this target saying so,
+  and that gcp's `gcp.cloudrunworker` or `stack dev` runs one
+  (`TargetSpec.Unplaced`, D64, amended). `cloudflare.d1` also refuses a
+  worker of a queue on it (`NoQueueClaims`, D53, amended). A Worker or a
+  Cron job enqueues on D1 with `enqueueStatement` in its batch.
+- A collector header from a secret for trace export, as on gcp.
 - Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
 - An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
   an identity store over SQLite for a TypeScript API.
@@ -6255,8 +6346,7 @@ runtime tests run fixture bundles under the `workerd` binary.
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
 - `immutable` caching for a site's hashed files.
-- A bucket under a jurisdiction, whose S3 host the R2 credential would
-  need to name, and a bucket's CORS (section 18.7).
+- A bucket's CORS (section 18.7).
 
 Built so far: the target's values, state with a deploy lock per run,
 secrets, bootstrap and CI identity, and the Workers platform for
@@ -6267,7 +6357,9 @@ buckets on R2 with their
 tokens, their policy and the emptying of a member's buckets before its
 destroy; databases on D1, a Worker's d1 binding and their migrations
 from the deploying machine; the Cron platform for TypeScript jobs and
-`scheduled.ts`; and the site platform, its embedded script and its site
+`scheduled.ts`, with each job's Workflow and the job runner over it for
+`stack run` and a job on every deploy; trace export on Workers; buckets
+in a jurisdiction; and the site platform, its embedded script and its site
 store in R2; all proven offline (D64, amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run

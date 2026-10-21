@@ -74,7 +74,47 @@ type Cloud interface {
 
 	// ListObjects returns the keys of the objects under prefix, sorted.
 	ListObjects(ctx context.Context, account, bucket, prefix string) ([]string, error)
+
+	// CreateWorkflowInstance starts an instance of a Workflow with params
+	// as its event's payload, and returns the instance's id. A Workflow
+	// that does not exist is an error that wraps fs.ErrNotExist.
+	CreateWorkflowInstance(ctx context.Context, account, workflow string, params any) (string, error)
+
+	// WorkflowInstance returns an instance's status and, once it has
+	// failed, its error.
+	WorkflowInstance(ctx context.Context, account, workflow, id string) (*WorkflowInstance, error)
 }
+
+// WorkflowInstance is a Workflow instance as Cloudflare reports it.
+type WorkflowInstance struct {
+	// Status is queued, running, paused, waiting, waitingForPause,
+	// errored, terminated or complete, among others.
+	Status string `json:"status"`
+
+	// Error is what the instance failed with: the message and the name of
+	// the error its run threw.
+	Error *struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// Done reports whether the instance has ended: complete, errored or
+// terminated.
+func (w *WorkflowInstance) Done() bool {
+	switch w.Status {
+	case WorkflowComplete, WorkflowErrored, WorkflowTerminated:
+		return true
+	}
+	return false
+}
+
+// The statuses of a Workflow instance that has ended.
+const (
+	WorkflowComplete   = "complete"
+	WorkflowErrored    = "errored"
+	WorkflowTerminated = "terminated"
+)
 
 // Token is an API token as Cloudflare verifies it.
 type Token struct {
@@ -141,7 +181,7 @@ func NewCloud(token string) Cloud {
 	return &restCloud{
 		token:  token,
 		api:    "https://api.cloudflare.com/client/v4",
-		r2:     R2Endpoint,
+		r2:     R2JurisdictionEndpoint,
 		client: &http.Client{Timeout: 2 * time.Minute},
 		now:    time.Now,
 		ids:    map[string]string{},
@@ -152,12 +192,48 @@ func NewCloud(token string) Cloud {
 type restCloud struct {
 	token  string
 	api    string
-	r2     func(account string) string
+	r2     func(account, jurisdiction string) string
 	client *http.Client
 	now    func() time.Time
 
+	// jurisdiction is the R2 jurisdiction whose S3 host the object calls
+	// reach, "" for the default one (InJurisdiction).
+	jurisdiction string
+
 	mu  sync.Mutex
 	ids map[string]string
+}
+
+// JurisdictionCloud is a Cloud whose object calls can reach the buckets of
+// an R2 jurisdiction, which R2's S3 API serves at a host of their own
+// (R2JurisdictionEndpoint, D64, amended). NewCloud's is one.
+type JurisdictionCloud interface {
+	Cloud
+
+	// InJurisdiction returns the Cloud whose object calls reach the
+	// buckets of jurisdiction, eu or fedramp; "" is the default one.
+	InJurisdiction(jurisdiction string) Cloud
+}
+
+var _ JurisdictionCloud = (*restCloud)(nil)
+
+// InJurisdiction returns the Cloud whose object calls go to the S3 host of
+// jurisdiction's buckets, signed as every object call is.
+func (c *restCloud) InJurisdiction(jurisdiction string) Cloud {
+	return &restCloud{token: c.token, api: c.api, r2: c.r2, client: c.client, now: c.now, jurisdiction: jurisdiction, ids: map[string]string{}}
+}
+
+// cloudIn is cloud's view of jurisdiction's buckets: cloud itself for the
+// default one, else through InJurisdiction, which a Cloud that cannot reach
+// a jurisdiction does not have.
+func cloudIn(cloud Cloud, jurisdiction string) (Cloud, error) {
+	if jurisdiction == "" {
+		return cloud, nil
+	}
+	if jc, ok := cloud.(JurisdictionCloud); ok {
+		return jc.InJurisdiction(jurisdiction), nil
+	}
+	return nil, fmt.Errorf("cloudflare: this Cloud reaches no bucket of R2 jurisdiction %s", jurisdiction)
 }
 
 // envelope is the REST API's response.
@@ -289,6 +365,40 @@ func (c *restCloud) WorkersSubdomain(ctx context.Context, account string) (strin
 	return result.Subdomain, err
 }
 
+func (c *restCloud) workflowPath(account, workflow string) string {
+	return "/accounts/" + url.PathEscape(account) + "/workflows/" + url.PathEscape(workflow) + "/instances"
+}
+
+func (c *restCloud) CreateWorkflowInstance(ctx context.Context, account, workflow string, params any) (string, error) {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return "", err
+	}
+	// The API takes the event's payload as JSON within a string.
+	var result struct {
+		ID string `json:"id"`
+	}
+	_, err = c.call(ctx, http.MethodPost, c.workflowPath(account, workflow), map[string]string{"params": string(data)}, &result)
+	if notFound(err) {
+		return "", fmt.Errorf("%w: %w", err, fs.ErrNotExist)
+	}
+	if err != nil {
+		return "", err
+	}
+	if result.ID == "" {
+		return "", fmt.Errorf("cloudflare: an instance of Workflow %s was created with no id", workflow)
+	}
+	return result.ID, nil
+}
+
+func (c *restCloud) WorkflowInstance(ctx context.Context, account, workflow, id string) (*WorkflowInstance, error) {
+	var instance WorkflowInstance
+	if _, err := c.call(ctx, http.MethodGet, c.workflowPath(account, workflow)+"/"+url.PathEscape(id)+"?simple=true", nil, &instance); err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
 func (c *restCloud) PermissionGroups(ctx context.Context, account string) ([]PermissionGroup, error) {
 	return list[PermissionGroup](ctx, c, "/accounts/"+url.PathEscape(account)+"/tokens/permission_groups", nil)
 }
@@ -368,7 +478,7 @@ func (c *restCloud) s3(ctx context.Context, account, method, bucket, key string,
 		}
 		id = tok.ID
 	}
-	u, err := url.Parse(c.r2(account))
+	u, err := url.Parse(c.r2(account, c.jurisdiction))
 	if err != nil {
 		return nil, nil, err
 	}

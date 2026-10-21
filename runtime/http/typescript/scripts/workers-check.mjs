@@ -1,12 +1,13 @@
 // The Workers check (D64, section 18.5 of docs/stack-model.md): bundles each
-// entry of this package a Worker imports, ., ./hono, ./workers, ./d1 and
-// ./r2, as a Worker's bundle.ts bundles it, with
-// `bun build --target=browser --conditions=workerd` and every .wasm module
-// kept external, and fails on what workerd cannot run without
-// nodejs_compat:
-//   - an import from node:, which Bun's browser target replaces with a
-//     polyfill or an empty module, so the check reads the bundle's
-//     metafile, not its text;
+// entry of this package a Worker imports, ., ./hono, ./workers, ./d1, ./r2
+// and ./workers-telemetry, as a Worker's bundle.ts bundles it, with
+// `bun build --target=browser --conditions=workerd`, every .wasm module and
+// node:async_hooks kept external, and fails on what workerd cannot run
+// without nodejs_compat:
+//   - an import from node: other than node:async_hooks, which a Worker has
+//     under the nodejs_als compatibility flag (D64, amended); Bun's browser
+//     target replaces a node: module with a polyfill or an empty module, so
+//     the check reads the bundle's metafile, not its text;
 //   - an import from bun:, or the Bun global;
 //   - a WebAssembly module other than superscalar's,
 //     superscalar_wasm_bg.wasm, which a Worker's upload carries beside its
@@ -20,7 +21,9 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ENTRIES = ['index', 'hono', 'workers', 'd1', 'r2'];
+const ENTRIES = ['index', 'hono', 'workers', 'd1', 'r2', 'workers-telemetry'];
+/** The one node: module a Worker imports, under nodejs_als. */
+const ASYNC_HOOKS = 'node:async_hooks';
 const SUPERSCALAR_WASM = 'superscalar_wasm_bg.wasm';
 
 const files = process.argv.length > 2 ? process.argv.slice(2) : ENTRIES.map(name => join(root, 'dist', `${name}.js`));
@@ -39,6 +42,9 @@ function check(file) {
         '--conditions=worker',
         '--external=*.wasm',
         '--external=cloudflare:*',
+        // node:* rather than node:async_hooks alone, which Bun's browser
+        // target swaps for an empty module all the same.
+        '--external=node:*',
         '--minify',
         `--metafile=${metafile}`,
         `--outdir=${join(out, 'bundle')}`,
@@ -59,7 +65,7 @@ function check(file) {
       if (key.startsWith('node:')) continue;
       const input = key.startsWith('../') ? basename(key) : key;
       for (const { path } of imports) {
-        if (path.startsWith('node:')) problems.push(`${input} imports ${path}, which workerd has only under nodejs_compat`);
+        if (path.startsWith('node:') && path !== ASYNC_HOOKS) problems.push(`${input} imports ${path}, which workerd has only under nodejs_compat`);
         else if (path.startsWith('bun:')) problems.push(`${input} imports ${path}, which only Bun has`);
         else if (path.endsWith('.wasm') && basename(path) !== SUPERSCALAR_WASM) {
           problems.push(`${input} imports the WebAssembly module ${path}; a Worker carries superscalar's alone`);

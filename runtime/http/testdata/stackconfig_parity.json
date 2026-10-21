@@ -610,6 +610,96 @@
       ]
     },
     {
+      "name": "bucket: an R2 credential in a jurisdiction",
+      "reader": "bucket",
+      "field": "SHOP_MEDIA_BUCKET",
+      "value": {
+        "binding": "SHOP_MEDIA_BUCKET",
+        "name": "shop-stack-shop-media",
+        "r2": {
+          "accessKeyId": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d",
+          "account": "0123456789abcdef0123456789abcdef",
+          "jurisdiction": "eu",
+          "token": "r2-token-value"
+        }
+      },
+      "variables": {
+        "SHOP_MEDIA_BUCKET_BINDING": "SHOP_MEDIA_BUCKET",
+        "SHOP_MEDIA_BUCKET_NAME": "shop-stack-shop-media",
+        "SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d",
+        "SHOP_MEDIA_BUCKET_R2_ACCOUNT": "0123456789abcdef0123456789abcdef",
+        "SHOP_MEDIA_BUCKET_R2_JURISDICTION": "eu",
+        "SHOP_MEDIA_BUCKET_R2_TOKEN": "r2-token-value"
+      },
+      "want": {
+        "binding": "SHOP_MEDIA_BUCKET",
+        "name": "shop-stack-shop-media",
+        "r2": {
+          "accessKeyId": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d",
+          "account": "0123456789abcdef0123456789abcdef",
+          "jurisdiction": "eu",
+          "token": "r2-token-value"
+        }
+      },
+      "refusals": null,
+      "workerOnly": [
+        "environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"
+      ]
+    },
+    {
+      "name": "bucket: a jurisdiction without a credential",
+      "reader": "bucket",
+      "field": "SHOP_MEDIA_BUCKET",
+      "value": {
+        "binding": "SHOP_MEDIA_BUCKET",
+        "name": "shop-stack-shop-media"
+      },
+      "variables": {
+        "SHOP_MEDIA_BUCKET_BINDING": "SHOP_MEDIA_BUCKET",
+        "SHOP_MEDIA_BUCKET_NAME": "shop-stack-shop-media"
+      },
+      "edits": {
+        "SHOP_MEDIA_BUCKET_R2_JURISDICTION": "eu"
+      },
+      "want": null,
+      "refusals": [
+        "environment variable SHOP_MEDIA_BUCKET_R2_JURISDICTION is set and SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN are not; a jurisdiction names the S3 host of an R2 credential's signed URLs"
+      ],
+      "workerOnly": [
+        "environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"
+      ]
+    },
+    {
+      "name": "bucket: a jurisdiction that is no host label",
+      "reader": "bucket",
+      "field": "SHOP_MEDIA_BUCKET",
+      "value": {
+        "binding": "SHOP_MEDIA_BUCKET",
+        "name": "shop-stack-shop-media",
+        "r2": {
+          "accessKeyId": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d",
+          "account": "0123456789abcdef0123456789abcdef",
+          "jurisdiction": "eu.evil.test/",
+          "token": "r2-token-value"
+        }
+      },
+      "variables": {
+        "SHOP_MEDIA_BUCKET_BINDING": "SHOP_MEDIA_BUCKET",
+        "SHOP_MEDIA_BUCKET_NAME": "shop-stack-shop-media",
+        "SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d",
+        "SHOP_MEDIA_BUCKET_R2_ACCOUNT": "0123456789abcdef0123456789abcdef",
+        "SHOP_MEDIA_BUCKET_R2_JURISDICTION": "eu.evil.test/",
+        "SHOP_MEDIA_BUCKET_R2_TOKEN": "r2-token-value"
+      },
+      "want": null,
+      "refusals": [
+        "environment variable SHOP_MEDIA_BUCKET_R2_JURISDICTION is \"eu.evil.test/\"; want a jurisdiction of lowercase letters and digits, eu or fedramp"
+      ],
+      "workerOnly": [
+        "environment variables SHOP_MEDIA_BUCKET_BINDING, SHOP_MEDIA_BUCKET_R2_ACCOUNT, SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID, SHOP_MEDIA_BUCKET_R2_TOKEN, SHOP_MEDIA_BUCKET_R2_JURISDICTION are set: only a Worker reads an R2 binding (D64)"
+      ]
+    },
+    {
       "name": "bucket: an R2 binding alone",
       "reader": "bucket",
       "field": "SHOP_MEDIA_BUCKET",

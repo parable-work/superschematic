@@ -116,6 +116,31 @@ describe('openR2Bucket', () => {
     expect(get.searchParams.get('X-Amz-Expires')).toBe('604800');
   });
 
+  test("signs a URL for a jurisdiction's S3 host, which the signature covers", async () => {
+    const eu = { ...credential, jurisdiction: 'eu' };
+    const bucket = openR2Bucket(fakeR2(), { ...connection, r2: eu }, { now: () => at });
+    const url = new URL(await bucket.signedUrl('products/tea.png', { method: 'GET', expiresInSeconds: 600 }));
+    expect(url.origin).toBe(`https://${credential.account}.eu.r2.cloudflarestorage.com`);
+    expect(r2Host(credential.account, 'fedramp')).toBe(`${credential.account}.fedramp.r2.cloudflarestorage.com`);
+    const secret = await r2SecretAccessKey(credential.token);
+    const sign = (host: string) =>
+      presignV4({
+        method: 'GET',
+        host,
+        path: '/shop-stack-shop-media/products/tea.png',
+        region: 'auto',
+        accessKeyId: credential.accessKeyId,
+        secretAccessKey: secret,
+        date: at,
+        expiresInSeconds: 600,
+      });
+    expect(url.href).toBe(await sign(`${credential.account}.eu.r2.cloudflarestorage.com`));
+    // The host is a signed header, so the default host's signature does not
+    // pass for the jurisdiction's.
+    const elsewhere = new URL(await sign(r2Host(credential.account)));
+    expect(elsewhere.searchParams.get('X-Amz-Signature')).not.toBe(url.searchParams.get('X-Amz-Signature'));
+  });
+
   test('refuses a URL for more than seven days, and one without a credential', async () => {
     const bucket = openR2Bucket(fakeR2(), connection, { now: () => at });
     await expect(bucket.signedUrl('a', { method: 'GET', expiresInSeconds: MAX_SIGNED_URL_SECONDS + 1 })).rejects.toThrow('at most 604800');

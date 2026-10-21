@@ -13,14 +13,17 @@
 // module, which superscalar's workerd build imports as a module of its own,
 // since workerd compiles no WebAssembly from bytes. Bun bundles for the
 // browser with the workerd, worker and browser export conditions, which
-// select that build, and leaves workerd's own cloudflare: modules and every
-// WebAssembly module external.
+// select that build, and leaves workerd's own cloudflare: modules, every
+// WebAssembly module and node:async_hooks, with every node: module, external: the runtime's
+// ./workers-telemetry carries a span's context in AsyncLocalStorage, which
+// the Worker's nodejs_als compatibility flag gives (D64, amended).
 //
 // Either way it fails on what a Worker without nodejs_compat cannot run,
 // which it reads from the build's metafile, since Bun's browser target
 // replaces a node: module with a polyfill or an empty one that leaves no
-// trace in main.js: an import of a node: or bun: module, a WebAssembly
-// module other than superscalar's, and a use of Bun's global.
+// trace in main.js: an import of a node: module other than
+// node:async_hooks, or of a bun: module, a WebAssembly module other than
+// superscalar's, and a use of Bun's global.
 
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +49,9 @@ const WASM = 'superscalar_wasm_bg.wasm';
  */
 const BUN_GLOBAL = '__superschematic_bun_global__';
 
+/** The one node: module a Worker imports, which its nodejs_als compatibility flag gives. */
+const ASYNC_HOOKS = 'node:async_hooks';
+
 const args = process.argv.slice(2);
 const check = args.length === 1 && args[0] === '--check';
 if (args.length !== 1 || (!check && args[0].startsWith('-'))) {
@@ -64,7 +70,10 @@ const result = await Bun.build({
   conditions: ['workerd', 'worker', 'browser'],
   minify: true,
   sourcemap: 'linked',
-  external: ['cloudflare:*', '*.wasm'],
+  // node:* rather than ASYNC_HOOKS alone: Bun's browser target swaps a
+  // node: module that only its own name keeps external for an empty one;
+  // every other node: import is refused below.
+  external: ['cloudflare:*', '*.wasm', 'node:*'],
   define: { Bun: BUN_GLOBAL, 'globalThis.Bun': BUN_GLOBAL },
   metafile: true,
 });
@@ -85,7 +94,7 @@ for (const [input, { imports = [] }] of Object.entries(result.metafile?.inputs ?
   const importer = resolve(process.cwd(), input);
   const name = relative(import.meta.dir, importer);
   for (const { path } of imports) {
-    if (path.startsWith('node:')) {
+    if (path.startsWith('node:') && path !== ASYNC_HOOKS) {
       problems.push(`${name} imports ${path}, which a Worker has only under nodejs_compat`);
     } else if (path.startsWith('bun:')) {
       problems.push(`${name} imports ${path}, which only Bun has`);

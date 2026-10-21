@@ -888,6 +888,10 @@ func (r *resolver) place() {
 				}
 			}
 			if platformName == "" {
+				if why := r.target.Unplaced[res.Kind]; why != "" {
+					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s", res.Kind, name, r.target.Name, res.Kind, why)
+					continue
+				}
 				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a %s; place it with a settings platform", res.Kind, name, r.target.Name, res.Kind)
 				continue
 			}

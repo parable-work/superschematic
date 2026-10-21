@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/http-runtime",
   "version": "0.0.0",
-  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, the readers of the config fields a stack derives, a JSON-lines logger, a pg Pool over a derived database connection and a queue's enqueue and claims (./postgres), a worker's claim loop (./worker), OpenTelemetry trace export on Bun (./telemetry), the provider-neutral Bucket with its GCS implementation (./gcs), the identity runtime of the core user model (./identity), and for Cloudflare Workers the env and bindings of a Worker (./workers), D1's interface as SqlDatabase (./d1), SqlDatabase over bun:sqlite for stack dev (./sqlite) and the Bucket over an R2 binding (./r2), none of which imports from node:. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, the service-caller verifier and credential sources, a token-bucket rate limiter, the Hono adapter, the readers of the config fields a stack derives, a JSON-lines logger, a pg Pool over a derived database connection and a queue's enqueue and claims (./postgres), a worker's claim loop (./worker), OpenTelemetry trace export on Bun (./telemetry) and on Workers (./workers-telemetry, which imports node:async_hooks alone, under the nodejs_als compatibility flag), the provider-neutral Bucket with its GCS implementation (./gcs), the identity runtime of the core user model (./identity), and for Cloudflare Workers the env and bindings of a Worker (./workers), D1's interface as SqlDatabase (./d1), SqlDatabase over bun:sqlite for stack dev (./sqlite) and the Bucket over an R2 binding (./r2), none of which imports from node:. Ships compiled ESM with declarations. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -49,6 +49,10 @@
     "./telemetry": {
       "types": "./dist/telemetry.d.ts",
       "import": "./dist/telemetry.js"
+    },
+    "./workers-telemetry": {
+      "types": "./dist/workers-telemetry.d.ts",
+      "import": "./dist/workers-telemetry.js"
     }
   },
   "files": [
@@ -70,6 +74,7 @@
     "@opentelemetry/context-async-hooks": "2.12.0",
     "@opentelemetry/core": "2.12.0",
     "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@opentelemetry/otlp-transformer": "0.223.0",
     "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace": "2.12.0",
     "hono": "4.13.8",
@@ -97,6 +102,9 @@
     "@opentelemetry/exporter-trace-otlp-proto": {
       "optional": true
     },
+    "@opentelemetry/otlp-transformer": {
+      "optional": true
+    },
     "@opentelemetry/resources": {
       "optional": true
     },
@@ -115,6 +123,7 @@
     "@opentelemetry/context-async-hooks": "2.12.0",
     "@opentelemetry/core": "2.12.0",
     "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@opentelemetry/otlp-transformer": "0.223.0",
     "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace": "2.12.0",
     "@types/node": "22.19.9",

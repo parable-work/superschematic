@@ -33,14 +33,16 @@ const (
 // BootstrapValue, which a person may correct: the account's workers.dev
 // subdomain, under which an exposed Worker without a domain is reached,
 // and the id of the account's Secrets Store, which every secret binding
-// names.
+// names; and telemetry, which turns trace export on for each server and job
+// (telemetry.go).
 const targetValues = `{
   "type": "object",
   "required": ["accountId"],
   "properties": {
     "accountId": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "workersSubdomain": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"},
-    "secretsStoreId": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+    "secretsStoreId": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "telemetry": ` + telemetryValues + `
   },
   "additionalProperties": false
 }`

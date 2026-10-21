@@ -1404,7 +1404,8 @@ func TestToolchainPinsMatchToolsEnv(t *testing.T) {
 // TestTelemetryPackagesMatchTheRuntime: a Bun server, job and worker depend
 // on the OpenTelemetry packages the HTTP runtime's ./telemetry entry imports
 // at the versions the runtime pins as its optional peer dependencies and
-// tests with (D67), and on no other.
+// tests with (D67), and a server or a job on Workers on those its
+// ./workers-telemetry entry adds (D64, amended), and on no other.
 func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "runtime", "http", "typescript", "package.json"))
 	if err != nil {
@@ -1426,8 +1427,10 @@ func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
 			}
 		}
 	}
-	if !maps.Equal(peers, servergen.TelemetryPackages) {
-		t.Errorf("the runtime's OpenTelemetry peers are %v; servergen.TelemetryPackages is %v", peers, servergen.TelemetryPackages)
+	both := maps.Clone(servergen.TelemetryPackages)
+	maps.Copy(both, servergen.WorkersTelemetryPackages)
+	if !maps.Equal(peers, both) {
+		t.Errorf("the runtime's OpenTelemetry peers are %v; servergen's TelemetryPackages and WorkersTelemetryPackages are %v", peers, both)
 	}
 }
 

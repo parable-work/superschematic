@@ -8,4 +8,29 @@
 declare module 'cloudflare:workers' {
   /** The Worker's bindings: its config's strings, its secrets and its resources, by name. */
   export const env: Readonly<Record<string, unknown>>;
+
+  /** The event a Workflow's run receives for its instance. */
+  export interface WorkflowEvent<P> {
+    readonly payload: Readonly<P>;
+    readonly timestamp: Date;
+    readonly instanceId: string;
+  }
+
+  /** How a Workflow's step retries and how long it may take. */
+  export interface WorkflowStepConfig {
+    readonly retries?: { readonly limit: number; readonly delay: string | number; readonly backoff?: 'constant' | 'linear' | 'exponential' };
+    readonly timeout?: string | number;
+  }
+
+  /** The steps a Workflow's run does its work in. */
+  export interface WorkflowStep {
+    do<T>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
+  }
+
+  /** The base class of a Workflow, whose run Cloudflare calls for each instance. */
+  export abstract class WorkflowEntrypoint<Env = unknown, P = unknown> {
+    protected readonly env: Env;
+    constructor(ctx: unknown, env: Env);
+    abstract run(event: Readonly<WorkflowEvent<P>>, step: WorkflowStep): Promise<unknown>;
+  }
 }

@@ -479,9 +479,15 @@ type JobRunRequest struct {
 	// Job is the job deployable to run.
 	Job string
 
-	// Image is the image the deploy manifest records for the job: what
-	// the last deploy rolled out, and so what the run runs.
+	// Image is the image the deploy manifest records for a job whose
+	// artifact is an image: what the last deploy rolled out, and so what
+	// the run runs.
 	Image string
+
+	// Bundle is the digest the deploy manifest records of the bundle of a
+	// job whose artifact is a bundle (D64), `sha256:<hex>`: what the last
+	// deploy rolled out, which a runner checks the job's platform runs.
+	Bundle string
 
 	// Log receives progress, and the run's output where the target reads
 	// it.
@@ -489,7 +495,8 @@ type JobRunRequest struct {
 }
 
 // Check refuses a request with no valid run, no job of the run's
-// environment, or no image.
+// environment, or none of the artifact its platform runs: an image, or a
+// bundle's digest.
 func (r JobRunRequest) Check() error {
 	if err := r.Run.Check(); err != nil {
 		return err
@@ -498,10 +505,21 @@ func (r JobRunRequest) Check() error {
 	switch {
 	case d == nil || d.Kind != ir.DeployableJob:
 		return fmt.Errorf("run: environment %s has no job %q", r.Run.Environment.Environment, r.Job)
-	case r.Image == "":
+	case d.HasBundle() && r.Bundle == "":
+		return fmt.Errorf("run %s: no bundle", r.Job)
+	case !d.HasBundle() && r.Image == "":
 		return fmt.Errorf("run %s: no image", r.Job)
 	}
 	return nil
+}
+
+// Artifact is what the request runs, as a log names it: the image, or
+// the bundle's digest.
+func (r JobRunRequest) Artifact() string {
+	if r.Bundle != "" {
+		return "bundle " + r.Bundle
+	}
+	return "image " + r.Image
 }
 
 // JobRunner runs a deployed job once on demand (D52), as its platform runs

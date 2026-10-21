@@ -358,12 +358,17 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 		return nil
 	case ir.StepJobs:
 		// The jobs that run on every deploy (D52, amended), one at a time,
-		// each with the image the rollout gave it: the one the manifest now
-		// records.
+		// each with the image or the bundle the rollout gave it: the one the
+		// manifest now records.
 		for _, name := range step.Deployables {
-			image := d.images[name]
-			d.logf("  run job %s (image %s) and wait for it to end", name, image)
-			if err := d.target.Jobs.RunJob(ctx, registry.JobRunRequest{Run: d.run, Job: name, Image: image, Log: d.log}); err != nil {
+			req := registry.JobRunRequest{Run: d.run, Job: name, Log: d.log}
+			if dep := d.env.Deployable(name); dep != nil && dep.HasBundle() {
+				req.Bundle = d.bundles[name].Digest
+			} else {
+				req.Image = d.images[name]
+			}
+			d.logf("  run job %s (%s) and wait for it to end", name, req.Artifact())
+			if err := d.target.Jobs.RunJob(ctx, req); err != nil {
 				return fmt.Errorf("job %s: %w", name, err)
 			}
 		}
@@ -374,8 +379,8 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 
 // checkDeployJobs refuses, before any step, a deploy whose order runs a job
 // on the deploy (D52, amended) that the target cannot run: one with no job
-// runner, or a job whose artifact is not an image, which a job runner runs
-// by its image.
+// runner, or a job with neither an image nor a bundle, which a job runner
+// runs by its artifact.
 func (s *session) checkDeployJobs() error {
 	for _, step := range s.env.DeployOrder {
 		if step.Step != ir.StepJobs {
@@ -388,8 +393,8 @@ func (s *session) checkDeployJobs() error {
 				return fmt.Errorf("the deploy order runs %s on each deploy, which is no job of environment %s", name, s.env.Environment)
 			case s.target.Jobs == nil:
 				return fmt.Errorf("environment %s runs job %s on each deploy, and target %s runs no job on demand; turn its onDeploy off", s.env.Environment, name, s.target.Name)
-			case !d.HasImage():
-				return fmt.Errorf("environment %s runs job %s on each deploy, and its platform %s runs a bundle, which a deploy does not run yet; turn its onDeploy off", s.env.Environment, name, d.Platform)
+			case !d.HasImage() && !d.HasBundle():
+				return fmt.Errorf("environment %s runs job %s on each deploy, and its platform %s runs neither an image nor a bundle, which a job runner runs; turn its onDeploy off", s.env.Environment, name, d.Platform)
 			}
 		}
 	}

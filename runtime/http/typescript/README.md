@@ -306,8 +306,10 @@ these, the twins of the Go runtime's `stackconfig` package (D51):
   `field_ENDPOINT` when an emulator serves the bucket, and on Workers
   `field_BINDING`, the R2 binding, and `field_R2_ACCOUNT`,
   `field_R2_ACCESS_KEY_ID` and `field_R2_TOKEN`, the credential that signs
-  its URLs (D64). It returns a `BucketConnection`, `{ name, endpoint?,
-  binding?, r2? }`.
+  its URLs (D64), with `field_R2_JURISDICTION` for a bucket in a
+  jurisdiction, `eu` or `fedramp`, whose URLs name
+  `<account>.<jurisdiction>.r2.cloudflarestorage.com` (D64, amended). It
+  returns a `BucketConnection`, `{ name, endpoint?, binding?, r2? }`.
 - `loadCallers(field, env)` reads an API's callers field
   (`<API>_CALLERS`): its issuers, keys and callers, as the
   `ServiceAuthConfig` that `serviceAuthenticator` takes. A key is a JWK's
@@ -549,6 +551,42 @@ versions this package is tested with, which a generated Bun package
 depends on. `src/telemetry.test.ts` runs each hook against an OTLP/HTTP
 receiver in the test's process (`src/otlp.testing.ts`), and a job's
 process that flushes before it exits.
+
+### On Workers
+
+`startWorkersTelemetry(env, { service, stack, kind, logger })`, from
+`@superschematic/http-runtime/workers-telemetry`, is the twin a generated
+`fetch.ts` and `scheduled.ts` call at module scope (D67, D64 amended).
+It reads the same variables, with the same refusals, from the Worker's
+string bindings, refuses too a member of `OTEL_RESOURCE_ATTRIBUTES` or of
+a headers variable without `=`, and shares its hooks with Bun's through
+`telemetry-core.ts`. A Worker differs in three ways:
+
+- the context of a span travels in `AsyncLocalStorage` from
+  `node:async_hooks`, the one `node:` module this entry imports, which
+  workerd gives under the `nodejs_als` compatibility flag, without the
+  rest of Node; every Worker version of a server or a job names it, and
+  `bundle.ts`, `scripts/workers-check.mjs` and the workerd harness keep
+  `node:*` external and refuse every other `node:` import;
+- an isolate runs no I/O outside a request, so no timer exports: ended
+  spans wait until `flush()`, which `fetch.ts` hands to the request's
+  `waitUntil` and a scheduled run or a Workflow step awaits, and each
+  flush sends what the isolate ended since the last, at most 2048 spans;
+- OpenTelemetry's browser exporter sends with `fetch` options workerd
+  refuses, so the entry posts the OTLP/HTTP protobuf body itself, built by
+  `@opentelemetry/otlp-transformer`'s serializer, to the traces endpoint or
+  the base endpoint's `v1/traces`, with the headers and timeout the
+  variables give.
+
+The `WorkersTelemetry` it returns holds `middleware()`, `traced(fetch)`,
+which wraps a client's transport (a service binding's `fetch`, or the
+in-process app's), `job(name, run)` and `flush()`. The workerd harness's
+`telemetry` fixture runs it: two requests at once with their own
+`traceparent`s land in their own traces, each with a client span the
+callee received, a job's span follows, the exports carry the bindings'
+headers to `v1/traces` through a receiver Worker, the app with no `OTEL_`
+binding exports nothing, and the `telemetry-refused` fixture's sampler is
+refused at module scope.
 
 ## Using it
 

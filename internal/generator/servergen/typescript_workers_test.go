@@ -264,7 +264,7 @@ func TestTypeScriptWorkersEntrypointWiring(t *testing.T) {
 		"const shopPricingClient = newShopPricingClient(shopApiConfig.SHOP_PRICING_SERVICE);",
 		"const shopMediaBucket = openR2Bucket(binding(env, bindingName('SHOP_MEDIA_BUCKET', shopApiConfig.SHOP_MEDIA_BUCKET.binding), 'r2'), shopApiConfig.SHOP_MEDIA_BUCKET);",
 		"media: shopMediaBucket,",
-		"fetch: serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service')),",
+		"fetch: telemetry.traced(serviceFetch(binding(env, bindingName('SHOP_PRICING_SERVICE', endpoint.binding?.name), 'service'))),",
 		"const shopApiAuthenticate = await construct('shop-api', 'authenticator', () => shopApiImpl.authenticate(shopApiDeps));",
 		"const shopApiManualRoutes = await construct('shop-api', 'manual routes', () => shopApiImpl.createManualRoutes(shopApiDeps));",
 		"authenticate: shopApiAuthenticate, authenticateService: serviceAuthenticator(shopApiConfig.SHOP_API_CALLERS), manualRoutes: shopApiManualRoutes",
@@ -424,8 +424,8 @@ func TestTypeScriptWorkersEntrypointCallsInProcess(t *testing.T) {
 		"let self: Handle | undefined;",
 		"  app.onError(errorHandler());\n  self = request => app.fetch(request, { requestIP });\n",
 		"const inProcess = (async (input: RequestInfo | URL, init?: RequestInit) => {",
-		"    baseUrl: endpoint.url,\n    fetch: inProcess,\n",
-		"    fetch: serviceFetch(binding(env, bindingName('SHOP_QUOTES_SERVICE', endpoint.binding?.name), 'service')),",
+		"    baseUrl: endpoint.url,\n    fetch: telemetry.traced(inProcess),\n",
+		"    fetch: telemetry.traced(serviceFetch(binding(env, bindingName('SHOP_QUOTES_SERVICE', endpoint.binding?.name), 'service'))),",
 		"function bindingName(field: string, name: string | undefined): string {",
 	} {
 		if !strings.Contains(fetch, want) {
@@ -442,7 +442,7 @@ func TestTypeScriptWorkersEntrypointCallsInProcess(t *testing.T) {
 			t.Errorf("fetch.ts whose every call stays in process holds %q:\n%s", unwanted, alone)
 		}
 	}
-	if !strings.Contains(alone, "fetch: inProcess,") {
+	if !strings.Contains(alone, "fetch: telemetry.traced(inProcess),") {
 		t.Errorf("fetch.ts does not call shop-pricing in process:\n%s", alone)
 	}
 }
@@ -507,7 +507,7 @@ func TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey(t *testing.T) {
 		"  const loopback = await loopbackServiceAuth('Till', ['ts-checkout', 'ts-pricing']);\n",
 		"const tsPricingClient = newTsPricingClient(tsCheckoutConfig.TS_PRICING_SERVICE, loopback);",
 		"function newTsPricingClient(endpoint: Service, loopback: Loopback): tsPricingSdk.TsPricingSDK {",
-		"    fetch: inProcess,\n    serviceCredential: serviceCredentialFor(endpoint.credential) ?? loopback.credential,\n",
+		"    fetch: telemetry.traced(inProcess),\n    serviceCredential: serviceCredentialFor(endpoint.credential) ?? loopback.credential,\n",
 		"authenticateService: serviceAuthenticator(loopback.accept(tsPricingConfig.TS_PRICING_CALLERS))",
 	} {
 		if !strings.Contains(string(fetch), want) {

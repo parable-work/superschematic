@@ -307,6 +307,13 @@ type TargetSpec struct {
 	// this target.
 	Platforms map[ir.DeployableKind]string
 
+	// Unplaced says, for a kind Platforms leaves out, why the target places
+	// none of it and where one runs instead: resolution refuses a
+	// deployable of that kind with the reason in place of saying to place
+	// it with a settings platform (the cloudflare target's queue workers,
+	// D64 amended). A kind may not be in both.
+	Unplaced map[ir.DeployableKind]string
+
 	// DatabasePlatforms names, by SQL dialect, the platform a database
 	// deployable goes on when no settings platform places it and every DB
 	// service it hosts lists that dialect first: the local target keeps a
@@ -848,6 +855,16 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		platforms[kind] = platform
 	}
 	spec.Platforms = platforms
+	for _, kind := range slices.Sorted(maps.Keys(spec.Unplaced)) {
+		switch _, placed := platforms[kind]; {
+		case !kind.Valid():
+			return fmt.Errorf("registry: target %q says why it places no deployable kind %q (want %s)", spec.Name, kind, deployableKindList())
+		case placed:
+			return fmt.Errorf("registry: target %q names a platform for %s and says why it places none", spec.Name, kind)
+		case spec.Unplaced[kind] == "":
+			return fmt.Errorf("registry: target %q says why it places no %s with an empty reason", spec.Name, kind)
+		}
+	}
 	databases := make(map[string]string, len(spec.DatabasePlatforms))
 	for _, dialect := range slices.Sorted(maps.Keys(spec.DatabasePlatforms)) {
 		platform := spec.DatabasePlatforms[dialect]

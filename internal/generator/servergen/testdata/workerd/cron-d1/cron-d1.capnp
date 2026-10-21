@@ -30,6 +30,7 @@ const prune :Workerd.Worker = (
     (name = "TS_NOTES_DB_DATABASE", wrapped = (moduleName = "superschematic-fixture:d1", entrypoint = "d1", innerBindings = [(name = "empty", text = "2")])),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const tester :Workerd.Worker = (

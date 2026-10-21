@@ -299,12 +299,21 @@ func RunJob(ctx context.Context, o RunJobOptions) error {
 	if prev == nil {
 		return fmt.Errorf("%s was never deployed; deploy it, then run job %s", s.run.Name(), o.Job)
 	}
-	image := prev.Images[o.Job]
-	if image == "" {
+	req := registry.JobRunRequest{Run: s.run, Job: o.Job, Log: s.log}
+	if s.env.Deployable(o.Job).HasBundle() {
+		// A job whose artifact is a bundle (D64) runs the bundle the last
+		// deploy rolled out.
+		if b := prev.Bundles[o.Job]; b != nil {
+			req.Bundle = b.Digest
+		}
+	} else {
+		req.Image = prev.Images[o.Job]
+	}
+	if req.Image == "" && req.Bundle == "" {
 		return fmt.Errorf("the last deploy of %s did not roll job %s out; deploy it, then run the job", s.run.Name(), o.Job)
 	}
-	s.logf("run job %s of %s (image %s)", o.Job, s.run.Name(), image)
-	return s.target.Jobs.RunJob(ctx, registry.JobRunRequest{Run: s.run, Job: o.Job, Image: image, Log: s.log})
+	s.logf("run job %s of %s (%s)", o.Job, s.run.Name(), req.Artifact())
+	return s.target.Jobs.RunJob(ctx, req)
 }
 
 // RunQueueOptions is one operation on a queue's dead messages in a

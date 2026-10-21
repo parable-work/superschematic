@@ -64,9 +64,26 @@ const (
 	R2BucketScope           = "com.cloudflare.edge.r2.bucket"
 )
 
-// r2Jurisdiction is the jurisdiction a bucket's token resource names: every
-// bucket the platform makes is in the default one (r2Settings).
-const r2Jurisdiction = "default"
+// defaultJurisdiction is the jurisdiction a bucket's token resource names
+// for a bucket whose settings name none (r2Settings).
+const defaultJurisdiction = "default"
+
+// bucketJurisdiction is the jurisdiction a bucket's settings name, eu or
+// fedramp, or "" for the default one.
+func bucketJurisdiction(d ir.ResolvedDeployable) string {
+	j, _ := d.Settings["jurisdiction"].(string)
+	return j
+}
+
+// R2JurisdictionEndpoint is the S3 endpoint of an account's R2 for buckets
+// in a jurisdiction: `https://<account>.<jurisdiction>.r2.cloudflarestorage.com`,
+// R2Endpoint's for the default one ("").
+func R2JurisdictionEndpoint(account, jurisdiction string) string {
+	if jurisdiction == "" {
+		return R2Endpoint(account)
+	}
+	return "https://" + account + "." + jurisdiction + ".r2.cloudflarestorage.com"
+}
 
 // r2Settings is the schema of a bucket's settings on R2 (section 18.1):
 //
@@ -75,15 +92,19 @@ const r2Jurisdiction = "default"
 //   - storageClass, the class a new object is stored in unless its upload
 //     names another;
 //   - deleteAfterDays, the age at which a lifecycle rule deletes an object,
-//     as gcp's lifecycle rule does.
+//     as gcp's lifecycle rule does;
+//   - jurisdiction, eu or fedramp, where R2 keeps the bucket's data: R2's
+//     S3 API serves such a bucket at another host,
+//     `<account>.<jurisdiction>.r2.cloudflarestorage.com`, which the bucket
+//     edge's R2 credential names, so the runtime signs its URLs for it
+//     (D64, amended). A jurisdiction overrides a location hint, which is
+//     refused beside it.
 //
-// There is no jurisdiction: a jurisdiction's bucket is reached at another
-// S3 host, `<account>.<jurisdiction>.r2.cloudflarestorage.com`, which the
-// R2 credential the runtime signs with does not carry (section 18.15). R2
-// has no object versioning, so gcp's versioning has no place here.
+// R2 has no object versioning, so gcp's versioning has no place here.
 const r2Settings = `{
   "type": "object",
   "properties": {
+    "jurisdiction": {"enum": ["eu", "fedramp"]},
     "locationHint": {"enum": ["wnam", "enam", "weur", "eeur", "apac", "oc"]},
     "storageClass": {"enum": ["Standard", "InfrequentAccess"]},
     "deleteAfterDays": {"type": "integer", "minimum": 1, "maximum": 36500}
@@ -154,7 +175,15 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"accountId": v.accountID,
 		"name":      d.ResourceName,
 	}
-	if hint, ok := d.Settings["locationHint"].(string); ok {
+	jurisdiction := bucketJurisdiction(d)
+	hint, hasHint := d.Settings["locationHint"].(string)
+	if jurisdiction != "" {
+		if hasHint {
+			return registry.Lowered{}, registry.Unrealizable("bucket %s sets locationHint %s and jurisdiction %s; R2 places a bucket in a jurisdiction by the jurisdiction alone, so set one", d.Name, hint, jurisdiction)
+		}
+		props["jurisdiction"] = jurisdiction
+	}
+	if hasHint {
 		props["location"] = hint
 	}
 	if class, ok := d.Settings["storageClass"].(string); ok {
@@ -167,7 +196,7 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 		Properties: props,
 	}}}
 	if days, ok := wholeNumber(d.Settings["deleteAfterDays"]); ok {
-		out.Resources = append(out.Resources, &ir.Resource{
+		lifecycle := &ir.Resource{
 			ID:    lifecycleID(d.Name),
 			Type:  TypeR2BucketLifecycle,
 			Phase: ir.PhaseInfrastructure,
@@ -183,7 +212,11 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 					},
 				}},
 			},
-		})
+		}
+		if jurisdiction != "" {
+			lifecycle.Properties["jurisdiction"] = jurisdiction
+		}
+		out.Resources = append(out.Resources, lifecycle)
 	}
 	return out, nil
 }
@@ -256,9 +289,10 @@ func bucketTokenID(from, bucket string) string { return from + ".r2." + bucket +
 // connectR2 realizes a bucket edge from a Worker to an R2 bucket. The
 // value is the bucket's name, an r2_bucket binding named after the derived
 // field, which the platform writes (resourceBinding), and the credential
-// with which the runtime presigns S3 URLs: the account, and the id and the
-// value of an account token the edge mints, flagged secret, which reaches
-// the Worker as a secret_text binding. The token allows Workers R2 Storage
+// with which the runtime presigns S3 URLs: the account, the bucket's
+// jurisdiction when its settings name one, whose S3 host the URLs name, and
+// the id and the value of an account token the edge mints, flagged secret,
+// which reaches the Worker as a secret_text binding. The token allows Workers R2 Storage
 // Bucket Item Write on that bucket alone, under its name,
 // `<stack>-<env>-<caller>-<bucket>` with the member's parameters: read and
 // write of the bucket's objects, and nothing of the bucket or any other.
@@ -266,7 +300,20 @@ func connectR2(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	v := targetValuesOf(ctx.Environment.Values)
 	token := bucketTokenID(from.Name, to.Name)
-	resources := join(`{"`+R2BucketScope+".", v.accountID, "_", r2Jurisdiction, "_", to.Address, `":"*"}`)
+	jurisdiction := bucketJurisdiction(to)
+	scope := jurisdiction
+	if scope == "" {
+		scope = defaultJurisdiction
+	}
+	resources := join(`{"`+R2BucketScope+".", v.accountID, "_", scope, "_", to.Address, `":"*"}`)
+	credential := &ir.R2Credential{
+		Account:     v.accountID,
+		AccessKeyID: ir.Output{Resource: token, Name: "id"},
+		Token:       ir.Output{Resource: token, Name: "value"},
+	}
+	if jurisdiction != "" {
+		credential.Jurisdiction = jurisdiction
+	}
 	return registry.Connected{
 		Resources: []*ir.Resource{{
 			ID:    token,
@@ -285,11 +332,7 @@ func connectR2(ctx registry.ConnectorContext) (registry.Connected, error) {
 		Value: ir.BucketConnection{
 			Name:    to.Address,
 			Binding: ctx.Edge.Field,
-			R2: &ir.R2Credential{
-				Account:     v.accountID,
-				AccessKeyID: ir.Output{Resource: token, Name: "id"},
-				Token:       ir.Output{Resource: token, Name: "value"},
-			},
+			R2:      credential,
 		},
 	}, nil
 }
@@ -384,7 +427,8 @@ func (p destroyPreparer) PrepareDestroy(ctx context.Context, run registry.Run, l
 	if env == nil || env.Resources == nil || len(env.Parameters) == 0 {
 		return nil
 	}
-	var buckets []string
+	type bucket struct{ name, jurisdiction string }
+	var buckets []bucket
 	for _, res := range env.Resources.Resources {
 		if res.Type != TypeR2Bucket || res.Inherited {
 			continue
@@ -393,7 +437,8 @@ func (p destroyPreparer) PrepareDestroy(ctx context.Context, run registry.Run, l
 		if err != nil {
 			return fmt.Errorf("cloudflare: bucket %s: %w", res.ID, err)
 		}
-		buckets = append(buckets, name)
+		jurisdiction, _ := res.Properties["jurisdiction"].(string)
+		buckets = append(buckets, bucket{name, jurisdiction})
 	}
 	if len(buckets) == 0 {
 		return nil
@@ -409,21 +454,27 @@ func (p destroyPreparer) PrepareDestroy(ctx context.Context, run registry.Run, l
 	if log == nil {
 		log = io.Discard
 	}
-	for _, bucket := range buckets {
-		keys, err := cloud.ListObjects(ctx, v.accountID, bucket, "")
+	for _, b := range buckets {
+		// A bucket in a jurisdiction is reached at that jurisdiction's S3
+		// host (D64, amended).
+		in, err := cloudIn(cloud, b.jurisdiction)
+		if err != nil {
+			return err
+		}
+		keys, err := in.ListObjects(ctx, v.accountID, b.name, "")
 		if errors.Is(err, fs.ErrNotExist) {
-			_, _ = fmt.Fprintf(log, "  bucket %s: gone\n", bucket)
+			_, _ = fmt.Fprintf(log, "  bucket %s: gone\n", b.name)
 			continue
 		}
 		if err != nil {
 			return err
 		}
 		for _, key := range keys {
-			if err := cloud.DeleteObject(ctx, v.accountID, bucket, key); err != nil {
+			if err := in.DeleteObject(ctx, v.accountID, b.name, key); err != nil {
 				return err
 			}
 		}
-		_, _ = fmt.Fprintf(log, "  bucket %s: emptied, %d objects deleted\n", bucket, len(keys))
+		_, _ = fmt.Fprintf(log, "  bucket %s: emptied, %d objects deleted\n", b.name, len(keys))
 	}
 	return nil
 }
