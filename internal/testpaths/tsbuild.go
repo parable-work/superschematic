@@ -3,6 +3,7 @@ package testpaths
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,9 +27,9 @@ import (
 // such a package only through BuildTypeScriptPackage or BuildHTTPRuntime;
 // never run its build or install directly from a test.
 
-// stampFile records, in a package's node_modules, the inputs its last
-// build through BuildTypeScriptPackage read and the dist/ it wrote; a bun
-// install that starts node_modules over drops it.
+// stampFile records, in a package's node_modules, what its last build
+// through BuildTypeScriptPackage read and what it left (see buildOnce); a
+// bun install that starts node_modules over drops it.
 const stampFile = ".superschematic-build-stamp"
 
 // BuildHTTPRuntime builds the HTTP runtime's TypeScript package, whose
@@ -45,18 +46,25 @@ func BuildHTTPRuntime(t testing.TB, bun string, paths naming.LocalPaths) {
 
 // BuildTypeScriptPackage runs `bun install --frozen-lockfile` and `bun run
 // build` in dir, a TypeScript package of this checkout other tests read,
-// holding a lock on dir that other test processes take too, and does
-// nothing when the package's sources, manifest and lock file are what its
-// last build here read and its dist/ is still what that build wrote. So of
+// holding a lock on dir that other test processes take too. It does
+// nothing when the build would read what the last build here read and the
+// package still holds what that build left (buildOnce lists both). So of
 // the parallel packages of a `go test ./...` that need it, the first builds
 // it and the rest wait for that build and reuse it, and none rebuilds it
 // under another's feet. An install that fails (likely offline) skips the
 // test, or fails it under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1; a build that
 // fails fails it.
-func BuildTypeScriptPackage(t testing.TB, bun, dir string) {
+//
+// copies names each package of this checkout whose dist/ dir's build
+// copies into its node_modules, as the engine's link-local-deps copies the
+// HTTP runtime's: a rebuild of one makes dir's next build run. A package
+// linked by a symlink needs no entry, and one copied but not named here
+// goes stale when it is rebuilt.
+func BuildTypeScriptPackage(t testing.TB, bun, dir string, copies ...string) {
 	t.Helper()
 	installFailed := false
-	_, err := buildOnce(dir, func() error {
+	in := buildInputs{tools: toolVersions(bun), copies: copies}
+	_, err := buildOnce(dir, in, func() error {
 		install := exec.Command(bun, "install", "--frozen-lockfile")
 		install.Dir = dir
 		if out, err := install.CombinedOutput(); err != nil {
@@ -79,26 +87,59 @@ func BuildTypeScriptPackage(t testing.TB, bun, dir string) {
 	}
 }
 
+// toolVersions is bun's and node's versions, which run the build: bun the
+// install and the script, node the scripts it calls and tsc.
+func toolVersions(bun string) string {
+	version := func(name string, args ...string) string {
+		out, err := exec.Command(name, args...).Output()
+		if err != nil {
+			return name + ": " + err.Error()
+		}
+		return name + " " + strings.TrimSpace(string(out))
+	}
+	return version(bun, "--version") + "\n" + version("node", "--version")
+}
+
+// buildInputs is what a build reads besides the package's own files.
+type buildInputs struct {
+	// tools names the versions of the tools that run the build.
+	tools string
+	// copies are the packages whose dist/ the build copies in.
+	copies []string
+}
+
 // buildOnce runs build under dir's cross-process lock unless dir's stamp
 // says it is current, and stamps dir after a build that succeeds. It
 // reports whether it ran build.
-func buildOnce(dir string, build func() error) (bool, error) {
+//
+// The stamp holds what the build read: the package's manifest, lock file,
+// tsconfigs, src/ and scripts/, the files outside it its build script
+// names (scripts/build-dist.mjs), in.tools, and each of in.copies' dist/.
+// And what it left: dist/, by each file's path, size and modification
+// time, which another build (make ts, a developer's bun run build) that
+// changes it changes, and node_modules' symlinks (link-local-deps'), by
+// name, target and whether the target is there, which a bun install that
+// drops one changes.
+func buildOnce(dir string, in buildInputs, build func() error) (bool, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return false, err
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
 	}
 	unlock, err := lockDir(dir)
 	if err != nil {
 		return false, err
 	}
 	defer unlock()
-	inputs, err := inputsDigest(dir)
+	inputs, err := inputsDigest(dir, in)
 	if err != nil {
 		return false, err
 	}
 	stamp := filepath.Join(dir, "node_modules", stampFile)
 	if recorded, err := os.ReadFile(stamp); err == nil {
-		if output, err := distDigest(dir); err == nil && string(recorded) == inputs+"\n"+output+"\n" {
+		if output, err := outputDigest(dir); err == nil && string(recorded) == inputs+"\n"+output+"\n" {
 			return false, nil
 		}
 	}
@@ -107,7 +148,7 @@ func buildOnce(dir string, build func() error) (bool, error) {
 	if err := build(); err != nil {
 		return true, err
 	}
-	output, err := distDigest(dir)
+	output, err := outputDigest(dir)
 	if err != nil {
 		return true, fmt.Errorf("after building %s: %w", dir, err)
 	}
@@ -117,17 +158,26 @@ func buildOnce(dir string, build func() error) (bool, error) {
 	return true, os.WriteFile(stamp, []byte(inputs+"\n"+output+"\n"), 0o644)
 }
 
-// lockPath is dir's lock file: in the temporary directory, which every
-// test process of a run shares, rather than in dir, whose node_modules a
-// bun install may start over under the lock.
-func lockPath(dir string) string {
+// lockPath is dir's lock file, keyed by its resolved path. It is under the
+// user's cache directory, which every process of the user's shares
+// whatever its TMPDIR, rather than in dir, whose node_modules a bun install
+// may start over under the lock; the temporary directory stands in where
+// there is no cache directory.
+func lockPath(dir string) (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	locks := filepath.Join(base, "superschematic", "build-locks")
+	if err := os.MkdirAll(locks, 0o755); err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256([]byte(dir))
-	return filepath.Join(os.TempDir(), "superschematic-build-"+hex.EncodeToString(sum[:8])+".lock")
+	return filepath.Join(locks, hex.EncodeToString(sum[:8])+".lock"), nil
 }
 
-// inputsDigest hashes what a package's build reads from it: its manifest,
-// lock file, tsconfigs, and everything under src/ and scripts/.
-func inputsDigest(dir string) (string, error) {
+// inputsDigest hashes what a package's build reads (see buildOnce).
+func inputsDigest(dir string, in buildInputs) (string, error) {
 	h := sha256.New()
 	files := []string{"package.json", "bun.lock"}
 	configs, err := filepath.Glob(filepath.Join(dir, "tsconfig*.json"))
@@ -153,7 +203,13 @@ func inputsDigest(dir string) (string, error) {
 			return "", err
 		}
 	}
+	scripts, err := buildScriptFiles(dir)
+	if err != nil {
+		return "", err
+	}
+	files = append(files, scripts...)
 	slices.Sort(files)
+	files = slices.Compact(files)
 	for _, rel := range files {
 		f, err := os.Open(filepath.Join(dir, rel))
 		if errors.Is(err, fs.ErrNotExist) {
@@ -170,13 +226,88 @@ func inputsDigest(dir string) (string, error) {
 		}
 		h.Write([]byte{0})
 	}
+	_, _ = fmt.Fprintf(h, "tools\x00%s\x00", in.tools)
+	for _, dep := range in.copies {
+		digest, err := distDigest(dep)
+		if err != nil {
+			digest = "missing: " + err.Error()
+		}
+		_, _ = fmt.Fprintf(h, "copy\x00%s\x00%s\x00", dep, digest)
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// buildScriptFiles is the script files package.json's build script names
+// by a path relative to dir, such as ../../../scripts/build-dist.mjs.
+func buildScriptFiles(dir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("%s/package.json: %w", dir, err)
+	}
+	var files []string
+	for _, word := range strings.Fields(manifest.Scripts["build"]) {
+		word = strings.Trim(word, `"'`)
+		switch filepath.Ext(word) {
+		case ".mjs", ".cjs", ".js":
+		default:
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, word)); err == nil && info.Mode().IsRegular() {
+			files = append(files, filepath.Clean(word))
+		}
+	}
+	return files, nil
+}
+
+// outputDigest fingerprints what a build leaves (see buildOnce).
+func outputDigest(dir string) (string, error) {
+	dist, err := distDigest(dir)
+	if err != nil {
+		return "", err
+	}
+	return dist + " " + linksDigest(dir), nil
+}
+
+// linksDigest fingerprints the symlinks in dir's node_modules, scoped ones
+// included: each one's name, target and whether the target is there.
+func linksDigest(dir string) string {
+	var lines []string
+	modules := filepath.Join(dir, "node_modules")
+	var scan func(sub string)
+	scan = func(sub string) {
+		entries, err := os.ReadDir(filepath.Join(modules, sub))
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			name := filepath.Join(sub, e.Name())
+			path := filepath.Join(modules, name)
+			switch {
+			case e.Type()&fs.ModeSymlink != 0:
+				target, _ := os.Readlink(path)
+				_, err := os.Stat(path)
+				lines = append(lines, fmt.Sprintf("%s -> %s %t", filepath.ToSlash(name), target, err == nil))
+			case e.IsDir() && sub == "" && strings.HasPrefix(e.Name(), "@"):
+				scan(e.Name())
+			}
+		}
+	}
+	scan("")
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
 // distDigest fingerprints dir's dist/ by each file's path, size and
-// modification time, which any other build of the package (make ts, a
-// developer's bun run build) changes. It is an error for dist/ to be
-// missing or empty.
+// modification time. It is an error for dist/ to be missing or empty.
 func distDigest(dir string) (string, error) {
 	var lines []string
 	root := filepath.Join(dir, "dist")

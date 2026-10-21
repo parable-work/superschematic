@@ -33,6 +33,8 @@ func TestIgnoreMatcher(t *testing.T) {
 		{[]string{"**/node_modules"}, "node_modules", true},
 		{[]string{"**/node_modules"}, "x/y/node_modules/z.js", true},
 		{[]string{"**/node_modules"}, "x/node_modules_old/z.js", false},
+		{[]string{"*", "!rt", "**/.dist-build-*"}, "rt/.dist-build-1-2/index.js", true},
+		{[]string{"*", "!rt", "**/.dist-build-*"}, "rt/dist/index.js", false},
 		{[]string{"a/*.go"}, "a/x.go", true},
 		{[]string{"a/*.go"}, "a/b/x.go", false},
 		{[]string{"a/**/b"}, "a/b", true},

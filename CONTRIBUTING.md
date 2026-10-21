@@ -255,28 +255,38 @@ parallel, and they share this checkout's built runtime packages: the HTTP
 runtime's and the engine's `dist/`, their `node_modules`, and the engine's
 addon in `runtime/engine/typescript/native/`. A test that needs the HTTP
 runtime built calls `testpaths.BuildHTTPRuntime` (or, for another package,
-`testpaths.BuildTypeScriptPackage`). It holds a lock on the package that
-every test process takes (`flock` on a file in the temporary directory),
-and skips the build when the package's sources, manifest and lock file are
-what its last build there read and its `dist/` is still what that build
-wrote. So the first test to need it builds it, the others wait for it, and
-none rebuilds it under another's feet. A test never runs `bun install` or
-`bun run build` in a runtime package itself, and never builds the engine's
-package or addon in place: it checks they are built and skips, or fails
-under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, as `requireEngineTypeScript`
-does, and builds a project's addon into a directory of its own
-(`scripts/engine-napi.sh --crate <dir> --out <dir>`).
+`testpaths.BuildTypeScriptPackage`, naming each package whose `dist/` its
+build copies in, as the engine's copies the HTTP runtime's). It holds a
+lock on the package that every test process takes (`flock` on a file
+under the user's cache directory, keyed by the package's resolved path),
+and skips the build when what the build would read is what the last build
+there read and the package still holds what that build left. The inputs
+are the package's sources, manifest, lock file and tsconfigs, the scripts
+its build script names, the bun and node versions, and the copied
+packages' `dist/`. The outputs are its `dist/` and its `node_modules`
+symlinks. So the first test to need it builds it, the others wait for it,
+and none rebuilds it under another's feet. A test never runs `bun install`
+or `bun run build` in a runtime package itself, and never builds the
+engine's package or addon in place: it checks they are built and skips, or
+fails under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, as
+`requireEngineTypeScript` does, and builds a project's addon into a
+directory of its own (`scripts/engine-napi.sh --crate <dir> --out <dir>`).
 
-The builds themselves never leave a reader without the files either. The
-HTTP runtime's and the engine's `bun run build` compile through
-`scripts/build-dist.mjs`, which writes into a staging directory and then
-renames each file into `dist/`, so `make ts`, CI or a build in another
-terminal never leaves `dist/` missing while a test reads it; it can leave
-one build's files beside another's for a moment, which is why the tests
-still build through the lock. `scripts/engine-napi.sh` likewise renames the
-new addon over the old one in `native/`. `internal/testpaths`'s
-`TestBuildDistNeverLeavesDistMissing` and `TestBuildOnceAcrossProcesses`
-show both.
+A build run outside the tests (`make ts`, CI, another terminal) never
+removes what a test reads, but it does not swap it in as a whole either.
+The HTTP runtime's, the engine's and the work queue's `bun run build`
+compile through `scripts/build-dist.mjs` into a `.dist-build-*` staging
+directory, then rename each changed file into `dist/` and remove the files
+the build no longer writes. So `dist/` is never missing, and no file in it
+is ever missing or half written, and a rebuild with the same output
+changes nothing. But while a build whose output changed moves its files
+in, a reader that holds no lock can load one build's module beside
+another's. The script's header says why it does not swap the whole
+directory. `scripts/engine-napi.sh` likewise renames the new addon over
+the old one in `native/`. `internal/testpaths`'s
+`TestBuildDistNeverLeavesDistMissing`,
+`TestBuildDistLeavesAnIdenticalRebuildAlone` and
+`TestBuildOnceAcrossProcesses` show this.
 
 ### Names come from the naming file
 
