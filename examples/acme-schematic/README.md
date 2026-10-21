@@ -855,7 +855,12 @@ well.
 A TypeScript server of this project loads the same addon, the engine
 crate's `napi/` member, in place of the core's (the engine option
 `addon`, or `SUPERSCHEMATIC_ENGINE_ADDON`); a Go server links the `ffi/`
-member's archive, and a Rust server the library.
+member's archive, and a Rust server the library. A generated server in a
+stack needs none of it set by hand: its image's engine stage and `stack
+dev` build the member it takes and hand it over, the archive through the
+build's `CGO_LDFLAGS` and the addon through `SUPERSCHEMATIC_ENGINE_ADDON`
+(`TestStackDevBuildsTheProjectsEngine` runs a Go, a Rust and a
+TypeScript server on acme.Rating so).
 
 ## A command
 

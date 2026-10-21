@@ -864,6 +864,13 @@ roots, so they build from one lock file:
 | `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
 | `napi/` | `<crate>-napi` | The engine's Node-API addon over `behaviors()` (`superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors)`, the twin of `export_engine_c_abi!`, the addon's library at `[paths] engine_napi_rust`), a cdylib a TypeScript server loads in place of the core's addon: `scripts/engine-napi.sh --crate <crate>/napi --out <dir>` prints the `.node` file, which the engine option `addon` or `SUPERSCHEMATIC_ENGINE_ADDON` names. An engine registers the core's behaviors when it opens, then each other one its options' `behaviors` name. Node-API symbols resolve only when Node.js or Bun loads it, so it has no Rust test; acme's smoke loads it in Node.js and rates a product on it |
 
+A generated Go or TypeScript server, job, worker or runner on such a
+database takes its member without anything set by hand: the entrypoint's
+`engine-project.json` names the crate and the member, which its image's
+engine stage and `stack dev` build, `stack dev` handing the archive to the
+Go build's `CGO_LDFLAGS` and the addon to the process's
+`SUPERSCHEMATIC_ENGINE_ADDON` (D58, amended).
+
 A schema that composes the
 core's behaviors alone gets no crate: the release's engine runs them. An
 extension behavior that names no crate, or one the project does not hold,

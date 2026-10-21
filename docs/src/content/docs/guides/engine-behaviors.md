@@ -500,11 +500,16 @@ const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', 
 `openEngine({ path, ... })` opens the same addon on a SQLite file.
 
 A generated Go server and runner on the database link it so: the
-checkout's Dockerfile builds the `ffi` member in its engine stage, and
-the generated CI's `check` builds it before it compiles the server. A
-generated TypeScript server and runner load the `napi` member's addon:
-the checkout's Dockerfile builds it in its engine stage and names it with
-`SUPERSCHEMATIC_ENGINE_ADDON`.
+checkout's Dockerfile builds the `ffi` member in its engine stage, the
+generated CI's `check` builds it before it compiles the server, and
+`stack dev` builds it before it builds the server and puts its directory
+first in the build's `CGO_LDFLAGS`. A generated TypeScript server and
+runner load the `napi` member's addon: the checkout's Dockerfile builds it
+in its engine stage and names it with `SUPERSCHEMATIC_ENGINE_ADDON`, and
+`stack dev` builds it and names it so in the server's environment. The
+commands above are for a host written by hand; a generated one needs none
+of them. Each needs the `[paths]` engine keys to name a checkout of the
+engine's crates, since a release ships none yet.
 
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an

@@ -964,6 +964,11 @@ engine from that crate its own way
   the file it wrote, and name that file with the engine option `addon`
   or, for every engine the process opens, `SUPERSCHEMATIC_ENGINE_ADDON`.
 
+A generated server does this itself: a stack's Dockerfile builds the
+member its language takes in its engine stage, and `stack dev` builds it
+before it builds or starts the server, so the commands above are for a
+host you write by hand.
+
 The host runs your behavior beside the core's: a Rust host passes the
 set of both, as the engine crate's `behaviors()` is, and a TypeScript
 host names yours in `behaviors`, which the addon registers after the
