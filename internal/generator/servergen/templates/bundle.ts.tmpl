@@ -22,7 +22,8 @@
 // which it reads from the build's metafile, since Bun's browser target
 // replaces a node: module with a polyfill or an empty one that leaves no
 // trace in main.js: an import of a node: module other than
-// node:async_hooks, or of a bun: module, a WebAssembly module other than
+// node:async_hooks, a Node builtin named without node: (async_hooks too,
+// which only its node: name keeps external), a bun: module, a WebAssembly module other than
 // superscalar's, and a use of Bun's global.
 
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -93,9 +94,13 @@ for (const [input, { imports = [] }] of Object.entries(result.metafile?.inputs ?
   if (input.startsWith('node:')) continue;
   const importer = resolve(process.cwd(), input);
   const name = relative(import.meta.dir, importer);
-  for (const { path } of imports) {
-    if (path.startsWith('node:') && path !== ASYNC_HOOKS) {
-      problems.push(`${name} imports ${path}, which a Worker has only under nodejs_compat`);
+  for (const { path, original } of imports as { path: string; original?: string }[]) {
+    if (path === ASYNC_HOOKS && original !== undefined && !original.startsWith('node:')) {
+      // Bun names a bare builtin by its node: name, and swaps the bare
+      // import, which no external pattern keeps, for an empty module.
+      problems.push(`${name} imports ${original} without node:, which the bundle swaps for an empty module; import ${ASYNC_HOOKS}`);
+    } else if (path.startsWith('node:') && path !== ASYNC_HOOKS) {
+      problems.push(`${name} imports ${original ?? path}${original && original !== path ? ` (${path})` : ''}, which a Worker has only under nodejs_compat`);
     } else if (path.startsWith('bun:')) {
       problems.push(`${name} imports ${path}, which only Bun has`);
     } else if (path.endsWith('.wasm')) {

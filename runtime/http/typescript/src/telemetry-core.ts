@@ -192,7 +192,7 @@ export function installTelemetry(provider: TracerProvider, contextManager: Conte
         kind: SpanKind.CLIENT,
         attributes: {
           'http.request.method': method,
-          'url.full': url.href,
+          'url.full': spanURL(url),
           'server.address': url.hostname,
           ...(url.port ? { 'server.port': Number(url.port) } : {}),
         },
@@ -231,6 +231,31 @@ export function installTelemetry(provider: TracerProvider, contextManager: Conte
         span => settle(span, handle)
       ),
   };
+}
+
+/**
+ * The URL a client span records as url.full: the call's, with no userinfo,
+ * query or fragment, which may carry a credential or personal data.
+ */
+export function spanURL(url: URL): string {
+  const out = new URL(url.href);
+  out.username = '';
+  out.password = '';
+  out.search = '';
+  out.hash = '';
+  return out.href;
+}
+
+/**
+ * An endpoint as a log line names it: its origin and path, with no
+ * userinfo, query or fragment, which may carry the collector's credential.
+ */
+export function loggedEndpoint(endpoint: string): string {
+  try {
+    return spanURL(new URL(endpoint));
+  } catch {
+    return '(no URL)';
+  }
 }
 
 /** Removes the globals installTelemetry set. */

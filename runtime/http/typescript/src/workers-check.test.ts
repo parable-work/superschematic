@@ -36,6 +36,15 @@ describe('workers-check', () => {
     expect(code).toBe(0);
   });
 
+  test('refuses async_hooks named without node:, which the bundle would empty', () => {
+    const { code, output } = run('bare-als.ts', "import { AsyncLocalStorage } from 'async_hooks';\nexport const store = new AsyncLocalStorage<string>();\n");
+    expect(code).toBe(1);
+    // Bun refuses the build itself, as a browser build of a builtin with no
+    // polyfill; the check's own refusal stands behind it.
+    expect(output).toMatch(/async_hooks/u);
+    expect(output).not.toContain('bundles for workerd');
+  });
+
   test('refuses a Node built-in named without node:', () => {
     const { code, output } = run('crypto.ts', "import { createHash } from 'crypto';\nexport const hash = () => createHash('sha256');\n");
     expect(code).toBe(1);

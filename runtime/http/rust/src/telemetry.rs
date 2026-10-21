@@ -791,6 +791,18 @@ pub fn transport() -> Option<Transport> {
     Some(Arc::new(|client, request| Box::pin(send(client, request))))
 }
 
+/// The URL a client span records as `url.full`: the request's, with no
+/// userinfo, query or fragment, which may carry a credential or personal
+/// data.
+fn span_url(url: &reqwest::Url) -> String {
+    let mut url = url.clone();
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
 /// Sends `request` with `client` in a client span.
 pub async fn send(
     client: reqwest::Client,
@@ -800,7 +812,7 @@ pub async fn send(
     let span =
         tracing::info_span!(target: TARGET, "call", otel.name = %method, otel.kind = "client");
     span.set_attribute("http.request.method", method);
-    span.set_attribute("url.full", request.url().to_string());
+    span.set_attribute("url.full", span_url(request.url()));
     if let Some(host) = request.url().host_str() {
         span.set_attribute("server.address", host.to_string());
     }
@@ -876,6 +888,19 @@ pub(crate) fn message_failed(span: &tracing::Span, cause: &str) {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
+
+    /// A client span's `url.full` holds no userinfo, query or fragment.
+    #[test]
+    fn a_client_span_records_no_userinfo_or_query() {
+        let url = reqwest::Url::parse(
+            "https://ada:secret@pricing.example:8443/api/prices/tea?coupon=x#top",
+        )
+        .unwrap();
+        assert_eq!(
+            span_url(&url),
+            "https://pricing.example:8443/api/prices/tea"
+        );
+    }
 
     /// Export sends the account's access token to an `https` endpoint under
     /// `googleapis.com` alone, never over `http`, and not when a headers variable names an

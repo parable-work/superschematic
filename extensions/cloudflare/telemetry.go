@@ -53,12 +53,16 @@ var telemetryVariables = []string{
 	"OTEL_TRACES_SAMPLER_ARG",
 }
 
-// telemetryValues is the schema of an environment's `telemetry` value.
+// telemetryValues is the schema of an environment's `telemetry` value. The
+// endpoint is an https URL with no userinfo, query or fragment: the
+// bindings are plain text, which the dashboard and Workers Logs show, and a
+// span leaves the account in clear over http. http is taken for a
+// collector on loopback alone, as under a local workerd.
 const telemetryValues = `{
       "type": "object",
       "required": ["endpoint"],
       "properties": {
-        "endpoint": {"type": "string", "pattern": "^https?://[^/?#\\s,]+(/[^?#\\s,]*)?$"},
+        "endpoint": {"type": "string", "pattern": "^(https://[^/?#@\\s,]+|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)(/[^?#\\s,]*)?$"},
         "sampleRatio": {"type": "number", "minimum": 0, "maximum": 1}
       },
       "additionalProperties": false

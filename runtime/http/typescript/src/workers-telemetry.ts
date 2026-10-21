@@ -45,6 +45,7 @@ import {
   defaultAttributes,
   installTelemetry,
   logDiagnostics,
+  loggedEndpoint,
   OTLP_PROTOCOL,
   readConfig,
   readPairs,
@@ -113,7 +114,7 @@ export function startWorkersTelemetry(env: Readonly<Record<string, unknown>>, de
     spanProcessors: [processor],
   });
   const hooks = installTelemetry(provider, new StorageContextManager(), config);
-  logger?.info('exporting traces', { endpoint: config.endpoint, protocol: OTLP_PROTOCOL });
+  logger?.info('exporting traces', { endpoint: loggedEndpoint(config.endpoint), protocol: OTLP_PROTOCOL });
   return { enabled: true, middleware: hooks.middleware, traced: hooks.traced, job: hooks.job, flush: () => processor.forceFlush() };
 }
 

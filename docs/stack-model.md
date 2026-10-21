@@ -5348,7 +5348,9 @@ export abstract class Staging {}
     secret binding names.
 - **`telemetry`** is optional: `{ endpoint }` turns trace export on for
   each server and job, to that OTLP/HTTP collector, with `sampleRatio`
-  the share of traces sampled (section 18.5).
+  the share of traces sampled (section 18.5). The endpoint is an `https`
+  URL with no userinfo, query or fragment, or `http` to loopback, since
+  the bindings are plain text.
 - **`domain`** is optional. With a domain, `dns` must be `cloudflare`, the
   target's default DNS platform, and its zone must be in the same account.
 - **Secrets** come through `stack secrets set`.
@@ -5810,7 +5812,8 @@ sets (section 18.1); off, every hook only calls through. On:
 - the server's Hono app runs the middleware first, a server span per
   request but the probes; each client's transport, a service binding's or
   the in-process app's, is traced, a client span that carries
-  `traceparent`; and a job's try runs its method in a span named after
+  `traceparent` and records `url.full` with no userinfo, query or
+  fragment; and a job's try runs its method in a span named after
   its `@job` class;
 - an isolate may not run I/O outside a request, so nothing exports on a
   timer: ended spans wait in the isolate, at most 2048, and `flush()`
@@ -5987,7 +5990,12 @@ The `cloudflare.r2` platform (D64, amended):
   objects under it, and the R2 credential names it (`<FIELD>_R2_JURISDICTION`),
   so the runtime signs URLs for the jurisdiction's S3 host,
   `<account>.<jurisdiction>.r2.cloudflarestorage.com`. A jurisdiction beside
-  a location hint is refused. There is no `versioning`, which R2 lacks.
+  a location hint is refused. A bucket's jurisdiction does not change in
+  place: the provider replaces the bucket, which `stack plan` lists as a
+  `replace`, and R2 deletes only an empty bucket, so the replace of one
+  that holds objects stops the deploy with both buckets kept; the hazard
+  gate covers migration plans alone and does not stop on it first. There
+  is no `versioning`, which R2 lacks.
 - **The token's permission group** is Workers R2 Storage Bucket Item
   Write, `2efd5506f9c8494dacb1fa10a3e7d5b6`, the id Cloudflare publishes
   for every account. Resolution calls nothing, so the connector names the
@@ -6112,10 +6120,13 @@ and for a job that runs on every deploy:
    (`POST /accounts/<id>/workflows/<name>/instances`) with the run's
    token, which `Workers Scripts Write` covers, its payload
    `{"bundle": "<hex>"}`, the bundle the deploy manifest records;
-2. the instance's run compares that digest with the version's
-   `SUPERSCHEMATIC_BUNDLE` binding, which the deploy pins, and fails naming
+2. the instance's run checks, in a step of its own, that the payload names
+   a digest and that it is the version's `SUPERSCHEMATIC_BUNDLE` binding,
+   which the deploy pins, and fails for good (`NonRetryableError`) naming
    both when they differ: a deploy under way, or a version made outside
-   one, as gcp's runner refuses an image the manifest does not record;
+   one, as gcp's runner refuses an image the manifest does not record.
+   Cloudflare keeps the step's result, so an instance a deploy interrupts
+   is not checked again against the next bundle;
 3. it runs the job's tries within one step, which retries nothing itself
    and may take every try's timeout and a minute, as a firing runs them,
    each logged to Workers Logs;
@@ -6123,7 +6134,15 @@ and for a job that runs on every deploy:
    `complete`, `errored` or `terminated`, and returns the error the run
    threw, which names the job and its last try's error, as gcp's runner
    returns the last try's from Cloud Logging. A Workflow that is not
-   there says to deploy first.
+   there says to deploy first;
+5. it waits at most every try's timeout, a minute for the step and five
+   minutes queued, and gives up on an instance that stays paused or
+   unknown for 30 reads or whose reads keep failing: then, and when the
+   run is cancelled, it terminates the instance
+   (`PATCH .../instances/<id>/status`) and says so.
+
+The Workflow is named as the Worker, with the stack and the environment,
+since a Workflow's PUT is an upsert that would repoint another stack's.
 
 A Workflow runs the Worker's current deployment, so a run takes the
 version the last rollout deployed; the bundle check makes a run that

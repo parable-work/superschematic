@@ -48,6 +48,7 @@ import {
   FLUSH_TIMEOUT_MS,
   installTelemetry,
   logDiagnostics,
+  loggedEndpoint,
   OTLP_PROTOCOL,
   readConfig,
   uninstallTelemetry,
@@ -99,7 +100,7 @@ export function startTelemetry(defaults: TelemetryDefaults): Telemetry {
     spanProcessors: [new BatchSpanProcessor({ exporter: new OTLPTraceExporter(google ? { headers: googleAuthHeaders({}, logger) } : {}) })],
   });
   const hooks = installTelemetry(provider, new AsyncLocalStorageContextManager(), config);
-  logger?.info('exporting traces', { endpoint: config.endpoint, protocol: OTLP_PROTOCOL, googleAuth: google });
+  logger?.info('exporting traces', { endpoint: loggedEndpoint(config.endpoint), protocol: OTLP_PROTOCOL, googleAuth: google });
   let stopped = false;
   return {
     enabled: true,
