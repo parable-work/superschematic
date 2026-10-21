@@ -146,25 +146,50 @@ export type EngineOutputConfig = {
 /**
  * The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired.
  */
-export type EngineRetention = {
+export type EngineRetention = (EngineRetentionOptions & { readonly maxAgeMs: number }) | (EngineRetentionOptions & { readonly maxEvents: number });
+
+/**
+ * The members of an engine's retention, each an integer in the engine's range.
+ */
+export type EngineRetentionOptions = {
   /**
-   * Events older than this many milliseconds, by when they were written, are pruned: an integer from 1.
+   * Events older than this many milliseconds, by when they were written, are pruned.
+   *
+   * @asType integer
+   * @minimum 1
+   * @maximum 9007199254740991
    */
   readonly maxAgeMs?: number;
   /**
-   * A namespace's events past its newest this many are pruned: an integer from 1.
+   * A namespace's events past its newest this many are pruned.
+   *
+   * @asType integer
+   * @minimum 1
+   * @maximum 9007199254740991
    */
   readonly maxEvents?: number;
   /**
-   * The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds events retention lets go, in milliseconds. Unset, it holds them until it advances.
+   * The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds events retention lets go, in milliseconds. Unset, one that has run holds them until it advances, and one that has not holds none.
+   *
+   * @asType integer
+   * @minimum 1
+   * @maximum 9007199254740991
    */
   readonly maxHoldMs?: number;
   /**
-   * How often the runner prunes, in milliseconds: an integer from 1000. Unset is 60000.
+   * How often the runner prunes, in milliseconds. Unset is 60000.
+   *
+   * @asType integer
+   * @minimum 1000
+   * @maximum 9007199254740991
    */
   readonly everyMs?: number;
   /**
-   * Events pruned in one transaction: an integer from 1 to 10000. Unset is 1000.
+   * Events pruned in one transaction. Unset is 1000.
+   *
+   * @asType integer
+   * @minimum 1
+   * @maximum 10000
    */
   readonly batchSize?: number;
 };
