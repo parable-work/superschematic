@@ -406,7 +406,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	validatedTypes := append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...)
-	if len(codegenScalars) > 0 || len(validatedTypes) > 0 || len(output.Enums) > 0 {
+	if len(codegenScalars) > 0 || len(validatedTypes) > 0 || len(output.Enums) > 0 || len(output.Unions) > 0 {
 		output.Validators = buildValidators(validatorInputs{
 			schema:          schema,
 			scalars:         codegenScalars,
@@ -414,6 +414,8 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 			localEnums:      output.Enums,
 			importedEnums:   imported.enums,
 			importedObjects: imported.objectValidators,
+			unions:          output.Unions,
+			importedUnions:  imported.unionValidators,
 			enumLookup:      enumLookup,
 			naming:          opts.Naming,
 		})

@@ -29,8 +29,12 @@ const (
 	fieldSelf = "self"
 	// fieldPrimitive is a builtin string, number or boolean.
 	fieldPrimitive = "primitive"
-	// fieldOther is anything else (a union, an imported object type, the
-	// object primitive): only its presence is checked, as in TypeScript.
+	// fieldUnion is a union with a validator (UnionValidator): its value is
+	// validated as the member the union picks, as in TypeScript.
+	fieldUnion = "union"
+	// fieldOther is anything else (an object type of a crate with no
+	// validators, a union one of whose members has none, the object
+	// primitive): only its presence is checked, as in TypeScript.
 	fieldOther = "other"
 )
 
@@ -52,6 +56,7 @@ type ValidatorsInfo struct {
 	Scalars []ScalarValidator
 	Enums   []EnumValidator
 	Types   []TypeValidator
+	Unions  []UnionValidator
 
 	// CallsCore is true when a scalar validator asks the scalar core for
 	// its verdict (coerce_lenient), ParsesCore when one runs a scalar's
@@ -142,6 +147,32 @@ type TypeValidator struct {
 	Patterns  []PatternStatic
 }
 
+// UnionValidator is validate_<union>, prepare_<union> and parse_<union>:
+// a union's value is validated as the member the union picks, as the
+// TypeScript validate<Union> validates it. A union gets one when every
+// member has a validator of this crate or of its dependency's.
+type UnionValidator struct {
+	Name      string
+	Fn        string
+	PickFn    string
+	PrepareFn string
+	ParseFn   string
+	RustPath  string
+	// Discriminator is the field whose value names the member, when the
+	// union dispatches by it; "" for a union serde decodes by shape.
+	Discriminator string
+	Members       []UnionMemberValidator
+}
+
+// UnionMemberValidator is one member of a UnionValidator: its variant, the
+// discriminator value that names it, and its prepare_<type>, which fills
+// its defaults and validates it.
+type UnionMemberValidator struct {
+	Variant   string
+	TagValue  string
+	PrepareFn string
+}
+
 // FieldValidator is one field's checks in validate_<type>.
 type FieldValidator struct {
 	Name string
@@ -175,7 +206,7 @@ func (f FieldValidator) HasChecks(strict bool) bool {
 		return true
 	case f.Kind == fieldScalar || f.Kind == fieldEnum || f.Kind == fieldPrimitive:
 		return true
-	case f.Kind == fieldObject || (f.Kind == fieldSelf && !strict):
+	case f.Kind == fieldObject || f.Kind == fieldUnion || (f.Kind == fieldSelf && !strict):
 		return true
 	case f.Required && !f.InternalMetadata:
 		return true
@@ -206,8 +237,13 @@ type validatorInputs struct {
 	// generates with validators, to that dependency crate's validators
 	// module, which a nested field of the type is validated with.
 	importedObjects map[string]string
-	enumLookup      codegen.EnumLookup
-	naming          naming.Naming
+	// unions are the crate's own unions, and importedUnions maps a union a
+	// dependency declares, whose crate validates it, to that crate's
+	// validators module.
+	unions         []UnionInfo
+	importedUnions map[string]string
+	enumLookup     codegen.EnumLookup
+	naming         naming.Naming
 }
 
 // buildValidators builds the validators of every scalar the schema uses,
@@ -243,6 +279,18 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 	generated := map[string]bool{}
 	for _, t := range in.types {
 		generated[t.Name] = true
+	}
+	unionFns := map[string]string{}
+	for name, module := range in.importedUnions {
+		unionFns[name] = module + "::" + validatorFnName(name)
+	}
+	for _, u := range in.unions {
+		uv, ok := buildUnionValidator(u, generated, in.importedObjects)
+		if !ok {
+			continue
+		}
+		info.Unions = append(info.Unions, uv)
+		unionFns[u.Name] = uv.Fn
 	}
 
 	for _, t := range in.types {
@@ -289,6 +337,9 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 				// (D14, amended).
 				fv.Kind = fieldObject
 				fv.Nested = in.importedObjects[f.Type] + "::" + validatorFnName(f.Type)
+			case !f.IsScalar && unionFns[f.Type] != "":
+				fv.Kind = fieldUnion
+				fv.Nested = unionFns[f.Type]
 			case primitiveCheck(f) != "":
 				fv.Kind = fieldPrimitive
 				fv.Primitive = primitiveCheck(f)
@@ -323,6 +374,33 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 		info.Types = append(info.Types, tv)
 	}
 	return info
+}
+
+// buildUnionValidator builds a union's validator, or reports false when a
+// member has no prepare_<type>: neither this crate nor its dependency's
+// generates it with validators.
+func buildUnionValidator(u UnionInfo, generated map[string]bool, importedObjects map[string]string) (UnionValidator, bool) {
+	uv := UnionValidator{
+		Name:          u.Name,
+		Fn:            validatorFnName(u.Name),
+		PickFn:        "pick_" + codegen.ToSnakeCase(u.Name),
+		PrepareFn:     "prepare_" + codegen.ToSnakeCase(u.Name),
+		ParseFn:       "parse_" + codegen.ToSnakeCase(u.Name),
+		RustPath:      "crate::unions::" + u.Name,
+		Discriminator: u.Discriminator,
+	}
+	for _, m := range u.Members {
+		prepare := "prepare_" + codegen.ToSnakeCase(m.Name)
+		switch {
+		case generated[m.Name]:
+		case importedObjects[m.Name] != "":
+			prepare = importedObjects[m.Name] + "::" + prepare
+		default:
+			return UnionValidator{}, false
+		}
+		uv.Members = append(uv.Members, UnionMemberValidator{Variant: m.Name, TagValue: m.TagValue, PrepareFn: prepare})
+	}
+	return uv, len(uv.Members) > 0
 }
 
 // buildScalarValidator ports tsgen's validator_scalar.tmpl for one scalar.

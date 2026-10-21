@@ -285,6 +285,75 @@ pub fn {{.ParseFn}}(value: Value, unknown_fields: rt::UnknownFields) -> Result<{
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 {{- end}}
+{{- if .Validators.Unions}}
+
+/// A member's `prepare_<type>`, which a union's validator picks.
+type MemberPrepare = fn(Value, rt::UnknownFields) -> Result<Value, rt::ParseError>;
+{{- end}}
+{{- range .Validators.Unions}}
+{{- $union := .}}
+
+/// The `prepare_<type>` of the member a `{{.Name}}` value is, as its
+/// `Deserialize` picks it:
+{{- if .Discriminator}} the member its `{{.Discriminator}}` names.
+{{- else}} the member serde decodes it as.
+{{- end}} None when no member is picked.
+fn {{.PickFn}}(value: &Value) -> Option<MemberPrepare> {
+{{- if .Discriminator}}
+    match value.get({{rustString .Discriminator}}).and_then(Value::as_str)? {
+{{- range .Members}}
+        {{rustString .TagValue}} => Some({{.PrepareFn}}),
+{{- end}}
+        _ => None,
+    }
+{{- else}}
+    match serde_json::from_value::<{{.RustPath}}>(value.clone()).ok()? {
+{{- range .Members}}
+        {{$union.RustPath}}::{{.Variant}}(_) => Some({{.PrepareFn}}),
+{{- end}}
+    }
+{{- end}}
+}
+
+/// Validates a JSON value as `{{.Name}}`: as the member the union picks,
+/// its defaults filled in, by the member's validator, so the errors are at
+/// the member's paths. A value that is not an object, or that no member
+/// reads, passes: decoding refuses it, as the Go and TypeScript decoders
+/// refuse it before any validator runs.
+pub fn {{.Fn}}(value: &Value) -> ValidationErrors {
+    if !value.is_object() {
+        return ValidationErrors::new();
+    }
+    let Some(prepare) = {{.PickFn}}(value) else {
+        return ValidationErrors::new();
+    };
+    match prepare(value.clone(), rt::UnknownFields::Allow) {
+        Err(rt::ParseError::Invalid(errors)) => errors,
+        _ => ValidationErrors::new(),
+    }
+}
+
+/// Prepares a JSON value as `{{.Name}}`: refuses a value that is not an
+/// object and validates it as its member (`{{.Fn}}`), returning the value
+/// `{{.ParseFn}}` decodes. A union's members tolerate keys they do not
+/// declare, so unknown_fields is not read.
+pub fn {{.PrepareFn}}(value: Value, _unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    if !value.is_object() {
+        return Err(rt::ParseError::NotAnObject);
+    }
+    let errors = {{.Fn}}(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `{{.Name}}`: `{{.PrepareFn}}`, then decodes it.
+pub fn {{.ParseFn}}(value: Value, unknown_fields: rt::UnknownFields) -> Result<{{.RustPath}}, rt::ParseError> {
+    let value = {{.PrepareFn}}(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+{{- end}}
 
 {{- define "fieldChecks"}}
 {{- $f := .Field}}
@@ -373,6 +442,44 @@ pub fn {{.ParseFn}}(value: Value, unknown_fields: rt::UnknownFields) -> Result<{
 {{- else}}
         if let Some(nested) = field {
             rt::check_nested(&mut errors, {{$name}}.to_owned(), nested, {{$f.Nested}});
+        }
+{{- end}}
+{{- end}}
+{{- /* tsgen: a union value is validated as the member the union picks. */}}
+{{- if eq $f.Kind "union"}}
+{{- if $f.IsMap}}
+        if let Some(entries) = rt::as_object(field) {
+            for (key, member) in entries {
+{{- if $f.IsArray}}
+                if let Some(items) = member.as_array() {
+                    for (index, item) in items.iter().enumerate() {
+                        errors.nest(rt::index_path(&rt::key_path({{$name}}, key), index), {{$f.Nested}}(item));
+                    }
+                }
+{{- else}}
+                errors.nest(rt::key_path({{$name}}, key), {{$f.Nested}}(member));
+{{- end}}
+            }
+        }
+{{- else if $f.IsArrayOfArrays}}
+        if let Some(rows) = rt::as_array(field) {
+            for (row_index, row) in rows.iter().enumerate() {
+                if let Some(items) = row.as_array() {
+                    for (index, item) in items.iter().enumerate() {
+                        errors.nest(rt::index_path(&rt::index_path({{$name}}, row_index), index), {{$f.Nested}}(item));
+                    }
+                }
+            }
+        }
+{{- else if $f.IsArray}}
+        if let Some(items) = rt::as_array(field) {
+            for (index, item) in items.iter().enumerate() {
+                errors.nest(rt::index_path({{$name}}, index), {{$f.Nested}}(item));
+            }
+        }
+{{- else}}
+        if let Some(member) = field {
+            errors.nest({{$name}}, {{$f.Nested}}(member));
         }
 {{- end}}
 {{- end}}
