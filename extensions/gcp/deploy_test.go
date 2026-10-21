@@ -79,6 +79,10 @@ type fakeCloud struct {
 	deletes    []string
 	failDelete error
 
+	// lifecycleConflicts fails that many of the next lifecycle writes as
+	// another writer's change to the bucket would.
+	lifecycleConflicts int
+
 	// numbers holds each project's number.
 	numbers map[string]string
 
@@ -293,6 +297,10 @@ func (c *fakeCloud) EnsureLifecycleRule(_ context.Context, bucket string, rule g
 	defer c.mu.Unlock()
 	if _, ok := c.buckets[bucket]; !ok {
 		return false, fmt.Errorf("no bucket %s", bucket)
+	}
+	if c.lifecycleConflicts > 0 {
+		c.lifecycleConflicts--
+		return false, fmt.Errorf("set the lifecycle of bucket %s: %w", bucket, gcp.ErrBucketChanged)
 	}
 	// A rule takes the place of the bucket's rule over the same prefixes,
 	// as Cloud Storage's does (withLifecycleRule).

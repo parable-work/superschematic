@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
@@ -43,9 +44,14 @@ func writesResult(result string) func(args []string) map[string][]byte {
 			return nil
 		}
 		i := slices.Index(args, "--result")
-		return map[string][]byte{strings.TrimPrefix(args[i+1], "gs://"): []byte(result)}
+		object := strings.TrimPrefix(args[i+1], "gs://")
+		return map[string][]byte{object + ".reserved": {}, object: []byte(result)}
 	}
 }
+
+// deployedRunner is the runner's image a deploy left the migration job
+// running, another than the one the extension names.
+var deployedRunner = migrateRepo + "@sha256:" + strings.Repeat("d", 64)
 
 // queueFixture is the gcp target over the fake cloud, with an image of
 // the runner, and its queue runner.
@@ -53,6 +59,9 @@ func queueFixture(t *testing.T) (*deployFixture, registry.QueueRunner) {
 	t.Helper()
 	f := newJobFixture(t, gcp.Extension{MigrateImage: migrateRepo + "@sha256:" + strings.Repeat("c", 64)})
 	f.cloud.buckets[stateBucket] = "us-east1"
+	// The job a deploy made, which a queue operation runs as it is.
+	f.cloud.jobs[jobKey] = gcp.JobSpec{Name: "shop-migrate", Container: "migrate", Image: deployedRunner,
+		ServiceAccount: "shop-migrator@acme-staging.iam.gserviceaccount.com", Timeout: time.Hour}
 	target, _ := f.reg.Target(gcp.Target)
 	if target.Queues == nil {
 		t.Fatal("the gcp target has no queue runner")
@@ -67,11 +76,13 @@ func queueFixture(t *testing.T) (*deployFixture, registry.QueueRunner) {
 // migrator, on the database by its Cloud SQL instance and name, with
 // --result naming an object under the stack's results by an id of 128
 // random bits, the document's too. The result comes back as the runner
-// wrote it, its version is deleted, and the log holds nothing of it. A
+// wrote it, its version and its marker's are deleted, and the log holds
+// nothing of it. A
 // second run takes another id. A member of Preview reaches its own
 // database, under its run's name.
 func TestQueueOperationOnGCP(t *testing.T) {
 	f, queues := queueFixture(t)
+	delete(f.cloud.jobs, jobKey)
 	f.ready(t)
 	f.cloud.runner = writesResult(queueResult)
 	ctx := context.Background()
@@ -104,8 +115,12 @@ func TestQueueOperationOnGCP(t *testing.T) {
 	if _, ok := f.cloud.objects[stateBucket+"/"+result]; ok {
 		t.Error("the result is left in the state bucket")
 	}
-	if len(f.cloud.deletes) != 1 || !strings.HasPrefix(f.cloud.deletes[0], "gs://"+stateBucket+"/"+result+"#") {
+	if len(f.cloud.deletes) != 2 || !strings.HasPrefix(f.cloud.deletes[0], "gs://"+stateBucket+"/"+result+"#") ||
+		!strings.HasPrefix(f.cloud.deletes[1], "gs://"+stateBucket+"/"+result+".reserved#") {
 		t.Errorf("deleted %q", f.cloud.deletes)
+	}
+	if _, ok := f.cloud.objects[stateBucket+"/"+result+".reserved"]; ok {
+		t.Error("the result's marker is left in the state bucket")
 	}
 	if rules := f.cloud.lifecycle[stateBucket]; !slices.ContainsFunc(rules, func(r gcp.LifecycleRule) bool {
 		return slices.Equal(r.Prefixes, []string{"superschematic/queue/"}) && r.AgeDays == 1
@@ -120,7 +135,7 @@ func TestQueueOperationOnGCP(t *testing.T) {
 			t.Errorf("the log holds %q:\n%s", private, log.String())
 		}
 	}
-	if !strings.Contains(log.String(), "run job shop-migrate: the queue operation of gs://"+stateBucket+"/superschematic/migrations/shop/Staging/queue/"+m[2]+".json on shop-db") {
+	if !strings.Contains(log.String(), "run job shop-migrate ("+migrateRepo+"@sha256:"+strings.Repeat("c", 64)+"): the queue operation of gs://"+stateBucket+"/superschematic/migrations/shop/Staging/queue/"+m[2]+".json on shop-db") {
 		t.Errorf("the log:\n%s", log.String())
 	}
 
@@ -212,4 +227,86 @@ func TestQueueOperationFailsOnGCP(t *testing.T) {
 			t.Fatalf("RunQueue = %v, %d run(s)", err, len(f.cloud.runs))
 		}
 	})
+}
+
+// TestQueueOperationLeavesTheJob: a queue operation runs the migration job
+// as the last deploy left it, another release's runner here, and changes
+// nothing of it, builds nothing and names the image in the log; a stack
+// with no job yet is refused before anything is written; a job whose
+// runner predates --cloud-sql, and a migrator that may not reserve the
+// result, are reported with what to do.
+func TestQueueOperationLeavesTheJob(t *testing.T) {
+	ctx := context.Background()
+	request := func(t *testing.T, f *deployFixture, log io.Writer) registry.QueueRequest {
+		env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+		return registry.QueueRequest{Run: registry.Run{Environment: env}, Database: "shop-db", Service: "shop-db", Document: []byte(queueDocument), Log: log}
+	}
+
+	f, queues := queueFixture(t)
+	f.cloud.runner = writesResult(queueResult)
+	before := f.cloud.jobs[jobKey]
+	var log bytes.Buffer
+	if _, err := queues.RunQueue(ctx, request(t, f, &log)); err != nil {
+		t.Fatal(err)
+	}
+	if after := f.cloud.jobs[jobKey]; after.Image != deployedRunner || after.Image != before.Image || len(f.cloud.builds) > 0 {
+		t.Errorf("the queue operation changed the job to %s, or built %d image(s)", after.Image, len(f.cloud.builds))
+	}
+	if slices.ContainsFunc(f.cloud.Changes(), func(c string) bool { return strings.HasPrefix(c, "job ") }) {
+		t.Errorf("the queue operation changed %v", f.cloud.Changes())
+	}
+	if !strings.Contains(log.String(), "run job shop-migrate ("+deployedRunner+")") {
+		t.Errorf("the log:\n%s", log.String())
+	}
+
+	none, queues := queueFixture(t)
+	delete(none.cloud.jobs, jobKey)
+	_, err := queues.RunQueue(ctx, request(t, none, nil))
+	if err == nil || err.Error() != "gcp: the stack's migration job shop-migrate does not exist in acme-staging; deploy Staging first, which creates it" {
+		t.Errorf("RunQueue with no job = %v", err)
+	}
+	if len(none.cloud.runs) > 0 || slices.ContainsFunc(none.cloud.Changes(), func(c string) bool { return strings.HasPrefix(c, "lifecycle") }) {
+		t.Errorf("a refused operation ran %d job(s) and changed %v", len(none.cloud.runs), none.cloud.Changes())
+	}
+
+	old, queues := queueFixture(t)
+	old.cloud.failRun["--result"] = fakeFailure{message: cloudRunExited, stderr: []string{
+		"flag provided but not defined: -cloud-sql",
+		"superschematic-migrate: flag provided but not defined: -cloud-sql",
+	}}
+	_, err = queues.RunQueue(ctx, request(t, old, nil))
+	if err == nil || !strings.HasSuffix(err.Error(), "; the job runs "+deployedRunner+", a runner from before stack queue reached Cloud SQL, and stack queue does not change it: deploy Staging with this release, which updates the job, then run this again") {
+		t.Errorf("RunQueue on an older runner = %v", err)
+	}
+
+	unbootstrapped, queues := queueFixture(t)
+	unbootstrapped.cloud.failRun["--result"] = fakeFailure{message: cloudRunExited, stderr: []string{
+		"superschematic-migrate: queue OrderPlaced of shop-db: reserve gs://" + stateBucket + "/superschematic/queue/shop/Staging/x.json for the result: " +
+			"gs://" + stateBucket + "/superschematic/queue/shop/Staging/x.json.reserved: 403 Forbidden: denied; the queue was not changed",
+	}}
+	_, err = queues.RunQueue(ctx, request(t, unbootstrapped, nil))
+	if err == nil || !strings.Contains(err.Error(), "the queue was not changed (logs: ") ||
+		!strings.HasSuffix(err.Error(), "; the migrator may not create the result: run superschematic stack bootstrap again, which grants it, then run this again") {
+		t.Errorf("RunQueue without the grant = %v", err)
+	}
+}
+
+// TestQueueOperationRereadsTheLifecycle: a lifecycle write that another
+// writer's change to the bucket refused is read and written again, up to
+// five times.
+func TestQueueOperationRereadsTheLifecycle(t *testing.T) {
+	ctx := context.Background()
+	f, queues := queueFixture(t)
+	f.cloud.runner = writesResult(queueResult)
+	f.cloud.lifecycleConflicts = 4
+	env := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	req := registry.QueueRequest{Run: registry.Run{Environment: env}, Database: "shop-db", Service: "shop-db", Document: []byte(queueDocument)}
+	if _, err := queues.RunQueue(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	f, queues = queueFixture(t)
+	f.cloud.lifecycleConflicts = 5
+	if _, err := queues.RunQueue(ctx, req); err == nil || !errors.Is(err, gcp.ErrBucketChanged) || len(f.cloud.runs) > 0 {
+		t.Errorf("RunQueue after five conflicts = %v, %d run(s)", err, len(f.cloud.runs))
+	}
 }

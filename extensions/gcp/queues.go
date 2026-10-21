@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 
 	"github.com/parable-work/superschematic/registry"
 )
@@ -20,15 +21,27 @@ import (
 //  1. the runner writes the queue document under the migration documents,
 //     superschematic/migrations/<stack>/<run>/queue/<id>.json, which the
 //     migrator reads;
-//  2. it runs the job once with `superschematic-migrate queue`, the
-//     database by its Cloud SQL instance and name, and --result naming
+//  2. it runs the job once, as the last deploy left it, with
+//     `superschematic-migrate queue`, the database by its Cloud SQL
+//     instance and name, and --result naming
 //     superschematic/queue/<stack>/<run>/<id>.json, where the runner
 //     writes what it did instead of to stdout: a listing holds the dead
 //     messages' bodies, which may hold personal data, and the job's
 //     stdout and stderr go to Cloud Logging, which every holder of Logs
-//     Viewer reads;
-//  3. it reads that object once and deletes its version, so the bucket,
-//     which keeps versions, holds no copy.
+//     Viewer reads. The runner first creates an empty marker,
+//     <id>.json.reserved, so a migrator that may not write the result
+//     fails before the queue changes;
+//  3. it reads the result once and deletes its version, and the marker's,
+//     so the bucket, which keeps versions, holds no copy.
+//
+// It never changes the job. The job is shared with the deploys of every
+// run of the stack in the project, and a deploy updates its image between
+// its EnsureJob and its RunJob, holding only its own run's lock; a queue
+// operation that updated the job to its CLI's release could put that
+// release's runner under a deploy's migration phase. A job a deploy of an
+// older release left, whose runner does not take --cloud-sql or --result,
+// fails with a usage error before it reads anything, and the error says
+// to deploy with this release.
 //
 // <id> is 128 random bits, so no one can name the object of another run
 // before it exists. The migrator may create objects under its stack's
@@ -85,9 +98,20 @@ func (r migrationRunner) RunQueue(ctx context.Context, req registry.QueueRequest
 		return nil, err
 	}
 
+	name := migrationJobName(env.Stack)
+	image, err := cloud.JobImage(ctx, v.project, v.region, name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, fmt.Errorf("gcp: the stack's migration job %s does not exist in %s; deploy %s first, which creates it", name, v.project, req.Run.Name())
+	case err != nil:
+		return nil, err
+	}
+
 	// The rule that deletes a result nobody read is in place before
-	// anything can write one; bootstrap sets it too.
-	if _, err := cloud.EnsureLifecycleRule(ctx, bucket, queueLifecycle()); err != nil {
+	// anything can write one; bootstrap sets it too. Another writer of the
+	// bucket's lifecycle in between, a bootstrap or a second queue
+	// operation, is read again.
+	if err := ensureLifecycleRule(ctx, cloud, bucket, queueLifecycle()); err != nil {
 		return nil, fmt.Errorf("gcp: the state bucket's rule that deletes what is under %s after a day, which a queue operation needs before it writes a result there: %w", queuePrefix, err)
 	}
 	id, err := queueRunID()
@@ -99,12 +123,8 @@ func (r migrationRunner) RunQueue(ctx context.Context, req registry.QueueRequest
 	if err := cloud.WriteObject(ctx, bucket, docObject, req.Document); err != nil {
 		return nil, err
 	}
-	name, err := r.ensureMigrationJob(ctx, req.Run, v, log)
-	if err != nil {
-		return nil, err
-	}
 	resultRef := "gs://" + bucket + "/" + resultObject
-	logf("run job %s: the queue operation of gs://%s/%s on %s", name, bucket, docObject, req.Service)
+	logf("run job %s (%s): the queue operation of gs://%s/%s on %s", name, image, bucket, docObject, req.Service)
 	run, err := cloud.RunJob(ctx, v.project, v.region, name, []string{
 		"queue", "--queue", "gs://" + bucket + "/" + docObject,
 		"--cloud-sql", v.project + ":" + v.region + ":" + instance,
@@ -115,11 +135,19 @@ func (r migrationRunner) RunQueue(ctx context.Context, req registry.QueueRequest
 	if err != nil {
 		return nil, fmt.Errorf("%w; an execution that still runs writes its result to %s, which the state bucket deletes a day later", err, resultRef)
 	}
+	defer r.removeResult(ctx, bucket, resultObject+reservedSuffix, logf)
 	// The runner writes its result last, so a failed execution holds
 	// none; this deletes one all the same.
 	if !run.Succeeded {
 		r.removeResult(ctx, bucket, resultObject, logf)
-		return nil, fmt.Errorf("gcp: the queue operation on %s failed in job %s, execution %s: %s", req.Service, name, run.Name, failure(ctx, cloud, run, "", runnerError))
+		why := failure(ctx, cloud, run, "", runnerError)
+		switch {
+		case strings.Contains(why, "flag provided but not defined: -cloud-sql"), strings.Contains(why, "flag provided but not defined: -result"):
+			why += fmt.Sprintf("; the job runs %s, a runner from before stack queue reached Cloud SQL, and stack queue does not change it: deploy %s with this release, which updates the job, then run this again", image, req.Run.Name())
+		case strings.Contains(why, "the queue was not changed") && strings.Contains(why, "403"):
+			why += "; the migrator may not create the result: run superschematic stack bootstrap again, which grants it, then run this again"
+		}
+		return nil, fmt.Errorf("gcp: the queue operation on %s failed in job %s, execution %s: %s", req.Service, name, run.Name, why)
 	}
 	data, generation, err := cloud.ReadObjectGeneration(ctx, bucket, resultObject)
 	switch {
@@ -147,6 +175,27 @@ func (r migrationRunner) removeResult(ctx context.Context, bucket, object string
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		logf("a result at gs://%s/%s may be left (%v); the state bucket deletes it a day after it was written", bucket, object, err)
 	}
+}
+
+// reservedSuffix ends the name of the empty marker the runner writes
+// beside a result's object before the operation runs (runtime/migrate,
+// "Queues"), which only the reader of the result can delete.
+const reservedSuffix = ".reserved"
+
+// lifecycleAttempts is how many times ensureLifecycleRule reads the
+// bucket's lifecycle again after another writer changed the bucket.
+const lifecycleAttempts = 5
+
+// ensureLifecycleRule gives the bucket rule, reading its lifecycle again
+// when another writer changed the bucket between the read and the write.
+func ensureLifecycleRule(ctx context.Context, cloud Cloud, bucket string, rule LifecycleRule) error {
+	var err error
+	for range lifecycleAttempts {
+		if _, err = cloud.EnsureLifecycleRule(ctx, bucket, rule); !errors.Is(err, ErrBucketChanged) {
+			return err
+		}
+	}
+	return err
 }
 
 // queueRunID returns 128 random bits in hex: the name of one queue

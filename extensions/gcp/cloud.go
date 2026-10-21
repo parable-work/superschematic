@@ -66,7 +66,9 @@ type Cloud interface {
 	// EnsureLifecycleRule gives a bucket rule unless it has it already: it
 	// puts rule in place of the bucket's rules that delete objects under
 	// the same prefixes, or after its rules when none does, and keeps the
-	// bucket's other rules. It reports whether it changed the bucket.
+	// bucket's other rules. It reports whether it changed the bucket. It
+	// returns an error that wraps ErrBucketChanged, and changes nothing,
+	// when another writer changed the bucket after it read the rules.
 	EnsureLifecycleRule(ctx context.Context, bucket string, rule LifecycleRule) (changed bool, err error)
 
 	// EnsureKey creates a key ring and a symmetric encryption key in it,
@@ -386,11 +388,18 @@ func (c *googleCloud) EnsureLifecycleRule(ctx context.Context, bucket string, ru
 	// to the configuration it was read from.
 	_, err = handle.If(storage.BucketConditions{MetagenerationMatch: attrs.MetaGeneration}).
 		Update(ctx, storage.BucketAttrsToUpdate{Lifecycle: &storage.Lifecycle{Rules: rules}})
+	if preconditionFailed(err) {
+		return false, fmt.Errorf("gcp: set the lifecycle of bucket %s: %w", bucket, ErrBucketChanged)
+	}
 	if err != nil {
 		return false, fmt.Errorf("gcp: set the lifecycle of bucket %s: %w", bucket, err)
 	}
 	return true, nil
 }
+
+// ErrBucketChanged is what EnsureLifecycleRule wraps when another writer
+// changed the bucket between its read of the lifecycle and its write.
+var ErrBucketChanged = errors.New("another writer changed the bucket's configuration; read it again")
 
 // withLifecycleRule returns rules with rule in place of the first rule
 // that deletes objects under the same prefixes, in any order, and with no
