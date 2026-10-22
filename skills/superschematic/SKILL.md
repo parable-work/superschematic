@@ -73,25 +73,39 @@ DB `dependencies` entry or `@source`; another API through `calls`.
    ([references/scalars.md](references/scalars.md)): `Contact.Email`, not
    `string` plus a pattern. Then wrappers and decorators
    ([references/decorators.md](references/decorators.md)).
-3. **Build.** From the directory holding `schemas/`:
+3. **Check after every edit.** `check` loads and verifies the schemas
+   without generating code, in well under a second, and lists each error
+   with its file, line and column. From the directory holding `schemas/`:
    ```sh
-   superschematic build-all schemas/services          # every service, in dependency order
-   superschematic build --with-deps schemas/services/shop-api  # one service and what it needs
+   superschematic check --json                         # every service; exits 1 on an error
+   superschematic check --json schemas/services/shop-api  # one service and what it depends on
    ```
-4. **Read the error.** Build errors name the field and say the fix, often
+   Read `diagnostics` (`file`, `line`, `column`, `severity`, `message`)
+   and fix each error before you build. A service `blocked` by another
+   has no errors of its own yet: fix the one it names. Warnings don't
+   fail the check but usually mean a view drops a field it should carry.
+   For a long session, `superschematic check --watch --json` re-checks
+   the services each saved edit affects and writes one document per line.
+4. **Read the error.** Errors name the field and say the fix, often
    with the decision record behind it (`(D34)`). Change the schema as the
    message says; don't work around it in code. When output surprises you,
    `superschematic build <dir> --emit-ir | jq` shows what the generators were
    given.
-5. **Implement what was generated.** `build --scaffold` (or a stack's
+5. **Build once it checks clean.** A few mistakes only a generator sees,
+   so build before you write code against the output:
+   ```sh
+   superschematic build-all schemas/services          # every service, in dependency order
+   superschematic build --with-deps schemas/services/shop-api  # one service and what it needs
+   ```
+6. **Implement what was generated.** `build --scaffold` (or a stack's
    build) writes a missing implementation: Go at `go/<service>`,
    TypeScript at `typescript/<service>`, Rust at `rust/<service>`, beside
    the schemas root. Each method answers 501 until you fill it. Compile
    errors after a schema change point at exactly the code to follow.
-6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
+7. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
    whole stack locally, with Postgres in Docker and migrations applied. Run
    the language's own tests against the generated SDKs.
-7. **Changing a table that holds data?** `superschematic migrate plan
+8. **Changing a table that holds data?** `superschematic migrate plan
    schemas/services/<db> --from-ref origin/main` plans expand and contract
    steps with their hazards. Show the hazards to the user.
 
@@ -123,7 +137,7 @@ DB `dependencies` entry or `@source`; another API through `calls`.
 
 ## Rules worth knowing
 
-Most are load errors; knowing them saves a build round-trip:
+Most are load errors, which `check` reports; knowing them saves a round-trip:
 
 - `schema.config.ts` imports only `@superschematic/schema-config` and other
   services' **sentinels** (`import { ShopDb } from "@acme/shop-db"`), never

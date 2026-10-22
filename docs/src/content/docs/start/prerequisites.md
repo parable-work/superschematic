@@ -58,7 +58,7 @@ Check it:
 bin/superschematic --help
 ```
 
-It lists the core's twelve commands: `init`, `build`, `build-all`, `migrate`,
+It lists the core's thirteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
 `new`, `stack` and `identity` groups.
 
