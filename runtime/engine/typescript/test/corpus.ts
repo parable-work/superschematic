@@ -1,5 +1,6 @@
-// The check the corpus tests run (D58), this suite's corpus.test.ts and the
-// work queue's (runtime/engine-workqueue/typescript/test/corpus.test.ts):
+// The check the corpus tests run (D58), this suite's corpus.test.ts, the
+// work queue's (runtime/engine-workqueue/typescript/test/corpus.test.ts) and
+// the commerce package's (runtime/engine-commerce/typescript):
 // it records a package's curated test files again, under Node.js, with
 // ENGINE_RECORD set to a fresh directory, and fails when a committed file
 // under runtime/engine/testdata is not what the recorder wrote;
@@ -17,7 +18,7 @@ import { fileURLToPath } from 'node:url';
  * same directories (recorder.ts's recordPackage): the engine's own check
  * leaves them to that package's.
  */
-export const PACKAGE_PREFIXES = ['workqueue-'];
+export const PACKAGE_PREFIXES = ['workqueue-', 'commerce-'];
 
 /** What one package's tests record into the corpus. */
 export interface CorpusFiles {

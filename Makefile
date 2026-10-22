@@ -74,6 +74,7 @@ setup:
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/engine-workqueue/typescript && bun install
+	cd runtime/engine-commerce/typescript && bun install
 	cd runtime/schema/python && uv sync
 	cd runtime/versiongraph/python && uv sync
 
@@ -190,6 +191,7 @@ ts:
 	scripts/engine-napi.sh --js-behaviors >/dev/null
 	cd runtime/engine/typescript && bun run typecheck && bun run build && bun run test
 	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
+	cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
 

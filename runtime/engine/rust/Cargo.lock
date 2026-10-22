@@ -1705,7 +1705,9 @@ name = "superschematic-engine-commerce"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "superscalar",
  "superschematic-engine",
+ "superschematic-engine-behaviors",
 ]
 
 [[package]]

@@ -7,7 +7,8 @@
 //! stages items and moves them as `Holds` does: it writes an item's new
 //! state, then calls the supply. The core meta-schema admits only the
 //! core's behaviors, so an engine that composes them loads against the
-//! open one ([`crate::open_meta_schema`]).
+//! open one ([`crate::open_meta_schema`]). [`PaymentsStandIn`] stands in
+//! for Payments' guard in the late-payment race until Payments lands.
 
 use std::sync::LazyLock;
 
@@ -568,4 +569,89 @@ fn put(cx: &OperationCx<'_, Value>, item: &HolderItem) -> Result<()> {
         &values,
     )?;
     Ok(())
+}
+
+/// A stand-in for Payments' guard in the late-payment race (D70), until
+/// Payments (M5) lands: `test.Payments` keeps whether a payment is being
+/// processed (`setProcessing`), and while one is, vetoes every move of
+/// the instance's Workflow status with `payment_in_progress`, as
+/// Payments' guard vetoes a move out of a state while an attempt is
+/// processing. Its field `processing` reads the flag.
+///
+/// TODO(lead): once Payments merges, switch the late-payment race in
+/// `tests/commerce_holds.rs` to Payments itself (an attempt reported
+/// processing through recordPaymentEvent) and drop this stand-in.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PaymentsStandIn;
+
+/// The veto code the stand-in's guard refuses a move with, as Payments'.
+pub const PAYMENT_IN_PROGRESS: &str = "payment_in_progress";
+
+static PAYMENTS_DECLARATION: LazyLock<String> = LazyLock::new(|| {
+    json!({
+        "name": "test.Payments",
+        "description": "A stand-in for Payments' guard: a move of the status is refused while a payment is processing.",
+        "fields": [{"name": "processing", "description": "Whether a payment is being processed."}],
+        "operations": [{
+            "name": "setProcessing",
+            "paramsSchema": {"type": "object", "additionalProperties": false, "required": ["processing"], "properties": {"processing": {"type": "boolean"}}},
+            "resultSchema": true,
+            "writes": true
+        }],
+        "vetoes": [{"code": PAYMENT_IN_PROGRESS, "description": "A move of the status while a payment is processing."}]
+    })
+    .to_string()
+});
+
+impl Behavior for PaymentsStandIn {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        &PAYMENTS_DECLARATION
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            migrations: vec![BehaviorMigration::new(1, "processing")
+                .column("processing", ColumnSpec::integer().not_null().default(0))],
+            guard: Some(|_, view, request| {
+                let GuardRequest::Operation {
+                    behavior: "Workflow",
+                    operation: "transition",
+                    params,
+                    ..
+                } = request
+                else {
+                    return Ok(None);
+                };
+                if view.columns().get()?.opt_i64("processing")? != Some(1) {
+                    return Ok(None);
+                }
+                Ok(Some(Veto {
+                    reason: format!(
+                        "a payment is being processed, so the status does not move to {}",
+                        params.get("to").and_then(Value::as_str).unwrap_or_default()
+                    ),
+                    code: Some(PAYMENT_IN_PROGRESS.to_owned()),
+                    details: None,
+                }))
+            }),
+            operations: vec![("setProcessing", |_, cx, params| {
+                let processing = params.get("processing") == Some(&Value::Bool(true));
+                cx.columns()
+                    .set(&[("processing", SqlValue::from(i64::from(processing)))])?;
+                Ok(json!({ "processing": processing }))
+            })],
+            fields: vec![("processing", |_, view| {
+                Ok(Some(Value::Bool(
+                    view.columns().get()?.opt_i64("processing")? == Some(1),
+                )))
+            })],
+            ..Hooks::default()
+        }
+    }
 }

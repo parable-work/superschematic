@@ -21,7 +21,10 @@
 //! ([`SupplyOperation::state`]). `Holds` writes an item's new state before
 //! it calls the supply, in the same transaction, so a caller that invokes
 //! `releaseFor` over HTTP for an item its claim still holds is refused, as
-//! is one that holds for an item its claim has not taken.
+//! is one that holds for an item its claim has not taken. A holder that
+//! is gone, which a claim's delete leaves its afterChange to read, gets
+//! back what it held: `releaseFor` and `returnFor` are taken for it, for
+//! what the supply's record of the item asks, and nothing else is.
 //!
 //! The record. A supply keeps a row per holder, hold and item
 //! ([`rows_table`]), and a call moves it only forward
@@ -564,6 +567,25 @@ pub fn check_holder<C>(
         .instances()
         .get(&holder.schema, &holder.id, Some(&[HOLDS_ITEMS]))?
     else {
+        // A claim's delete lets go of what it holds from its afterChange,
+        // when a read finds it gone, as Budget's scope reads an inner
+        // instance that is gone as releasing everything: what a gone
+        // holder held is released, and what it committed is returned.
+        // The supply's record holds the call to what was asked
+        // ([`begin`]).
+        if matches!(
+            operation,
+            SupplyOperation::Release | SupplyOperation::Return
+        ) {
+            return Ok(HolderItem {
+                hold: call.hold.clone(),
+                item: call.item,
+                supply: InstanceRef::of(view),
+                ask: call.ask,
+                state: needs,
+                price: None,
+            });
+        }
         return Err(refuse(
             format!("{} {} does not exist", holder.schema, holder.id),
             None,
@@ -1014,6 +1036,26 @@ pub fn begin<C>(
 ) -> Result<Begun> {
     let item = check_holder(cx, operation, call)?;
     let record = recorded(cx, table, call)?;
+    // A record moves only with what it was taken for, so a commit or a
+    // return moves no more than the item held.
+    if let Some(found) = record.as_ref().filter(|found| found.ask != call.ask) {
+        return Err(not_requested(
+            cx,
+            operation,
+            call,
+            format!(
+                "this supply records item {} of hold {} of {} {} asking {}, not {}",
+                call.item,
+                call.hold,
+                call.holder.schema,
+                call.holder.id,
+                superschematic_engine::json::stringify(&found.ask.to_json()),
+                superschematic_engine::json::stringify(&call.ask.to_json())
+            ),
+            Some(item.state),
+            Some(found.state),
+        ));
+    }
     match operation.step(record.as_ref().map(|record| record.state)) {
         Some(Step::Apply) => Ok(Begun::Apply {
             item,

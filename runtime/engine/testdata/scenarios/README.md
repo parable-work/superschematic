@@ -125,6 +125,26 @@ A replayer reads them as it reads the engine's, with these differences:
   `bhv_budget__meters`, `engine_instances.bhv_queue__status`, which a second
   implementation keeps, as `../sqlite` holds it to.
 
+## The commerce package's files
+
+The `commerce-*.json` files are the commerce package's suite (D70),
+`runtime/engine-commerce/typescript/test`, recorded by the same recorder:
+its `test/helpers.ts` opens every engine through `recordOpen` with the
+package's behaviors named and calls `recordPackage('commerce-')`, and its
+`test/corpus.test.ts` holds them to what the recorder writes, through the
+same check, which rewrites only its own package's files:
+
+```
+cd runtime/engine-commerce/typescript && bun run build   # after the engine's
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/commerce-*.json; review the diff
+```
+
+`open`'s `behaviors` names the package's behaviors, `Stock` and `Holds`,
+which a replayer registers by name after the core's; the files define no
+test behaviors. Every scenario runs on a fixed clock, and
+`commerce-holds-timers` runs the runner (`runner.runDue`), whose Timers
+deadline moves a checkout out of `held`.
+
 ## A file
 
 ```json

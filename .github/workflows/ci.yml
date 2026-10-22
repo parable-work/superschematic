@@ -798,6 +798,17 @@ jobs:
           bun run typecheck
           bun run test
 
+      - name: runtime/engine-commerce/typescript typecheck + build + test (Node.js and Bun)
+        # Runs after the engine's build, which its scripts/link-local-deps.mjs
+        # links into node_modules, on the test addon, whose commerce
+        # behaviors are the Rust ones (D70). Its corpus check holds
+        # runtime/engine/testdata/scenarios/commerce-*.json to the recorder.
+        working-directory: runtime/engine-commerce/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)
         # The engine guide's example: the http runtime and the engine rebuilt
         # from the installs above, on the addon built above, linked into the
