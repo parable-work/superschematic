@@ -31,17 +31,16 @@ use std::sync::Arc;
 use acme_shop_stock_api::database_types::{self, STOCK_LOW_QUEUE};
 use acme_shop_stock_api::types::{self, IdentityUUID};
 use acme_shop_stock_api::{
-    BoxError, Deps, Handlers, Jobs, StockGetStockArgs, StockImplementation,
-    StockReceiveStockArgs, StockSalesImplementation, StockSalesStockSoldArgs, StockSetStockArgs,
-    Workers,
+    BoxError, Deps, Handlers, Jobs, StockGetStockArgs, StockImplementation, StockReceiveStockArgs,
+    StockSalesImplementation, StockSalesStockSoldArgs, StockSetStockArgs, Workers,
 };
 use async_trait::async_trait;
+use http::StatusCode;
 use serde_json::{json, Value};
 use superschematic_engine::{calls, Principal, PrincipalService};
 use superschematic_http_runtime::postgres::deadpool_postgres::Object;
 use superschematic_http_runtime::postgres::tokio_postgres::error::SqlState;
 use superschematic_http_runtime::queue::{self, QueueDefinition};
-use http::StatusCode;
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
 
 /// The engine namespace shop-db's engine types live in, and the type that
@@ -141,7 +140,8 @@ async fn engine_call(
                 .and_then(Value::as_str)
                 .unwrap_or(refused.code().as_str())
                 .to_owned();
-            let status = StatusCode::from_u16(refused.status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let status =
+                StatusCode::from_u16(refused.status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             let error = ApiError::new(status, code, refused.to_string());
             match details {
                 Some(details) => error.with_details(details),
@@ -243,7 +243,13 @@ impl StockImplementation for Stock {
             )
             .await?
             .unwrap_or(Value::Null);
-            levels.extend(page["items"].as_array().into_iter().flatten().filter_map(view));
+            levels.extend(
+                page["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(view),
+            );
             match page["next"].as_str() {
                 Some(next) if !next.is_empty() => cursor = Some(next.to_owned()),
                 _ => break,
@@ -291,7 +297,10 @@ impl StockImplementation for Stock {
             .ok_or_else(|| ApiError::not_found(format!("no product has id {product}")))?;
         let sku: String = row.get("sku");
         let price: i64 = row.get("price_cents");
-        let reorder_at = args.input.reorder_at.map(|at| if at == 0 { Value::Null } else { json!(at) });
+        let reorder_at = args
+            .input
+            .reorder_at
+            .map(|at| if at == 0 { Value::Null } else { json!(at) });
         match inventory(&self.deps, principal.clone(), &product).await? {
             None => {
                 let mut data = json!({ "sku": sku, "priceCents": price });
@@ -319,7 +328,12 @@ impl StockImplementation for Stock {
                     &self.deps,
                     principal.clone(),
                     "instances.update",
-                    vec![json!(INVENTORY), json!(product.to_string()), patch, in_namespace()],
+                    vec![
+                        json!(INVENTORY),
+                        json!(product.to_string()),
+                        patch,
+                        in_namespace(),
+                    ],
                 )
                 .await?;
             }
@@ -354,7 +368,10 @@ impl StockImplementation for Stock {
     ) -> Result<types::StockView, ApiError> {
         let principal = staff_principal(&ctx)?;
         let product = args.product_id;
-        if inventory(&self.deps, principal.clone(), &product).await?.is_none() {
+        if inventory(&self.deps, principal.clone(), &product)
+            .await?
+            .is_none()
+        {
             return Err(ApiError::not_found(format!(
                 "the warehouse has never stocked product {product}: count it first"
             )));
@@ -544,7 +561,12 @@ impl Jobs for StockJobs {
         .map_err(|err| format!("list the low stock: {}", err.message))?
         .unwrap_or(Value::Null);
         let mut filed = 0;
-        for level in low["items"].as_array().into_iter().flatten().filter_map(view) {
+        for level in low["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(view)
+        {
             let threshold = level.reorder_at.unwrap_or(0);
             if file_restock(
                 &self.deps,

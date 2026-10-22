@@ -24,24 +24,36 @@
 //! when the router serves it, so the console's lists, which are live
 //! (`pages_live`), render a filter's or a page's results in place; without
 //! it they are GET forms and links that load the page (D44, amended).
+//!
+//! shop-db is an engine database (D58, D70), so the crate mounts its
+//! engine at `/engine` beside the JSON API, which the app opens on a SQLite
+//! file of its own (`open_engine`) and deploys shop-db's engine types in.
+//! The app keeps its own orders and sells nothing through the engine yet:
+//! the shop's checkouts, which hold stock and take payment, are the stack's,
+//! on shop-orders' Go server.
 
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles};
+use acme_shop_orders_server::{
+    Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles,
+};
 use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service, StoreError};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
-    OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
+    OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs,
+    ProductReviewsWriteReviewArgs, types,
 };
 use acme_shop_orders_topcoat::forms::{
-    Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm, PlaceOrderInputForm, Refusal,
-    WriteReviewInputForm, order_cancel_order_args_fields, order_list_orders_args_fields, place_order_input_fields,
-    write_review_input_fields,
+    Choices, FormErrors, OrderCancelOrderArgsForm, OrderListOrdersArgsForm, PlaceOrderInputForm,
+    Refusal, WriteReviewInputForm, order_cancel_order_args_fields, order_list_orders_args_fields,
+    place_order_input_fields, write_review_input_fields,
 };
 use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
-use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references};
+use acme_shop_orders_topcoat::{
+    IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references,
+};
 use serde::Deserialize;
 use topcoat::asset::{AssetConfig, RouterBuilderAssetExt};
 use topcoat::context::{Cx, app_context, try_app_context};
@@ -50,7 +62,9 @@ use topcoat::router::error::see_other;
 use topcoat::router::header::SET_COOKIE;
 use topcoat::router::request::parts;
 use topcoat::router::response::response_headers;
-use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, Slot, StatusCode, layout, page, path_param};
+use topcoat::router::{
+    HeaderValue, Router, RouterBuilderDiscoverExt, Slot, StatusCode, layout, page, path_param,
+};
 use topcoat::runtime::{RouterBuilderRuntimeExt, RuntimeSetup, shard};
 use topcoat::view::{Child, View, component, view};
 
@@ -90,7 +104,12 @@ impl Product {
 /// or in SQLite (`stock_sqlite`). The shop lists it (`listProducts`), which
 /// the place-order form offers and an order's lines are named from, and
 /// prices an order's lines from it.
-pub const CATALOG: &[Product] = &[Product { id: PRODUCT, sku: "anvil", name: "Anvil", price_cents: 1999 }];
+pub const CATALOG: &[Product] = &[Product {
+    id: PRODUCT,
+    sku: "anvil",
+    name: "Anvil",
+    price_cents: 1999,
+}];
 
 /// The shop in memory, its catalog the app's.
 pub fn shop_in_memory() -> Shop {
@@ -102,7 +121,12 @@ pub fn shop_in_memory() -> Shop {
 /// reads a line's price from the product's row.
 pub fn stock_sqlite(shop: &SqliteShop) -> Result<(), Box<dyn std::error::Error>> {
     for product in CATALOG {
-        shop.add_product(&product.id(), product.sku, product.name, product.price_cents)?;
+        shop.add_product(
+            &product.id(),
+            product.sku,
+            product.name,
+            product.price_cents,
+        )?;
     }
     Ok(())
 }
@@ -116,12 +140,18 @@ pub type Person = (&'static str, &'static str, &'static str);
 /// roles to the permissions they grant now (`update_roles`), users or no
 /// users: a file made before staff held `orders.any` has a `shopper` role
 /// that grants all of `orders`, and so every customer's orders.
-pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn add_people(
+    users: &Service,
+    shopper: Person,
+    staff: Person,
+) -> Result<(), Box<dyn std::error::Error>> {
     update_roles(users).await?;
     for ((login, name, password), is_staff) in [(shopper, false), (staff, true)] {
         match users.store().find_login(login).await {
             Ok(_) => {}
-            Err(StoreError::NotFound) if is_staff => add_staff(users, login, name, password).await?,
+            Err(StoreError::NotFound) if is_staff => {
+                add_staff(users, login, name, password).await?
+            }
             Err(StoreError::NotFound) => add_shopper(users, login, name, password).await?,
             Err(err) => return Err(err.into()),
         }
@@ -133,8 +163,15 @@ pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Resu
 /// the session cookie is not `Secure`.
 pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 
+/// shop-db's engine, which `app` mounts at `/engine`.
+pub type Engine = superschematic_engine::Engine;
+
+/// Opens shop-db's engine on the SQLite file at `path`, created if absent,
+/// and deploys shop-db's engine types in it, as `app` takes it.
+pub use acme_shop_orders_topcoat::engine::open as open_engine;
+
 /// The app: its pages, and shop-orders' JSON API and in-process operations
-/// over `shop`, in memory (`shop_in_memory`) or in SQLite
+/// over `shop`, shop-db's `engine` at `/engine`, in memory (`shop_in_memory`) or in SQLite
 /// (`acme_shop_orders_server::sqlite::SqliteShop`), whose callers are
 /// `users`' users. A page's caller is the user whose session the request
 /// carries, read by the identity runtime as the JSON API reads it. Topcoat's
@@ -152,14 +189,19 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// again meets its controls as the GET it becomes. Without `assets` the
 /// pages load no script, and the console's live lists are the GET forms and
 /// links they are without the runtime.
-pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
+pub fn app<S: ShopImplementation>(
+    shop: Arc<S>,
+    users: Arc<Service>,
+    engine: Arc<Engine>,
+    assets: Option<AssetConfig>,
+) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let authenticator = IdentityPageAuthenticator::of(&implementations);
     let builder = Router::builder()
         .discover()
         .app_context(users)
         .app_context(console_settings())
-        .shop_orders(implementations, authenticator);
+        .shop_orders(implementations, authenticator, engine);
     match assets {
         Some(assets) => builder.assets(assets).runtime().build(),
         None => builder.build(),
@@ -193,7 +235,9 @@ async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
 /// back to the console page it is given as `next`. The console names the
 /// products an order's lines refer to itself, from `listProducts`.
 fn console_settings() -> pages::Settings {
-    pages::Settings::new().title("Acme shop console").sign_in("/sign-in")
+    pages::Settings::new()
+        .title("Acme shop console")
+        .sign_in("/sign-in")
 }
 
 /// The sign-in form, as the browser sends it: the shopper's email and
@@ -216,16 +260,26 @@ pub struct SignInForm {
 #[page(POST "/sign-in")]
 async fn sign_in(cx: &Cx, Form(form): Form<SignInForm>) -> topcoat::Result<impl View> {
     let users: &Arc<Service> = app_context(cx);
-    let input = LoginInput { login: form.login.clone(), password: form.password, session: "cookie".to_owned() };
+    let input = LoginInput {
+        login: form.login.clone(),
+        password: form.password,
+        session: "cookie".to_owned(),
+    };
     let signed_in = match users.check_cookie_login(parts(cx), &input.session) {
         Ok(()) => users.login(&input).await,
         Err(err) => Err(err),
     };
     let refused = match signed_in {
         Ok(session) => {
-            let cookie = users.config().session_cookie(&session.token, users.config().session_ttl());
+            let cookie = users
+                .config()
+                .session_cookie(&session.token, users.config().session_ttl());
             response_headers(cx).append(SET_COOKIE, HeaderValue::from_str(&cookie)?);
-            let next = if is_local(&form.next) { form.next.as_str() } else { "/reviews" };
+            let next = if is_local(&form.next) {
+                form.next.as_str()
+            } else {
+                "/reviews"
+            };
             return Err(see_other(next).into());
         }
         Err(err) => err,
@@ -394,10 +448,16 @@ async fn show_reviews() -> topcoat::Result<impl View> {
 /// rules, then the operation called as the signed-in shopper. A refusal of
 /// either renders the page again, 422, with the form as sent.
 #[page(POST "/reviews")]
-async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat::Result<impl View> {
+async fn post_review(
+    cx: &Cx,
+    Form(form): Form<WriteReviewInputForm>,
+) -> topcoat::Result<impl View> {
     let errors = match form.parse() {
         Ok(input) => {
-            let args = ProductReviewsWriteReviewArgs { product_id: product(), input };
+            let args = ProductReviewsWriteReviewArgs {
+                product_id: product(),
+                input,
+            };
             match operations::product_reviews_write_review(cx, args).await {
                 Ok(_) => return Err(see_other("/reviews").into()),
                 Err(err) => FormErrors::from_api(&err),
@@ -424,7 +484,10 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
 /// the message the form's own, and a refused caller the route's 401, with
 /// the sign-in button, or 403, with no links, since no page is theirs.
 #[page("/orders")]
-async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
+async fn show_orders(
+    cx: &Cx,
+    Form(filter): Form<OrderListOrdersArgsForm>,
+) -> topcoat::Result<impl View> {
     let unfiltered = filter.statuses.is_empty();
     let (status, page, errors) = match filter.submit(cx).await {
         Ok(page) => (StatusCode::OK, Some(page), FormErrors::default()),
@@ -433,7 +496,10 @@ async fn show_orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> to
     let signed_out = status == StatusCode::UNAUTHORIZED;
     let admitted = !signed_out && status != StatusCode::FORBIDDEN;
     let first = (admitted && filter.cursor.is_some()).then(|| orders_href(&filter, None));
-    let next = page.as_ref().and_then(|page| page.next.as_ref()).map(|next| orders_href(&filter, Some(next.as_str())));
+    let next = page
+        .as_ref()
+        .and_then(|page| page.next.as_ref())
+        .map(|next| orders_href(&filter, Some(next.as_str())));
     Ok(view! {
         (status)
         shop_page(
@@ -464,7 +530,11 @@ fn orders_href(filter: &OrderListOrdersArgsForm, cursor: Option<&str>) -> String
         query.append_pair("cursor", cursor);
     }
     let query = query.finish();
-    if query.is_empty() { "/orders".to_owned() } else { format!("/orders?{query}") }
+    if query.is_empty() {
+        "/orders".to_owned()
+    } else {
+        format!("/orders?{query}")
+    }
 }
 
 /// The links between a list's pages: "First page" while the page is a
@@ -492,7 +562,12 @@ async fn pager(first: Option<String>, next: Option<String>) -> topcoat::Result<i
 async fn order_list(orders: Vec<types::OrderView>, unfiltered: bool) -> topcoat::Result<impl View> {
     let links: Vec<(String, String)> = orders
         .iter()
-        .map(|order| (format!("/orders/{}", order.id), format!("Order {}", order.id)))
+        .map(|order| {
+            (
+                format!("/orders/{}", order.id),
+                format!("Order {}", order.id),
+            )
+        })
         .collect();
     let rows: Vec<OrderViewRecord> = orders.iter().map(OrderViewRecord::from).collect();
     Ok(view! {
@@ -532,12 +607,16 @@ async fn order_page(
 ) -> topcoat::Result<impl View> {
     let path = format!("/orders/{id}");
     let order = operations::order_get_order(cx, OrderGetOrderArgs { id }).await;
-    let cancellable =
-        !errors.is_empty() || order.as_ref().is_ok_and(|order| order.status == types::OrderStatus::Placed);
+    let cancellable = !errors.is_empty()
+        || order
+            .as_ref()
+            .is_ok_and(|order| order.status == types::OrderStatus::Placed);
     let cancel = cancel.unwrap_or_else(|| OrderCancelOrderArgsForm::new(id));
     let order = order.map(OrderViewRecord::from);
     let choices = match &order {
-        Ok(record) => references::order_view_labels(cx, std::slice::from_ref(record), Choices::new()).await,
+        Ok(record) => {
+            references::order_view_labels(cx, std::slice::from_ref(record), Choices::new()).await
+        }
         Err(_) => Choices::new(),
     };
     Ok(view! {
@@ -572,9 +651,15 @@ async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
 /// reason, and the operation's 409 for an order that is not placed, as the
 /// form's own message.
 #[page(POST "/orders/{id}/cancel")]
-async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat::Result<impl View> {
+async fn cancel_order(
+    cx: &Cx,
+    Form(form): Form<OrderCancelOrderArgsForm>,
+) -> topcoat::Result<impl View> {
     let id = *path_param::<Id>(cx)?;
-    let form = OrderCancelOrderArgsForm { id: Some(id.to_string()), ..form };
+    let form = OrderCancelOrderArgsForm {
+        id: Some(id.to_string()),
+        ..form
+    };
     let refused = match form.submit(cx).await {
         Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
         Err(refused) => refused,
@@ -636,10 +721,12 @@ async fn place_order(cx: &Cx, Form(form): Form<PlaceOrderInputForm>) -> topcoat:
         (StatusCode::OK, FormErrors::default())
     } else {
         let refused = match form.parse() {
-            Ok(input) => match operations::order_place_order(cx, OrderPlaceOrderArgs { input }).await {
-                Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
-                Err(err) => Refusal::from_api(&err),
-            },
+            Ok(input) => {
+                match operations::order_place_order(cx, OrderPlaceOrderArgs { input }).await {
+                    Ok(order) => return Err(see_other(format!("/orders/{}", order.id)).into()),
+                    Err(err) => Refusal::from_api(&err),
+                }
+            }
             Err(errors) => Refusal::from(errors),
         };
         (refused.status, refused.errors)
