@@ -8978,5 +8978,40 @@ America/New_York and Australia/Lord_Howe held to Python's zoneinfo
 instants, a sweep held to a minute-scan model, and two engines racing
 eight threads for two places. The TypeScript suite and the recorded
 `commerce-calendar.json` wait for the commerce package's TypeScript side.
+M5, `Payments`: built in `runtime/engine-commerce/rust` (`payments.rs`)
+and registered by `commerce()`, with its own tables of attempts, actions,
+refunds, a refund instance's issues and the provider events it recorded,
+the same SQL on both databases. A literal currency, and the code an
+instance pays in, is checked against `Finance.Currency`'s table through
+the crate's `currency` module, which Stock's builder added: its `build.rs`
+turns the table on when the superscalar checkout carries the scalar, and
+until then a code is held to its shape alone. The testkit's `commerce_payments` (11 cases)
+and `commerce_payments_refunds` (4) pass on SQLite and Postgres:
+idempotent and reordered events, `amount_locked` from a field and from a
+stand-in `Holds.total`, `require`, `voidOn` and `payment_in_progress`,
+`afterRelease`, manual capture and over-capture, direct refunds, a
+currency mismatch, and a Refund issued after two Approvals sign-offs,
+numbered by Numbering and moved to issued by Reactions. Where the table
+above left a choice:
+- an attempt's statuses rank `open < requiresAction < processing <
+  failed < authorized < cancelled < captured`, so a payment that succeeds
+  after a failed try is caught and money a provider captured is counted
+  whatever came before it;
+- an event id applies once per namespace and provider: the same id with
+  other content, or on another instance, is `key_reused`;
+- `openPayment` opens no second attempt while one is in flight
+  (`nothing_due`): a payer who switches method voids the first;
+- a refund draws on one captured attempt;
+- `listPaymentActions` and `settleRefundFor` need `record.permission`
+  too, and `refundFor` takes a call only from a refund instance whose link
+  points here, in an `issueOn` state, for its own amount;
+- with `amount: { holds: true }` the type lists Payments after Holds, and
+  `require` names no initial state;
+- a new version keeps the currency, the amount's source and `refundOf`,
+  and Payments leaves a schema, only while the schema has no instances,
+  which is what the engine's configChange can see;
+- a delete waits while an attempt is in flight (`payment_in_progress`),
+  and the recorded events stay after it so a redelivery is still a
+  repeat.
 
-Payments, the plumbing, acme-shop and the cross-language proof follow.
+The plumbing, acme-shop and the cross-language proof follow.
