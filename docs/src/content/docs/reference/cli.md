@@ -21,9 +21,9 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has ten commands: `build`, `build-all`, `migrate`,
+The core has twelve commands: `init`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
-`stack` and `identity` groups, beside cobra's own `help` and
+`new`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
 target, and the Pulumi provisioner), which add none. The migration runner,
@@ -31,6 +31,92 @@ target, and the Pulumi provisioner), which add none. The migration runner,
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
 database drivers, which stay out of the compiler.
+
+## `init [<schemas-root>]`
+
+Write a schemas root, the directory every other command reads, so no one
+writes its boilerplate by hand (D71). Without a directory, it writes
+`./schemas`.
+
+| File | What it holds |
+| --- | --- |
+| `superschematic.toml` | `go_module_root` and `npm_scope`, and a [`[paths]`](/superschematic/reference/naming/#paths) table pointing the generated packages' path dependencies at a superschematic checkout, relative to the parent of the schemas root; `build_context` too when the checkout holds the project |
+| `tsconfig.base.json` | `strict`, `experimentalDecorators` and the options acme-shop's has, with `paths` mapping `@superschematic/*` and `superscalar` to the checkout's sources and `<npm_scope>/*` to `./services/*/src/index.ts` |
+| `.gitignore` | the output root's contents, but for the lockfiles of its Bun and Cargo workspaces: `!/dist/`, `/dist/*`, `!/dist/bun.lock`, `!/dist/Cargo.lock` (D51) |
+| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsite) adds each service |
+
+Nothing of superschematic is published yet, so the schema files compile
+against a checkout that `make setup` has prepared: `--superschematic`
+names it, and without the flag init takes the checkout that holds the
+schemas root. Outside one, it asks at a terminal and otherwise refuses.
+At a terminal it asks for each value no flag gives, each with its
+default. Without one, the module root is `example.com/<project>` and the
+scope `@<project>`, the project being the directory that holds the
+schemas root, in lower case.
+
+init writes no file that exists: when any of the three does, it names
+each and writes nothing. It ends with the next command, `superschematic
+new service`.
+
+```
+superschematic init --superschematic ~/src/superschematic
+superschematic init ./schemas --go-module-root example.com/acme --npm-scope @acme
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--go-module-root` | `example.com/<project>` | the prefix of every generated Go module path |
+| `--npm-scope` | `@<project>` | the npm scope of the generated packages and of the services' own |
+| `--superschematic` | the checkout that holds the schemas root | the superschematic checkout the schema files and generated packages build against |
+
+## `new service <name> --kind DB|API|General|Bucket|Site`
+
+Write a service into a schemas root and build it once (D71). The name is
+lower-case words joined by hyphens, such as `shop-db`; `--kind` takes the
+kind in any case. A Stack service is [`stack init`](#stack-init-services-root)'s.
+
+It writes `<schemas-root>/services/<name>/`:
+
+| File | What it holds |
+| --- | --- |
+| `schema.config.ts` | `defineConfig` with the name, the kind and an `outputs` block that loads |
+| `package.json` | `{ "name": "<npm_scope>/<name>", "private": true }`, the package other services import |
+| `tsconfig.json` | extends `../../tsconfig.base.json`; includes `schema.config.ts` and `src/**/*.ts` |
+| `src/index.ts` | re-exports the starter's declarations and `./service.generated` |
+| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General |
+
+| Kind | `outputs` |
+| --- | --- |
+| `DB` | Go and TypeScript types; a DB always needs Go types |
+| `API` | Go and TypeScript types, a Go server (`api`), Go and TypeScript SDKs |
+| `General` | Go and TypeScript types |
+| `Bucket` | `{}` |
+| `Site` | none |
+
+A Bucket and a Site declare nothing in schema files, so they get no
+starter schema: an API lists a bucket in its `buckets`, and a site's
+config lists the APIs its browser code calls in `calls`.
+
+Last, it builds the service as [`build`](#build-service-dir) does, into
+`<schemas-root>/dist`, which writes `src/service.generated.ts`, the
+handle other services' configs import. A Site's build also writes its
+code's mirror under `web/<name>`, as every build of a Site does. A build
+that fails leaves the files written and says so.
+
+It writes no file that exists: when any does, or a config in another
+form, it names each and writes nothing. It refuses a name another
+service's config has, and a schemas root with no `tsconfig.base.json`.
+
+```
+superschematic new service shop-db --kind DB
+superschematic new service shop-api --kind API --root ./schemas
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket` or `Site` |
+| `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
+| `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
 
 ## `build <service-dir>`
 

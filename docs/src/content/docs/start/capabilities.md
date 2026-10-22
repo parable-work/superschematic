@@ -41,6 +41,13 @@ breaks your code, the type checker of each language points at the line.
 - The handler of a `@manualRouteRegistration` operation, for a response
   the generated route cannot give.
 
+## Starting
+
+| You need | Declare | The build generates | You write | Guide |
+| --- | --- | --- | --- | --- |
+| A project | nothing: `superschematic init` writes the schemas root, its naming file, base tsconfig and ignore rules | nothing yet | nothing | [CLI](/superschematic/reference/cli/#init-schemas-root) |
+| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsite) |
+
 ## Data
 
 | You need | Declare | The build generates | You write | Guide |

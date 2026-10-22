@@ -360,7 +360,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `stack`, `identity` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `new`, `stack`, `identity` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |

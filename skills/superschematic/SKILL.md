@@ -140,32 +140,34 @@ Most are load errors; knowing them saves a build round-trip:
 
 ## Starting a project
 
-There is no `init` command for a schemas root yet; create these files
-yourself, modeled on `examples/acme-shop/schemas` in the superschematic
-repository:
+Two commands write the boilerplate; don't write these files by hand:
 
-```text
-schemas/
-  superschematic.toml        # go_module_root, npm_scope, ...; every key optional
-  tsconfig.base.json         # experimentalDecorators, strict, paths to the authoring packages
-  .gitignore                 # dist/* but !dist/bun.lock and !dist/Cargo.lock
-  services/<name>/
-    schema.config.ts         # defineConfig({ name, kind, outputs, ... })
-    package.json             # { "name": "<npm_scope>/<name>", "private": true }
-    tsconfig.json            # extends ../../tsconfig.base.json; include schema.config.ts, src/**/*.ts
-    src/index.ts             # re-exports the schema files and ./service.generated
-    src/<topic>.schema.ts
+```sh
+superschematic init --superschematic <checkout>      # writes ./schemas
+superschematic new service shop-db --kind DB         # from the project or schemas root
+superschematic new service shop-api --kind API
 ```
 
-superschematic is pre-release: nothing is published yet. The
-`tsconfig.base.json` `paths` map `@superschematic/*` and `superscalar` to
-a superschematic checkout's `packages/*/src/index.ts` and
-`third_party/superscalar/bindings/typescript/src/index.ts`, plus
-`"<npm_scope>/*": ["./services/*/src/index.ts"]` so services import each
-other's sentinels and types, and the naming
-file's `[paths]` table points the generated packages' dependencies at its
-runtimes. Once APIs exist, `superschematic stack init` writes the Stack
-service.
+`init [<schemas-root>]` writes `superschematic.toml` (`--go-module-root`,
+`--npm-scope`, and a `[paths]` table pointing the generated packages at
+the checkout's runtimes), `tsconfig.base.json` (whose `paths` map
+`@superschematic/*` and `superscalar` to the checkout and
+`"<npm_scope>/*"` to `./services/*/src/index.ts`), the `.gitignore` for
+`dist/` and an empty `services/`. superschematic is pre-release and
+nothing is published, so it needs a checkout prepared with `make setup`:
+`--superschematic` names it, else the checkout that holds the project.
+
+`new service <name> --kind DB|API|General|Bucket|Site [--root <schemas-root>]`
+writes `services/<name>/`: `schema.config.ts` with an `outputs` block
+that loads, `package.json` (`<npm_scope>/<name>`), `tsconfig.json`,
+`src/index.ts` and, for DB, API and General, a starter
+`src/<name>.schema.ts` to rename and grow. Then it builds the service
+once, which writes `src/service.generated.ts`, so other configs can
+import its handle at once. Wire services together afterwards in the
+configs (`authDb`, `calls`, `buckets`, `dependencies`).
+
+Both refuse to replace a file that exists and write nothing then. Once
+APIs exist, `superschematic stack init` writes the Stack service.
 
 ## Before you deploy
 
