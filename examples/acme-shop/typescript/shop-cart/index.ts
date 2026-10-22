@@ -10,6 +10,7 @@
 // checkout, which holds what the cart asks, and takes payment for it.
 import { randomUUID } from 'node:crypto';
 
+import { normalizeIdentityUUIDStrict } from 'superscalar';
 import { HttpProblem, OperationResult, notFound, type RequestContext } from '@superschematic/http-runtime';
 import { BehaviorVetoError, EngineError, type Principal } from '@superschematic/engine';
 import type { AsyncEngine } from '@superschematic/engine/server';
@@ -21,6 +22,11 @@ import type { CartLine, CartView, IdentityUUID, PickupSlot } from '@acme/shop-ca
 const NAMESPACE = 'shop-db';
 const SERVICE = 'shop-cart';
 const inNamespace = { namespace: NAMESPACE };
+
+// An engine id is a UUID's canonical text, as Identity.UUID writes it:
+// the engine keeps a checkout's customerId and its lines' inventoryId so,
+// and an Inventory's id is its product's.
+const engineId = (id: string): IdentityUUID => normalizeIdentityUUIDStrict(id);
 
 // A pickup slot is fifteen minutes, the CollectionPoint's grid.
 const SLOT_MS = 15 * 60 * 1000;
@@ -36,7 +42,7 @@ export const create: Constructor = deps => ({
 function shopper(ctx: RequestContext): Principal {
   const subject = ctx.principal?.subject;
   if (!subject) throw new HttpProblem(401, 'sign in to use a cart', { code: 'unauthorized' });
-  return { subject, permissions: [], service: { deployable: SERVICE, serves: [SERVICE], subject: SERVICE, standsIn: false } };
+  return { subject: engineId(subject), permissions: [], service: { deployable: SERVICE, serves: [SERVICE], subject: SERVICE, standsIn: false } };
 }
 
 /** shop-cart itself, for what no shopper asks: the pickup slots anyone reads. */
@@ -91,7 +97,7 @@ async function engineCall<T>(deps: Deps, fn: (engine: AsyncEngine) => Promise<T>
 /** The caller's cart: another shopper's is the 404 of one never opened. */
 async function callersCart(deps: Deps, ctx: RequestContext, id: string): Promise<{ record: CheckoutRecord; principal: Principal }> {
   const principal = shopper(ctx);
-  const found = await engineCall(deps, engine => engine.instances.get(principal, 'Checkout', id, inNamespace));
+  const found = await engineCall(deps, engine => engine.instances.get(principal, 'Checkout', engineId(id), inNamespace));
   const record = found ? checkout(found) : undefined;
   if (!record || record.data.customerId !== principal.subject) throw notFound(`Cart ${id} does not exist`);
   return { record, principal };
@@ -130,7 +136,7 @@ function carts(deps: Deps): CartsImplementation {
       const principal = shopper(ctx);
       const record = checkout(
         await engineCall(deps, engine =>
-          engine.instances.create(principal, 'Checkout', { customerId: principal.subject, lines: [] }, { ...inNamespace, id: randomUUID() })
+          engine.instances.create(principal, 'Checkout', { customerId: principal.subject, lines: [] }, { ...inNamespace, id: engineId(randomUUID()) })
         )
       );
       deps.logger.info('cart opened', { cart: record.id, shopper: principal.subject });
@@ -142,26 +148,27 @@ function carts(deps: Deps): CartsImplementation {
     addCartLine: async ({ id, input }, ctx) => {
       const { record, principal } = await callersCart(deps, ctx, id);
       inCart(record);
-      const inventory = await engineCall(deps, engine => engine.instances.get(principal, 'Inventory', input.productId, inNamespace));
+      const product = engineId(input.productId);
+      const inventory = await engineCall(deps, engine => engine.instances.get(principal, 'Inventory', product, inNamespace));
       if (!inventory) throw new HttpProblem(422, `the shop does not stock product ${input.productId}`, { code: 'unknown_product' });
       const lines = record.data.lines.map(line => ({ ...line }));
-      const line = lines.find(existing => existing.inventoryId === input.productId);
+      const line = lines.find(existing => existing.inventoryId === product);
       if (line) line.quantity += input.quantity;
-      else lines.push({ inventoryId: input.productId, quantity: input.quantity });
-      return view(checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', id, { lines }, inNamespace))));
+      else lines.push({ inventoryId: product, quantity: input.quantity });
+      return view(checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', record.id, { lines }, inNamespace))));
     },
     // Links the counter and records the slot, which startCheckout holds.
     choosePickup: async ({ id, input }, ctx) => {
       const { record, principal } = await callersCart(deps, ctx, id);
       inCart(record);
       if (record.behaviors.Links?.targets?.counter !== undefined) {
-        await engineCall(deps, engine => engine.instances.invoke(principal, 'Checkout', id, 'unlink', { name: 'counter' }, inNamespace));
+        await engineCall(deps, engine => engine.instances.invoke(principal, 'Checkout', record.id, 'unlink', { name: 'counter' }, inNamespace));
       }
       await engineCall(deps, engine =>
-        engine.instances.invoke(principal, 'Checkout', id, 'link', { name: 'counter', id: input.collectionPointId }, inNamespace)
+        engine.instances.invoke(principal, 'Checkout', record.id, 'link', { name: 'counter', id: engineId(input.collectionPointId) }, inNamespace)
       );
       return view(
-        checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', id, { pickupAt: input.startsAt.toISOString() }, inNamespace)))
+        checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', record.id, { pickupAt: input.startsAt.toISOString() }, inNamespace)))
       );
     },
   };

@@ -125,12 +125,14 @@ func (c *Checkouts) callersCheckout(ctx context.Context, id types.IdentityUUID) 
 	if err != nil {
 		return nil, nil, err
 	}
-	principal := shopperPrincipal(customer.ToUUID().String())
-	rec, err := readCheckout(ctx, c.Engine, principal, id.ToUUID().String())
+	// An engine id is a UUID's canonical text, as Identity.UUID writes it,
+	// which is how the engine keeps the checkout's customerId too.
+	principal := shopperPrincipal(customer.String())
+	rec, err := readCheckout(ctx, c.Engine, principal, id.String())
 	if err != nil {
 		return nil, nil, err
 	}
-	if rec == nil || (!seesEveryOrder(ctx) && rec.Data.CustomerID != customer.ToUUID().String()) {
+	if rec == nil || (!seesEveryOrder(ctx) && rec.Data.CustomerID != customer.String()) {
 		return nil, nil, api.NotFoundError("checkout", nil)
 	}
 	return rec, principal, nil
@@ -253,7 +255,8 @@ func (c *Checkouts) RequestRefund(ctx context.Context, id types.IdentityUUID, in
 	}
 	var refund refundRecord
 	data := map[string]any{"amountCents": int64(input.AmountCents), "reason": input.Reason, "requestedBy": principal.Subject}
-	options := map[string]any{"namespace": namespace, "behaviors": map[string]any{"Links": map[string]any{"order": rec.ID}}}
+	// Its id is a UUID's canonical text, as the API answers it.
+	options := map[string]any{"namespace": namespace, "id": scalars.NewUUID().String(), "behaviors": map[string]any{"Links": map[string]any{"order": rec.ID}}}
 	if err := call(ctx, c.Engine, &refund, "instances.create", principal, refundSchema, data, options); err != nil {
 		return nil, err
 	}
