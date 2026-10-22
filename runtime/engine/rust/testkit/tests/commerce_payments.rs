@@ -965,6 +965,47 @@ fn an_amount_in_another_currency_is_refused() {
 }
 
 #[test]
+fn a_finance_currency_field_takes_only_active_iso_4217_codes() {
+    for target in targets("a_finance_currency_field") {
+        let engine = open(&target, BehaviorSet::new());
+        let mut document = checkout_document(
+            "Priced",
+            json!([checkout_flow(), {"name": "Payments", "config": payments_config(json!({"currency": {"field": "currency"}}))}]),
+        );
+        document["types"]["Priced"]["fields"] = json!([
+            {"name": "title", "typeRef": {"name": "string"}},
+            {"name": "totalCents", "typeRef": {"name": "Generic.Int64"}},
+            {"name": "currency", "typeRef": {"name": "Finance.Currency"}}
+        ]);
+        support::publish(&engine, &document, None);
+        create(
+            &engine,
+            "Priced",
+            "p-1",
+            json!({"totalCents": 100, "currency": "GBP"}),
+            None,
+        )
+        .expect("an active code");
+        // The engine's validation reads Finance.Currency from superscalar's
+        // core: a code of the right shape ISO 4217 does not list is refused
+        // as the field's value, before Payments reads it.
+        for code in ["ABC", "XYZ", "gbp"] {
+            let refused = refusal(create(
+                &engine,
+                "Priced",
+                "p-2",
+                json!({"totalCents": 100, "currency": code}),
+                None,
+            ));
+            assert!(
+                refused.to_string().contains("currency"),
+                "{code}: {refused}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_literal_currency_is_checked_against_iso_4217_when_the_schema_is_defined() {
     for target in targets("a_literal_currency") {
         let engine = open(&target, BehaviorSet::new());
