@@ -132,8 +132,15 @@ func (r *resolver) resolveWorkerRef(where string, ref ir.DeployableRef) (*deploy
 // takes on another deployable, which it refuses.
 func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *ir.DeployableSettings) bool {
 	if d.res.Kind != ir.DeployableWorker {
-		if entry.Instances != nil || entry.Concurrency != nil {
-			r.fail(CodeInvalidSettings, "%s sets instances or concurrency on %s %s; only a worker takes them, named beside its API's handle with `worker`", where, d.res.Kind, d.res.Name)
+		if entry.Instances != nil || entry.Concurrency != nil || entry.MaxInstances != nil {
+			var set []string
+			for name, on := range map[string]bool{"instances": entry.Instances != nil, "maxInstances": entry.MaxInstances != nil, "concurrency": entry.Concurrency != nil} {
+				if on {
+					set = append(set, name)
+				}
+			}
+			slices.Sort(set)
+			r.fail(CodeInvalidSettings, "%s sets %s on %s %s; only a worker takes instances, maxInstances and concurrency, named beside its API's handle with `worker`", where, strings.Join(set, " and "), d.res.Kind, d.res.Name)
 			return true
 		}
 		return false
@@ -155,6 +162,13 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 		instances := *entry.Instances
 		s.instances, s.workerFrom["instances"] = &instances, env
 	}
+	if entry.MaxInstances != nil {
+		if *entry.MaxInstances < 1 {
+			r.fail(CodeInvalidSettings, "%s maxInstances is %d; it is one or more", where, *entry.MaxInstances)
+		}
+		maxInstances := *entry.MaxInstances
+		s.maxInstances, s.workerFrom["maxInstances"] = &maxInstances, env
+	}
 	if entry.Concurrency != nil {
 		if *entry.Concurrency < 1 {
 			r.fail(CodeInvalidSettings, "%s concurrency is %d; it is one or more", where, *entry.Concurrency)
@@ -171,7 +185,9 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 
 // runWorkers decides what each worker runs in the environment (D53): its
 // queue, which must be a `@queue` of the database its API connects to, on
-// a database the environment runs on Postgres; its concurrency, the
+// a database the environment runs on Postgres or on a SQLite file, whose
+// platform does not refuse a worker's claims (D53, amended); its
+// concurrency, the
 // decorator's unless the settings change it; and its instances, one unless
 // the settings change them, and none when they turn it off. Its grace is
 // the decorator's.
@@ -200,9 +216,15 @@ func (r *resolver) runWorkers() {
 			continue
 		}
 		run.Database = db
-		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" && host.res.Dialect != registry.SQLDialectPostgres {
-			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)",
-				name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
+		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" {
+			switch {
+			case host.platform.NoQueueClaims != "":
+				r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database on platform %s, where no worker claims: %s (D53, amended)",
+					name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect, host.platform.Name, host.platform.NoQueueClaims)
+			case host.res.Dialect != registry.SQLDialectPostgres && host.res.Dialect != registry.SQLDialectSQLite:
+				r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres or SQLite, the dialects the queue clients claim on (D53, amended)",
+					name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
+			}
 		}
 		run.Concurrency = registry.WorkerConcurrency(d.worker)
 		if s.concurrency != nil {
@@ -212,8 +234,14 @@ func (r *resolver) runWorkers() {
 		if s.instances != nil {
 			run.Instances = *s.instances
 		}
+		if s.maxInstances != nil {
+			if *s.maxInstances < run.Instances {
+				r.fail(CodeInvalidSettings, "worker %s may run up to %d instances (maxInstances), under its %d (instances), the fewest it runs", name, *s.maxInstances, run.Instances)
+			}
+			run.MaxInstances = *s.maxInstances
+		}
 		if s.enabled != nil && !*s.enabled {
-			run.Instances = 0
+			run.Instances, run.MaxInstances = 0, 0
 		}
 		run.GraceSeconds = registry.WorkerGraceSeconds(d.worker)
 	}

@@ -138,10 +138,10 @@ func queueDriver(ctx context.Context, q *migrate.QueueDocument, conn *migrate.Cl
 	if err != nil {
 		return nil, nil, err
 	}
-	// A queue's messages are claimed on Postgres alone, so no other
+	// The operator's statements are Postgres's alone, so no other
 	// database is opened for them.
 	if dialect := migrate.URLDialect(url); dialect != migrate.Postgres {
-		return nil, nil, fmt.Errorf("queue %s of %s: a queue's messages are claimed on Postgres alone, and the database URL selects %s", q.Queue, q.Service, dialect)
+		return nil, nil, fmt.Errorf("queue %s of %s: a queue's dead messages are read, retried and dropped on Postgres alone, and the database URL selects %s", q.Queue, q.Service, dialect)
 	}
 	return openDriver(ctx, url, o)
 }

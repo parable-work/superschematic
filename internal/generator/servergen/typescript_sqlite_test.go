@@ -1,21 +1,26 @@
 package servergen_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 	publicregistry "github.com/parable-work/superschematic/registry"
@@ -23,13 +28,19 @@ import (
 )
 
 // The sqlite-first TypeScript fixture (D64; docs/stack-model.md, section
-// 18.6): ts-notes, a TypeScript API with a job, on ts-notes-db, whose DB
-// service lists sqlite first, deployed alone by ts-lite-stack, whose Local
-// environment keeps the database in a SQLite file.
+// 18.6): ts-notes, a TypeScript API with a job and a worker, on
+// ts-notes-db, whose DB service lists sqlite first, deployed alone by
+// ts-lite-stack, whose Local environment keeps the database in a SQLite
+// file.
 var tsLiteOrder = []string{"ts-notes-db", "ts-notes", "ts-lite-stack"}
 
-// tsPruneNotes is the deployable of ts-notes' job PruneNotes.
-const tsPruneNotes = "ts-notes-prune-notes"
+// tsPruneNotes is the deployable of ts-notes' job PruneNotes, and
+// tsIndexNotes of its worker IndexNotes, which claims ts-notes-db's queue
+// NoteWritten on the SQLite file (D53, amended).
+const (
+	tsPruneNotes = "ts-notes-prune-notes"
+	tsIndexNotes = "ts-notes-index-notes"
+)
 
 // loadTypeScriptSQLiteFixture loads the sqlite-first fixture's services.
 func loadTypeScriptSQLiteFixture(t *testing.T) fixture {
@@ -60,7 +71,7 @@ func tsLiteGenerated(repoRoot string) map[string]string {
 	for _, file := range []string{"deps.ts", "config.ts", "package.json"} {
 		files[filepath.Join("api", "ts-notes", file)] = filepath.Join(out, "api", "ts-notes", file)
 	}
-	for _, server := range []string{"ts-notes", tsPruneNotes} {
+	for _, server := range []string{"ts-notes", tsPruneNotes, tsIndexNotes} {
 		for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile} {
 			files[filepath.Join("server", "ts-lite-stack", server, file)] = filepath.Join(servergen.ServerDir(out, "ts-lite-stack", server), file)
 		}
@@ -103,9 +114,9 @@ func TestTypeScriptSQLiteEntrypointGolden(t *testing.T) {
 // TestTypeScriptPlanRefusesWhatSQLiteCannotRun: a stack whose environments
 // resolve refuses these first; the plan of an entrypoint refuses them too,
 // since its code could not reach the database: an identity store over a
-// sqlite-first authDb, which no TypeScript store runs on (D50), and a
-// worker whose queue's database lists sqlite first, since a worker claims
-// on Postgres (D53).
+// sqlite-first authDb, which no TypeScript store runs on (D50). A worker
+// whose queue's database lists sqlite first plans, claiming on the SQLite
+// file with sqliteQueue (D53, amended).
 func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
 	input := func(output *tsrestgen.APIOutput, worker *servergen.WorkerInput) servergen.TypeScriptInput {
 		return servergen.TypeScriptInput{
@@ -136,17 +147,21 @@ func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
 		SchemaName: "notes", PackageName: "@schemas/notes-api", HasEnvConfig: true, Deps: deps,
 		Workers: []tsrestgen.WorkerInfo{{Name: "IndexNotes", Method: "indexNotes", Queue: "NoteWritten", Concurrency: 1}},
 	}
-	_, err = servergen.PlanTypeScript(input(worker, &servergen.WorkerInput{Name: "IndexNotes"}))
-	if want := "worker notes of notes claims queue NoteWritten of notes-db, whose DB service lists sqlite first; a worker claims on Postgres, the one dialect the TypeScript queue client claims on (D53, D64)"; err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("PlanTypeScript of a worker on SQLite = %v, want %q", err, want)
+	plan, err := servergen.PlanTypeScript(input(worker, &servergen.WorkerInput{Name: "IndexNotes"}))
+	if err != nil || plan.Worker == nil || plan.Worker.Database == nil || !plan.Worker.Database.SQLite {
+		t.Errorf("PlanTypeScript of a worker on SQLite = %+v, %v, want a worker that claims on the SQLite file", plan, err)
 	}
 }
 
 // tsNotesImplementation keeps notes in Deps.db, a SqlDatabase over the
 // SQLite file, creating its table when it starts, as a migration would.
-// Its job, PruneNotes, deletes the notes whose text is empty.
+// Its job, PruneNotes, deletes the notes whose text is empty. putNote
+// enqueues a NoteWritten in the batch that writes the note, and its worker,
+// IndexNotes, logs each message, failing one of the note poison.
 const tsNotesImplementation = `import { notFound } from '@superschematic/http-runtime';
-import type { Constructor, JobsConstructor } from '@schemas/ts-notes-api';
+import { enqueueStatement } from '@superschematic/http-runtime/d1';
+import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
+import type { Constructor, JobsConstructor, WorkersConstructor } from '@schemas/ts-notes-api';
 
 export const create: Constructor = async deps => {
   await deps.db.exec('CREATE TABLE IF NOT EXISTS note (id TEXT PRIMARY KEY, text TEXT NOT NULL)');
@@ -158,12 +173,23 @@ export const create: Constructor = async deps => {
         return note;
       },
       async putNote({ id, text }) {
-        await deps.db.prepare('INSERT INTO note (id, text) VALUES (?1, ?2) ON CONFLICT (id) DO UPDATE SET text = ?2').bind(id, text).run();
+        // The note and its message commit together, in one batch.
+        await deps.db.batch([
+          deps.db.prepare('INSERT INTO note (id, text) VALUES (?1, ?2) ON CONFLICT (id) DO UPDATE SET text = ?2').bind(id, text),
+          enqueueStatement(deps.db, noteWrittenQueue, { noteId: id, words: text.split(' ').filter(Boolean), empty: text === '' }),
+        ]);
         return { id, text };
       },
     },
   };
 };
+
+export const createWorkers: WorkersConstructor = deps => ({
+  async indexNotes(message) {
+    if (message.noteId === 'poison') throw new Error('poison every time');
+    deps.logger.info('indexed', { note: message.noteId, words: message.words.join('+'), empty: message.empty });
+  },
+});
 
 export const createJobs: JobsConstructor = deps => ({
   async pruneNotes() {
@@ -223,10 +249,11 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 	}
 	serverDir := servergen.ServerDir(out, "ts-lite-stack", "ts-notes")
 	jobDir := servergen.ServerDir(out, "ts-lite-stack", tsPruneNotes)
+	workerDir := servergen.ServerDir(out, "ts-lite-stack", tsIndexNotes)
 	// The server's tsconfig.json takes fetch.ts in too, and the job's
 	// scheduled.ts: Edge places them on the fake bundle and cron
 	// platforms, as Workers and Cron Triggers (D64).
-	for _, dir := range []string{impl, serverDir, jobDir} {
+	for _, dir := range []string{impl, serverDir, jobDir, workerDir} {
 		check(dir)
 	}
 	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist", "workerd", "superscalar_wasm_bg.wasm")); err == nil {
@@ -244,6 +271,17 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 
 	file := filepath.Join(t.TempDir(), "notes_db.sqlite")
 	url := "TS_NOTES_DB_DATABASE_URL=sqlite:" + filepath.ToSlash(file)
+	// The SQLite model's DDL of ts-notes-db, which a migration would apply:
+	// the note table and the queue NoteWritten's.
+	model, err := sqlmigrate.BuildModel(f.schemas["ts-notes-db"], sqlgen.Options{SchemaName: "ts-notes-db"}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddl, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueRows := liteQueue(t, bun, file, ddl)
 	notes := bunServer(t, bun, serverDir, url)
 	notes.expect(t, http.MethodGet, "/readyz", http.StatusOK, `"ready"`)
 	notes.send(t, http.MethodPut, "/api/notes/tea", `{"text":"steep for four minutes"}`, http.StatusOK, `"text":"steep for four minutes"`)
@@ -264,7 +302,9 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 	notes = bunServer(t, bun, serverDir, url)
 	notes.expect(t, http.MethodGet, "/api/notes/empty", http.StatusNotFound)
 	notes.expect(t, http.MethodGet, "/api/notes/tea", http.StatusOK, `"steep for four minutes"`)
+	notes.send(t, http.MethodPut, "/api/notes/poison", `{"text":"never indexed"}`, http.StatusOK)
 	notes.stop(t)
+	runIndexNotes(t, bun, workerDir, url, queueRows)
 
 	for env, want := range map[string][]string{
 		"TS_NOTES_DB_DATABASE_URL=postgres://notes:secret@127.0.0.1:9/notes": {"database ts-notes-db, from TS_NOTES_DB_DATABASE: the database's URL is a postgres: URL; a sqlite-first database's is sqlite:<path>"},
@@ -284,6 +324,108 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 		}
 		if strings.Contains(string(refused), "secret") {
 			t.Errorf("ts-notes printed the database URL's password:\n%s", refused)
+		}
+	}
+}
+
+// liteQueue applies ddl to the SQLite file and returns a reader of its
+// queue NoteWritten's rows, by note: each one's state, attempts and last
+// error, read through bun:sqlite.
+func liteQueue(t *testing.T, bun, file, ddl string) func() map[string]queueRow {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sqlite.ts")
+	if err := os.WriteFile(script, []byte(`import { Database } from 'bun:sqlite';
+const [file, sql] = process.argv.slice(2);
+const db = new Database(file, { create: true });
+db.run('PRAGMA busy_timeout = 5000');
+if (sql.startsWith('SELECT')) console.log(JSON.stringify(db.query(sql).all()));
+else db.exec(sql);
+db.close();
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(sql string) string {
+		t.Helper()
+		output, err := exec.Command(bun, script, file, sql).CombinedOutput()
+		if err != nil {
+			t.Fatalf("bun sqlite.ts %q: %v\n%s", sql, err, output)
+		}
+		return string(output)
+	}
+	run(ddl)
+	return func() map[string]queueRow {
+		t.Helper()
+		var list []queueRow
+		if err := json.Unmarshal([]byte(run("SELECT note_id AS sku, state, attempts, claim_token, last_error FROM note_written_queue")), &list); err != nil {
+			t.Fatal(err)
+		}
+		byNote := map[string]queueRow{}
+		for _, r := range list {
+			byNote[r.SKU] = r
+		}
+		return byNote
+	}
+}
+
+// runIndexNotes runs the worker IndexNotes on the SQLite file the server
+// wrote, whose queue holds the messages of the notes tea, empty and
+// poison: it handles tea and empty, logging each, fails poison until it is
+// dead, its retries spent, and on SIGTERM stops and exits 0 (D53,
+// amended).
+func runIndexNotes(t *testing.T, bun, workerDir, url string, rows func() map[string]queueRow) {
+	t.Helper()
+	if r := rows(); len(r) != 3 || r["tea"].State != ir.QueueStateReady {
+		t.Fatalf("the server enqueued %v, want tea, empty and poison ready", r)
+	}
+	worker := exec.Command(bun, servergen.TypeScriptMainFile)
+	worker.Dir = workerDir
+	worker.Env = append(os.Environ(), url)
+	var logs lockedBuffer
+	worker.Stdout, worker.Stderr = &logs, &logs
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- worker.Wait() }()
+	t.Cleanup(func() { _ = worker.Process.Kill() })
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		r := rows()
+		if r["tea"].State == ir.QueueStateDone && r["empty"].State == ir.QueueStateDone && r["poison"].State == ir.QueueStateDead {
+			break
+		}
+		select {
+		case err := <-exited:
+			t.Fatalf("the worker exited: %v\n%s", err, logs.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker did not settle the messages: %v\n%s", r, logs.String())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if poison := rows()["poison"]; poison.Attempts != 2 || poison.LastError == nil || *poison.LastError != "poison every time" {
+		t.Errorf("poison took %d attempts with %v; want two, its error kept", poison.Attempts, poison.LastError)
+	}
+	if err := worker.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Errorf("the worker exited %v on SIGTERM, want 0:\n%s", err, logs.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("the worker did not stop on SIGTERM:\n%s", logs.String())
+	}
+	for _, want := range []string{
+		`"msg":"worker started"`,
+		`"msg":"indexed","stack":"ts-lite-stack","worker":"ts-notes-index-notes","api":"ts-notes","note":"tea","words":"steep+for+four+minutes","empty":false`,
+		`"note":"empty","words":"","empty":true`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("the worker's log lacks %s:\n%s", want, logs.String())
 		}
 	}
 }

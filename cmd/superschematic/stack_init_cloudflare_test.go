@@ -55,7 +55,7 @@ func TestStackInitWritesACloudflareEnvironment(t *testing.T) {
 	}
 	for _, want := range []string{
 		"declare module \"@superschematic/stack\" {\n  interface Targets {\n    cloudflare: {\n",
-		"      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string };\n",
+		"      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string; telemetry?: { endpoint: string; sampleRatio?: number } };\n",
 	} {
 		if !strings.Contains(string(types), want) {
 			t.Errorf("src/cloudflare-target.ts holds no %q:\n%s", want, types)

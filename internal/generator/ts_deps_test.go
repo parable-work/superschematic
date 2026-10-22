@@ -284,12 +284,7 @@ func TestTypeScriptDepsAndScaffoldCompile(t *testing.T) {
 	}
 	// The workspace overrides the runtime with its checkout, which a
 	// consumer reads from its dist/.
-	install := exec.Command(bunPath, "install", "--frozen-lockfile")
-	install.Dir = paths.HTTPRuntimeTypeScript
-	if out, err := install.CombinedOutput(); err != nil {
-		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed for the http runtime (likely offline): %v\n%s", err, out))
-	}
-	run(paths.HTTPRuntimeTypeScript, bunPath, "run", "build")
+	testpaths.BuildHTTPRuntime(t, bunPath, paths)
 
 	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

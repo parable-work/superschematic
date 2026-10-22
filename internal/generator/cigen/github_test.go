@@ -47,7 +47,7 @@ func TestNodeIsPinnedAsToolsEnvPinsIt(t *testing.T) {
 	if pinned != NodeVersion {
 		t.Errorf("tools.env pins Node %s; cigen.NodeVersion is %s", pinned, NodeVersion)
 	}
-	if s := setupNode(); len(s.with) != 1 || s.with[0] != [2]string{"node-version", pinned} || s.uses != &actionSetupNode {
+	if s := setupNode(); len(s.with) != 2 || s.with[1] != [2]string{"package-manager-cache", "false"} || s.with[0] != [2]string{"node-version", pinned} || s.uses != &actionSetupNode {
 		t.Errorf("setupNode() = %+v, want actions/setup-node at node-version %s", s, pinned)
 	}
 }

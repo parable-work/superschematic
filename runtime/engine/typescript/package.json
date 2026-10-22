@@ -49,7 +49,7 @@
   "scripts": {
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
-    "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "build": "node scripts/link-local-deps.mjs && node ../../../scripts/build-dist.mjs tsc -p tsconfig.json",
     "build:napi": "../../../scripts/engine-napi.sh",
     "test": "bun run build && bun run test:node && bun run test:bun",
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",

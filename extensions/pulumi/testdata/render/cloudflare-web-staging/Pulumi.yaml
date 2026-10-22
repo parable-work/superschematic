@@ -45,7 +45,12 @@ resources:
         - name: CART_TTL_DAYS
           text: "30"
           type: plain_text
+        - name: SUPERSCHEMATIC_BUNDLE
+          text: "2222222222222222222222222222222222222222222222222222222222222222"
+          type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       limits:
         cpuMs: 30000
       mainModule: main.js
@@ -84,6 +89,20 @@ resources:
         previewsEnabled: false
     options:
       version: 6.22.0
+  # phase rollout; owners shop-storefront-sweep-carts
+  shop-storefront-sweep-carts-workflow:
+    name: shop-storefront-sweep-carts.workflow
+    type: cloudflare:index/workflow:Workflow
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      className: JobRun
+      scriptName: ${shop-storefront-sweep-carts-worker.name}
+      workflowName: web-stack-staging-shop-storefront-sweep-carts
+    options:
+      dependsOn:
+        - ${shop-storefront-sweep-carts-deployment}
+        - ${shop-storefront-sweep-carts-worker}
+      version: 6.22.0
   # phase rollout; owners shop-storefront
   shop-storefront-deployment:
     name: shop-storefront.deployment
@@ -114,6 +133,8 @@ resources:
           text: https://web-stack-staging-storefront-web.acme.workers.dev
           type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js
@@ -222,6 +243,7 @@ outputs:
   shop-storefront-sweep-carts.version.id: ${shop-storefront-sweep-carts-version.id}
   shop-storefront-sweep-carts.worker.id: ${shop-storefront-sweep-carts-worker.id}
   shop-storefront-sweep-carts.worker.name: ${shop-storefront-sweep-carts-worker.name}
+  shop-storefront-sweep-carts.workflow.id: ${shop-storefront-sweep-carts-workflow.id}
   shop-storefront.deployment.id: ${shop-storefront-deployment.id}
   shop-storefront.version.id: ${shop-storefront-version.id}
   shop-storefront.worker.id: ${shop-storefront-worker.id}

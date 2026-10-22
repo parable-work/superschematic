@@ -52,9 +52,10 @@ dev's schedule goes on; that schedule skips its runs while this one goes
 on. Ctrl-C stops the run.
 
 On a cloud target, run runs the deployed job through the target's job
-runner: the job the last deploy rolled out, with its image, config,
-identity, timeout and retries. It refuses a target that runs no job on
-demand, and a run whose last deploy did not roll the job out.
+runner: the job the last deploy rolled out, with its image, or its bundle
+on a target that runs one, config, identity, timeout and retries. It
+refuses a target that runs no job on demand, and a run whose last deploy
+did not roll the job out.
 
 Run exits non-zero when the job's last try fails.
 

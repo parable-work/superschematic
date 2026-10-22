@@ -239,6 +239,11 @@ type ResolvedWorker struct {
 	Instances   int `json:"instances"`
 	Concurrency int `json:"concurrency"`
 
+	// MaxInstances is the most instances its settings let a target run as
+	// the queue's depth grows, Instances the fewest; zero when they set
+	// none, a fixed count (D53, amended). No target scales a worker yet.
+	MaxInstances int `json:"maxInstances,omitempty"`
+
 	// GraceSeconds is how long a stopping instance lets its running
 	// handlers finish before it gives their messages back.
 	GraceSeconds int `json:"graceSeconds"`

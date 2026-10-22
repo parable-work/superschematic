@@ -104,6 +104,21 @@ func TestBootstrapGraph(t *testing.T) {
 		}
 		return false
 	}
+	// Cloudflare's Workflows API, which a job's Workflow node and the job
+	// runner call (D64, amended), takes Workers Scripts Write to create,
+	// start and terminate, and Workers Scripts Read to read, as its
+	// reference lists for each call: the deployer and the preview, which
+	// deploy and run jobs, write; the planner, which refreshes the node,
+	// reads.
+	for node, group := range map[string]string{
+		"deployer": cloudflare.WorkflowsWriteGroup,
+		"preview":  cloudflare.WorkflowsWriteGroup,
+		"planner":  cloudflare.WorkflowsReadGroup,
+	} {
+		if !holds(node, group) {
+			t.Errorf("the %s holds no %s, which the Workflows API asks for", node, group)
+		}
+	}
 	for _, group := range []string{"Workers R2 Storage Read", "Workers R2 Storage Write"} {
 		if holds("planner", group) {
 			t.Errorf("the planner holds %s", group)

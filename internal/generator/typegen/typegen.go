@@ -69,6 +69,13 @@ type ScalarInfo struct {
 	// that must be parsed into this module's int64-backed scalar alias.
 	ParseAsInt64 bool
 
+	// ParseCanonical means the parse target reads the scalar core's
+	// canonical text of the input, not the input: superscalar's
+	// ParseDuration reads the text with Go's duration parser, which refuses
+	// text the core trims and rounds a fraction of a nanosecond down where
+	// the core rounds it to the nearest.
+	ParseCanonical bool
+
 	// ParseAsJSON means the superscalar parse target returns canonical JSON
 	// text that must be decoded into this module's scalar alias (a map or
 	// other JSON-like Go type): a JSON-shaped custom-parse scalar, and every
@@ -691,6 +698,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 		}
 		scalar.ParseTarget = scalarLibParseTarget(scalar)
 		scalar.ParseAsInt64 = scalar.ParseTarget != "" && scalar.Traits.IsIntegerLike
+		scalar.ParseCanonical = scalar.ParseTarget == "ParseDuration"
 		scalar.ParseAsJSON = (scalar.HasCustomParse && scalar.Traits.IsJSONLike) || scalar.Traits.StructuredJSON != ""
 		scalars[i] = scalar
 	}

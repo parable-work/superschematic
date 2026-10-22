@@ -31,3 +31,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# A runtime package build's staging directory (scripts/build-dist.mjs), left
+# only if the build was killed.
+.dist-build-*/

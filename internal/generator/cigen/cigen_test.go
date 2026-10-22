@@ -198,7 +198,7 @@ func TestGoldenWorkflow(t *testing.T) {
 	if w.name != "shop-stack" {
 		t.Errorf("name = %q", w.name)
 	}
-	if want := []string{"check", "plan-beta", "plan-live", "preview-review", "deploy-beta", "deploy-live"}; !slices.Equal(w.order, want) {
+	if want := []string{"check", "prepare", "plan-beta", "plan-live", "preview-review", "deploy-beta", "deploy-live"}; !slices.Equal(w.order, want) {
 		t.Fatalf("jobs = %v, want %v", w.order, want)
 	}
 	on := w.on
@@ -211,21 +211,23 @@ func TestGoldenWorkflow(t *testing.T) {
 
 	const (
 		pullRequest = "github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository"
-		preview     = "!cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action == 'closed' || needs.check.result == 'success')"
+		preview     = "!cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.prepare.result == 'success' && (github.event.action == 'closed' || needs.check.result == 'success')"
+		prepare     = "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
 		push        = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
 	)
 	for _, tc := range []struct {
 		id, needs, cond, environment, role, account string
 	}{
 		{"check", "", "github.event.action != 'closed'", "", "", ""},
-		{"plan-beta", "check", pullRequest, "", "planner", "shop-stack-planner@acme-beta.fake.test"},
-		{"plan-live", "check", pullRequest, "", "planner", "shop-stack-planner@acme-live.fake.test"},
-		{"preview-review", "check", preview, "", "deployer", "shop-stack-deployer@acme-beta.fake.test"},
-		{"deploy-beta", "check", push, "Beta", "deployer", "shop-stack-deployer@acme-beta.fake.test"},
-		{"deploy-live", "deploy-beta", push, "Live", "deployer", "shop-stack-deployer@acme-live.fake.test"},
+		{"prepare", "", prepare, "", "", ""},
+		{"plan-beta", "check, prepare", pullRequest, "", "planner", "shop-stack-planner@acme-beta.fake.test"},
+		{"plan-live", "check, prepare", pullRequest, "", "planner", "shop-stack-planner@acme-live.fake.test"},
+		{"preview-review", "check, prepare", preview, "", "deployer", "shop-stack-deployer@acme-beta.fake.test"},
+		{"deploy-beta", "check, prepare", push, "Beta", "deployer", "shop-stack-deployer@acme-beta.fake.test"},
+		{"deploy-live", "deploy-beta, prepare", push, "Live", "deployer", "shop-stack-deployer@acme-live.fake.test"},
 	} {
 		j := w.jobs[tc.id]
-		if j.Needs != tc.needs || j.If != tc.cond || j.Environment != tc.environment {
+		if string(j.Needs) != tc.needs || j.If != tc.cond || j.Environment != tc.environment {
 			t.Errorf("%s: needs %q, if %q, environment %q; want %q, %q, %q", tc.id, j.Needs, j.If, j.Environment, tc.needs, tc.cond, tc.environment)
 		}
 		signIn := j.step("Sign in to Google Cloud as " + tc.role)
@@ -251,8 +253,14 @@ func TestGoldenWorkflow(t *testing.T) {
 			!strings.Contains(install.Run, "https://github.com/parable-work/superschematic/releases/download/v1.2.3") {
 			t.Errorf("%s does not install release %s checked against SHA256SUMS", tc.id, version)
 		}
-		if packages := j.step("Install the schemas root's packages"); packages == nil || packages.Run != "bun install --frozen-lockfile" || packages.WorkingDirectory != "schemas" {
-			t.Errorf("%s does not install the schemas root's packages with bun: %+v", tc.id, packages)
+		// A cloud job installs the packages with none of their scripts,
+		// for the loader to read their types (D47, amended).
+		name, run := "Install the schemas root's packages", "bun install --frozen-lockfile"
+		if tc.role != "" {
+			name, run = name+", running none of their scripts", run+" --ignore-scripts"
+		}
+		if packages := j.step(name); packages == nil || packages.Run != run || packages.WorkingDirectory != "schemas" {
+			t.Errorf("%s does not install the schemas root's packages with %s: %+v", tc.id, run, packages)
 		}
 		if bun := j.step("Set up Bun"); bun == nil || bun.With["bun-version"] != servergen.BunVersion {
 			t.Errorf("%s does not set up Bun at tools.env's %s: %+v", tc.id, servergen.BunVersion, bun)
@@ -271,11 +279,11 @@ func TestGoldenWorkflow(t *testing.T) {
 	}
 	review := w.jobs["preview-review"]
 	if s := review.step("Deploy Review for the pull request"); s == nil || s.If != "github.event.action != 'closed'" ||
-		s.Run != "superschematic stack deploy Review --stack schemas/services/shop-stack --param pr=${{ github.event.pull_request.number }}" {
+		s.Run != `superschematic stack deploy Review --stack schemas/services/shop-stack --prepared "$RUNNER_TEMP/prepared" --param pr=${{ github.event.pull_request.number }}` {
 		t.Errorf("preview-review's deploy = %+v", s)
 	}
 	if s := review.step("Destroy Review for the pull request"); s == nil || s.If != "github.event.action == 'closed'" ||
-		s.Run != "superschematic stack destroy Review --stack schemas/services/shop-stack --param pr=${{ github.event.pull_request.number }} --yes" {
+		s.Run != `superschematic stack destroy Review --stack schemas/services/shop-stack --prepared "$RUNNER_TEMP/prepared" --param pr=${{ github.event.pull_request.number }} --yes` {
 		t.Errorf("preview-review's destroy = %+v", s)
 	}
 	check := w.jobs["check"]
@@ -310,14 +318,31 @@ func TestGoldenWorkflow(t *testing.T) {
 	if i, j := check.index(install), check.index("Build site shop-web"); i < 0 || i > j {
 		t.Errorf("check installs the workspace at step %d, after it builds the site at step %d", i, j)
 	}
-	for _, id := range []string{"preview-review", "deploy-beta", "deploy-live"} {
-		j := w.jobs[id]
-		if i, k := j.index(install), j.index("Build the services"); i < 0 || i < k {
-			t.Errorf("%s installs the workspace at step %d, before the build at step %d", id, i, k)
-		}
+	// prepare builds, installs the workspace and prepares, for the pull
+	// request; when it closes, it prepares the documents alone, which the
+	// preview's destroy reads. No cloud job builds or installs.
+	prep := w.jobs["prepare"]
+	if i, k, p := prep.index(install), prep.index("Build the services"), prep.index("Prepare Beta, Live, Review"); k < 0 || i < k || p < i {
+		t.Errorf("prepare builds at step %d, installs the workspace at step %d and prepares at step %d", k, i, p)
 	}
-	if w.jobs["plan-beta"].step(install) != nil {
-		t.Error("plan-beta installs the workspace, though stack plan builds no site")
+	if s := prep.step("Prepare Beta, Live, Review"); s == nil || s.If != "github.event.action != 'closed'" ||
+		s.Run != `superschematic stack prepare Beta Live Review --stack schemas/services/shop-stack --dir "$RUNNER_TEMP/prepared"` {
+		t.Errorf("prepare's step = %+v", s)
+	}
+	if s := prep.step("Prepare the documents of Beta, Live, Review for the destroy"); s == nil || s.If != "github.event.action == 'closed'" || !strings.HasSuffix(s.Run, " --no-build") {
+		t.Errorf("prepare's step for the destroy = %+v", s)
+	}
+	if s := prep.Steps[len(prep.Steps)-1]; !strings.HasPrefix(s.Uses, "actions/upload-artifact@") || s.With["name"] != "prepared" || s.With["path"] != "${{ runner.temp }}/prepared" {
+		t.Errorf("prepare ends with %+v, not the upload", s)
+	}
+	for _, id := range w.order[2:] {
+		j := w.jobs[id]
+		if j.step(install) != nil || j.step("Build the services") != nil {
+			t.Errorf("%s builds or installs the workspace", id)
+		}
+		if s := j.step("Download what prepare made"); s == nil || s.With["name"] != "prepared" || s.With["path"] != "${{ runner.temp }}/prepared" {
+			t.Errorf("%s downloads %+v", id, s)
+		}
 	}
 	// check links the servers against the release's archives for the
 	// runner's platform, checked against the digest the binary names,
@@ -539,7 +564,7 @@ func TestRendererNamesEnvironmentsWithNoJob(t *testing.T) {
 		}
 	}
 	w := parseWorkflow(t, files[0].Data)
-	if want := []string{"check", "plan-staging", "deploy-staging"}; !slices.Equal(w.order, want) {
+	if want := []string{"check", "prepare", "plan-staging", "deploy-staging"}; !slices.Equal(w.order, want) {
 		t.Errorf("jobs = %v, want %v", w.order, want)
 	}
 	if s := w.jobs["check"].step("Set up Go"); s != nil {
@@ -857,9 +882,9 @@ func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
 // TestSitesInTheWorkflow: stack deploy builds a site with Bun (D55), so in
 // a project whose schemas root installs with npm, check sets up Bun at the
 // release tools.env pins, installs the output root's workspace and builds
-// the site; each deploy and preview job sets up Bun and installs the
-// workspace after the build; a plan job, which builds no site, does
-// neither. Every job sets up Node.js at the release tools.env pins for
+// the site; the prepare job does the same and builds it for the deploys,
+// and no cloud job sets up Bun or installs the workspace (D47, amended).
+// Every job sets up Node.js at the release tools.env pins for
 // npm ci. A stack whose environment deploys a site it does not locate is
 // refused.
 func TestSitesInTheWorkflow(t *testing.T) {
@@ -908,11 +933,18 @@ func TestSitesInTheWorkflow(t *testing.T) {
 	if s := w.jobs["check"].step("Build site shop-web"); s.WorkingDirectory != "apps/web/shop-web" || s.Run != "bun run bundle" {
 		t.Errorf("check builds the site with %+v", s)
 	}
+	// prepare builds the site for the deploys, after the build and the
+	// workspace's install; the deploy builds nothing (D47, amended).
+	if got, want := names("prepare"), []string{"Check out", "Install superschematic " + version, "Set up Node.js",
+		"Install the schemas root's packages", "Set up Bun", "Build the services", install, "Prepare Staging, Preview",
+		"Prepare the documents of Staging, Preview for the destroy", "Upload what prepare made"}; !slices.Equal(got, want) {
+		t.Errorf("prepare's steps:\n%q\nwant:\n%q", got, want)
+	}
 	if got, want := names("deploy-staging"), []string{"Check out", "Install superschematic " + version, "Set up Node.js",
-		"Install the schemas root's packages", "Set up Bun", "Build the services", install, "Sign in to Google Cloud as deployer", "Deploy Staging"}; !slices.Equal(got, want) {
+		"Install the schemas root's packages, running none of their scripts", "Download what prepare made", "Sign in to Google Cloud as deployer", "Deploy Staging"}; !slices.Equal(got, want) {
 		t.Errorf("deploy-staging's steps:\n%q\nwant:\n%q", got, want)
 	}
-	for _, id := range []string{"check", "deploy-staging", "preview-preview"} {
+	for _, id := range []string{"check", "prepare"} {
 		if s := w.jobs[id].step("Set up Bun"); s == nil || s.With["bun-version"] != servergen.BunVersion {
 			t.Errorf("%s sets up Bun with %+v, want tools.env's %s", id, s, servergen.BunVersion)
 		}
@@ -927,16 +959,14 @@ func TestSitesInTheWorkflow(t *testing.T) {
 	if !bytes.Contains(files[0].Data, []byte(`node-version: "`+cigen.NodeVersion+`"`)) {
 		t.Errorf("the workflow does not quote Node's release %s, which YAML would read as a number:\n%s", cigen.NodeVersion, files[0].Data)
 	}
-	preview := w.jobs["preview-preview"]
-	if s := preview.step(install); s == nil || s.If != "github.event.action != 'closed'" {
-		t.Errorf("preview-preview installs the workspace with %+v", s)
+	prepare := w.jobs["prepare"]
+	if s := prepare.step(install); s == nil || s.If != "github.event.action != 'closed'" {
+		t.Errorf("prepare installs the workspace with %+v", s)
 	}
-	if i, j := preview.index(install), preview.index("Deploy Preview for the pull request"); i < 0 || i > j {
-		t.Errorf("preview-preview installs the workspace at step %d, after it deploys at step %d", i, j)
-	}
-	plan := w.jobs["plan-staging"]
-	if plan.step("Set up Bun") != nil || plan.step(install) != nil {
-		t.Error("plan-staging sets up Bun or installs the workspace, though stack plan builds no site")
+	for _, id := range []string{"plan-staging", "deploy-staging", "preview-preview"} {
+		if job := w.jobs[id]; job.step("Set up Bun") != nil || job.step(install) != nil {
+			t.Errorf("%s sets up Bun or installs the workspace, though prepare built the site", id)
+		}
 	}
 
 	unlocated := req
@@ -949,10 +979,9 @@ func TestSitesInTheWorkflow(t *testing.T) {
 // TestBundlesInTheWorkflow: check bundles each TypeScript server some
 // environment places on a platform whose artifact is a bundle with
 // bundle.ts --check after type-checking it, as a deploy bundles it, and no
-// server only on images; the deploy and preview jobs of an environment
-// with a bundle set up Bun and install the workspace before they deploy,
-// since the deploy runs bundle.ts on the runner, and the plan job, which
-// builds nothing, does neither (D64).
+// server only on images; the prepare job sets up Bun and installs the
+// workspace, since it runs bundle.ts, and no cloud job does (D64; D47,
+// amended).
 func TestBundlesInTheWorkflow(t *testing.T) {
 	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
 	env := func(name string, artifact ir.Artifact, params ...string) *ir.ResolvedEnvironment {
@@ -996,26 +1025,34 @@ func TestBundlesInTheWorkflow(t *testing.T) {
 	if check.step("Bundle server shop-pricing for Workers") != nil {
 		t.Error("check bundles shop-pricing, which every environment runs from an image")
 	}
+	// prepare sets up Bun and installs the workspace, since it runs
+	// bundle.ts; no cloud job does (D47, amended).
 	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
-	for _, id := range []string{"deploy-staging", "preview-preview"} {
-		job := w.jobs[id]
-		if job.step("Set up Bun") == nil || job.step(install) == nil {
-			t.Errorf("%s does not set up Bun and install the workspace before it bundles", id)
-		}
+	if job := w.jobs["prepare"]; job.step("Set up Bun") == nil || job.step(install) == nil {
+		t.Error("prepare does not set up Bun and install the workspace before it bundles")
 	}
-	for _, id := range []string{"deploy-dev", "plan-staging"} {
+	for _, id := range []string{"deploy-dev", "plan-staging", "deploy-staging", "preview-preview"} {
 		if job := w.jobs[id]; job.step("Set up Bun") != nil || job.step(install) != nil {
-			t.Errorf("%s sets up Bun or installs the workspace, though it bundles nothing", id)
+			t.Errorf("%s sets up Bun or installs the workspace, though prepare bundled", id)
 		}
 	}
 }
 
 // TestCloudJobsSignInLast: every cloud job of every golden workflow, the
-// gcp ones here and the cloudflare target's, takes its credentials after
-// its installs and builds, which run the pull request's lockfiles and
-// scripts, so none of them finds the credentials file or the environment
-// google-github-actions/auth leaves for the later steps, or a secret:
-// only the stack commands run after the sign-in, and only they read a
+// gcp ones here and the cloudflare target's, runs no project code: no
+// build, no Bun, no package's script, no sidecar document. The prepare job
+// ran it with no identity token and no secret (D47, amended), and a cloud
+// job's steps are the checkout, superschematic's releases, the package
+// managers' set-up, the schemas root's install with no scripts, the
+// provisioner's tools, the download of what prepare made, the sign-in,
+// and last the stack commands, each with --prepared. No tool it runs comes
+// from the Actions cache, which check's and prepare's dependencies can
+// write: setup-bun downloads Bun every time, and setup-node restores no
+// package manager's cache. Only superschematic's release installs write
+// $GITHUB_PATH or $GITHUB_ENV, which persist to the later steps. So no
+// step of the job asks for an identity token with the project's code, no
+// child finds the credentials file or the environment
+// google-github-actions/auth leaves, and only the stack commands read a
 // secret (D47, amended; D64).
 func TestCloudJobsSignInLast(t *testing.T) {
 	goldens, err := filepath.Glob("testdata/golden/*.yml")
@@ -1026,7 +1063,26 @@ func TestCloudJobsSignInLast(t *testing.T) {
 	if err != nil || len(cloudflare) == 0 {
 		t.Fatalf("no cloudflare golden workflows: %v", err)
 	}
-	for _, path := range append(goldens, cloudflare...) {
+	gcp, err := filepath.Glob("../../../extensions/gcp/testdata/golden/ci/*.yml")
+	if err != nil || len(gcp) == 0 {
+		t.Fatalf("no gcp golden workflows: %v", err)
+	}
+	// The actions and commands a cloud job may take, none of which runs
+	// the project's code.
+	actions := []string{"actions/checkout@", "oven-sh/setup-bun@", "actions/setup-node@", "pulumi/actions@", "actions/download-artifact@", "google-github-actions/auth@"}
+	trusted := func(s parsedStep) bool {
+		switch {
+		case s.Uses != "":
+			return slices.ContainsFunc(actions, func(a string) bool { return strings.HasPrefix(s.Uses, a) })
+		case strings.HasPrefix(s.Name, "Install superschematic"):
+			// The release's binaries, by curl, checked against SHA256SUMS.
+			return !strings.Contains(s.Run, "bun") && !strings.Contains(s.Run, "npm")
+		case s.Run == "bun install --frozen-lockfile --ignore-scripts", s.Run == "npm ci --ignore-scripts":
+			return true
+		}
+		return isStackCommand(s)
+	}
+	for _, path := range slices.Concat(goldens, cloudflare, gcp) {
 		w := parseWorkflow(t, readFile(t, path))
 		for _, id := range w.order {
 			j := w.jobs[id]
@@ -1034,16 +1090,51 @@ func TestCloudJobsSignInLast(t *testing.T) {
 			if (at >= 0) != (j.Permissions["id-token"] == "write") {
 				t.Errorf("%s: %s signs in at step %d with permissions %v", path, id, at, j.Permissions)
 			}
+			cloud := at >= 0 || slices.ContainsFunc(j.Steps, func(s parsedStep) bool { return len(s.Env) > 0 })
 			if at >= 0 {
 				commands := j.Steps[at+1:]
 				if len(commands) == 0 {
 					t.Errorf("%s: %s signs in and runs nothing after", path, id)
 				}
 				for _, s := range commands {
-					if !strings.HasPrefix(s.Run, "superschematic stack ") {
+					if !isStackCommand(s) {
 						t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
 					}
 				}
+			}
+			if cloud {
+				for _, s := range j.Steps {
+					if !trusted(s) {
+						t.Errorf("%s: %s, a cloud job, runs %q (%s%s), which may run the project's code", path, id, s.Name, s.Uses, s.Run)
+					}
+				}
+				if !slices.ContainsFunc(j.Steps, func(s parsedStep) bool { return strings.HasPrefix(s.Uses, "actions/download-artifact@") }) {
+					t.Errorf("%s: %s, a cloud job, does not download what prepare made", path, id)
+				}
+				if !strings.Contains(string(j.Needs), "prepare") {
+					t.Errorf("%s: %s, a cloud job, needs %q, not prepare", path, id, j.Needs)
+				}
+				for _, s := range j.Steps {
+					switch {
+					case strings.HasPrefix(s.Uses, "oven-sh/setup-bun@") && s.With["no-cache"] != "true":
+						t.Errorf("%s: %s sets up Bun from the Actions cache: %v", path, id, s.With)
+					case strings.HasPrefix(s.Uses, "actions/setup-node@") && (s.With["package-manager-cache"] != "false" || s.With["cache"] != ""):
+						t.Errorf("%s: %s sets up Node.js with a package manager's cache: %v", path, id, s.With)
+					case strings.HasPrefix(s.Uses, "actions/cache"):
+						t.Errorf("%s: %s restores the Actions cache", path, id)
+					case (strings.Contains(s.Run, "GITHUB_PATH") || strings.Contains(s.Run, "GITHUB_ENV")) && !strings.HasPrefix(s.Name, "Install superschematic"):
+						t.Errorf("%s: %s, %s writes the environment of the later steps", path, id, s.Name)
+					}
+				}
+			}
+			if id == "prepare" {
+				upload := j.Steps[len(j.Steps)-1]
+				if !strings.HasPrefix(upload.Uses, "actions/upload-artifact@") || upload.With["retention-days"] != "1" {
+					t.Errorf("%s: prepare uploads with %+v, not for a day", path, upload)
+				}
+			}
+			if id == "prepare" && (j.Permissions["id-token"] != "" || len(j.Env) > 0 || slices.ContainsFunc(j.Steps, func(s parsedStep) bool { return len(s.Env) > 0 })) {
+				t.Errorf("%s: prepare holds an identity token or a secret", path)
 			}
 			for k, v := range j.Env {
 				if strings.Contains(v, "secrets.") {
@@ -1052,7 +1143,7 @@ func TestCloudJobsSignInLast(t *testing.T) {
 			}
 			for _, s := range j.Steps {
 				for k, v := range s.Env {
-					if strings.Contains(v, "secrets.") && !strings.HasPrefix(s.Run, "superschematic stack ") {
+					if strings.Contains(v, "secrets.") && !isStackCommand(s) {
 						t.Errorf("%s: %s, %s reads the secret %s, which only a stack command does", path, id, s.Name, k)
 					}
 				}
@@ -1064,6 +1155,14 @@ func TestCloudJobsSignInLast(t *testing.T) {
 			}
 		}
 	}
+}
+
+// isStackCommand reports whether s runs one stack command on what the
+// prepare job made, and nothing else.
+func isStackCommand(s parsedStep) bool {
+	return s.Uses == "" && strings.HasPrefix(s.Run, "superschematic stack ") &&
+		!strings.ContainsAny(s.Run, ";&|`\n") && !strings.Contains(s.Run, "$(") &&
+		strings.Contains(s.Run, ` --prepared "$RUNNER_TEMP/prepared"`)
 }
 
 // parsed is a workflow as yaml.v3 reads it, its jobs in order.
@@ -1086,7 +1185,7 @@ type triggers struct {
 
 type parsedJob struct {
 	Name        string            `yaml:"name"`
-	Needs       string            `yaml:"needs"`
+	Needs       needs             `yaml:"needs"`
 	If          string            `yaml:"if"`
 	Environment string            `yaml:"environment"`
 	Permissions map[string]string `yaml:"permissions"`
@@ -1096,6 +1195,22 @@ type parsedJob struct {
 		CancelInProgress bool   `yaml:"cancel-in-progress"`
 	} `yaml:"concurrency"`
 	Steps []parsedStep `yaml:"steps"`
+}
+
+// needs is a job's needs, one job or a list, joined by ", ".
+type needs string
+
+func (n *needs) UnmarshalYAML(node *yaml.Node) error {
+	var list []string
+	if node.Kind == yaml.SequenceNode {
+		if err := node.Decode(&list); err != nil {
+			return err
+		}
+	} else {
+		list = []string{node.Value}
+	}
+	*n = needs(strings.Join(list, ", "))
+	return nil
 }
 
 type parsedStep struct {
@@ -1191,7 +1306,7 @@ func TestAPITokenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := parseWorkflow(t, files[0].Data)
-	if want := []string{"check", "plan-staging", "preview-preview", "deploy-staging"}; !slices.Equal(w.order, want) {
+	if want := []string{"check", "prepare", "plan-staging", "preview-preview", "deploy-staging"}; !slices.Equal(w.order, want) {
 		t.Fatalf("jobs = %v, want %v", w.order, want)
 	}
 	for id, want := range map[string]struct {

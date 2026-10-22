@@ -30,6 +30,8 @@ func TestWriteTypesGolden(t *testing.T) {
 	cases := []struct {
 		service string
 		deps    []string
+		// sqlite is whether the service lists the sqlite dialect.
+		sqlite bool
 	}{
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
@@ -41,7 +43,7 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-user-model-db"},
 		{service: "fixture-nested-arrays-api"},
 		// A DB's queues: src/queues.rs (D65).
-		{service: "fixture-queue-db"},
+		{service: "fixture-queue-db", sqlite: true},
 		// Types that compose behaviors: src/behaviors.rs (D58).
 		{service: behaviortypestest.Service},
 	}
@@ -73,6 +75,7 @@ func TestWriteTypesGolden(t *testing.T) {
 				SchemaName:   tc.service,
 				Dependencies: deps,
 				Registry:     reg,
+				SQLite:       tc.sqlite,
 				Clock:        fixedClock,
 			})
 			if err != nil {

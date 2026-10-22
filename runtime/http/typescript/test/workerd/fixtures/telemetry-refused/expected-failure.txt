@@ -1,0 +1,1 @@
+OTEL_TRACES_SAMPLER is "jaeger_remote"

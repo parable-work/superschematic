@@ -77,9 +77,10 @@ error, until an operator retries or drops it.
 shop-db.OrderPlaced. Each command resolves the environment from the
 schemas, as stack plan does, without a build, and runs the operation with
 the migration runner, superschematic-migrate, which holds the database
-drivers: on the $SUPERSCHEMATIC_MIGRATE runner, else the one on PATH. A
-queue's messages are claimed on Postgres alone, so a queue whose database
-the environment places on another dialect is refused.
+drivers: on the $SUPERSCHEMATIC_MIGRATE runner, else the one on PATH. The
+operator's statements run on Postgres alone: a queue whose database the
+environment places on SQLite, where workers claim too (D53, amended), is
+refused, since its dead messages are not read there yet.
 
 On the local target the operation runs against the Postgres container
 stack dev runs the environment in, at the URL the environment resolves for
@@ -357,7 +358,7 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 	case host == nil:
 		return "", fmt.Errorf("environment %s hosts no database of %s", c.env.Environment, service)
 	case host.Dialect != "" && host.Dialect != registry.SQLDialectPostgres:
-		return "", fmt.Errorf("environment %s places %s on database %s, a %s database; a queue's messages are claimed on Postgres alone, and so are its dead ones read, retried and dropped (D53, amended)",
+		return "", fmt.Errorf("environment %s places %s on database %s, a %s database; stack queue reads, retries and drops a queue's dead messages on Postgres alone, and on SQLite it is not built (D68)",
 			c.env.Environment, service, host.Name, host.Dialect)
 	}
 	return host.Name, nil

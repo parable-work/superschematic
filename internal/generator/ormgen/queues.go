@@ -46,6 +46,34 @@ type Queue struct {
 	// Statements are the queue's statements on Postgres, which the
 	// TypeScript types' queues.ts carries too (sqlutil.QueueStatements).
 	Statements sqlutil.QueueStatements
+
+	// SQLiteFields are the message's fields as queues_sqlite.go converts
+	// them, and SQLiteStatements the queue's statements on SQLite
+	// (sqlutil.SQLiteQueueStatements), which queues.ts and queues.rs carry
+	// too, for a DB service that lists the sqlite dialect; nil otherwise,
+	// or for a queue whose message SQLiteUnsupported says SQLite's clients
+	// cannot hold (D53, amended).
+	SQLiteFields      []SQLiteQueueField
+	SQLiteStatements  *sqlutil.QueueStatements
+	SQLiteUnsupported string
+}
+
+// SQLiteQueueField is a field of a queue's message as the SQLite queue
+// converts it between its JSON form, the member Name, and its column, as
+// the TypeScript and Rust clients mark it: a JSON value as its text, a
+// list as a JSON array, an enum's Default for an unset member, a UUID as
+// its lowercase hyphenated text, a timestamp in RFC 3339 in UTC, a boolean
+// as 1 or 0, and a duration as its canonical text.
+type SQLiteQueueField struct {
+	Name      string
+	Column    string
+	JSON      bool
+	List      bool
+	Default   string
+	UUID      bool
+	Timestamp bool
+	Boolean   bool
+	Interval  bool
 }
 
 // queuesOf reads the schema's queues, sorted by name. It refuses a field
@@ -53,7 +81,8 @@ type Queue struct {
 // native array, and a list of locations or durations, a POINT[] or an
 // INTERVAL[] column, which the TypeScript and Rust clients leave out too. A
 // single location or duration it holds (D53, amended).
-func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool) ([]Queue, error) {
+func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, sqlite bool) ([]Queue, error) {
+	sqlTypes := sqlutil.ScalarSQLTypes(schema)
 	var queues []Queue
 	for _, td := range schema.Queues() {
 		if err := registry.CheckQueue(td.Queue); err != nil {
@@ -91,15 +120,66 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 				return nil, fmt.Errorf("queue %s: field %s is a list of %s values, an INTERVAL[] column, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name, field.IRType)
 			}
 			q.Fields = append(q.Fields, field)
+			sqlType := sqlTypes[f.TypeRef.Name]
+			kind := ""
+			if !field.IsJSONField {
+				kind = sqlutil.QueueKindOf(sqlType)
+				if refusal := sqlutil.SQLiteQueueRefusal(sqlType); refusal != "" && q.SQLiteUnsupported == "" {
+					q.SQLiteUnsupported = fmt.Sprintf("field %s %s", f.Name, refusal)
+				}
+			}
+			q.SQLiteFields = append(q.SQLiteFields, SQLiteQueueField{
+				Name:      f.Name,
+				Column:    field.QuotedDBName,
+				JSON:      field.IsJSONField,
+				List:      field.NativeList(),
+				Default:   field.EnumDefault,
+				UUID:      kind == sqlutil.QueueKindUUID,
+				Timestamp: kind == sqlutil.QueueKindTimestamp,
+				Boolean:   kind == sqlutil.QueueKindBoolean,
+				Interval:  field.IsInterval,
+			})
 		}
 		columns := make([]string, len(q.Fields))
 		for i, f := range q.Fields {
 			columns[i] = f.QuotedDBName
 		}
 		q.Statements = sqlutil.PostgresQueueStatements(q.QuotedTableName, columns, q.RetainSeconds > 0)
+		switch {
+		case !sqlite:
+			q.SQLiteFields, q.SQLiteUnsupported = nil, ""
+		case q.SQLiteUnsupported != "":
+			q.SQLiteFields = nil
+		default:
+			statements := sqlutil.SQLiteQueueStatements(q.QuotedTableName, columns, q.RetainSeconds > 0)
+			q.SQLiteStatements = &statements
+		}
 		queues = append(queues, q)
 	}
 	return queues, nil
+}
+
+// SQLiteQueues are the queues queues_sqlite.go claims on SQLite.
+func (o *ORMOutput) SQLiteQueues() []Queue {
+	var out []Queue
+	for _, q := range o.Queues {
+		if q.SQLiteStatements != nil {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// SQLiteLeftOut are the queues of a database that lists the sqlite dialect
+// which queues_sqlite.go leaves out, each with why.
+func (o *ORMOutput) SQLiteLeftOut() []Queue {
+	var out []Queue
+	for _, q := range o.Queues {
+		if q.SQLiteUnsupported != "" {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // docLines splits a comment into lines, after a blank one, or returns none

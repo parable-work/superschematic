@@ -2,8 +2,6 @@ package cloudflare_test
 
 import (
 	"bytes"
-	"context"
-	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -65,7 +63,7 @@ func TestJobNodes(t *testing.T) {
 	if _, ok := version.Properties["placement"]; ok {
 		t.Error("the job's version has a placement")
 	}
-	if got := jsonOf(t, version.Properties["bindings"]); got != `[{"name":"CART_TTL_DAYS","text":"30","type":"plain_text"}]` {
+	if got := jsonOf(t, version.Properties["bindings"]); got != `[{"name":"CART_TTL_DAYS","text":"30","type":"plain_text"},{"name":"SUPERSCHEMATIC_BUNDLE","text":"{bundle-digest}","type":"plain_text"}]` {
 		t.Errorf("the job's bindings are %s", got)
 	}
 	trigger := node(t, env, sweepCartsJob+".schedule")
@@ -252,22 +250,6 @@ func TestJobEdges(t *testing.T) {
 	got := bindingsOf(t, node(t, reviews, "reviews-compact-reviews.version"))["REVIEWS_DB_DATABASE"]
 	if want := `{"id":{"$output":{"resource":"reviews-db.d1.reviews-db","name":"uuid"}},"name":"REVIEWS_DB_DATABASE","type":"d1"}`; got != want {
 		t.Errorf("the job's D1 binding is %s, want %s", got, want)
-	}
-}
-
-// TestStackRunRefusesTheTarget: the target builds no Jobs seam, so `stack
-// run` refuses a job on it before it reads any state (section 18.15).
-func TestStackRunRefusesTheTarget(t *testing.T) {
-	f := newFixture(t)
-	err := stack.RunJob(context.Background(), stack.RunJobOptions{
-		Options: stack.Options{Registry: f.reg, Run: webRun(t, f), Dir: t.TempDir(), Log: io.Discard},
-		Job:     sweepCartsJob,
-	})
-	if err == nil || !strings.Contains(err.Error(), "target cloudflare runs no job on demand, so `stack run` does not run job "+sweepCartsJob+" of environment Staging") {
-		t.Errorf("stack run = %v", err)
-	}
-	if changes := f.cloud.Changes(); len(changes) != 0 {
-		t.Errorf("stack run changed %q", changes)
 	}
 }
 

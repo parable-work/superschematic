@@ -48,6 +48,9 @@ func d1Platform() registry.PlatformSpec {
 		Kind:     ir.DeployableDatabase,
 		Dialects: []string{registry.SQLDialectSQLite},
 		Settings: json.RawMessage(d1Settings),
+		// A worker's claim loop is a long-running process, and D1 is
+		// reached through a Worker's binding alone (D53, amended).
+		NoQueueClaims: "D1 is reached through a Worker's binding alone, and Workers has no runtime for a worker's claim loop, a process that runs until it is stopped; a Worker or a Cron job enqueues on D1 with enqueueStatement, and the queue's claims run on SQLite only where a SQLite file is the database, as under stack dev",
 		NameOf: func(ctx registry.PlatformContext) any {
 			return d1Name(ctx.Environment, ctx.Deployable.Name)
 		},

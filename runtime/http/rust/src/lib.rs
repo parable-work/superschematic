@@ -9,7 +9,12 @@ mod auth;
 mod body;
 // The provider-neutral interface of a bucket an API lists (D54).
 pub mod bucket;
-#[cfg(any(feature = "logging", feature = "postgres", feature = "gcs"))]
+#[cfg(any(
+    feature = "logging",
+    feature = "postgres",
+    feature = "gcs",
+    feature = "sqlite"
+))]
 mod civil;
 mod context;
 mod controls;
@@ -40,8 +45,9 @@ mod path;
 // A stack server's database (D57), with the `postgres` feature.
 #[cfg(feature = "postgres")]
 pub mod postgres;
-// A queue's client (D53, D65), with the `postgres` feature.
-#[cfg(feature = "postgres")]
+// A queue's client (D53, D65), with the `postgres` feature, and on SQLite
+// with the `sqlite` feature (D53, amended).
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod queue;
 mod ratelimit;
 mod request_id;
@@ -58,10 +64,11 @@ pub mod stackconfig;
 #[cfg(feature = "otel")]
 pub mod telemetry;
 mod token_source;
-#[cfg(any(feature = "identity", feature = "postgres"))]
+#[cfg(any(feature = "identity", feature = "postgres", feature = "sqlite"))]
 mod uuid62;
-// A worker's claim loop (D53, D65), with the `postgres` feature.
-#[cfg(feature = "postgres")]
+// A worker's claim loop (D53, D65), with the `postgres` or `sqlite`
+// feature.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod worker;
 
 /// The error a job's or a worker's method returns (D65), and any other

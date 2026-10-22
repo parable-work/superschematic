@@ -1,5 +1,8 @@
 name: ts-notes
 kind: API
+imports:
+  - package: "@schemas/ts-notes-db"
+    types: [NoteWritten]
 types:
   NoteView:
     name: NoteView
@@ -40,3 +43,10 @@ jobs:
   - name: PruneNotes
     schedule: "0 3 * * *"
     timeout: 1m
+# A worker claims ts-notes-db's queue NoteWritten on the SQLite file the
+# server writes, as its job reads it (D53, amended).
+workers:
+  - name: IndexNotes
+    queue: NoteWritten
+    concurrency: 2
+    grace: 2s

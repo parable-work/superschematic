@@ -23,6 +23,7 @@
     "cloudflare:index/workerVersion:WorkerVersion",
     "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
     "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
-    "cloudflare:index/workersDeployment:WorkersDeployment"
+    "cloudflare:index/workersDeployment:WorkersDeployment",
+    "cloudflare:index/workflow:Workflow"
   ]
 }

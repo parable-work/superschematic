@@ -17,3 +17,18 @@ types:
       - name: text
         typeRef: { name: string }
         required: true
+  # Written when a note is, in the batch that writes it: ts-notes' worker
+  # IndexNotes claims it on the SQLite file (D53, amended).
+  NoteWritten:
+    name: NoteWritten
+    role: EmbeddedStruct
+    queue: { retries: 1, backoff: 1s, lease: 30s }
+    fields:
+      - name: noteId
+        typeRef: { name: string }
+        required: true
+      - name: words
+        typeRef: { name: string, isArray: true }
+        required: true
+      - name: empty
+        typeRef: { name: boolean }

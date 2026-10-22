@@ -95,6 +95,8 @@ resources:
           text: "300"
           type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-pricing/0000000000000000000000000000000000000000000000000000000000000000/main.js
@@ -225,6 +227,8 @@ resources:
           text: https://calls-stack-preview-shop-pricing-pr${pr}
           type: plain_text
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js

@@ -11,10 +11,20 @@
 //! enqueue a message in the transaction whose writes caused it, and claim,
 //! complete, fail, extend, release and prune messages with its
 //! `PostgresQueue`. Delivery is at least once.
+{{- if .QueuesOnSQLite}}
+//!
+//! On SQLite each descriptor carries its statements there too: enqueue with
+//! the runtime's `queue::enqueue_sqlite` in the transaction whose writes
+//! caused the message, and claim with its `SqliteQueue` (D53, amended).
+{{- end}}
 {{- range .LeftOutQueues}}
 //!
 //! Queue {{.Name}} is left out: {{.Unsupported}}.
 {{- end}}
+{{- range .WrittenQueues}}{{if .SQLiteUnsupported}}
+//!
+//! Queue {{.Name}} has no statements on SQLite: its {{.SQLiteUnsupported}}.
+{{- end}}{{end}}
 {{- range .WrittenQueues}}
 
 /// The queue of `{{.Name}}` messages, whose descriptor this is.

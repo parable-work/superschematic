@@ -251,9 +251,17 @@
               "name": "CART_TTL_DAYS",
               "text": "30",
               "type": "plain_text"
+            },
+            {
+              "name": "SUPERSCHEMATIC_BUNDLE",
+              "text": "{bundle-digest}",
+              "type": "plain_text"
             }
           ],
           "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
           "limits": {
             "cpuMs": 30000
           },
@@ -324,6 +332,36 @@
         ]
       },
       {
+        "id": "shop-storefront-sweep-carts.workflow",
+        "type": "cloudflare:index/workflow:Workflow",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "className": "JobRun",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront-sweep-carts.worker",
+              "name": "name"
+            }
+          },
+          "workflowName": {
+            "$concat": [
+              "web-stack-preview-shop-storefront-sweep-carts-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "shop-storefront-sweep-carts.deployment",
+          "shop-storefront-sweep-carts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
         "id": "shop-storefront.deployment",
         "type": "cloudflare:index/workersDeployment:WorkersDeployment",
         "properties": {
@@ -382,6 +420,9 @@
             }
           ],
           "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
           "mainModule": "main.js",
           "modules": [
             {
@@ -595,6 +636,7 @@
       "resources": [
         "shop-storefront-sweep-carts.deployment",
         "shop-storefront-sweep-carts.version",
+        "shop-storefront-sweep-carts.workflow",
         "shop-storefront.deployment",
         "shop-storefront.version"
       ]

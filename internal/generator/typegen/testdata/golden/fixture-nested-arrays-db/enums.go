@@ -2,6 +2,38 @@
 
 package types
 
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strconv"
+)
+
+// unmarshalEnumJSON reads an enum's JSON string into the value valid
+// accepts. null is no value (ok is false), which leaves the enum as it was,
+// as encoding/json leaves a string. A value that is not a string, or a
+// string valid refuses, is refused with the *json.UnmarshalTypeError
+// encoding/json gives a value of the wrong JSON type, naming typ, which
+// encoding/json completes with the field's path.
+func unmarshalEnumJSON(data []byte, typ reflect.Type, valid func(string) bool) (value string, ok bool, err error) {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		return "", false, nil
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) {
+			return "", false, &json.UnmarshalTypeError{Value: typeErr.Value, Type: typ, Offset: typeErr.Offset}
+		}
+		return "", false, err
+	}
+	if !valid(value) {
+		return "", false, &json.UnmarshalTypeError{Value: "string " + strconv.Quote(value), Type: typ}
+	}
+	return value, true, nil
+}
+
 // CellState - The state of one board cell.
 type CellState string
 
@@ -31,6 +63,17 @@ func (e CellState) IsValid() bool {
 
 	}
 	return false
+}
+
+// UnmarshalJSON reads CellState from its JSON string and refuses a string
+// that is not one of its values, or a value that is not a string, as every
+// other language's decoder refuses it. null leaves the value as it was.
+func (e *CellState) UnmarshalJSON(data []byte) error {
+	value, ok, err := unmarshalEnumJSON(data, reflect.TypeFor[CellState](), func(s string) bool { return CellState(s).IsValid() })
+	if ok {
+		*e = CellState(value)
+	}
+	return err
 }
 
 // Values returns every CellState member in schema declaration order.

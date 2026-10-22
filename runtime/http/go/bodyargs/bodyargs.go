@@ -29,9 +29,12 @@
 //     was built with, in order: the rules of its scalar type, then the
 //     argument's own. The first rule it breaks is its one error, named by
 //     the rule ("minLength", "maxLength", "pattern", "min", "max").
-//   - A value the rules accept is decoded into its Go type; a string its
+//   - A value the rules accept is decoded into its Go type; a string an
+//     enum lacks, which the enum's decoder refuses, is "enum", a string its
 //     type's decoder refuses (a malformed UUID or timestamp), and an empty
-//     one a non-string type decodes, is "pattern".
+//     one a non-string type decodes, is "pattern", and an object whose
+//     decoder refuses a string one of its enums lacks has "enum" at that
+//     string's path beside the object's other errors.
 //     Then the type's own Validate runs: a scalar's core check, an enum's
 //     membership ("enum"), an object's field validation, whose errors nest
 //     under the element's path.
@@ -540,10 +543,15 @@ func decode[T any](errs validate.ValidationErrors, arg *Arg, path string, raw js
 			errs.SetFieldErrors(path, []validate.ValidationError{broken})
 			return
 		}
+		// A string an enum lacks is "enum": the enum's decoder refuses it.
 		// A string a non-string Go type decodes (a UUID, a timestamp) is
 		// malformed when the decoder refuses it, and when it is empty: a
 		// timestamp decoder reads "" as the zero time, which no client means.
 		if err := json.Unmarshal(raw, target); err != nil || (s == "" && reflect.ValueOf(target).Elem().Kind() != reflect.String) {
+			if isEnumType(reflect.TypeOf(target).Elem()) {
+				errs.SetFieldErrors(path, []validate.ValidationError{enumError})
+				return
+			}
 			errs.AddFieldError(path, "pattern", "invalid format")
 			return
 		}
@@ -568,6 +576,24 @@ func decode[T any](errs validate.ValidationErrors, arg *Arg, path string, raw js
 		}
 	default:
 		if err := json.Unmarshal(raw, target); err != nil {
+			// An object the decoder refused for strings its enums lack is
+			// checked with them replaced: they are "enum" at their paths,
+			// beside the object's other errors.
+			if isEnumRefusal(err) {
+				if refused, ok := decodeWithoutUnknownEnums(raw, target); ok {
+					own := validate.NewValidationErrors()
+					if validator, isObject := any(target).(interface {
+						Validate() validate.ValidationErrors
+					}); isObject {
+						if nested := validator.Validate(); nested != nil {
+							own = nested
+						}
+					}
+					mergeErrors(own, refused)
+					errs.AddNestedError(path, own)
+					return
+				}
+			}
 			errs.AddFieldError(path, "type", "does not match the declared type")
 			return
 		}

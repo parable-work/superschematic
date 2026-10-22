@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "stack": "lite-worker-stack",
+  "environment": "Dev",
+  "sqliteDatabases": [
+    {
+      "id": "notes-db.database.notes-db",
+      "name": "notes_db",
+      "service": "notes-db",
+      "file": "databases/notes_db.sqlite"
+    }
+  ],
+  "migrations": [
+    {
+      "database": "notes-db",
+      "service": "notes-db",
+      "resource": "notes-db.database.notes-db",
+      "dialect": "sqlite",
+      "file": "databases/notes_db.sqlite",
+      "model": "models/notes-db.json",
+      "plan": "migrations/notes-db.plan.json"
+    }
+  ],
+  "servers": [
+    {
+      "id": "notes-index-notes.process",
+      "deployable": "notes-index-notes",
+      "name": "notes-index-notes",
+      "kind": "worker",
+      "wave": 1,
+      "language": "typescript",
+      "module": "server/lite-worker-stack/notes-index-notes",
+      "readiness": "started",
+      "env": [
+        {
+          "name": "NOTES_DB_DATABASE_URL",
+          "value": {
+            "$output": {
+              "resource": "notes-db.database.notes-db",
+              "name": "url"
+            }
+          }
+        },
+        {
+          "name": "WORKER_CONCURRENCY",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "id": "notes.process",
+      "deployable": "notes",
+      "name": "notes",
+      "wave": 1,
+      "language": "typescript",
+      "module": "server/lite-worker-stack/notes",
+      "port": 21017,
+      "url": "http://127.0.0.1:21017",
+      "readiness": "/readyz",
+      "env": [
+        {
+          "name": "NOTES_DB_DATABASE_URL",
+          "value": {
+            "$output": {
+              "resource": "notes-db.database.notes-db",
+              "name": "url"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

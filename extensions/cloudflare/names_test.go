@@ -10,12 +10,13 @@ import (
 )
 
 // accountNames are the names an environment's nodes take in the account:
-// each node's `name`, and each custom domain's `hostname`, by node.
+// each node's `name`, each custom domain's `hostname`, and each job's
+// Workflow's `workflowName`, by node.
 func accountNames(t *testing.T, env *ir.ResolvedEnvironment) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	for _, res := range env.Resources.Resources {
-		for _, property := range []string{"name", "hostname"} {
+		for _, property := range []string{"name", "hostname", "workflowName"} {
 			value, ok := res.Properties[property]
 			if !ok {
 				continue
@@ -35,7 +36,7 @@ func accountNames(t *testing.T, env *ir.ResolvedEnvironment) map[string]string {
 
 // TestPlainEnvironmentsOfOneAccountNameApart: Staging and Production of
 // each fixture are plain environments in one account, and no Worker, D1
-// database, R2 bucket, bucket token or custom domain of one takes a name
+// database, R2 bucket, bucket token, Workflow or custom domain of one takes a name
 // of the other's: each name holds its stack and its environment (custom
 // domains, under each environment's domain).
 func TestPlainEnvironmentsOfOneAccountNameApart(t *testing.T) {
