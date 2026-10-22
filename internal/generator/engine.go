@@ -33,7 +33,9 @@ const projectengineGenerator = "projectengine"
 // checked here so that no entrypoint opens an engine that refuses it
 // (D58); tools.invocation is the MCP invocation policy of a built-in tool
 // or a behavior operation by name, which enginedoc checks against the
-// binary's policy and the behaviors the engine types compose (D70).
+// binary's policy and the behaviors the engine types compose, and requires
+// for each commerce operation that moves money or stock; tools.hidden
+// lists behavior operations the tools leave out (D70).
 var engineOutputSchema = []byte(`{
 	"type": "object",
 	"additionalProperties": false,
@@ -57,6 +59,11 @@ var engineOutputSchema = []byte(`{
 					"type": "object",
 					"propertyNames": {"pattern": "^(?:[A-Za-z][A-Za-z0-9_]*|(?:[A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[A-Za-z][A-Za-z0-9_]*)$"},
 					"additionalProperties": {"type": "string", "minLength": 1}
+				},
+				"hidden": {
+					"type": "array",
+					"items": {"type": "string", "pattern": "^(?:[A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[A-Za-z][A-Za-z0-9_]*$"},
+					"uniqueItems": true
 				}
 			}
 		},
@@ -97,6 +104,7 @@ func (m *runMemo) buildEngineDocument() ([]byte, error) {
 		Registry:     r.Registry,
 		Dependencies: deps,
 		Invocation:   r.Outputs.EngineInvocation(),
+		Hidden:       r.Outputs.EngineHidden(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: engine document for %s: %w", r.Config.Name, err)

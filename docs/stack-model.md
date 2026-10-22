@@ -1808,7 +1808,10 @@ The access policy is `outputs.engine.policy` of the database's config,
 database opens the engine with and the database's runner alone prunes
 with; the engine document's tools carry `outputs.engine.tools.invocation`,
 the invocation policy of each tool or behavior operation the deployment
-marks (D70). The first API on the database, by name, mounts
+marks, which a database that composes `Payments` or `Stock` must give
+each of their operations that move money or stock, and
+`outputs.engine.tools.hidden` with Payments' service operations, the
+operations no agent is offered (D70, amended). The first API on the database, by name, mounts
 the engine's routes, its event stream and its MCP endpoint at
 `outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
 its own routes and behind its middleware: the request log, and the

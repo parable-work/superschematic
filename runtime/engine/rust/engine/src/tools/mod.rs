@@ -1178,6 +1178,12 @@ impl<'e> Tools<'e> {
                     },
                     encode_component(&operation.name)
                 );
+                if options.hides(&behavior.name, &operation.name) {
+                    tool.hidden = Some(format!(
+                        "the deployment's tool options hide {}.{} (tools.hidden): a service calls it through the API, and no agent is offered it",
+                        behavior.name, operation.name
+                    ));
+                }
                 tool.behavior = Some(behavior.clone());
                 if !schema_level {
                     tool.preconditions = preconditions.clone();

@@ -17,6 +17,11 @@ held to the Go defaults by runtime/engine/testdata/tool_parameters_parity.json.
   names no policy, as the core's leave money-moving ones, through it, and
   the engine refuses one naming a behavior it does not run or an operation
   the behavior does not declare when it opens.
+- hidden: behavior operations, by `<Behavior>.<operation>`, that the tools
+  leave out: a service calls them through the API or in-process (Payments'
+  recordPaymentEvent, which a provider's adapter calls), and no agent is
+  offered them. A hidden tool reads hidden with its reason, and its call by
+  MCP handle is a tool the namespace does not have.
 - keys: the vendor keys of the tool documents (apigen.ToolKeys, section
   3.14): the scalar key, the `_meta` key of a tool's guidance, and keys
   written at the root of every argument schema.
@@ -104,6 +109,8 @@ export interface ToolOptions {
    * policy's default when absent.
    */
   invocation?: Partial<Record<BuiltinTool | BehaviorOperation, string>>;
+  /** Behavior operations the tools leave out, by `<Behavior>.<operation>`: a service's, which no agent is offered. */
+  hidden?: readonly string[];
   /** Each absent key is the core's: x-superschematic-scalar, superschematic/operation-guidance, none. */
   keys?: Partial<ToolKeys>;
 }
@@ -128,6 +135,8 @@ export interface ResolvedToolOptions {
   readonly invocation: Readonly<Record<BuiltinTool, string>>;
   /** The behavior operations the options set a policy for, by `<Behavior>.<operation>`. */
   readonly operations: Readonly<Record<BehaviorOperation, string>>;
+  /** The behavior operations the tools leave out. */
+  readonly hidden: readonly BehaviorOperation[];
   readonly keys: ToolKeys;
 }
 
@@ -168,7 +177,14 @@ export function resolveToolOptions(options: ToolOptions = {}): ResolvedToolOptio
 
   const invocation = {} as Record<BuiltinTool, string>;
   const operations = {} as Record<BehaviorOperation, string>;
-  for (const [name, value] of Object.entries(options.invocation ?? {})) {
+  if (options.invocation !== undefined && !isPlainObject(options.invocation)) {
+    problems.push(`invocation is an object of policies by name, not ${JSON.stringify(options.invocation)}`);
+  }
+  for (const [name, value] of Object.entries(isPlainObject(options.invocation) ? options.invocation : {})) {
+    if (value !== undefined && typeof value !== 'string') {
+      problems.push(`the invocation policy of ${name} is ${JSON.stringify(value)}, not a string`);
+      continue;
+    }
     const dot = name.lastIndexOf('.');
     if (dot >= 0) {
       if (!BEHAVIOR_NAME.test(name.slice(0, dot)) || !OPERATION_NAME.test(name.slice(dot + 1))) {
@@ -185,7 +201,24 @@ export function resolveToolOptions(options: ToolOptions = {}): ResolvedToolOptio
     }
   }
   for (const name of BUILTIN_TOOLS) {
-    invocation[name] = options.invocation?.[name] ?? policy.default;
+    const value = isPlainObject(options.invocation) ? options.invocation[name] : undefined;
+    invocation[name] = typeof value === 'string' ? value : policy.default;
+  }
+  const hidden: BehaviorOperation[] = [];
+  if (options.hidden !== undefined && !Array.isArray(options.hidden)) {
+    problems.push(`hidden is a list of <Behavior>.<operation> names, not ${JSON.stringify(options.hidden)}`);
+  }
+  for (const name of Array.isArray(options.hidden) ? (options.hidden as readonly unknown[]) : []) {
+    if (typeof name !== 'string') {
+      problems.push(`hidden lists ${JSON.stringify(name)}, not a <Behavior>.<operation> string`);
+      continue;
+    }
+    const dot = name.lastIndexOf('.');
+    if (dot < 0 || !BEHAVIOR_NAME.test(name.slice(0, dot)) || !OPERATION_NAME.test(name.slice(dot + 1))) {
+      problems.push(`hidden names ${JSON.stringify(name)}, which is no behavior's operation (<Behavior>.<operation>)`);
+    } else {
+      hidden.push(name as BehaviorOperation);
+    }
   }
 
   const keys: ToolKeys = {
@@ -219,6 +252,7 @@ export function resolveToolOptions(options: ToolOptions = {}): ResolvedToolOptio
     invocationPolicy: Object.freeze({ key: policy.key, values: Object.freeze([...values]), default: policy.default }),
     invocation: Object.freeze(invocation),
     operations: Object.freeze(operations),
+    hidden: Object.freeze(hidden),
     keys: Object.freeze({ ...keys, parameters: Object.freeze(keys.parameters) }),
   });
 }

@@ -152,9 +152,13 @@ export type EngineOutputConfig = {
  */
 export type EngineToolsConfig = {
   /**
-   * The MCP invocation policy of an engine tool or operation, by the name the engine's tools.invocation takes: a built-in tool's (create, delete, defineSchema), or a behavior operation's, <Behavior>.<operation> (Payments.capturePayment), in place of its declaration's. Each value is one of the binary's invocation policy's values (auto or ask in the core). The build refuses a name no engine type's behavior declares, and every server, job, worker and runner on this database opens the engine with it, so an agent's MCP client asks before it runs an operation marked ask.
+   * The MCP invocation policy of an engine tool or operation, by the name the engine's tools.invocation takes: a built-in tool's (create, delete, defineSchema), or a behavior operation's, <Behavior>.<operation> (Payments.capturePayment), in place of its declaration's. Each value is one of the binary's invocation policy's values (auto or ask in the core). The build refuses a name no engine type's behavior declares, and where the engine types compose Payments or Stock it refuses a map that does not name each of their operations that move money or stock (Payments' openPayment, capturePayment, voidPayment, refundPayment and refundFor; Stock's receiveStock, adjustStock and countStock). Every server, job, worker and runner on this database opens the engine with it, so an agent's MCP client asks before it runs an operation marked ask.
    */
   readonly invocation?: { readonly [name: string]: string };
+  /**
+   * Behavior operations, by <Behavior>.<operation>, that the engine's MCP tools leave out: a service calls them through the API or in-process, and no agent is offered them. The build refuses a name no engine type's behavior declares, and the engine document adds the service operations of the core's commerce behaviors (Payments' listPaymentActions, recordPaymentEvent and settleRefundFor) wherever they are composed.
+   */
+  readonly hidden?: readonly string[];
 };
 
 /**

@@ -593,16 +593,27 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Refuses tool options that set the policy of a behavior operation
-    /// this engine does not run (D70): a behavior it has no registration
-    /// of, or an operation its declaration does not declare.
+    /// Refuses tool options that set the policy of, or hide, a behavior
+    /// operation this engine does not run (D70): a behavior it has no
+    /// registration of, or an operation its declaration does not declare.
     fn check_operation_invocations(&self) -> Result<()> {
         let registry = self.catalog.registry();
         let mut problems = Vec::new();
-        for (behavior, operation, _) in &self.tools.options.operations {
+        let options = &self.tools.options;
+        let named = options
+            .operations
+            .iter()
+            .map(|(behavior, operation, _)| ("invocation", behavior, operation))
+            .chain(
+                options
+                    .hidden
+                    .iter()
+                    .map(|(behavior, operation)| ("hidden", behavior, operation)),
+            );
+        for (option, behavior, operation) in named {
             match registry.lookup(behavior) {
                 None => problems.push(format!(
-                    "invocation names {behavior}.{operation}, and this engine runs no behavior {behavior}"
+                    "{option} names {behavior}.{operation}, and this engine runs no behavior {behavior}"
                 )),
                 Some(registered)
                     if !registered
@@ -612,7 +623,7 @@ impl Engine {
                         .any(|declared| declared.name == *operation) =>
                 {
                     problems.push(format!(
-                        "invocation names {behavior}.{operation}, which is no operation of {behavior}"
+                        "{option} names {behavior}.{operation}, which is no operation of {behavior}"
                     ))
                 }
                 Some(_) => {}
