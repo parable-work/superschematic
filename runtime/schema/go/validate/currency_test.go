@@ -14,11 +14,10 @@ import (
 // is three uppercase letters by its pattern, but only the active ISO 4217
 // codes are currencies: the core checks the list, so a value the pattern
 // admits (ABC) is refused through the default registry, as a lowercase or
-// historic code is. It skips while the linked superscalar has no
-// Finance.Currency, until superscalar.pin moves past the scalar's commit.
+// historic code is.
 func TestFinanceCurrencyThroughTheCore(t *testing.T) {
 	if !slices.Contains(scalarcore.Names(), "Finance.Currency") {
-		t.Skip("the linked superscalar has no Finance.Currency; it arrives with the pin bump")
+		t.Fatal("the linked superscalar has no Finance.Currency; superscalar.pin names the commit that added it")
 	}
 	schema := ir.NewSchema("prices", ir.SchemaKindGeneral)
 	schema.Scalars["Finance.Currency"] = &ir.ScalarDef{Name: "Finance.Currency", Primitive: "String", Pattern: "^[A-Z]{3}$", HasCustomValidate: true}

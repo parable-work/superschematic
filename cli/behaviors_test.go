@@ -501,12 +501,10 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 }
 
 // Stock and Payments read a currency from a Finance.Currency own field
-// (D70): the fixture loads in both forms to the same IR. It needs the
-// scalar, which superscalar adds after the commit superscalar.pin names
-// today, so it skips on a build without it.
+// (D70): the fixture loads in both forms to the same IR.
 func TestCommerceCurrencyFields(t *testing.T) {
 	if _, ok := registry.CoreScalars().Scalar("Finance.Currency"); !ok {
-		t.Skip("this build's superscalar has no Finance.Currency; it arrives with the pin bump")
+		t.Fatal("this build's superscalar has no Finance.Currency; superscalar.pin names the commit that added it")
 	}
 	load := func(service string) map[string]json.RawMessage {
 		t.Helper()

@@ -453,12 +453,14 @@ docs:
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
 # fixture-timers-json, fixture-workqueue-json and fixture-commerce-json,
 # whose types compose the core's behaviors (D10): --emit-ir carries all
-# twenty-six and json-schema admits them. The engine runs the first eleven
-# documents with its own behaviors in
-# runtime/engine/typescript/test/core-behaviors.test.ts, and the
-# work-queue package runs fixture-workqueue-json in
-# runtime/engine-workqueue/typescript/test/package.test.ts; the commerce
-# package's behaviors (D70) are declared and not yet built. It builds
+# twenty-six and json-schema admits them; fixture-commerce-currency-json
+# holds a commerce currency in a Finance.Currency own field (D70). The
+# engine runs the first eleven documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
+# package runs fixture-workqueue-json in
+# runtime/engine-workqueue/typescript/test/package.test.ts, and the
+# commerce package's suites (runtime/engine-commerce/typescript) run its
+# behaviors on the addon. It builds
 # fixture-behaviors-json, a General schema, and fixture-engine-db-json,
 # whose engine types the sql generator leaves out and whose engine
 # document the build writes (D58).
@@ -498,6 +500,10 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
+	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
+		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
 	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers \
 		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
