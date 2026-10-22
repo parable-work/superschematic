@@ -1,0 +1,27 @@
+name: shop-checkout-rs-api
+kind: API
+types:
+  Till:
+    name: Till
+    role: APIView
+    fields:
+      - name: shop
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: TillQueries
+    operations:
+      # A route of the API's own, which a member or a service standing in
+      # for one may call: the API's operations have a service clause, so
+      # its server builds a service authenticator, which the engine's
+      # routes verify a caller with too.
+      - name: till
+        typeRef: { name: Till }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: till
+        serviceCallers: { mode: allow }

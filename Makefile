@@ -318,13 +318,18 @@ engine-go: engine-archive
 # them: servergen's engine entrypoint tests and the script three servers,
 # Go, Rust and TypeScript, answer alike over one engine database
 # (TestEngineServersAnswerOneScriptAlike), and the commerce fixture's
-# servers in each language (TestCommerceEngineEntrypointServes*, D70), over
-# the engine's archive, its package and its Node-API addon, which this
-# builds. They run offline, and
+# servers in each language (TestCommerceEngineEntrypointServes*, D70),
+# which three answer one commerce script alike
+# (TestCommerceServersAnswerOneScriptAlike) and oversell nothing when
+# 1,000 claims race for the last units and one slot
+# (TestCommerceServersOversellNothing), over the engine's archive, its
+# package and its Node-API addon, which this builds. The holds-a-second
+# measurement, TestCommerceHoldsLoad, runs only with
+# SUPERSCHEMATIC_COMMERCE_LOAD=1. They run offline, and
 # on the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is
 # set; SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1 makes a missing toolchain or
 # database a failure rather than a skip.
-ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript)$$
+ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript|TestCommerceServersAnswerOneScriptAlike|TestCommerceServersOversellNothing)$$
 engine-servers: versiongraph engine-archive
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build

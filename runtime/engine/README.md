@@ -2538,7 +2538,12 @@ no extension linked. The core declares the work-queue behaviors too,
 `Retries`, which `runtime/engine-workqueue/rust` implements, in every
 binding (`runtime/engine-workqueue/README.md`): the engine refuses a
 schema that composes one until a deployment names it in `behaviors`
-(`workQueueBehaviors`, all seven). Each implementation embeds the copy of
+(`workQueueBehaviors`, all seven). The commerce behaviors, `Stock`,
+`Calendar`, `Holds` and `Payments` (D70), are the same:
+`runtime/engine-commerce/rust` implements them and the core's addon
+carries them (`runtime/engine-commerce/README.md`), a Go or Rust server
+links them through the project's engine crate, and a deployment names
+them in `behaviors` (`commerceBehaviors`). Each implementation embeds the copy of
 its declaration in its crate's `declarations/`, which the core binary
 writes (`make behaviors`) and CI checks (`make behaviors-check`). They
 reach the engine only through the plug-in interface above. A deployment
