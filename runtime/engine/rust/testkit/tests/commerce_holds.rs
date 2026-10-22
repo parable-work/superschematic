@@ -3,8 +3,10 @@
 //! slot of a timed test supply as it enters `held`, all or none, keeps the
 //! unit prices and their total, commits on `placed`, releases on `expired`
 //! and `cancelled` and returns on `returned`, whichever operation moved the
-//! status; a hold expires through a Timers deadline the runner fires; the
-//! late-payment race holds what is being paid for; `holds_missing`,
+//! status; a hold expires through a Timers deadline the runner fires; in
+//! the late-payment race Payments holds what is being paid for past the
+//! expiry, Reactions places the checkout once it is paid, and money
+//! captured after the release is refunded; `holds_missing`,
 //! `held_fields`, `committed`, `too_many_items`, `no_supply` and
 //! `not_taking`; an update that changes what a claim in `held` asks while
 //! it holds nothing takes it; `retakeHolds` after a new version adds a
@@ -24,7 +26,7 @@ use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineOptions, Error, InstanceRecord,
     Principal, RunnerOptions, SchemaTarget, WriteOptions,
 };
-use superschematic_engine_testkit::commerce_fixtures::{PaymentsStandIn, TestSupply};
+use superschematic_engine_testkit::commerce_fixtures::TestSupply;
 
 use commerce_support::{assert_ledger, assert_matched, items_of, principal, read, Supply};
 use support::{alice, schema_document, targets, veto, Target};
@@ -51,7 +53,6 @@ fn behaviors() -> BehaviorSet {
     superschematic_engine_behaviors::core()
         .extend(superschematic_engine_commerce::commerce())
         .with(TestSupply::TIMED)
-        .with(PaymentsStandIn)
 }
 
 fn int(name: &str) -> Value {
@@ -105,8 +106,7 @@ fn timers() -> Value {
 }
 
 /// The Checkout schema: lines of Inventory, a pickup slot at a Counter,
-/// Workflow, Links, Holds with the config given, Timers and the Payments
-/// stand-in.
+/// Workflow, Links, Holds with the config given, and Timers.
 fn checkout(holds: Value) -> Value {
     let mut document = schema_document(
         "Checkout",
@@ -125,9 +125,114 @@ fn checkout(holds: Value) -> Value {
         {"name": "Links", "config": {"links": {"counter": {"schema": "Counter"}}}},
         {"name": "Holds", "config": holds},
         {"name": "Timers", "config": timers()},
-        {"name": "test.Payments"}
     ]);
     document
+}
+
+/// The permission the payment provider's adapter holds.
+const RECORD: &str = "payments.record";
+
+/// The provider every payment is made at.
+const PROVIDER: &str = "acmepay";
+
+/// The Checkout schema with Payments of its `Holds.total`, which must be
+/// paid to enter placed, voids in expired and cancelled and refunds money
+/// captured after it lets go (`afterRelease: refund`), and Reactions that
+/// place it once Payments says it is paid.
+fn paid_checkout() -> Value {
+    let mut document = checkout(holds_config(
+        json!({"lines": lines_hold(), "pickup": pickup_hold()}),
+    ));
+    let behaviors = document["types"]["Checkout"]["behaviors"]
+        .as_array_mut()
+        .expect("the checkout's behaviors");
+    behaviors.push(json!({"name": "Payments", "config": {
+        "amount": {"holds": true},
+        "require": {"placed": "paid"},
+        "voidOn": ["expired", "cancelled"],
+        "afterRelease": "refund",
+        "record": {"permission": RECORD}
+    }}));
+    behaviors.push(json!({"name": "Reactions", "config": {"rules": [
+        {"when": {"changes": {"field": "Payments.state", "to": "paid"}}, "then": {"transition": "placed"}}
+    ]}}));
+    document
+}
+
+/// The provider's adapter, which records what the provider did.
+fn adapter() -> Principal {
+    principal("adapter", &[RECORD])
+}
+
+/// Opens a payment of what a checkout owes; returns the attempt's id.
+fn open_payment(engine: &Engine, id: &str) -> Value {
+    let opened = invoke(
+        engine,
+        &alice(),
+        "Checkout",
+        id,
+        "openPayment",
+        json!({"provider": PROVIDER, "idempotencyKey": format!("{id}-pay")}),
+    )
+    .expect("openPayment");
+    opened["attempt"].clone()
+}
+
+/// Records a provider event of an attempt in GBP, as the adapter reports
+/// it.
+fn pay_event(engine: &Engine, id: &str, event_id: &str, kind: &str, amount: i64, attempt: &Value) {
+    invoke(
+        engine,
+        &adapter(),
+        "Checkout",
+        id,
+        "recordPaymentEvent",
+        json!({
+            "provider": PROVIDER,
+            "eventId": event_id,
+            "kind": kind,
+            "amount": amount,
+            "currency": "GBP",
+            "at": engine.clock().now(),
+            "attempt": attempt
+        }),
+    )
+    .unwrap_or_else(|error| panic!("record {event_id}: {error}"));
+}
+
+/// The actions waiting for the provider's adapter for one checkout, by
+/// kind and amount.
+fn waiting(engine: &Engine, id: &str) -> Vec<(String, Value)> {
+    let page = engine
+        .instances()
+        .invoke_schema(
+            &adapter(),
+            "Checkout",
+            "listPaymentActions",
+            &json!({"provider": PROVIDER, "limit": 100}),
+            None,
+        )
+        .expect("listPaymentActions");
+    page["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|action| action["id"] == json!(id))
+        .map(|action| {
+            (
+                action["kind"].as_str().unwrap_or_default().to_owned(),
+                action["amount"].clone(),
+            )
+        })
+        .collect()
+}
+
+fn payments_of(engine: &Engine, id: &str) -> Value {
+    read(engine, "Checkout", id)
+        .expect("the checkout")
+        .behaviors["Payments"]
+        .clone()
 }
 
 fn publish(engine: &Engine, document: &Value) -> Result<(), Error> {
@@ -153,6 +258,11 @@ fn configure(options: &mut EngineOptions) {
 /// An engine with Inventory (Stock, 1250 GBP a unit), Counter (a timed
 /// test supply, 500 GBP a slot) and the Checkout schema.
 fn open_with(target: &Target, holds: Value) -> Engine {
+    open_document(target, &checkout(holds))
+}
+
+/// An engine with Inventory, Counter and the Checkout schema given.
+fn open_document(target: &Target, checkout: &Value) -> Engine {
     let engine = target.open_with(behaviors(), configure);
     let mut inventory =
         schema_document("Inventory", json!([title(), int("priceCents")]), json!({}));
@@ -169,7 +279,7 @@ fn open_with(target: &Target, holds: Value) -> Engine {
     counter["types"]["Counter"]["behaviors"] =
         json!([{"name": "test.Slots", "config": {"priceField": "feeCents", "currency": "GBP"}}]);
     publish(&engine, &counter).expect("publish Counter");
-    publish(&engine, &checkout(holds)).expect("publish Checkout");
+    publish(&engine, checkout).expect("publish Checkout");
     engine.runner().run_due().expect("the runner's first pass");
     for (id, units, price) in [("anvil", 3, 1250), ("rope", 5, 300)] {
         create(
@@ -516,79 +626,119 @@ fn a_hold_expires_through_its_timers_deadline_and_the_runner_lets_it_go() {
 
 #[test]
 fn a_payment_in_progress_holds_what_is_paid_for_past_the_expiry() {
-    // TODO(lead): switch this race to Payments (M5) once it merges: an
-    // attempt reported processing through recordPaymentEvent in place of
-    // the stand-in's setProcessing, and Reactions on Payments.state paid
-    // moving the checkout to placed.
     for target in targets("holds_late_payment") {
-        let engine = open(&target);
-        cart(&engine, "c1", json!([line("anvil", 2)]), false);
-        move_to(&engine, "c1", "held").expect("hold");
-        invoke(
-            &engine,
-            &alice(),
-            "Checkout",
-            "c1",
-            "setProcessing",
-            json!({"processing": true}),
-        )
-        .expect("the payment starts");
-
-        // The expiry fires, meets the payment's veto, and is spent: the
-        // claim keeps what it holds.
-        sweep(&engine, 15 * MINUTE + 5_000);
-        let deadlines =
-            read(&engine, "Checkout", "c1").expect("c1").behaviors["Timers"]["deadlines"].clone();
-        assert_eq!(deadlines["holdExpiry"]["fired"], json!(true));
-        assert_eq!(deadlines["holdExpiry"]["outcome"], "vetoed");
-        assert_eq!(status(&engine, "c1"), "held");
-        assert_eq!(states(&engine, "c1"), ["held"]);
-        assert_eq!(stock(&engine, "anvil")["held"], json!(2));
-        holds(&engine);
-
-        // The payment succeeds and the checkout is placed: committed.
-        invoke(
-            &engine,
-            &alice(),
-            "Checkout",
-            "c1",
-            "setProcessing",
-            json!({"processing": false}),
-        )
-        .expect("the payment resolves");
-        move_to(&engine, "c1", "placed").expect("place");
-        assert_eq!(states(&engine, "c1"), ["committed"]);
-        assert_eq!(stock(&engine, "anvil")["onHand"], json!(1));
-        holds(&engine);
-
-        // A payment that never reports is caught by the backstop.
-        cart(&engine, "c2", json!([line("anvil", 1)]), false);
-        move_to(&engine, "c2", "held").expect("hold");
-        invoke(
-            &engine,
-            &alice(),
-            "Checkout",
-            "c2",
-            "setProcessing",
-            json!({"processing": true}),
-        )
-        .expect("the payment starts");
-        sweep(&engine, 15 * MINUTE + 5_000);
-        assert_eq!(status(&engine, "c2"), "held");
-        invoke(
-            &engine,
-            &alice(),
-            "Checkout",
-            "c2",
-            "setProcessing",
-            json!({"processing": false}),
-        )
-        .expect("the payment fails");
-        sweep(&engine, 2 * HOUR);
-        assert_eq!(status(&engine, "c2"), "expired");
-        assert_eq!(states(&engine, "c2"), ["released"]);
-        holds(&engine);
+        let engine = open_document(&target, &paid_checkout());
+        paid_after_the_expiry(&engine);
+        failed_after_the_expiry(&engine);
+        captured_after_the_release(&engine);
     }
+}
+
+/// c1 is paid while its expiry fires: the expiry is vetoed, and the
+/// capture places it through Reactions and commits what it holds.
+fn paid_after_the_expiry(engine: &Engine) {
+    cart(engine, "c1", json!([line("anvil", 2)]), false);
+    move_to(engine, "c1", "held").expect("hold");
+    // Payments owes what Holds totals.
+    let owed = payments_of(engine, "c1");
+    assert_eq!(
+        (owed["due"].clone(), owed["currency"].clone()),
+        (json!(2500), json!("GBP"))
+    );
+    // Not paid, so not placed.
+    let (behavior, _, _, code, _) = veto(move_to(engine, "c1", "placed"));
+    assert_eq!(
+        (behavior.as_str(), code.as_deref()),
+        ("Payments", Some("unpaid"))
+    );
+    let attempt = open_payment(engine, "c1");
+    pay_event(engine, "c1", "c1-processing", "processing", 2500, &attempt);
+
+    // The expiry fires, meets Payments' payment_in_progress, and is
+    // spent: the claim keeps what it holds.
+    sweep(engine, 15 * MINUTE + 5_000);
+    let deadlines =
+        read(engine, "Checkout", "c1").expect("c1").behaviors["Timers"]["deadlines"].clone();
+    assert_eq!(deadlines["holdExpiry"]["fired"], json!(true));
+    assert_eq!(deadlines["holdExpiry"]["outcome"], "vetoed");
+    assert_eq!(status(engine, "c1"), "held");
+    assert_eq!(states(engine, "c1"), ["held"]);
+    assert_eq!(stock(engine, "anvil")["held"], json!(2));
+    // What is held is what is being paid for: it does not change.
+    let (_, action, _, code, _) = veto(update(engine, "c1", json!({"lines": [line("anvil", 1)]})));
+    assert_eq!(
+        (action.as_str(), code.as_deref()),
+        ("update", Some("held_fields"))
+    );
+    holds(engine);
+
+    // The provider captures it: Payments says paid, the runner hands
+    // the change to Reactions, which places the checkout, and Holds
+    // commits what it held.
+    pay_event(engine, "c1", "c1-captured", "captured", 2500, &attempt);
+    assert_eq!(payments_of(engine, "c1")["state"], json!("paid"));
+    assert_eq!(status(engine, "c1"), "held");
+    sweep(engine, 0);
+    assert_eq!(status(engine, "c1"), "placed");
+    assert_eq!(states(engine, "c1"), ["committed"]);
+    assert_eq!(stock(engine, "anvil")["onHand"], json!(1));
+    assert_eq!(stock(engine, "anvil")["held"], json!(0));
+    assert!(
+        waiting(engine, "c1").is_empty(),
+        "{:?}",
+        waiting(engine, "c1")
+    );
+    holds(engine);
+}
+
+/// c2's payment fails after its expiry was vetoed: the backstop lets go.
+fn failed_after_the_expiry(engine: &Engine) {
+    // A payment that fails after the expiry was refused lets the
+    // backstop release the claim, and nothing is left to void.
+    cart(engine, "c2", json!([line("anvil", 1)]), false);
+    move_to(engine, "c2", "held").expect("hold");
+    let attempt = open_payment(engine, "c2");
+    pay_event(engine, "c2", "c2-processing", "processing", 1250, &attempt);
+    sweep(engine, 15 * MINUTE + 5_000);
+    assert_eq!(status(engine, "c2"), "held");
+    pay_event(engine, "c2", "c2-failed", "failed", 1250, &attempt);
+    sweep(engine, 2 * HOUR);
+    assert_eq!(status(engine, "c2"), "expired");
+    assert_eq!(states(engine, "c2"), ["released"]);
+    assert_eq!(stock(engine, "anvil")["available"], json!(1));
+    assert!(
+        waiting(engine, "c2").is_empty(),
+        "{:?}",
+        waiting(engine, "c2")
+    );
+    holds(engine);
+}
+
+/// c3's payment is captured after its expiry let go of what it held.
+fn captured_after_the_release(engine: &Engine) {
+    // A payment opened and never reported processing does not hold the
+    // claim: the expiry releases it and voids the attempt. When the
+    // provider captures it after all, the claim does not take back
+    // what it let go, and afterRelease refunds the money.
+    cart(engine, "c3", json!([line("anvil", 1)]), false);
+    move_to(engine, "c3", "held").expect("hold");
+    let attempt = open_payment(engine, "c3");
+    sweep(engine, 15 * MINUTE + 5_000);
+    assert_eq!(status(engine, "c3"), "expired");
+    assert_eq!(states(engine, "c3"), ["released"]);
+    assert_eq!(
+        waiting(engine, "c3")
+            .iter()
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["create", "void"]
+    );
+    pay_event(engine, "c3", "c3-captured", "captured", 1250, &attempt);
+    assert_eq!(status(engine, "c3"), "expired");
+    assert_eq!(states(engine, "c3"), ["released"]);
+    assert_eq!(stock(engine, "anvil")["available"], json!(1));
+    assert_eq!(waiting(engine, "c3"), [("refund".to_owned(), json!(1250))]);
+    holds(engine);
 }
 
 #[test]
