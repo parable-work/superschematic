@@ -20,6 +20,7 @@ const storefront :Workerd.Worker = (
     (name = "superscalar_wasm_bg.wasm", wasm = embed "superscalar_wasm_bg.wasm"),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const tester :Workerd.Worker = (

@@ -57,6 +57,18 @@ func Parse{{.Tokens.Symbol}}(s string) ({{.Tokens.Symbol}}, error) {
 		return zero, err
 	}
 	return parsed, nil
+{{- else if .ParseCanonical}}
+	canonical, err := scalars.Parse({{printf "%q" .Name}}, s)
+	if err != nil {
+		var zero {{.Tokens.Symbol}}
+		return zero, err
+	}
+	parsed, err := scalars.{{.ParseTarget}}(canonical)
+	if err != nil {
+		var zero {{.Tokens.Symbol}}
+		return zero, err
+	}
+	return {{.Tokens.Symbol}}(parsed), nil
 {{- else}}
 	parsed, err := scalars.{{.ParseTarget}}(s)
 	if err != nil {

@@ -17,8 +17,8 @@ import (
 // queue` writes it with the statements the compiler writes for the queue's
 // table on Postgres (sqlutil.PostgresQueueOperatorStatements), so the
 // runner runs the compiler's SQL as it runs a plan's, and writes none of
-// its own. A queue's messages are claimed on Postgres alone (D53, amended),
-// and so are these.
+// its own. These statements are Postgres's alone: a queue on SQLite, where
+// workers claim too (D53, amended), has no operator's statements yet.
 
 // QueueVersion is the version of the queue document and of the result the
 // queue command prints.
@@ -226,7 +226,7 @@ func (e *QueueRefusal) Error() string {
 // (QueueRefusal).
 func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueResult, error) {
 	if driver.Dialect() != Postgres {
-		return nil, fmt.Errorf("queue %s of %s: a queue's messages are claimed on Postgres alone, and the database is %s", doc.Queue, doc.Service, driver.Dialect())
+		return nil, fmt.Errorf("queue %s of %s: a queue's dead messages are read, retried and dropped on Postgres alone, and the database is %s", doc.Queue, doc.Service, driver.Dialect())
 	}
 	result := &QueueResult{Version: QueueVersion, Service: doc.Service, Queue: doc.Queue, Operation: doc.Operation}
 	if doc.Operation == QueueDead {

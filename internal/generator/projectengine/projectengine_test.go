@@ -110,6 +110,7 @@ func project(t *testing.T, reg *registry.Registry, withPaths bool) (string, proj
 			EngineRust:          filepath.Join(root, "runtime", "engine", "rust", "engine"),
 			EngineBehaviorsRust: filepath.Join(root, "runtime", "engine", "rust", "behaviors"),
 			EngineWorkQueueRust: filepath.Join(root, "runtime", "engine-workqueue", "rust"),
+			EngineCommerceRust:  filepath.Join(root, "runtime", "engine-commerce", "rust"),
 			EngineABIRust:       filepath.Join(root, "runtime", "engine", "rust", "abi"),
 			EngineNapiRust:      filepath.Join(root, "runtime", "engine", "rust", "napi"),
 		}
@@ -162,20 +163,21 @@ func checkGoldens(t *testing.T, name string, crate *projectengine.Crate) map[str
 }
 
 // A DB schema's engine types compose the core's behaviors, the work
-// queue's Lease and three extension behaviors from two crates: the crate
-// depends on the engine's three crates at the [paths] checkouts and on
-// each extension crate at its path in the project, and registers each
-// composed extension behavior by its expression, by name, after the core's
-// and the work queue's, under the binary's tool options; its ffi member,
+// queue's Lease, the commerce Stock and three extension behaviors from two
+// crates: the crate depends on the engine's four crates at the [paths]
+// checkouts and on each extension crate at its path in the project, and
+// registers each composed extension behavior by its expression, by name,
+// after the core's, the work queue's and the commerce ones, under the
+// binary's tool options; its ffi member,
 // a member of the crate's workspace, exports the C ABI over behaviors(),
 // with the C ABI's library at its [paths] checkout, and its napi member
 // the Node-API addon, with the addon's library at its own. Point, which composes
 // none, adds nothing; acme.Pin, which no type composes, needs no crate.
-func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
+func TestBuildAssemblesTheCoreTheWorkQueueTheCommerceAndTheExtensionsCrates(t *testing.T) {
 	reg := extensions(t)
 	_, opts := project(t, reg, true)
-	crate := build(t, schema(ir.SchemaKindDB, []string{"Workflow", "acme.Rating", "Lease", "desk.Triage"}, []string{"Comments", "acme.Flag", "acme.Rating"}), opts)
-	if want := []string{"Comments", "Lease", "Workflow", "acme.Flag", "acme.Rating", "desk.Triage"}; !reflect.DeepEqual(crate.Composed, want) {
+	crate := build(t, schema(ir.SchemaKindDB, []string{"Workflow", "acme.Rating", "Lease", "desk.Triage"}, []string{"Comments", "acme.Flag", "acme.Rating", "Stock"}), opts)
+	if want := []string{"Comments", "Lease", "Stock", "Workflow", "acme.Flag", "acme.Rating", "desk.Triage"}; !reflect.DeepEqual(crate.Composed, want) {
 		t.Errorf("Composed = %v, want %v", crate.Composed, want)
 	}
 	if crate.Name != "schemas-shop-engine" || crate.Ident != "schemas_shop_engine" {
@@ -185,6 +187,7 @@ func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 	for _, want := range []string{
 		`superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false }`,
 		`superschematic-engine-workqueue = { path = "../../../../../runtime/engine-workqueue/rust", default-features = false }`,
+		`superschematic-engine-commerce = { path = "../../../../../runtime/engine-commerce/rust", default-features = false }`,
 		`acme-behaviors = { path = "../../../../../crates/behaviors" }`,
 		`desk-triage = { path = "../../../../../vendor/desk" }`,
 		"[workspace]\nresolver = \"2\"\nmembers = [\"ffi\", \"napi\"]",
@@ -235,8 +238,8 @@ func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 	reg := extensions(t)
 	_, opts := project(t, reg, false)
 	crate := build(t, schema(ir.SchemaKindGeneral, []string{"acme.Rating"}, nil), opts)
-	if crate.WorkQueue != nil {
-		t.Errorf("WorkQueue = %+v, want none", crate.WorkQueue)
+	if crate.WorkQueue != nil || crate.Commerce != nil {
+		t.Errorf("WorkQueue, Commerce = %+v, %+v, want none", crate.WorkQueue, crate.Commerce)
 	}
 	files := checkGoldens(t, "general", crate)
 	if !strings.Contains(string(files[projectengine.ManifestFile]), "\nsuperschematic-engine = { version = \"0.0.0\", default-features = false }\n") {
@@ -279,6 +282,55 @@ func TestBuildOfAWorkQueueSchemaWritesACrate(t *testing.T) {
 		t.Errorf("lib.rs registers more than the core's and the work queue's:\n%s", files[projectengine.LibFile])
 	}
 	rustfmtCheck(t, files[projectengine.LibFile])
+}
+
+// A schema whose types compose the four commerce behaviors beside the
+// core's, and no extension's, gets a crate as a work-queue schema does
+// (D70): the core's archive leaves the commerce crate out. The crate
+// depends on the commerce crate, by path at [paths] engine_commerce_rust
+// or by version without it, and registers its behaviors after the core's,
+// with no work queue and no extension crate.
+func TestBuildOfACommerceSchemaWritesACrate(t *testing.T) {
+	reg := extensions(t)
+	_, opts := project(t, reg, true)
+	crate := build(t, schema(ir.SchemaKindDB, []string{"Workflow", "Holds", "Payments"}, []string{"Stock", "Calendar"}), opts)
+	if crate.Commerce == nil || crate.WorkQueue != nil || len(crate.Extensions) != 0 {
+		t.Fatalf("Commerce = %+v, WorkQueue = %+v, Extensions = %+v; want the commerce crate alone", crate.Commerce, crate.WorkQueue, crate.Extensions)
+	}
+	files, err := crate.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(files[projectengine.ManifestFile])
+	for _, want := range []string{
+		"superschematic-engine-commerce = { path = \"../../../../../runtime/engine-commerce/rust\", default-features = false }\n",
+		"# schema's types compose compiled in: the core's behaviors,\n# the commerce ones.\n",
+		"sqlite = [\"superschematic-engine/sqlite\", \"superschematic-engine-behaviors/sqlite\", \"superschematic-engine-commerce/sqlite\"]\n",
+		"postgres = [\"superschematic-engine/postgres\", \"superschematic-engine-behaviors/postgres\", \"superschematic-engine-commerce/postgres\"]\n",
+	} {
+		if !strings.Contains(manifest, want) {
+			t.Errorf("Cargo.toml lacks %q:\n%s", want, manifest)
+		}
+	}
+	if want := "    superschematic_engine_behaviors::core()\n        .extend(superschematic_engine_commerce::commerce())\n}\n"; !strings.Contains(string(files[projectengine.LibFile]), want) {
+		t.Errorf("lib.rs registers more than the core's and the commerce ones:\n%s", files[projectengine.LibFile])
+	}
+	if want := "//! - the commerce ones (`Stock`, `Calendar`, `Holds`, `Payments`)\n"; !strings.Contains(string(files[projectengine.NapiLibFile]), want) {
+		t.Errorf("napi/src/lib.rs does not name the commerce behaviors:\n%s", files[projectengine.NapiLibFile])
+	}
+	for _, file := range []string{projectengine.LibFile, projectengine.NapiLibFile} {
+		rustfmtCheck(t, files[file])
+	}
+
+	_, unset := project(t, reg, false)
+	crate = build(t, schema(ir.SchemaKindDB, []string{"Stock"}, nil), unset)
+	files, err = crate.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\nsuperschematic-engine-commerce = { version = \"0.0.0\", default-features = false }\n"; !strings.Contains(string(files[projectengine.ManifestFile]), want) {
+		t.Errorf("Cargo.toml names no commerce version:\n%s", files[projectengine.ManifestFile])
+	}
 }
 
 // No crate when the schema composes the core's behaviors alone, which the

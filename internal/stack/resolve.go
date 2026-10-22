@@ -192,12 +192,12 @@ type settings struct {
 	enabled, onDeploy  *bool
 	scheduleFrom       map[string]string
 
-	// instances and concurrency are a worker's, with enabled: what the
-	// environment chain sets, the later over the earlier. workerFrom names
-	// the environment that set each (D53). An engine's runner takes enabled
-	// alone (D58).
-	instances, concurrency *int
-	workerFrom             map[string]string
+	// instances, maxInstances and concurrency are a worker's, with
+	// enabled: what the environment chain sets, the later over the
+	// earlier. workerFrom names the environment that set each (D53). An
+	// engine's runner takes enabled alone (D58).
+	instances, maxInstances, concurrency *int
+	workerFrom                           map[string]string
 }
 
 // effectiveEnv is an environment with its parents' values merged in.
@@ -888,6 +888,10 @@ func (r *resolver) place() {
 				}
 			}
 			if platformName == "" {
+				if why := r.target.Unplaced[res.Kind]; why != "" {
+					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s", res.Kind, name, r.target.Name, res.Kind, why)
+					continue
+				}
 				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a %s; place it with a settings platform", res.Kind, name, r.target.Name, res.Kind)
 				continue
 			}

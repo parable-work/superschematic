@@ -4,10 +4,11 @@
 
 [workspace]
 resolver = "2"
-# The work queue's behaviors (runtime/engine-workqueue/rust) are a member
-# too, outside this directory: they build with this lock file and this
-# toolchain, and `cargo --workspace` lints and tests them with the rest.
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust"]
+# The work queue's behaviors (runtime/engine-workqueue/rust) and the
+# commerce behaviors (runtime/engine-commerce/rust) are members too, outside
+# this directory: they build with this lock file and this toolchain, and
+# `cargo --workspace` lints and tests them with the rest.
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"

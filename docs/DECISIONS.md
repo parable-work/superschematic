@@ -3170,7 +3170,9 @@ unchanged.
 Status: built. A union field is no longer checked for presence alone: it
 is validated as the member the union picks, in Rust and TypeScript as in
 Go, and every language picks the member by one structural predicate (D31,
-amended: a union picks its member by one structural predicate).
+amended: a union picks its member by one structural predicate). A Go enum
+refuses a string it lacks and a Go duration reads its text as every
+validator does (D31, amended: a Go enum refuses a string it lacks).
 
 The rule is reversible until the first release.
 ## D32. The version graph on SQLite, and a behavior that hosts one
@@ -4372,10 +4374,11 @@ Status: built.
 The amendments below ship the archives the workflow's builds link and
 pin each generated module to the release. The workflow builds a stack's
 static sites (D55): `check` installs the output root's Bun workspace and
-builds each site, and the deploy and preview jobs of an environment with
-a site set up Bun, even in an npm project, and install the workspace,
-since `stack deploy` builds the site on the runner (`CIStack.Sites`,
-`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+builds each site, and a `prepare` job with no credentials sets up Bun,
+even in an npm project, installs the workspace and builds each site and
+bundle, which the deploy and preview jobs take with `stack deploy
+--prepared` and build nothing (`CIStack.Sites`, `TestSitesInTheWorkflow`;
+the amendment "no project code runs where deploy credentials are"). Jobs, workers and buckets need nothing of the
 workflow: the deploy builds their images on the target and applies the
 rest as graph resources. No generated workflow has run on GitHub
 Actions: a run needs a release, a project bootstrapped with a GitHub
@@ -5107,7 +5110,7 @@ Status: built, as narrowed below.
 
 The claims run on Postgres alone, since the Go ORM does: resolution
 refuses a worker whose queue's database an environment places on SQLite
-or D1.
+or D1. The last D53 amendment claims on SQLite too.
 
 acme-shop's `shop-db` declares `OrderPlaced`, which `PlaceOrder` enqueues
 in its transaction, and `shop-orders`' worker `FulfilOrders` fulfils the
@@ -5128,8 +5131,9 @@ D68 builds a backoff that grows with each attempt, the removal of done
 messages, and an operator's command to read, retry and drop dead ones.
 
 Not built:
-- claims on SQLite and D1, in a write transaction (the amendment below);
-- scaling a worker with its queue's depth.
+- claims on D1, which no platform of Workers runs a claim loop for;
+- scaling a worker with its queue's depth, which the last D53 amendment
+  designs.
 
 The rule is reversible until the first release.
 
@@ -6499,7 +6503,8 @@ SQLite gets a queue's table and its migrations, but no claim.
 |----------|------------------------|
 | A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
 
-Status: built in #336.
+Status: built in #336. The last D53 amendment lifts the refusal for a
+SQLite file, with statements the clients carry beside Postgres's.
 
 ### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
 
@@ -7868,8 +7873,8 @@ Status: built.
 Not built:
 - Export on gcp: built by the amendment at the end of this file that
   names it (`### D67, amended`).
-- The cloudflare target's Workers build, which does not import
-  `./telemetry`.
+- The cloudflare target's Workers build: built by the D64 amendment that
+  names `./workers-telemetry`, at the end of this file.
 - Metrics and logs, as above.
 - A message span that continues the trace that enqueued it.
 
@@ -8254,7 +8259,9 @@ gcp's `TestDeployRunsTheJobOnEveryDeploy` reads a failed execution's error,
 the gcp goldens hold a job that runs on deploy, the Pulumi render goldens
 are unchanged by it, and the local target's
 `TestJobRunsOnceTheEnvironmentIsUp` runs it under `stack dev`. No job has
-run on a deploy on Google Cloud.
+run on a deploy on Google Cloud. A job whose artifact is a bundle runs on
+a deploy on cloudflare through its Workflow (D64, amended, at the end of
+this file), so the deploy no longer refuses one.
 
 The rule is reversible until the first release.
 
@@ -8350,7 +8357,8 @@ command.
 Not built:
 - `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
-- Claims on SQLite and D1.
+- Claims on D1. Those on SQLite are D53's last amendment.
+- `stack queue` on SQLite, whose dead messages it refuses to read.
 
 The rule is reversible until the first release.
 
@@ -8413,9 +8421,10 @@ Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
 the builds; actionlint passes on them. No generated workflow has run on
 GitHub Actions.
 
-Not built: a deploy that runs the project's TypeScript with no
-credentials in its environment. The bindings scoped by claim, so a pull
-request's job cannot act as the deployer of an environment without
+Not built here: a deploy that runs the project's TypeScript with no
+credentials in its environment, which the amendment "no project code runs
+where deploy credentials are" builds. The bindings scoped by claim, so a
+pull request's job cannot act as the deployer of an environment without
 parameters, are D69's.
 
 ## D69. Each CI account admits only the runs of the jobs that sign in as it (D47 amended)
@@ -8494,7 +8503,8 @@ A decoder may still refuse, after the pick, a value the predicate reads:
 Go's decoder of `Temporal.Duration` reads Go's own duration text, which the
 scalar's validator does not. Such a value is a decoder's divergence, as
 D14's `decodeRejects` lists them, not a pick's. A Go enum takes any string
-outside a union, which no pick depends on. A map's key path is `field.key`
+outside a union, which no pick depends on. (Both closed below: a Go enum
+refuses a string it lacks.) A map's key path is `field.key`
 in the TypeScript and Rust validators and `field[key]` in Go's, as for an
 object in a map; the Python SDK names an argument by its Python name.
 
@@ -8785,6 +8795,385 @@ holder's new session too until the other takes the lease
 (`hand_over`), and held in 20 runs of 20 beside a release build, the
 first taking its lease again in two of them.
 
+## D70. A claim holds stock and time until it is paid or let go, through supplies, holds and payments the engine keeps
+
+D56 gave business records deadlines, state rules, numbers and sign-offs,
+and left "holds, stock, calendars and payments" for later, to build on
+it. A shop, a salon or a rental desk sells two kinds of supply: units it
+counts and time on a resource. A claim, such as a checkout, a booking or
+a rental, holds some of each while it waits for money, and either keeps
+what it holds once paid or lets it go when it expires or is cancelled.
+D58 put the engine in every server, over one writer per namespace, so a
+check of what is free and the hold that takes it cannot race across
+replicas or languages.
+
+This entry adds four behaviors that the core declares:
+- `Stock`, units a supply counts;
+- `Calendar`, time a supply opens;
+- `Holds`, one claim's holds on any supply, tied to its Workflow;
+- `Payments`, what a claim owes and the payments and refunds that settle
+  it.
+
+They are implemented in a third first-party package beside the work
+queue's.
+
+Three rules hold throughout, beside D56's.
+- An amount is a whole number of a currency's minor units, and whatever
+  holds one names its currency: an ISO 4217 code, which superscalar's
+  `Finance.Currency` scalar holds. Amounts of two currencies are never
+  added.
+- The engine opens no connection to a payment provider. Payments records
+  what is to be done, and an adapter outside the engine does it and
+  reports back, as search's vectors are computed outside and settled in
+  (D16, amended).
+- A supply hears from a claim only through the supply contract's
+  operations. It checks each call against the claim's own `Holds` field,
+  as Budget's scope operations check the instance that calls them.
+
+### Money
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A currency is an ISO 4217 code: a config gives one as a literal (`"GBP"`) or names an own field of the type (`{ field }`), which is a `Finance.Currency`, superscalar's scalar of the active List One codes with their minor-unit exponents. An amount is an integer of minor units, a `Finance.Money` field or a count the behavior keeps. The engine checks a literal code against the same list. | A `Finance.Price` object scalar of amount and currency, like `Geo.Location`, which every SQL column and SDK would carry as JSON; decimal amounts, which every language rounds its own way; acme's `amountCents` and `currency` pair with no scalar, which no generator can format |
+
+### The supply contract and `Holds`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A supply behavior serves the instance operations `holdFor`, `commitFor`, `releaseFor` and, for counted supply, `returnFor`, plus the read-only `checkHold`. Each takes the holder (`{schema, id}`), the hold's name, the item's index and its `quantity` or its `interval` (`{startMs, endMs}`). `Holds` writes an item's new state before it calls the supply, in the same transaction, and a supply refuses a call unless the holder's `Holds.items` already shows that item, asking what the call asks, in the state the call moves the supply's record to (`not_requested`), so a caller cannot hold or release by calling it directly. Its rows, keyed by holder, hold and item, make each call idempotent and move only forward. What does not fit is `unavailable`, its details giving the supply, the hold and item, what was asked and what is free. `Stock` and `Calendar` declare the same operations and conflict. | A supply operation per behavior (`holdStock`, `bookSlot`), which Holds would name supply by supply and an extension's supply could not join; Budget's `reserveFor` itself, whose meters, leases and scopes a supply does not have; trusting the caller's parameters, which lets anyone free stock |
+| A supply may name an own integer field as its unit price, with a currency: `holdFor` returns it, and Holds keeps it on the item. A line keeps the price it was held at, and the shopper never sets it. | A general copy-at-create mechanism, which nothing but a price needs yet; reading the price again at payment, which charges what the product costs then |
+| `Holds` requires `Workflow`. Its config is a map of named holds:<br>- each hold is a single-valued `link`, or `each`, an own list field whose elements name a `target` id in a `schema`;<br>- each hold has a `quantity` (an integer or a field) for counted supply, or an `interval` (`start` with `end` or `durationMs`, each a `date-time` field) for time, read from the list's element for an `each` hold;<br>- the config names the states it takes in (`takeOn`, the create when absent), commits in (`commitOn`), releases in (`releaseOn`) and returns in (`returnOn`), and at most `maxItems` items, 100 when absent.<br><br>A many-valued link is refused, as D56 refuses one wherever one target is read. | A hold per `OrderLine` instance, each with a Workflow of its own, so one checkout moves N state machines; a TTL in Holds' config, a second expiry mechanism beside Timers |
+| A create into a `takeOn` state, or a transition into one, writes the claim's items as `pending`. Its guard asks each supply's `checkHold`, counting what the claim's other items still to hold ask of the same instance (`also`), and vetoes with `unavailable`, listing every item that does not fit. Its `afterChange` then holds them in the same transaction, each call in a savepoint, so the claim holds all of its items or none. Entering a `commitOn`, `releaseOn` or `returnOn` state commits, releases or returns them. `afterChange` reads the status from the instance as it is, never from which operation ran, so a Timers fire, a Lease expiry and a Reactions move are each caught, as Timers' arming is (D56). `retakeHolds` takes them again in a `takeOn` state after a supply refused. | Holding in `afterChange` alone, whose failure is an internal error a client cannot read; releasing only on `transition`, which a Timers move would skip |
+| A transition into a `commitOn` state while an item is not held is vetoed with `holds_missing`. While the claim holds, an update that changes a field a hold reads is vetoed with `held_fields`. A delete releases what the claim holds and leaves what it committed so: units stay sold and time booked, since a return is a move into a `returnOn` state and never a delete. It is vetoed with `committed` while the claim holds committed time that has not ended. A claim records a reference to each supply it holds, and a supply refuses its own delete while it holds anything (`held`): an item held, or committed time that has not ended. Holds has no release operation: a claim lets go by a move of its status, which runs its guards and leaves its event. | `releaseHolds` beside the Workflow, a second way to end a claim that no state shows; leaving the lines to StateRules alone, which a schema may not compose |
+| `Holds.items` gives each item's hold, supply, quantity or interval, state (`pending`, `held`, `committed`, `released`, `returned`), and unit price and currency when the supply gives them. `Holds.state` is the least advanced item's state, `none` before any. `Holds.total` is the sum of the priced items' prices: an item without a price (time, or units of a Stock with no `price`) adds nothing, and with none priced it is `{ amount: 0, currency: null }`. It is null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly, so a reader that needs money, such as Payments, fails closed on null. None of them is volatile: each moves only with the claim's own events, so a Reactions rule hears `Holds.state` turn `committed`. Reactions' `holds` trigger, a rollup that comes to hold, is a rule key and never meets the behavior's name. | A total computed at read from the supplies, which moves when a supply's price does |
+| A hold expires through a Timers deadline the schema writes, such as `{ start: { enters: "held" }, afterMs, then: { transition: "expired" } }`, with `expired` among the `releaseOn` states. Holds' guidance names a `takeOn` state that no deadline leaves. A hold is let go at most Timers' `sweepMs` after its deadline while the runner runs, and when the runner comes back if it is off (D58, amended). | An expiry sweep in Holds, which D56's Timers was built first to avoid; refusing a `takeOn` state with no deadline, which a quote held until withdrawn needs |
+| A namespace's commerce writes serialize on D58's namespace lock, which is what keeps two shoppers from holding the last unit. A shop or tenant is a namespace of its own, and a load test measures the rate. | A lock per supply, which needs a D58 amendment and breaks behaviors that read across instances; a Postgres row lock or exclusion constraint, which SQLite lacks |
+
+### `Stock`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Stock` counts units on an instance. Its fields:<br>- `Stock.onHand`;<br>- `Stock.held`;<br>- `Stock.available`, which is `onHand − held` and never below 0 unless `backorder`;<br>- `Stock.low`, true at or below `lowAt` (an integer or an own field). `low` is volatile, since the config moves it, and is a list filter. | `available` alone, which hides what is promised from what is on the shelf; `low` as a column written at each movement, which a config change would leave stale |
+| `receiveStock`, `adjustStock` and `countStock` need the config's `permission`, which the config must give, each with a reason. A count or an adjustment below what is held is `below_held`, a count unless the caller holds the permission's `.override`. One item holds at most `maxPerHold` (`over_max`). `commitFor` takes units out of `onHand` and `held` (they are sold), and `returnFor` puts back at most what that item committed. | A count that silently leaves promised units unbacked |
+| Each change of `onHand` is a row of an append-only movement table: kind (`receive`, `adjust`, `count`, `commit`, `return`), delta, reason, holder and actor. `on_hand` is kept as a column that always equals the sum of the movements. `listStockMovements` pages them by D60's cursor. | Only the count, which leaves no reason for a change; reading the count as the sum at every read, a scan per read |
+| A new version may change the price field, `lowAt` and `maxPerHold`. `backorder` may turn off only while no instance is below zero. `Stock` joins a schema that has instances, each starting at zero, and leaves only one that has none. | Budget with a store's config, which brings leases, daily meters and scope chains into a stock count |
+
+### `Calendar`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Calendar` opens a resource's time:<br>- weekly hours as `["HH:MM", "HH:MM"]` ranges per day in an IANA `timeZone`;<br>- a `capacity` (an integer or an own field);<br>- a start grid (`slotMs`);<br>- length bounds (`minMs`, `maxMs`);<br>- buffers before and after a hold;<br>- a lead time and a horizon (`leadMs`, `horizonMs`), read against the engine's clock;<br>- `permission`.<br><br>`setOpeningHours` and `addClosure`/`removeClosure` change an instance's own hours and closures. A closure over held time is `has_bookings` unless forced with the permission's `.override`. | Hours as an own field the config names, whose shape no behavior's parameters check; durations in ISO 8601, which D56's rule leaves out |
+| `holdFor` checks, in order:<br>- the opening hours and closures (`outside_hours`, `closed`);<br>- the grid (`off_grid`);<br>- the length bounds (`too_short`, `too_long`);<br>- the lead time and horizon (`too_soon`, `too_far`);<br>- capacity: the most holds over any instant of the interval, buffers included, must stay below it (`unavailable`, with the conflicting interval).<br><br>Holds are rows of `(instance, start_ms, end_ms)`, indexed by instance and start, and the overlap read is the same on both databases. | A Postgres exclusion constraint, which SQLite lacks and the namespace's one writer makes unnecessary; counting overlapping holds, which over-counts a long hold that two short ones overlap at different times |
+| Local times become instants through `jiff` with its time zone database bundled, so every server built from one lock file computes the same slots. A wall time that DST skips has no slot, and a repeated one gives two. The schema-level, read-only `findAvailability({ startMs, endMs, durationMs, ids?, where?, limit })` gives free slots across instances: at most 500, over at most 31 days (`window_too_long`), by `holdFor`'s rules. `listBookings` reads an instance's holds over the same window. | The system's zone files, which differ between a distroless image and a laptop; chrono-tz, whose API is further from the Temporal names superscalar's scalars use; joint availability across two resources' schemas, which the caller intersects for now |
+| Hours, the grid, buffers, lead time and horizon may change in a new version, and apply to holds made after it. `capacity` falls no lower than the current peak. `timeZone` changes only while no instance holds future time, and an instance's own zone, through `setOpeningHours`, only while it holds none (`has_bookings`). | Moving held time when the hours change, which a business does by hand with its customers |
+
+### `Payments`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Payments` keeps what an instance owes and how it is settled. The amount due comes from an own integer field (`{ field }`), in the config's currency or an own field's, or from `Holds.total` (`{ holds: true }`), which carries its own. Its fields are `due`, `authorized`, `captured`, `refunded`, `outstanding` (`due − captured`, never below 0), `currency`, `state` and the last twenty `attempts`. `state` is one of `unpaid`, `pending`, `authorized`, `paid`, `partiallyRefunded` and `refunded`. None of them is volatile, so a Reactions rule hears `Payments.state` turn `paid`. | A card or a payer on the instance, which brings it into PCI scope; a `paid` boolean, which a partial capture or a refund cannot show |
+| `openPayment({ provider, idempotencyKey })` records an attempt and the action that creates it at the provider, and returns the attempt and its amount; the same key returns the same attempt, and the key reused with other parameters is `key_reused`. While an attempt is open the amount does not change (`amount_locked`). `capturePayment`, `voidPayment` and `refundPayment` record actions. A refund above what is captured and not yet refunded or asked is `exceeds_refundable`, and refunding needs `refunds.permission`. The core's declarations name no invocation policy, so they register under any distribution's; a deployment that wants these four confirmed marks them in the engine's tools config: its `invocation` takes a behavior operation as `<Behavior>.<operation>` (`Payments.capturePayment: ask`) in its declaration's place, beside the built-in tools it already took, and a generated server's engine takes it from the engine database's `outputs.engine.tools.invocation`, which the build checks against the binary's policy and the behaviors the engine types compose, and which the engine document carries. An engine refuses one naming a behavior it does not run or an operation the behavior does not declare when it opens. | Calling the provider inside the call, which holds the namespace's lock across the network and breaks D16's synchronous hooks; an invocation policy in the declarations, which a distribution with other values than the core's would refuse; a list of confirmed operations in the core, which the deployment could not change |
+| An adapter outside the engine reads the actions waiting for its provider through the schema-level, read-only `listPaymentActions`, and calls the provider with each action's id as the provider's idempotency key. It reports every outcome, and every provider event, through `recordPaymentEvent({ provider, eventId, attempt or providerRef, kind, amount, currency, at })`, which needs `record.permission`, which the config must give. An event applies once per `(provider, eventId)`; a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late changes nothing. An event in another currency is `currency_mismatch`. | Storing a provider's raw event, which holds the payer's name, email and address; trusting delivery order, which no provider promises |
+| `require: { <state>: "authorized" or "paid" }` vetoes a transition into the state until the payment meets it (`unauthorized`, `unpaid`). `voidOn` states void the open attempts as the instance enters them. With `capture: "manual"`, `captureOn` states capture what is authorized. A move out of a state while an attempt is `processing` is vetoed with `payment_in_progress`, so a hold's expiry fired by Timers does not let go of what is being paid for; Timers records the veto as the deadline's outcome (D56), and a longer second deadline catches a payment that never reports. Money captured on an instance already in a `voidOn` state is refunded when `afterRelease` is `"refund"`, and kept for an operator when it is `"keep"`, the default. | Letting the expiry win, which sells a paid customer's stock to someone else |
+| A refund that needs sign-off is an instance of its own: Workflow, Approvals' gate, a required link to what it refunds, Numbering, and Payments with `refundOf: { link }` and `issueOn` states. Entering an `issueOn` state invokes `refundFor` on the linked instance's Payments. That instance checks the link and the amount and records the refund action, and when the provider's refund event is reported to it, it invokes `settleRefundFor` back on the refund. A shop without sign-off calls `refundPayment` directly. | A count of approvers inside Payments, a second sign-off mechanism beside D56's Approvals; a Reactions `then` that invokes any operation, which D16 turned down |
+| A new version may change `require`, `voidOn`, `captureOn` and the permissions. The currency and the source of the amount stay while any attempt exists. `Payments` joins a schema that has instances and leaves only one with no attempts. | |
+
+### Providers, webhooks and personal data
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A provider's adapter is the API's own code; the repository ships no official one. acme-shop carries the example over a fake provider, `acmepay`, with Stripe-shaped signing, which `stack dev` and the tests run:<br>- the operation that opens a payment calls the provider;<br>- an `@webhook @hmacVerified({ provider })` operation (D26, D28) maps each provider event to `recordPaymentEvent`, and answers 2xx for an unknown event or a veto and 503 for `busy`;<br>- a job (D52) drains the waiting actions and asks the provider about attempts stuck in `processing`.<br><br>Each calls the engine in-process as a service principal the database's engine policy names. The provider's key and signing secret are `Secret<T>` fields of the API's config (stack-model 4.2), in each platform's secret store (D63, D64), never in the engine's config, document or log. | A Rust `PaymentProvider` in the engine's runner, which needs the runner to read secrets and config it does not have (D58, amended); an adapter per language in the runtimes, three implementations of each provider; a real provider's test mode in CI, which needs its keys |
+| Payments' parameters hold no card data. Every schema is closed:<br>- `providerRef` is limited by pattern;<br>- the display hint is a brand and a four-digit `last4`;<br>- metadata is at most ten string pairs.<br><br>The documentation names the provider's hosted fields as the only way a card is entered, which keeps a merchant to SAQ A, and says a schema must add no card fields of its own. | Tokenising cards in the engine, which brings every server into PCI scope; a loader that refuses own fields named like card data, which refuses legitimate names and misses others |
+
+### Packaging
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core declares `Stock`, `Calendar`, `Holds` and `Payments` under bare names in `internal/registry/behaviors`, with the package `@superschematic/engine-commerce` (`registry.CommercePackage`). The crate `superschematic-engine-commerce` in `runtime/engine-commerce/rust` implements them on the plug-in API alone, carries their declarations in `declarations/` (`make behaviors`, checked by `make behaviors-check`), and its `supply` module gives an extension's supply the contract's types and the holder check. Go and Rust servers link it through the project's engine crate when a schema composes one of them, as they link the work queue's (`[paths] engine_commerce_rust`). The core's Node-API addon carries it beside the work queue's. | The core's behavior crate, which would put a time zone database in every Go server's archive; an extension, which would qualify the names and leave them out of the core's catalog |
+| The engine client generator narrows the four behaviors' fields, operations and parameters (D49). | |
+| acme-shop's stock and checkout move onto the engine: `Inventory` (`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`, `Payments`) and `Refund`. The `Order` table and its queues stay, and a placed checkout writes its row. | A separate commerce slice beside acme's tables, which proves nothing acme's servers do |
+
+This entry amends:
+- D11, whose engine tool options take a behavior operation's invocation
+  policy, which the engine database's config sets;
+- D16, whose catalog gains the four behaviors and a third package;
+- D58, whose project engine crate and addon gain the commerce crate.
+
+It uses:
+- D56's Timers for expiry, Approvals for refunds, Numbering for numbers,
+  StateRules for frozen claims and Reactions' `changes` for what follows a
+  payment;
+- D26 and D28 for webhooks, D37 for the adapter's principal, and D52 for
+  its job.
+
+Status: built and proved across languages, and acme-shop is built.
+The core declares the four behaviors, twenty-six in
+all, with the package `@superschematic/engine-commerce`, and
+`runtime/engine-commerce/rust/declarations` carries their copies;
+`@superschematic/schema` types their configs. `fixture-commerce-json`
+and its TypeScript twin compose all four with Workflow, Links, Timers,
+Reactions, Numbering, StateRules and Approvals and load to the same IR,
+and `make cli-smoke` builds the JSON form. `superscalar.pin` names
+62b300e7, which adds `Finance.Currency` (superscalar#86):
+`fixture-commerce-currency`, whose currency is a `Finance.Currency` own
+field, loads in both forms to the same IR (`TestCommerceCurrencyFields`)
+and `make cli-smoke` builds its JSON form; the Go runtime refuses `ABC`
+(`TestFinanceCurrencyThroughTheCore`), and the engine refuses it as a
+`Finance.Currency` field's value
+(`a_finance_currency_field_takes_only_active_iso_4217_codes`). The names
+and rules are reversible until the first release.
+
+Stock (M2) and Holds (M3) are built in `runtime/engine-commerce/rust`,
+registered by `commerce()` and carried by the core's addon. Each has a
+Rust suite in the test kit (`tests/commerce_stock.rs`,
+`tests/commerce_holds.rs`) on SQLite and Postgres, which checks after
+every step that `Stock.onHand` is the sum of the movements, `held` the
+sum of the records that hold, and that every held or committed item
+matches its supply's record. The suites cover all or none, expiry
+through the runner, the late-payment race and two claims racing for the
+last units on two engines over one Postgres. The late-payment race runs
+on Payments over the claim's `Holds.total`: an attempt reported
+`processing` vetoes the expiry (`payment_in_progress`), its capture
+places the checkout through a Reactions rule on `Payments.state`, a
+failed payment lets the backstop release it, and a capture after the
+release leaves it released and asks a refund (`afterRelease: refund`).
+The package
+`@superschematic/engine-commerce` (`runtime/engine-commerce/typescript`)
+holds their names and types, and its suite records
+`commerce-{stock,holds,holds-timers}.json`, which the test kit replays.
+What the build settled:
+- `Holds.items` shows each item the claim's fields and links ask that it
+  has not taken as `pending`, so a cart shows what it would hold.
+- An update in a `takeOn` state that changes what a claim holding
+  nothing asks takes the holds, refused as an entry is.
+- `parse_config` refuses a transition from a `releaseOn` or `returnOn`
+  state into a `takeOn` state, since a supply records each item of a
+  claim once.
+- A supply takes `releaseFor` alone for a holder that is gone, which a
+  claim's delete makes: it releases what was held, leaves what was
+  committed, and retires the records (amended by the supply review
+  below).
+- Stock refuses its delete while it holds units, not while claims have
+  committed some, which are sold.
+- `Stock.low` filters through a column each write sets, so after a new
+  version moves a literal `lowAt` the filter follows each instance's next
+  write while the field answers at once.
+- Under the default dotted permissions the permission covers its
+  `.override`.
+- A literal currency is checked against ISO 4217 through superscalar's
+  `Finance.Currency` table (`currency.rs`), so `ABC` is refused.
+
+M4, `Calendar`, is built in the commerce crate (`src/calendar`) and
+registered in `NAMES`, so the core's Node-API addon carries it. It links
+`jiff` 0.2.38 with only `std` and `tzdb-bundle-always`: the IANA database
+(2026e, from `jiff-tzdb` 0.1.9, Unlicense OR MIT) is in the binary and no
+host zone file is read. The release (`dist`) addon for darwin-arm64 grew
+from 14,705,536 to 15,532,288 bytes (+827 KB, 5.6%), and gzipped from
+6,398,402 to 6,700,423 (+302 KB); the database itself is 207 KB. The Go
+core archive does not link the crate. The start grid is in wall time, a
+whole number of `slotMs` after the opening time of the range a start lies
+in, so a grid time a change skips has no slot, and a hold's length is
+elapsed time. Where the build settled what this entry left open:
+- `findAvailability` reads at most 100 instances, by id, and answers
+  `truncated` when more match; its `where` takes the type's own fields
+  that hold a string, a number or a boolean, as a list's equality does,
+  not a behavior's; a duration outside `minMs` and `maxMs` is vetoed
+  `too_short` or `too_long`;
+- `outside_hours`, `closed`, `off_grid`, `too_short`, `too_long`,
+  `too_soon` and `too_far` carry `unavailable`'s details with what they
+  turn on (`timeZone`, `closure`, `slotMs`, `minMs`, `maxMs`,
+  `earliestMs`, `latestMs`), and `has_bookings` lists the holds;
+- under the default dotted permission matcher, the config's permission
+  covers its own `.override`, so `force` is a separate right only under a
+  deployment's matcher;
+- the peak a new version's capacity may not fall below, and a capacity
+  field's update (vetoed `has_bookings`), counts the holds that have not
+  ended, without buffers; a new version refused for capacity or zone is a
+  `BehaviorConfigError` of the publish; Calendar leaves only a schema with
+  no instances;
+- a resource with held time, or committed time that has not ended, is not
+  deleted (`held`), as the contract's helper counts (amended by the
+  supply review below; past bookings once kept it for good).
+
+`commerce_calendar.rs` in testkit, the core-calendar suite, runs it
+through the contract and testkit's Holds stand-in on SQLite and Postgres:
+thirteen cases, among them the daylight-saving Sundays of Europe/London,
+America/New_York and Australia/Lord_Howe held to Python's zoneinfo
+instants, a sweep held to a minute-scan model, and two engines racing
+eight threads for two places. The commerce package's TypeScript suite
+covers it (`test/calendar.test.ts`), and its recording,
+`commerce-calendar.json`, is in the corpus the test kit replays.
+
+The supply review of Stock, Holds and Calendar settled:
+- An interval of the contract lies from 1900 to 9000, in its paramsSchema
+  and in `SupplyCall::parse`. Calendar reads hours, closures and holds
+  over an interval's first `maxMs` and a minute only, so one of centuries
+  costs what the longest hold does and is `too_long` once that much is
+  open; before, one call could hang a server under the namespace lock.
+  Holds lists an item whose own date-time fields ask time outside the
+  bounds as `unavailable` without asking the supply.
+- `checkHold` takes `also`, the asks of the claim's other items still to
+  hold of the same instance: a count Stock subtracts from what is
+  available, intervals Calendar counts against capacity. Holds' guard and
+  `listHolds` send it, so two lines of one supply that do not fit
+  together are each listed, rather than failing in `afterChange`.
+- A claim's delete leaves committed units sold: a gone holder's
+  `releaseFor` is the only call a supply takes for it, so no caller gives
+  a deleted claim's units back, and the ledger records no return that
+  did not happen.
+- A gone holder's records retire: a `retired` key column, 0 while the
+  holder lives, keeps their state, so committed time stays booked, and
+  frees the holder's id, so a claim created again with it holds afresh.
+  `listBookings` marks such time `retired`. Calendar's `checkHold` reads
+  the record as Stock's does, so both agree with `holdFor`.
+- A resource and a claim whose committed time has ended are deleted;
+  committed time to come keeps both.
+- `findAvailability` sweeps each instance's sorted holds once, jumps past
+  a full stretch, a closure and a closed stretch, and stops at
+  `MAX_FIND_WORK` (two million), answering `truncated`.
+- Stock's held and commit arithmetic is checked against what a JSON
+  number holds; backorder turns off only with no instance below zero, as
+  this entry says; without backorder a commit is `unavailable` while it
+  would leave fewer than 0 on hand, which a count with the override can
+  cause, and an adjustment up is taken while it leaves too few.
+- The `closures` field reads from now with a limit of 100, and
+  `parse_config` refuses a `takeOn` state's transition to itself, which
+  would start the hold's expiry again.
+
+`commerce_holds_calendar.rs` holds a desk's time through a booking's real
+Holds beside Workflow, Links, Timers, StateRules and Reactions (a rule on
+`Holds.state` turning `committed`), on SQLite and Postgres: commit,
+expiry, the delete that waits for committed time to pass, a claim
+created again with a deleted one's id, an interval of centuries refused
+at once, and two sessions of one desk listed together. Calendar's suite
+times `findAvailability` on a full calendar of 100 instances; Stock's
+covers the counts under backorder and after an override count.
+
+M5, `Payments`: built in `runtime/engine-commerce/rust` (`payments.rs`)
+and registered by `commerce()`, with its own tables of attempts, actions,
+refunds, a refund instance's issues and the provider events it recorded,
+the same SQL on both databases. A literal currency, and the code an
+instance pays in, is checked against `Finance.Currency`'s table through
+the crate's `currency` module, which Stock's builder added. The
+testkit's `commerce_payments` and `commerce_payments_refunds` pass on
+SQLite and Postgres:
+idempotent and reordered events, `amount_locked` from a field, a real
+`Holds.total` (the stand-in is gone, D70 amended below), `require`,
+`voidOn` and `payment_in_progress`,
+`afterRelease`, manual capture and over-capture, direct refunds, a
+currency mismatch, and a Refund issued after two Approvals sign-offs,
+numbered by Numbering and moved to issued by Reactions. Where the table
+above left a choice:
+- an attempt's statuses rank `open < requiresAction < processing <
+  failed < authorized < cancelled < captured`, so a payment that succeeds
+  after a failed try is caught and money a provider captured is counted
+  whatever came before it;
+- an event id applies once per namespace and provider: the same id with
+  other content, or on another instance, is `key_reused`;
+- `openPayment` opens no second attempt while one is in flight
+  (`nothing_due`): a payer who switches method voids the first;
+- a refund draws on one captured attempt;
+- `listPaymentActions` and `settleRefundFor` need `record.permission`
+  too, and `refundFor` takes a call only from a refund instance whose link
+  points here, in an `issueOn` state, for its own amount;
+- with `amount: { holds: true }` the type lists Payments after Holds, and
+  `require` names no initial state;
+- a new version keeps the currency, the amount's source and `refundOf`,
+  and Payments leaves a schema, only while the schema has no instances,
+  which is what the engine's configChange can see;
+- a delete waits while an attempt is in flight (`payment_in_progress`),
+  and the recorded events stay after it so a redelivery is still a
+  repeat.
+
+The plumbing is built. The project's engine crate depends on
+`superschematic-engine-commerce` when a type composes a commerce
+behavior, at `[paths] engine_commerce_rust`, which the local target's
+check of a crate by version, the release's refusal and the naming
+reference name; a Go server links its archive, a Rust server its
+`behaviors()`, and a TypeScript server names the four on the core's
+addon, whose release check now opens them. `outputs.engine.tools.invocation`
+reaches every entrypoint through the engine document, and the engine and
+its TypeScript facade take `<Behavior>.<operation>` in `tools.invocation`
+(`a_behavior_operation_takes_the_invocation_policy_the_tool_options_give_it`,
+`TestBuildCarriesTheDeploymentsInvocationPolicies`). `behaviortypes`
+narrows the four, and `runtime/engine/typescript/test/generated/commerce.ts`
+is their client. servergen's `shop-commerce-db` fixture, with an API in
+Go, Rust and TypeScript, builds and serves offline in all three
+(`TestCommerceEngineEntrypointServes`, `…Rust`, `…TypeScript`); on
+Postgres each deploys the document and answers one script, the MCP
+tools' policies included, now that the crate registers all four
+behaviors. The client parity corpus carries the commerce schemas, and
+the release publishes `@superschematic/engine-commerce` (D70, amended
+below).
+
+acme-shop is built (D70, amended below: acme-shop sells, books and
+refunds through the engine).
+
+The cross-language proof (M8). servergen's `shop-checkout-stack` serves
+`shop-commerce-db`'s three APIs, in Go, Rust and TypeScript, each naming
+the database as its authDb, so its members hold the permissions their
+roles grant, beside one runner; the database gains the user model, a
+`Bay` of capacity 1 with a `Booking` that holds it, and a two-second
+hold expiry. `TestCommerceServersAnswerOneScriptAlike` runs the design's
+script against each server on one Postgres, its ids, logins, provider
+and event ids tagged per run: staff receive three units, which a shopper
+may not; a cart holds two and a pickup slot, owes `total_unknown` while
+they are pending and their price once held, and a second cart's two are
+`unavailable`; a payment opens twice under one key, and the adapter,
+staff holding `payments.record`, lists its action and records
+`processing`, `captured`, the capture again (`applied: false`), a late
+`requiresAction` (ignored) and an event in EUR (`currency_mismatch`),
+which a shopper may not record; placing commits the units and the slot;
+a refund past what is refundable is `exceeds_refundable`, and a Refund
+its creator may not sign and one sign-off cannot approve is approved by
+two, asked of the checkout, and settled by the provider's refund event;
+then two checkouts hold a unit each, one paying, and the runner expires
+the unpaid one, its unit back, vetoes the paying one's expiry
+(`payment_in_progress`, the deadline fired with the outcome `vetoed`)
+and moves the Refund to issued, and once the late capture is recorded
+places the paying one through Reactions. After each run onHand is the
+sum of the ledger's movements. The three normalised transcripts, 65
+exchanges each, are identical: a Numbering label and seq are symbols,
+since the runs share the namespace's count. Each server then reads what
+each other wrote, with its own staff's session and the writer's, alike.
+`TestCommerceServersOversellNothing` moves 1,000 checkouts cart→held at
+once, a third through each server and at most 32 requests in flight to
+each, for an Inventory's three units: three hold, 997 are vetoed
+`unavailable` and stay in their carts, and Stock's ledger holds (onHand
+the sum of the movements, held the sum of the held checkouts' items,
+none available); 1,000 bookings of one slot of the Bay hold one. With
+128 in flight to each server, the moves at the back of the namespace's
+queue waited past the servers' 30-second engine route timeout and
+answered 504 `gateway_timeout` (12 and 189 of the 1,000 in two runs),
+and still exactly three held. CI's engine-servers job and `make
+engine-servers` run both.
+
+`TestCommerceHoldsLoad`, which runs only with
+`SUPERSCHEMATIC_COMMERCE_LOAD=1`, measured three servers and 24 clients
+on a laptop against Postgres 17 in a local VM: checkouts of one item
+held at 6.2 a second (6 holds a second), of ten items at 2.6 (26 holds
+a second), and of fifty at 0.7 (35 holds a second); checkouts were
+created at about 12 a second. In the oversell test the refused moves ran
+at about 13 a second, and the Bay's bookings, a type of fewer behaviors,
+at about 60. Statement logging puts the time in round trips under the
+namespace lock rather than in the database's work: holding a checkout
+of ten items ran about 680 statements in one transaction, with about
+7 ms of database time, and creating one about 165. Each behavior's hook
+reads the schema's document and the instance again, 109 times each in
+that hold, so a cache of those reads within a transaction is the first
+step to a faster checkout; until then a namespace per shop keeps shops
+from queueing on each other. Reads pay the same way: listing the 997
+checkouts the oversell test leaves in their carts, whose pending items
+each read their supply, took about 58 seconds in pages of 100, and one
+page of 500 passed the 30-second route timeout.
+
+The guide "Selling and booking with the engine"
+(`docs/src/content/docs/guides/commerce.md`) and
+`runtime/engine-commerce/README.md` describe the four behaviors, the
+supply contract, totals and currency, the payment adapter outside the
+engine, refunds with Approvals, expiry with Timers and the MCP tools'
+policy.
+
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 
 D21 kept every optional integer scalar (`Generic.Int64`, `Temporal.Seconds`,
@@ -8809,6 +9198,430 @@ Optional `number` and `string` fields keep value types with `omitempty`.
 `TestOptionalIntegerEnvVarKeepsExplicitZero` cover these shapes.
 
 The rule is reversible until the first release.
+
+### D58, amended: a deploy orders its documents by the schemas their configs name, and tries a refused one again after the others
+
+A server's deploy defined and published its engine document's schemas in
+the document's order, the engine types' name order, and stopped at the
+first refusal. A behavior whose config reads another schema's live
+version (Rollups' source, a Holds supply, a Payments `refundOf` link's
+target, D70) was refused when that schema came later by name:
+shop-commerce-db's Checkout, which holds Inventory, never deployed, so
+no commerce server became ready.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Engine::deploy` first orders the documents so that each comes after the others its behaviors' configs name: a string anywhere in a type's behavior config equal to another document's name. Documents that name each other, directly or not, keep the order given among themselves, and so does every document otherwise. | The engine document's generator ordering the schemas, which needs every behavior's references, an extension's included, known to the compiler; the order given alone, which made a document's validity depend on its types' names |
+| It then deploys in passes. A document refused as an invalid schema (`InvalidSchema`, which a behavior's config refusal is) is tried again in the next pass; a pass that deploys none of those left returns its first refusal in the dependency order, every other document deployed, so a supply that cannot deploy fails with its own refusal and not with its claim's "no live version". Any other error (an incompatible change, a busy or unavailable database) stops the deploy at once, as before. There are at most as many passes as documents, so at most n(n+1)/2 attempts. | Retrying every refusal, which retried an unavailable database and returned a dependent's refusal before its cause's |
+| A draft with the document's hash, which a publish refused a pass before left, is published again without a second define, so a retry writes no second draft and no second define event. The result lists the documents in the order given. The Go binding's `Deploy` and the TypeScript `deploy` call it. | |
+
+`commerce_holds.rs`'s `a_deploy_publishes_a_claim_after_the_supplies_it_names`
+deploys Checkout before Counter and Inventory on SQLite and Postgres:
+with an Inventory whose Stock config is wrong it fails with Inventory's
+refusal while Counter deploys; with a good one each schema is defined
+once; a second deploy writes nothing; and a config naming a schema that
+is never live is refused after the rest deployed. `deploy.rs`'s order
+tests cover a chain and a cycle.
+
+### D70, amended: Payments fails closed, pays one refund per approval, asks back a double charge, and a deployment names every money-moving operation's policy
+
+A review of Payments and its plumbing found that:
+- one approved Refund could drain its order through `refundFor`, which
+  took a refund per caller key;
+- `amount: { holds: true }` read a null `Holds.total` as 0, so `require:
+  paid` passed with nothing paid;
+- a late capture of an attempt that had failed charged the payer twice,
+  with no signal;
+- the operations that move money or stock were `auto` MCP tools unless
+  the deployment said otherwise, and the adapter's own operations were
+  offered to end users;
+- `settleRefundFor` trusted its caller's status and amount.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One live refund per refund instance: while one it asked is `requested`, `sent` or `succeeded`, `refundFor` returns it under its key and refuses any other (`key_reused`). After one failed it takes only the key the refund instance derives from itself and the failures before (`<schema>:<id>.<n>`), which `issue` already sends. | Trusting the caller's key, which the review's drain used; refusing every direct call, which nested invokes cannot tell from a forged one |
+| With `amount: { holds: true }` what is owed is unknown while an item is `pending` (its price comes when it is held), or while `Holds.total` is null over priced items (two currencies, or a sum past what an integer holds). `due` reads 0 then, and `openPayment` and a move into a `require` state veto with the new code `total_unknown`. A claim whose items carry no price owes 0, so a free booking moves. `Holds.total` sums the priced items only (cm-fix-supply's Holds change); Payments reads `Holds.items` too, so it holds to this before and after that change. | `due` 0 for a null total, the review's finding; a nullable `due`, which every client and SDK would carry |
+| `openPayment` gives each earlier `failed` attempt a `void` action, and a capture that pays what is due voids the other attempts still open. A capture that arrives anyway is counted; what it brings past what is due is the new field `Payments.overpaid`, and Payments asks it back with a refund keyed `overpaid:<eventId>`. That refund leaves `state` `paid`. `refundPayment` refuses the `overpaid:` and `release:` keys, which are Payments' own. | A new `overpaid` state, which a rule listening for `paid` would miss; refusing the capture, which leaves money taken and unrecorded |
+| `settleRefundFor` reads the refunded instance's refund row (Payments' tables are namespace-wide) and refuses a status or an amount other than what that instance recorded (`not_linked`). Defining a refund's schema refuses a `record.permission` other than its target's, since the adapter settles both in one call. The module's documentation says the engine policy must let the adapter write `settleRefundFor`, and the issuing principal write `refundFor`. | A config-time check of the engine policy, which the schema registry cannot see |
+| A build whose engine types compose the core's `Payments` or `Stock` is refused unless `outputs.engine.tools.invocation` names a policy for each operation that moves money or stock, naming each it lacks: `Payments.openPayment`, `capturePayment`, `voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`, `adjustStock` and `countStock` (`enginedoc.MoneyOperations`). | Filling in `ask` silently, which a distribution with other values could not take; a warning, which a build log hides |
+| A new engine tool option, `tools.hidden`, lists behavior operations the tools leave out. Such a tool reads `hidden: true` with its reason, and its call by MCP handle is `UnknownToolError`; the operation still runs through the engine's API. `outputs.engine.tools.hidden` sets it, which the build checks. The engine document adds Payments' service operations wherever Payments is composed: `listPaymentActions` and `recordPaymentEvent`, which the adapter calls, and `settleRefundFor`, which a refunded instance calls (`enginedoc.ServiceOperations`). An engine opened by hand hides only what it is given. | A value of `invocation`, which is the binary's policy's to define; a `service` flag in the declarations, which every distribution's registry and the engine's declaration reader would have to learn; the access policy alone, which hides a tool from a caller only per deployment |
+| `ToolOptions::from_json` and `resolveToolOptions` refuse a non-string `invocation` value, a non-object `invocation` and a `hidden` that is not a list of strings, naming each, rather than dropping them to the default. | |
+
+`@superschematic/engine-commerce` names all four behaviors and types
+Payments' config and record. The release packs and publishes it after
+the engine, beside the work queue's package, so a TypeScript deployment
+can name and type the commerce behaviors from it.
+
+This amends D11, whose engine tool options gain `hidden`.
+
+Status: built. The new behavior is tested in four places:
+- the testkit's `commerce_payments` and `commerce_payments_refunds`, on
+  SQLite and Postgres: made-up keys after approval, a forged settlement,
+  the record permission, a late capture voided and asked back, and
+  `total_unknown` for pending lines, two currencies and an overflow over
+  real Stock and Holds, with a free claim placed;
+- `tools.rs` and the TypeScript `tools.test.ts`, for `hidden` and the
+  refused option shapes;
+- `enginedoc`'s and servergen's build tests, for the refusal and the
+  hidden list;
+- the commerce package's `payments`, `payments-refunds` and
+  `payments-holds` suites, recorded as `commerce-payments*.json`, which
+  the testkit replays.
+
+servergen's commerce entrypoint tests lost the `NAMES` gate. Without a
+Postgres they skip after the offline half, or fail under
+`SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1`. On Postgres, Go, Rust and
+TypeScript each hold a pickup slot through Calendar and Holds, meet
+`total_unknown` and `nothing_due`, place the free checkout and read its
+booking, and show the MCP tools' policies and hidden operations. The
+client parity corpus carries the commerce schemas.
+
+### D31, amended: a Go enum refuses a string it lacks, and a Go duration reads its text as every validator does
+
+The amendment above left two Go decoders apart from every other language.
+A generated Go enum had no `UnmarshalJSON`, so a request body, a model
+field, a response an SDK read or a queue message decoded any string into
+it: only a caller that ran `Validate` learned it was no member, where
+serde refuses it at decode, TypeScript in validation and pydantic at
+parse. And a `Temporal.Duration` field, a `time.Duration`, decoded through
+superscalar's `UnmarshalJSON`, which reads the text with Go's own
+duration parser and never with the scalar's rules: it took `+1s`, `.5s`
+and `0`, which the scalar's pattern refuses, and refused ` 1s` and `1s `
+with a decode error, where every validator reports `pattern`; and since
+`Validate` could see only the decoded value, it checked the pattern and
+the length on Go's rendering of it (`1s` for `+1s`). Go's parser also
+reads a fraction of a nanosecond down (`1.5ns` is 1ns) where the core
+rounds it (2ns). No other scalar's Go decoder disagrees with its
+validator in the parity matrix: superscalar's other decoders read through
+the core.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated Go enum has `UnmarshalJSON`. A string the enum lacks, `""` and another case of a value included, and a value that is not a string, are refused with the `*json.UnmarshalTypeError` `encoding/json` gives a value of the wrong JSON type, its `Value` `string "purple"` or the JSON kind and its `Type` the enum, which `encoding/json` completes with the struct field's path. null leaves the value as it was, as for a string. A Go client or server that relied on an unknown value decoding, from a request, a stored JSON column, a queue message or a response, now gets the decode error. So an enum's members are part of the wire contract for Go, as they were for Rust and Python: a member a newer server adds fails an older Go client's decode of the whole response, a member removed or renamed makes JSON stored with it (a JSON column, a queue message, a version graph's history) unreadable to the new code, and a required enum a Go value left unset, which encodes as `""`, is refused by the reader. `install/go.md` says so; there is no compatibility check for it yet. | An error of a type of our own, which no caller of `encoding/json` expects and which `encoding/json` would not name the field in. A lenient decode and `Validate` alone, as before, which a caller that skips `Validate` (an SDK reading a response, the ORM reading a JSON column) never ran. `UnmarshalText`, which no generated route, query decoder or YAML reader calls on an enum: query and path values are cast and checked by `ValidateRequired`, and YAML goes through JSON. |
+| A Go route answers an input body whose decoder refused a string an enum lacks as the TypeScript and Rust servers answer it, which validate the body before they decode it: `validation failed`, with `enum` ("invalid enum value") at each such string's path, a list's element, a map's value, a nested object's field and an `InputField` included, beside the errors the input type's `Validate` finds in the rest. `bodyargs.DecodeRefusal` reads the body again with each such string replaced by the enum's first value, walking the JSON beside the Go type (a generated object type, which lists its keys; a list; a string-keyed map; an `InputField`), and does not walk a union, whose pick refuses such a member first. Any other body the decoder refuses, a value of the wrong JSON type among them, is `does not match the declared type`, as before. A body argument is read the same way: a string an enum lacks is `enum`, where its decoder's refusal would have made it `pattern`, and an object argument has `enum` at the string's path beside its other errors. A query value is cast and checked as before, `enum` at its name. | `does not match the declared type`, as the Go route answers a value of the wrong JSON type, which every server answered `validation failed` with `enum` before. The enum's errors alone, which drop the body's other broken rules that the TypeScript and Rust servers report beside them. |
+| A Go type's `UnmarshalJSON` reads each `Temporal.Duration` field's text itself, alone, in a list, a list of lists and a map (`decodeDurationField`): `check<Symbol>Text` checks the text by the scalar's own length and pattern, each one it breaks, and when they accept it by the scalar core, whose canonical text Go's parser then reads exactly. A text they refuse keeps the value Go's parser reads from it and is recorded, as a JSON-object scalar's core failures are, and `Validate` reports it at its path while the field still holds the value decoded; a text Go's parser refuses too (` 1s`, `1d`, an amount beyond the core) is a decode error naming the field, as it was. So a negative duration Go writes (`-1h2m0s`), which the ORM stores and reads, round-trips through every Go reader (an SDK's response, a queue message, a version graph's `HistoryRecord`), none of which runs `Validate`. The union pick checks a duration's text with the same function, and `Parse<Symbol>` parses the core's canonical text. A text the rules and the core accept whose amount a `time.Duration` cannot hold, beyond about 292 years (`2562047h1h`), is still refused at decode, the one value Go cannot hold. | superscalar's `UnmarshalJSON` running the scalar's rules and writing the core's canonical text, a change to the pinned superscalar for a check this repository's validators already make on the text. A string-backed Go type for a duration, which would break the alias every module shares with superscalar and the ORM's `INTERVAL` columns. Refusing every text the rules refuse at decode, which a Go route would answer `does not match the declared type` where every other server answers the rule. Decoding a refused text to 0s, which loses a value Go wrote, a negative one, silently for every reader that does not validate. |
+| Encoding is unchanged: Go writes a duration as Go renders it (`1.5ms`, `1µs`), which every validator accepts and which reads back as the same value, while TypeScript and Rust echo the text they were sent. | Writing the core's canonical text (`1500us`), which needs superscalar's `MarshalJSON`. |
+| A Python enum's reader refuses a string the enum lacks with a pydantic error of type `enum` where it raised the enum's `ValueError` (`value_error`), so the Python SDK names it `enum`, as every other SDK does, where it said `invalid`. | |
+
+The parity matrix holds `Temporal.Duration` alone and in a list: a text
+in each unit (`µs` included), a sign, a negative duration as Go writes
+it, a bare number and a fraction without its integer part (`pattern`),
+space around it and a unit the scalar lacks (`pattern`, which Go's
+decoder refuses), a text too long (`maxLength`), an amount the core
+refuses (core-only, `parse`, which Go's decoder refuses) and a number
+(`type`); the generated validators of every language and the three
+runtimes agree on each. The bad enum vectors
+list Go among the decoders that refuse them, as Python is listed, and a
+member's value in another case is one more. union-lists-api's `Probe`
+holds a `Status`, a list of them, a `Ticket` whose status is one, a
+duration and a list of them outside any union, and `union_requests.json`
+asks every server and SDK about them: a status the enum lacks, alone, in
+a list, in a nested object and beside a duration the pattern refuses, is
+`validation failed` with `enum` at its path from the Go, TypeScript and
+Rust servers, and the TypeScript and Python SDKs refuse it with the same
+errors; the Go and Rust SDKs cannot hold it and skip those requests
+(`typedSkips`). A duration with a sign, a negative one as Go writes it,
+a bare number or one too long is refused by its rule by every server and
+SDK. A duration text Go's parser refuses too, ` 1s` or `1d`, is still
+`does not match the declared type` from a Go route, as a value of the
+wrong JSON type is, where TypeScript and Rust answer `pattern`; no
+request asks it.
+
+A Go route's multipart input, whose `data` part holds the input's JSON,
+answered a part its decoder refused with a plain 400, "Invalid 'data'
+field: " and the decoder's message, which named Go's types. It answers
+it as a JSON body is answered, through `bodyargs.DecodeRefusal`, so a
+string an enum lacks there is `enum` at its path too. `DecodeRefusal`
+reads the body again only when the decoder's error is an enum's refusal.
+
+Open: the scalar's domain excludes a negative duration (its pattern has
+no sign, and every validator refuses `-1s`), while Go writes one
+(`-1h2m0s`), the ORM stores and reads one in an `INTERVAL`, and the queue
+and version graph carry one. A Go reader now keeps the value and
+`Validate` reports `pattern`, as TypeScript, Rust and Python report it;
+whether the scalar should take a sign is superscalar's to decide.
+
+Status: built. typegen's `TestGeneratedDurationsReadTheirText` holds the
+duration decode, the canonical value, a refused text keeping Go's value,
+a negative duration's round trip, a text Go cannot parse as a decode
+error naming the field, the report following the field, a later decode
+clearing an earlier one's report, and the enum's refusal and its
+`*json.UnmarshalTypeError`; ormgen's `TestDurationColumnsOnPostgres`
+sends every duration it reads, negatives included, through Go's JSON and
+back; the nested-arrays module tests decode an unknown enum element as a
+refusal, and apigen's `TestWriteAPIGoldenRawBodyChecks` pins the
+multipart part's refusal. bodyargs' `TestDecodeRefusal`,
+`TestAnEnumStringArgumentItsDecoderRefusesIsEnum` and
+`TestAnObjectArgumentWithAnUnknownEnum` hold the route's answers.
+`TestGeneratedValidatorParity`, the runtime suites,
+`TestUnionListsGoAPI`, `TestRustRouterAnswersUnionRequests`,
+`TestGeneratedRouterAnswersUnionRequests` and the four SDKs' union tests
+run the new vectors; the Rust SDK's harness names the rule its input
+schema check breaks by the message the check gives (`invalid format` is
+`pattern`). A Go body argument that is a duration is checked by the
+route's rules on its text, as before, but still decoded by Go's parser,
+so its value rounds a fraction of a nanosecond down; an object argument
+holding one reads it as its type's decoder does.
+
+The rule is reversible until the first release.
+
+### D53, amended: a queue's messages are claimed on SQLite too, each claim one statement under SQLite's single writer, and a worker's instance range is a setting no target scales yet
+
+D53 named SQLite and D1 as a queue's backings and claimed on Postgres
+alone, waiting for an ORM per dialect. The TypeScript server already runs
+over a SQLite file under `stack dev` (D64), so its worker could not, and
+the Go and Rust clients had no SQLite statements to share. And a worker
+pool on gcp runs a fixed instance count, whatever its queue's depth.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One function, `sqlutil.SQLiteQueueStatements`, writes a queue's statements on SQLite with Postgres's names, parameters (numbered `?1`, `?2`) and semantics: the lease, the attempts, the doubling backoff capped at `maxBackoff`, the dead messages and the retention. Each is one `UPDATE` or `DELETE`, which takes SQLite's write lock before it reads a row, so no `FOR UPDATE SKIP LOCKED` is needed: a claim is one `UPDATE ... WHERE id IN (the due messages, oldest first, LIMIT ?1) ... RETURNING`, and two workers that claim at once take different messages. A claim's token is the SQLite model's UUID expression, per row. Times are RFC 3339 in UTC to the millisecond, the form the SQLite model's `CURRENT_TIMESTAMP` writes, so they compare as text; the backoff doubles with a shift, since `power()` is an optional SQLite extension, a product past 2^63 becomes a REAL rather than an overflow, and the cap is `COALESCE(MIN(x, ?6), x)`, which ignores a NULL maximum as Postgres's `LEAST` does. A claim first runs `due`, a read of whether any message is due or claimed past its expiry, and takes the write lock only when one is, so an idle worker's polls only read. | `BEGIN IMMEDIATE` around a `SELECT` and an `UPDATE`, two round trips a D1-style `SqlDatabase` cannot hold in one transaction. `UPDATE ... LIMIT`, a compile option most builds lack. Times as Julian days or epoch numbers, which would differ from every other timestamp column of the SQLite model. |
+| A DB service that lists the sqlite dialect carries them beside Postgres's: `sqliteStatements` in `queues.ts` and in the descriptor `queues.rs` holds, and the Go ORM's `queues_sqlite.go`. A queue whose message holds a value SQLite has no storage for, a location, or a `BYTEA`, which the three clients' messages hold in no one form, has none, saying why. | Statements for every database, which would put SQLite in the output of a Postgres-only service. |
+| On SQLite a message crosses through its JSON form in every language, each field as its definition marks it: `uuid` its lowercase hyphenated text (a Rust type's base62 and Go's converted), `timestamp` RFC 3339 in UTC with its fraction kept, `boolean` 1 or 0 in a column and true or false in a list, a duration its canonical text, a JSON value or a list its JSON text. The marks are written for every queue, as `point` and `interval` are, and a test holds `queues.ts`'s to the Go ORM's. The Go ORM's SQLite queue marshals the message with the types' own JSON, so it needs no scan per field. | Converting by each column's declared type, which SQLite's `TEXT` and `INTEGER` do not tell apart for a UUID, a timestamp or a boolean. Generated code per field in Go, as on Postgres, a second classification of every field. |
+| The clients: the Go ORM's `Enqueue<Queue>SQLite(ctx, tx, msg)` over a `*sql.Tx` and `New<Queue>SQLiteQueue(db)` over a `*sql.DB` of any driver, the ORM importing none, whose caller opens the file with a busy timeout and in WAL; the TypeScript runtime's `enqueueStatement(db, queue, msg)`, the statement a caller adds to the batch whose writes caused the message, since a `SqlDatabase` has no interactive transaction, from `./sqlite` and from `./d1`, and `sqliteQueue(db, queue)` from `./sqlite` alone, since no worker claims on D1; the Rust runtime's `sqlite` feature, `enqueue_sqlite` through a rusqlite connection or transaction and `SqliteQueue`, on tokio's blocking pool, which the worker loop runs as a `PostgresQueue`. | A transaction callback in TypeScript, which D1 cannot run. A SQLite pool in the Go ORM's `Database`, which every Go server would then open. |
+| Several processes share one file, so `openSqlite` and `SqliteQueue::open` put it in write-ahead logging, where a reader never waits for a writer, and a write transaction begins IMMEDIATE: `openSqlite`'s `batch`, and a Rust caller's transaction (`TransactionBehavior::Immediate`). A deferred transaction that reads, then writes after another connection's commit, fails at once on its stale snapshot, which the busy timeout does not wait out. | Rollback journaling, where a server's reads and a worker's claims block each other. Retrying a busy transaction, which the IMMEDIATE lock makes unneeded. |
+| A claimed row that does not read into its message, say a JSON column holding no JSON, is failed alone, its cause `the message could not be read: <why>` in every language, and the claim returns the others: on SQLite and on Postgres alike, since `RETURNING` has already claimed every row. | Failing the whole claim, which left every message of the batch to wait out its lease and the poison row to come back with them, until the expiry marked good messages dead. |
+| A UUID crosses parsed, base62 or hyphenated, as superscalar's `ParseUUID` reads it, and is written hyphenated, by the TypeScript client too on either database; a value that is neither is refused. A `bigint` beyond ±(2^53 − 1) is refused rather than rounded. | Lowercasing the text, which corrupts a base62 UUID, whose case is its value. |
+| Resolution lets a worker claim on a SQLite file: the local target connects one through `local.worker-sqlite`, and a TypeScript worker's `main.ts` opens the file and runs `sqliteQueue`. Each process has a connection of its own, which waits five seconds for another's write lock. A Go or Rust worker there stays refused, with its server, since D64's rule keeps their `Deps` on Postgres. A database platform may say why no worker claims on it (`PlatformSpec.NoQueueClaims`), which resolution gives as an unrealizable worker's reason: `cloudflare.d1` does, since D1 is reached through a Worker's binding alone and Workers runs no claim loop. | Lifting the refusal for every SQLite-dialect platform, which would leave a D1 worker to fail at its first claim. A Go worker's `Deps` on SQLite, which needs the Go ORM's tables there too. |
+| A worker's settings take `maxInstances`, the most instances a target may run as its queue's depth grows, `instances` then the fewest, refused under it; `enabled: false` runs none. No target scales a worker yet: gcp refuses a range, local runs one process, and the fake target ignores it. | No setting until a scaler exists, which would leave the range undesigned. |
+
+A scaler, designed and not built. Cloud Run worker pools have no
+autoscaling: the Admin API's `WorkerPoolScaling` documents
+`manualInstanceCount` alone, and Google's answer is CREMA, a separate
+Cloud Run service running KEDA's scalers that sets the pool's count. So a
+scaler is ours to run:
+
+- *Where it runs.* A Cloud Scheduler job per environment, every minute,
+  runs an execution of the migration job (D68, amended) with a `scale`
+  command: it already reaches every database as the migrator, needs no
+  new image, and works for a pool at zero instances, which nothing inside
+  the pool could wake. A loop inside each worker, behind an advisory lock,
+  needs a running instance, so no minimum of zero, and gives the worker's
+  own account the right to change its pool.
+- *What it decides.* Per scaled worker: depth = ready and due messages
+  plus live claims; desired = ⌈depth ÷ concurrency⌉, clamped to
+  [`instances`, `maxInstances`]. It scales up at once, and down only after
+  desired stayed below the current count for a cool-down of five minutes,
+  one step at a time, so a burst does not flap the pool; the last change's
+  time lives in a row of a scaler table the migration plan keeps.
+- *IAM.* The migrator's account gets `run.workerPools.get` and
+  `run.workerPools.update` on each scaled pool alone (a
+  `WorkerPoolIamMember` with a custom role). `update` is the narrowest
+  permission that sets a count, and it also lets the holder change the
+  pool's image and environment: whoever holds the migrator's credentials
+  could then run code as the worker's account. That is the cost the
+  design must accept or narrow, by a scaler account of its own that holds
+  nothing else.
+- *Deploys.* The deploy writes `instances` as the count; Pulumi would put
+  back the scaler's count at each deploy unless the graph says to ignore
+  the field, and the IR has no `ignoreChanges` yet.
+- *Cost safety.* `maxInstances` is the hard ceiling, refused without
+  `instances` under it; the scheduler costs one job execution a minute per
+  environment.
+
+It is not built because three of its parts are not sound yet: the IAM
+grant, which would let the migrator's identity redeploy the worker; the
+Pulumi field that the next deploy would reset; and a minute's scheduled
+job per environment, a running cost for every stack with a range, where
+the fakes would prove only the arithmetic. The setting is built so a stack
+can state its range, and gcp says why it cannot run one.
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnSQLite` runs the
+parity cases on SQLite, each in a file of its own, the Go ORM through
+modernc.org/sqlite, TypeScript through bun:sqlite and Rust through
+rusqlite, each side a process: every case but `LocationsAndDurationsAgree`,
+which SQLite cannot hold. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+runs the same refactored cases on Postgres. Both hold two more:
+`UnreadableRowFailsAlone`, each side's claim of a good message beside a
+row whose JSON column holds no JSON, and `Base62UUIDsGoHyphenated`, each
+side's enqueue of a base62 UUID. tsgen's
+`TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts`'s SQLite statements
+and marks to the Go ORM's, and rustgen's
+`TestQueuesDescribeWhatTypeScriptWrites` `queues.rs`'s to `queues.ts`'s.
+The runtimes' `queue-sqlite.test.ts` and `tests/queue_sqlite.rs` run the
+clients on a file opened twice, the Rust worker loop among them; a batch
+that reads, then enqueues while another process holds the write lock with
+a write pending, waits rather than failing (it fails with `SQLITE_BUSY`
+under a deferred transaction), enqueues run beside a polling worker in
+another process, and an idle claim returns while another connection
+holds the write lock. servergen's
+`TestTypeScriptSQLiteEntrypointCompilesAndServes` gives ts-notes a queue
+and a worker: the server enqueues in the batch that writes a note, and the
+worker, under Bun on the same file, handles two messages, fails one until
+it is dead, and exits 0 on SIGTERM. Resolution's tests cover a TypeScript
+worker on a local SQLite file (`TestSQLiteWorkerGolden`), a Go one refused,
+a platform that says no worker claims, and `maxInstances`; gcp's
+`TestWorkerRefusals` refuses a range.
+
+Not built: claims on D1; `stack queue` on SQLite; the scaler above. No
+worker has claimed on SQLite outside the tests.
+
+The rule is reversible until the first release.
+
+### D47, amended: no project code runs where deploy credentials are: a `prepare` job builds what the cloud jobs deploy, the stack commands read it, and a child process for project code gets an environment without credentials
+
+D47's amendment signed each cloud job in after its installs and builds,
+and left two exposures. GitHub grants `id-token: write` to the whole job,
+so the build and the installs before the sign-in could still ask for an
+identity token; and `stack plan`, `deploy` and `destroy` ran the
+project's TypeScript after it: the loader's sidecar documents through
+Bun, and a deploy's frozen install of the output root's workspace, each
+site's build and each bundle's. Every such child process inherited
+`GOOGLE_APPLICATION_CREDENTIALS`, the gcloud override, the credentials
+file in the workspace, `CLOUDFLARE_API_TOKEN`,
+`PULUMI_CONFIG_PASSPHRASE` and GitHub's own
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN`, so a dependency's install script, a
+build plugin or a sidecar document could read them. A developer's own
+credentials were exposed the same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic stack prepare [environment...]` writes, with no credentials, everything a deploy of the environments runs project code to make, into a directory (`--dir`, `<output-root>/prepared/<stack>` unless set): each service's sidecar documents, evaluated; each server's, job's and worker's build context, as `contexts/<deployable>.tar.gz`; each site's files, built, as `sites/<site>.tar`; and each bundle, built, as `bundles/<deployable>.tar`; with `prepared.json`, which names each and its digest. A site's or a bundle's archive is the tar stream its digest is of (D55, D64), so an upload that drops file modes cannot change it, and a reader checks it against the digest before it extracts it. With no environment named it prepares every one off the local target, since a context, a site's files and a bundle do not depend on the environment. `--no-build` writes the documents alone. | `stack build`, which uploads through the target and needs its credentials. Uploading the output root and the repository, and building the contexts in the cloud job, which needs `build-all` there. The files of a site as a directory, whose executable bits an artifact upload drops, changing the digest. |
+| Every cloud stack command takes `--prepared <dir>`. With it the loader takes each sidecar document a module runs from `prepared.json` and never starts Bun: a document it lacks, or one whose file or imports changed since, is refused, naming `stack prepare`. `stack deploy` and `stack build` take each context, site and bundle from the directory and install and build nothing: a deployable it holds nothing for keeps the manifest's, or `--image`'s, `--site`'s or `--bundle`'s, as one with no Dockerfile does. | Refusing a TypeScript sidecar document in CI, which no target registers today but an extension may. Evaluating the documents in the cloud job before it signs in, which still holds the job's `id-token`. |
+| The generated workflow has a `prepare` job, with no `id-token` and no secret, on every event a cloud job runs on: a pull request from the repository, its closing too when the stack has a preview, and a push. It runs the build, the Rust setup and the workspace's install, as the cloud jobs did, then `stack prepare` into the runner's temporary directory, and uploads it as the artifact `prepared`. On a closing pull request it builds nothing and prepares the documents alone (`--no-build`), which the preview's destroy reads. Each cloud job needs `prepare`, downloads the artifact, installs the schemas root's packages with `--ignore-scripts`, which the loader reads the types of, signs in last and runs its stack commands with `--prepared`. It runs no build, no sidecar document and no script of the project's; its one package manager run, the scriptless install, is on a Bun or Node.js downloaded from its release, not restored from the Actions cache, which check's and prepare's dependencies can write (setup-bun's `no-cache`, setup-node's `package-manager-cache: false`), and only superschematic's release installs, checked against `SHA256SUMS`, write `$GITHUB_PATH` or `$GITHUB_ENV`, which reach the steps after them. `TestCloudJobsSignInLast` holds every golden's cloud jobs to the steps that may run there, and to no cached tool. A self-hosted runner that is not ephemeral keeps what a prepare job left for the jobs after it, so the split holds on GitHub's runners and other ephemeral ones. | The build in the cloud job before the sign-in, D47's last amendment, whose steps the job's `id-token` reached. `prepare` folded into `check`, which does not run when a pull request closes, when the destroy still needs the documents. One prepare job per environment, which builds the same contexts, sites and bundles again. |
+| Every child process the stack commands, the document harness and `stack prepare` start to run project code (the harness, the workspace's install, a site's build, a bundle's) gets an allowlisted environment (`internal/childenv`): the path, user, shell, temporary directories, locale, terminal, `CI`, the proxy and certificate variables, the cache directories, Bun's install directory, `NODE_ENV`, and Windows' system variables, matched in any case there. `SUPERSCHEMATIC_CHILD_ENV` names more, a registry token's for a private package, but never a credential's: a name beginning `GOOGLE_`, `CLOUDSDK_`, `GCLOUD_`, `GCP_`, `CLOUDFLARE_`, `CF_`, `WRANGLER_`, `PULUMI_`, `AWS_`, `AZURE_`, `ARM_` or `ACTIONS_`, `GITHUB_TOKEN`, `GH_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_AUTH_CONFIG`, `KUBECONFIG`, `VAULT_TOKEN`, a passphrase, or a superschematic token, secret or key. The child's home is a scratch directory of its own, and so are the configuration and data directories under it, while `XDG_CACHE_HOME` and Bun's install cache stay the user's, which an install needs to stay fast; naming `HOME` in `SUPERSCHEMATIC_CHILD_ENV` keeps the user's, for a registry configured only in `~/.npmrc`. | A denylist of known credentials, which misses the next one: `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and its URL mint identity tokens, and an install script reads whatever a shell exports. The shell's environment with a few names removed, for the same reason. The user's home, where gcloud, Pulumi, wrangler, npm, Docker, AWS and SSH keep their credentials. | A denylist of known credentials, which misses the next one: `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and its URL mint identity tokens, and an install script reads whatever a shell exports. The shell's environment with a few names removed, for the same reason. |
+| What the environment and the scratch home protect is narrow, and the boundary is elsewhere. They keep a child from finding a credential in its environment or under the home it is given. They do not keep a credentials file from it: a child runs as the user, so gcloud's application default credentials, `~/.pulumi/credentials.json`, wrangler's configuration, `~/.npmrc`, `~/.docker/config.json`, `~/.aws/credentials` or a key file stay readable to a child that names the user's real path. In CI the boundary is the job: the file `google-github-actions/auth` writes lies in the workspace of a job that runs no project code, and the `prepare` job holds no credential. On a developer's machine the boundary is the same split: run `stack prepare` first, before signing in or in a shell that holds no credential, then `stack deploy --prepared`, which runs no project code. A `stack deploy` without `--prepared` still runs it, beside whatever the user's files hold. | Moving the file, or a copy deleted before the builds: superschematic does not own gcloud's file, and a deploy needs it after the builds. A sandbox per child, which no platform the CLI runs on gives without privileges. |
+| A prepared directory's digests are checked against its `prepared.json`, which the same prepare wrote: they catch a corrupted or half-uploaded directory, not a forged one. A dependency that runs in the prepare job can change the documents, contexts, sites and bundles it makes, and their digests with them, and so what the deployer applies, within what the IR allows; it cannot reach the deployer's token. That is what a deploy that built them did before, with the token beside it. The integrity of `--prepared` rests on the artifact's provenance, the prepare job of the same run, and the pull request's plan and the hazard gate are what review the result. `prepared.json` records the commit and the run (`GITHUB_SHA`, `GITHUB_RUN_ID`), and a stack command in CI refuses a directory of another commit or run, or one prepared outside CI; outside CI it checks nothing. The upload keeps the artifact one day, not GitHub's default of ninety, so a deploy whose reviewers approve it later than that fails to download and its run is started again. A documents-only directory or one prepared for other environments is refused by plan and destroy too. | Signing the directory, which needs a key the prepare job cannot hold and the cloud job can, a secret of its own for no more assurance than the run's provenance. Rebuilding in the cloud job to compare, which runs the code the split keeps out. |
+
+What stays out. `stack dev`'s local builds and servers keep the shell's
+environment: the local target holds no deploy credentials, and its
+servers read the developer's settings. Cloud Build runs a Dockerfile
+with its own account, on the target. The `prepare` job runs the pull
+request's code, which makes what deploys, as the cloud jobs' builds did.
+The artifact holds the repository's own sources and the files built from
+them, no secret, and anyone who can read the repository's Actions runs
+can download it.
+
+Status: built, proven offline. `internal/childenv` and its tests; the
+document harness and `stackdeploy`'s installs and builds run with it, and
+`TestRunDocument_SeesNoCredential` and `TestBuildsSeeNoCredential` set
+gcp's, Cloudflare's, Pulumi's and GitHub's identity-token variables and
+find none of them in the child. `stackdeploy.Prepare`, `ReadPrepared` and
+`Sources.Prepared`: `TestPrepareThenDeployASite`, `...Images` and
+`...ABundle` prepare with the fake builds, then deploy with a `Run` that
+fails the test if called, and get the digests a deploy that builds
+records; a changed archive, a stale document, a directory of other files
+and a documents-only directory for a build are refused. `stack prepare`
+and `--prepared` in the CLI: `TestStackPrepare` deploys from a prepared
+context with the output root removed. The generated workflow's `prepare`
+job and cloud jobs are in every cigen, gcp and cloudflare golden;
+`TestCloudJobsSignInLast` holds each cloud job to steps that run no
+project code and each stack command to `--prepared`, and prepare to no
+identity token or secret; actionlint passes on all of them. No generated
+workflow has run on GitHub Actions: an artifact's upload and download
+between jobs, `--ignore-scripts` with the loader's reading of the schemas
+root's packages, and a TypeScript sidecar document replayed in CI are
+proven by tests on this machine only.
+
+Not built: `stack dev`'s child processes keep the shell's environment. A
+sandbox that keeps a credentials file on disk from a child. A document
+evaluated in the prepare job sees the job's filtered environment and none
+of a GitHub environment's variables, and its result serves every
+environment: one that branches on `process.env` behaves as it did in that
+job.
+
+The review that followed added the scratch home, the wider deny list and
+Windows' case to `childenv`; the uncached Bun and Node.js, the guard on
+`$GITHUB_PATH` and `$GITHUB_ENV`, the provenance and the one-day
+retention to the workflow and `prepared.json`; and refused a backslash
+or a non-local path in a prepared archive, and hashed a workspace
+package a document imports through `node_modules` by its real path.
+`TestBuildsRunInAScratchHome` installs a workspace with Bun in a scratch
+home and finds no gcloud credentials under it; `TestPreparedProvenance`
+and `TestUntarRefusesPathsOutOfTheDirectory` hold the rest.
+
+### D64, amended: a job's Worker is a Workflow the job runner starts, Workers export traces under nodejs_als, a bucket names its jurisdiction, and a worker's refusal says where one runs
+
+The target left four gaps (#402's "Not built"): a job on every deploy
+and `stack run`, which `checkDeployJobs` and the missing `Jobs` seam
+refused; OpenTelemetry on Workers, whose bundles left `./telemetry` out
+for its `node:async_hooks` (D67); R2 jurisdictions, whose S3 host the R2
+credential did not name; and the refusal of a queue worker, which said to
+place it with a settings platform, advice no cloudflare environment can
+follow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every job's Worker is also a Workflow, `<job>.workflow` (pinned `cloudflare:index/workflow:Workflow`), named as the Worker, of the class `JobRun` (`ir.JobRunClass`) that `scheduled.ts` exports, after the deployment. The target's `Jobs` seam starts an instance through Cloudflare's API (`POST /accounts/<id>/workflows/<name>/instances`) with the run's token, which `Workers Scripts Write` and `Read` cover, and polls it every two seconds until it is `complete`, `errored` or `terminated`, returning the error its run threw. It waits at most every try's timeout, a minute for the step and five minutes queued, and gives up on an instance that stays `paused` or `unknown` for 30 reads or whose reads keep failing; then, and when its context is cancelled, it terminates the instance (`PATCH .../instances/<id>/status`, `terminate`) and says so, so neither a stuck instance holds a deploy's lock nor a cancelled run goes on unwatched. The Workflow's name is the Worker's, which holds the stack and the environment, since Cloudflare's PUT of a Workflow is an upsert that would repoint another's. `JobRun` runs the job's tries within one step that retries nothing and may take every try's timeout and a minute, as a firing runs them, so a run on demand behaves as a scheduled one. | A `fetch` entry on the job's Worker guarded by a deploy-scoped token: the Worker would need workers.dev or a route, public addresses `nothing-public-unless-exposed` refuses for a job, and a token per deploy in a graph that is a function of the schemas, which D52's amendment rejected for Cloud Run's execution token; a client that disconnects mid-run cancels the Worker. An API that fires a deployed Worker's scheduled handler: Cloudflare has none, only wrangler's local `/__scheduled`. The Workflow's own retries and timeout per try, which would log and fail unlike a firing and leave a try's timeout to Cloudflare's step semantics. A Workflow `schedules` in place of the Cron Trigger, which changes what a schedule is for no gain. |
+| The instance's payload is `{"bundle": "<hex>"}`, the digest the deploy manifest records or the rollout pinned (`JobRunRequest.Bundle`), and the job's version binds `SUPERSCHEMATIC_BUNDLE` (`ir.BundleDigestVariable`) to `{bundle-digest}`, which the deploy pins: `JobRun` requires the digest and checks it in a step of its own, `check the bundle`, throwing `NonRetryableError` on a payload with none or another one, so it fails for good, and Cloudflare keeps the step's result, so an instance a deploy interrupts is not checked again against the next bundle. A Workflow runs the Worker's current deployment, so this is gcp's refusal of an image the manifest does not record. The API takes `params` as JSON in a string, so `JobRun` parses a string payload too. | Trusting the deployment, which a deploy under way or a version made by hand would change unseen. Comparing the version's id from the graph's outputs, which `JobRunRequest` does not carry. |
+| `JobRunRequest` gains `Bundle`; `Check` asks for the artifact the job's platform runs; the deploy's jobs step and `stack run` fill it from the rollout and the manifest; `checkDeployJobs` refuses only a job with neither an image nor a bundle. | A second request type for bundles, which every runner would switch on anyway. |
+| The HTTP runtime's `./workers-telemetry`, beside `./telemetry` on a shared `telemetry-core`, reads OpenTelemetry's variables from the Worker's string bindings with `./telemetry`'s refusals, and refuses a member without `=` of `OTEL_RESOURCE_ATTRIBUTES` or of a headers variable. A span's context travels in `AsyncLocalStorage` from `node:async_hooks`. Ended spans wait in the isolate, at most 2048, until `flush()`, which `fetch.ts` hands to each request's `waitUntil` and a scheduled run and a Workflow step await: an isolate runs no I/O outside a request, so no timer exports. The entry posts the OTLP/HTTP protobuf body itself, built by `@opentelemetry/otlp-transformer`'s serializer, which a Workers package depends on. A client span's `url.full` holds no userinfo, query or fragment, in TypeScript and Rust alike, and the log line that export is on names the endpoint without them. | An explicit context with no `AsyncLocalStorage`: clients are built once per isolate and shared by concurrent requests, so a client span could not find its request's server span. OpenTelemetry's browser exporter, which sends `fetch` with `mode` and `keepalive` that workerd refuses. A `BatchSpanProcessor`, whose timer would export from one request's I/O context in another's. |
+| Every server's and job's version names `compatibilityFlags: ["nodejs_als"]` (`WorkersCompatibilityFlags`), workerd's `AsyncLocalStorage` without the rest of Node, whether or not its environment exports, since one bundle serves every environment. workerd gives `node:` modules with no flag from compatibility date 2026-08-04, the pinned 2026-09-15 among them, so the flag keeps a server whose `compatibilityDate` is earlier running. `bundle.ts`, `workers-check.mjs` and the workerd harness keep `node:*` external, since Bun's browser target swaps `node:async_hooks` named alone for an empty module, and refuse every `node:` import but `node:async_hooks`, and a Node builtin named without `node:`, a bare `async_hooks` among them, which Bun's browser build refuses or empties. | `nodejs_compat`, all of Node for one class. No flag, relying on the date, which breaks a server that pins an earlier one. Loading the telemetry only where an environment exports, which the bundle, one per deployable, cannot know. |
+| The environment's values take `telemetry: { endpoint, sampleRatio? }`, and a server's or a job's settings `telemetry: true\|false`, as gcp's (D67, amended); the endpoint is required, since Cloudflare has no OTLP endpoint of its own for a Worker's traces, and is an `https` URL with no userinfo, query or fragment, `http` to loopback alone: the bindings are plain text, which the dashboard and Workers Logs show. A Worker that exports gets `plain_text` bindings: the endpoint, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (the environment with a member's parameters, `cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`, `cloud.account.id`, and `service.version=sha256:{bundle-digest}`, which the deploy pins), and the sampler. A config field of one of those names is refused. | Bindings the engineer writes by hand, which no setting reaches. A collector header from a Secrets Store secret, which waits for a secret identity outside an API, as gcp's does. |
+| An `r2` bucket takes `jurisdiction`, `eu` or `fedramp`: the bucket and its lifecycle name it, the edge's token names the bucket's objects as `<account>_<jurisdiction>_<bucket>`, and the R2 credential gains an optional `jurisdiction` member (`<FIELD>_R2_JURISDICTION`), which the TypeScript runtime reads to presign URLs for `<account>.<jurisdiction>.r2.cloudflarestorage.com`, refusing a value that is no lowercase label or one with no credential, and the Go and Rust readers refuse with the other Worker-only R2 variables. `PreDestroy` empties a member's bucket at its jurisdiction's host through `JurisdictionCloud`. A jurisdiction beside `locationHint` is refused as unrealizable. This reverses the third amendment's row that left `jurisdiction` out. A bucket's jurisdiction cannot change in place: the provider replaces the bucket, and R2 deletes only an empty one, so the replace's delete of a bucket that holds objects fails and the deploy stops there, with the new bucket made and the old one kept; `stack plan` lists the bucket as `replace`. The deploy's hazard gate covers migration plans alone, so it does not stop on the replace before it starts. | A replace that empties the old bucket first, which would delete what the environment kept. A jurisdiction without the member, whose signed URLs would name the default host. A host in the credential, which a value could point anywhere. |
+| A target may say why it places no deployable of a kind (`TargetSpec.Unplaced`), and resolution gives that reason in place of "place it with a settings platform". The cloudflare target says a worker's claim loop needs a long-lived process and Postgres or a SQLite file, and that gcp's `gcp.cloudrunworker` or `stack dev` runs one. | Leaving the generic advice, which a cloudflare environment, mixing no other target, cannot follow. A cloudflare check of its own, which the core's placement runs before any platform sees the worker. |
+
+Status: built, proven offline. `extensions/cloudflare`'s `jobs_test.go`
+reads each job's Workflow and bundle binding, runs a fake Workflow through
+the runner, `stack run` after a deploy and a deploy's jobs step with
+`onDeploy`, and reports an errored, a terminated and a missing Workflow,
+and terminates one still queued at its deadline, one that stays paused
+and one whose run is cancelled; `TestCloudWorkflows` holds the create,
+read and terminate calls to a stand-in;
+`telemetry_test.go` reads the `OTEL_` bindings, the flag and the
+refusals; `TestR2BucketInAJurisdiction`,
+`TestPreDestroyEmptiesABucketInAJurisdiction` and
+`TestCloudS3InAJurisdiction`, which signs object calls for the EU host
+against a TLS stand-in that signs them again from the Host it received;
+and the worker's refusal in `TestWorkersRefusals`. servergen's
+`TestTypeScriptCronEntrypointCompilesAndBundles` runs `JobRun` under the
+runtime's pinned workerd through a binding to the entrypoint, as
+Cloudflare's engine calls it: the bundle checked in a step of its own,
+the tries in another, another bundle and none refused in the check's step
+with `NonRetryableError`, and the last try's error thrown. The HTTP
+runtime's `telemetry` workerd fixture exports to a receiver Worker: two
+concurrent requests land in their own traces with their callee's client
+spans, a job's span follows, and with no `OTEL_` binding nothing is sent;
+`telemetry-refused` is refused at module scope. The stackconfig parity
+vectors hold the jurisdiction in all three runtimes, and `r2.test.ts`
+signs for the EU host. Nothing has reached Cloudflare. A live run must
+check: that a Workflow of a Worker managed through versions and
+deployments runs the current deployment after each rollout, and that
+`params` reaches `run` as the object; that `Workers Scripts Write` starts
+and reads instances; an instance's error message for a thrown error;
+that Cloudflare accepts `nodejs_als` at a date that implies it; that
+spans reach a collector from `waitUntil`; and a presigned PUT and GET for
+an EU bucket, with the edge's token scoped to it.
+
+The rule is reversible until the first release.
+
+### D70, amended: acme-shop sells, books and refunds through the engine
+
+D70 moved acme-shop's stock and checkout onto the engine: `Inventory`
+(`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`,
+`Payments`) and `Refund`, with the `Order` table and its queues staying.
+Building it settled where each piece runs and what the old shop keeps.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cart is a TypeScript API of its own, `shop-cart`: a shopper's cart is a `Checkout` in `cart`, and the pickup slots are `CollectionPoint`'s `findAvailability`. `shop-storefront` keeps its carts in memory, since `storefront-stack` runs it as a Cloudflare Worker, which cannot load the engine (D64). | Moving the storefront's carts onto the engine, which ends `storefront-stack`'s `Staging`; the storefront calling `shop-orders`, whose `calls` edge brings `shop-orders` and `shop-db` into that stack |
+| `shop-stock`'s `reserveStock` goes. `shop-orders` tells `shop-stock` what a placed checkout sold through a `@requireService` operation with no user clause, `stockSold`, since a payment's webhook brings no shopper, and `shop-stock` enqueues `StockLow` for each product the sale left low (`Stock.low`). `StockLow` and `ReorderStock` stay, so the Go to Rust service call (D37, D57) and the Rust worker and job (D65) keep their proofs; `OrderRestocks` also files a request for each `Inventory` the engine lists low with none open, which a count or an adjustment leaves, and then orders the open ones. | Retiring `StockLow` and `ReorderStock` for `OrderRestocks` over `Stock.low` alone, which drops the queue's proof; a `Reactions` rule, which moves statuses and runs no project code |
+| `placeOrder` stays, an order taken in one step that holds no stock and takes no payment, which the Rust server, the Topcoat app and the SDKs' tests place. The Rust server answers the checkouts 501, and the Topcoat app mounts the engine at `/engine` on a SQLite file of its own and sells nothing through it yet. | Retiring `placeOrder`, which takes the D60–D62 and Topcoat proofs with it |
+| The runner's `Reactions` rule places a paid checkout after the webhook that recorded the capture answered, so the `Order` row (unique `checkoutId`) is written when `shop-orders` next looks: the webhook, if the checkout is placed already, `getCheckout`, or `SettlePayments`, which reads every placed checkout. The row's lines are the prices `Holds` held. | The webhook moving the checkout to `placed` itself, which races the rule |
+| `go/acmepay` is the provider: intents, cancellations, refunds and webhooks signed `t=…,v1=` (HMAC-SHA256 of `t.body`, five minutes' tolerance, two secrets during a rotation), with idempotency keys. Every change is an event with an id, which its API's answer names, so the adapter records the answer under the event's id and the webhook that brings the same event applies once. It takes a payer's test token and refuses any other field, a card number among them. `stack dev` runs no process of a project's own, so acmepay runs beside it at `ACMEPAY_URL`'s default address, `127.0.0.1:4250`, with `Dev`'s secrets, and the tests run it in-process. | A real provider's test mode, which needs its keys; an API of the stack's that serves the fake in `Dev` alone, which a stack cannot declare per environment |
+| An engine id that a type's `Identity.UUID` field names is that UUID's canonical text, as the scalar writes it (base62): a line's `inventoryId` names an `Inventory` whose id is its product's, and a checkout's `customerId` is the shopper's id as the engine stores it. | The UUID's hyphenated form, which the engine's `Identity.UUID` fields would hold in the other form, so no hold found its supply |
+| `shop-db`'s policy is rules, the first that matches deciding: `shop-orders` reads and writes, `shop-cart` writes checkouts and reads the stock and the counters, `shop-stock` the stock, any other service nothing, the runner (`shop-db-engine-runner`) each type by its name, then staff by their roles (`refunds.approve`, `orders.any`, `stock.write`, `calendar.manage`). Every `Payments` operation asks; `receiveStock` is `auto`, a warehouse's routine its ledger records with a reason; `adjustStock` and `countStock` ask, since each takes units out of sale. | `allowAll`, which a deployment should not copy; the runner's rule after the staff's, which a read of a checkout by the runner met first |
+
+A build of one stack, `superschematic build`, read its engine database's
+config only where build-all hands it over, so its servers opened the
+engine with the default `permission` policy rather than the database's;
+the engine's settings now come from the config either way (D58).
+
+Status: built. `examples/acme-shop/go/commerce_test.go` opens `shop-db`'s
+engine on SQLite with the project's engine archive and the policy
+`shop-stack`'s servers open it with, and serves `shop-orders` over it:
+a checkout holds two units and a pickup slot, another finds one free
+(`unavailable`), acmepay's signed capture places it through the runner, a
+webhook signed with another secret, with none or long ago is refused, a
+resent one changes nothing, the order is written once and `shop-stock`
+told of the sale, the slot is committed, and a refund two members of
+staff sign off is made by `SettlePayments` and issued, once. acmepay has
+tests of its own. `TestStackDevRunsTheShop` runs the same sale on
+`stack dev` over Postgres, `shop-cart` on Bun included, with the sale one
+trace from `shop-orders` into `shop-stock`, and
+`TestStackInitOverAcmeShop` resolves the stack on gcp.
+`internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
+holds the policy fix. The rule is reversible until the first release.
 
 ## D71. `init` writes a schemas root and `new service` writes a service, refusing every file that exists
 

@@ -4,7 +4,9 @@
 // For each fixture it:
 //   1. bundles each of its .ts files as a Worker's bundle.ts bundles one,
 //      `bun build --target=browser --conditions=workerd`, with superscalar's
-//      WebAssembly module and cloudflare:workers kept external, into
+//      WebAssembly module, cloudflare:workers and node:async_hooks, which
+//      the nodejs_als flag gives, kept external (as node:*, since Bun
+//      swaps a node: module named alone for an empty one), into
 //      test/workerd/out/<fixture>/, beside superscalar's module and the
 //      fixture's .js files;
 //   2. writes its config.capnp there, with a fresh Ed25519 key pair for the
@@ -42,7 +44,7 @@ function must(command, args, options) {
   return done;
 }
 
-for (const name of ['index', 'workers', 'd1', 'r2']) {
+for (const name of ['index', 'workers', 'd1', 'r2', 'workers-telemetry']) {
   if (!existsSync(join(root, 'dist', `${name}.js`))) throw new Error(`workerd-test: dist/${name}.js is missing; run bun run build first`);
 }
 must('bun', ['install', '--frozen-lockfile'], { cwd: harness });
@@ -69,7 +71,7 @@ for (const fixture of readdirSync(fixtures).sort()) {
     if (file.endsWith('.ts')) {
       must(
         'bun',
-        ['build', '--target=browser', '--conditions=workerd', '--conditions=worker', '--external=*.wasm', '--external=cloudflare:*', `--outdir=${out}`, join(source, file)],
+        ['build', '--target=browser', '--conditions=workerd', '--conditions=worker', '--external=*.wasm', '--external=cloudflare:*', '--external=node:*', `--outdir=${out}`, join(source, file)],
         { cwd: root }
       );
     } else if (file.endsWith('.js')) {

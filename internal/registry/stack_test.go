@@ -390,6 +390,9 @@ func TestRegisterTargetRejects(t *testing.T) {
 		{"empty platform", func(s *TargetSpec) { s.Platforms[ir.DeployableServer] = "" }, "empty platform for server"},
 		{"database platform of an unknown dialect", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{"mysql": "fake.my"} }, `database platform for dialect "mysql" (want postgres or sqlite)`},
 		{"empty database platform", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{SQLDialectSQLite: ""} }, "empty database platform for sqlite"},
+		{"a reason for an unknown kind", func(s *TargetSpec) { s.Unplaced = map[ir.DeployableKind]string{"lambda": "no"} }, `says why it places no deployable kind "lambda"`},
+		{"a reason for a placed kind", func(s *TargetSpec) { s.Unplaced = map[ir.DeployableKind]string{ir.DeployableServer: "no"} }, "names a platform for server and says why it places none"},
+		{"an empty reason", func(s *TargetSpec) { s.Unplaced = map[ir.DeployableKind]string{ir.DeployableWorker: ""} }, "places no worker with an empty reason"},
 		{"bad values schema", func(s *TargetSpec) { s.Values = json.RawMessage(`{"required": 1}`) }, "Values"},
 		{"bad resource type schema", func(s *TargetSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"fake:x/y:Z": json.RawMessage(`{"type": 1}`)}

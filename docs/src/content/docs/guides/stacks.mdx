@@ -31,16 +31,16 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp or cloudflare environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON |
 | `calls` in an API's config, and a build ordered by output | |
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
-| [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell, and on gcp to Cloud Trace or a collector when the environment's `telemetry` turns it on | metrics and logs |
+| [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell, on gcp to Cloud Trace or a collector, and on cloudflare to a collector, when the environment's `telemetry` turns it on | metrics and logs |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers) and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; `stack run` and queue workers on Workers |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; queue workers on Workers |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger | a job on every deploy on cloudflare, whose Worker a deploy cannot run on demand yet |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
 
@@ -137,8 +137,9 @@ commands to run next:
 ```
 Wrote the Stack service shop-stack in ./schemas/services/shop-stack:
   ...
-It deploys shop-api, shop-orders, shop-storefront and shop-web; the databases and buckets they reach come with them.
+It deploys shop-api, shop-cart, shop-orders, shop-storefront and shop-web; the databases and buckets they reach come with them.
   shop-api         exposed: Account.login is not @requireService
+  shop-cart        exposed: Carts.openCart is not @requireService
   shop-orders      exposed: OrderQueries.getOrder is not @requireService
   shop-storefront  exposed: StorefrontProbes.getHealth is not @requireService
   A site is always exposed: shop-web.
@@ -725,8 +726,8 @@ schedule skips the job's runs, and while a scheduled run goes on, it
 refuses to start. On a cloud environment it runs the deployed job, with
 the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
-Cloud](#deploy-to-google-cloud)). The cloudflare target runs a job only
-on its Cron Trigger, and `stack run` refuses it ([Jobs on Cron
+Cloud](#deploy-to-google-cloud)); on cloudflare, an instance of the job's
+Workflow, with the bundle the last deploy rolled out ([Jobs on Cron
 Triggers](#jobs-on-cron-triggers)).
 
 ## Queues and workers
@@ -914,23 +915,26 @@ malformed declarations and names nothing registers.
 
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
 `shop-api` and `shop-orders`, each on a default Go server, `shop-stock`,
-on a default Rust server, and `shop-storefront`, on a default TypeScript
-server, and exposes all four; `shop-db`, the `authDb` of `shop-api`,
-`shop-orders` and `shop-stock`, joins as their database; `shop-media`,
-the bucket `shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`,
-which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
+on a default Rust server, and `shop-cart` and `shop-storefront`, each on a
+default TypeScript server, and exposes all five; `shop-db`, the `authDb`
+of `shop-api`, `shop-orders`, `shop-stock` and `shop-cart`, joins as their
+database, and its engine types (D70) bring its engine runner,
+`shop-db-engine-runner`, in `shop-api`'s Go; `shop-media`, the bucket
+`shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`, which
+handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
-`shop-orders`' `ShipOrders` and `shop-stock`'s `OrderRestocks`, in
-Rust, as jobs; and `shop-web`, a static site whose browser code calls
-`shop-api`, as a site. A second stack, `storefront-stack`, deploys the
-storefront alone, on Bun in its `Dev` and on Cloudflare Workers in its
-`Staging` ([Servers on Workers](#servers-on-workers)), so each `stack`
-command run from the example names its stack. `shop-orders` calls
-`shop-stock`, whose reservations admit only `shop-orders`' server
+`shop-orders`' `ShipOrders` and `SettlePayments` and `shop-stock`'s
+`OrderRestocks`, in Rust, as jobs; and `shop-web`, a static site whose
+browser code calls `shop-api`, as a site. A second stack,
+`storefront-stack`, deploys the storefront alone, on Bun in its `Dev` and
+on Cloudflare Workers in its `Staging`
+([Servers on Workers](#servers-on-workers)), so each `stack` command run
+from the example names its stack. `shop-orders` calls `shop-stock`, whose
+sales admit only `shop-orders`
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
-runs `ShipOrders` every minute, and turns `OrderRestocks`' schedule
-off, so it runs only when `stack run` asks:
+runs `ShipOrders` and `SettlePayments` every minute, and turns
+`OrderRestocks`' schedule off, so it runs only when `stack run` asks:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -939,8 +943,9 @@ Each API's implementation lives at the naming file's
 default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` the Go
 entrypoints call, building each API's identity service over `shop-db`,
 whose `User` table has the user model's trait, and
-`typescript/shop-storefront`, whose `create(deps)` and `authenticate(deps)`
-the TypeScript one calls. `shop-stock`'s is at `rust-impl/shop-stock`, the
+`typescript/shop-cart` and `typescript/shop-storefront`, whose
+`create(deps)` the TypeScript ones call, with the storefront's
+`authenticate(deps)`. `shop-stock`'s is at `rust-impl/shop-stock`, the
 `rust` template the example's naming file sets, `rust-impl/{service}`,
 since its `rust/` is a client crate: the Rust entrypoint calls its
 `create(deps)` and builds the identity service over `shop-db` and the
@@ -961,29 +966,33 @@ worker as a process, `ShipOrders` on its schedule, and the site, built
 once and served with its config.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
 running, calls each Go and Rust server through its Go SDK, uploads a
-product's image to `shop-media` through the URL `shop-api` signs, sets the
-product's stock and threshold on `shop-stock` as staff, reads a cart
-from the storefront, places an order, which reserves its stock on
-`shop-stock` and runs it low, sees an order beyond the stock refused and
-a reservation with the shopper's session alone refused 401, sees the
-worker fulfil the order it placed and `ReorderStock` file the product's
-restock request, reads the site and its config, checks that `shop-api`
-answers CORS for the site's origin and no other, sees `ShipOrders` ship
-the order, once with `stack run` and once on the schedule, and sees
-`OrderRestocks`, run with `stack run`, order the restock request.
-Then it runs `stack dev` and the job once more, into an output root of
-its own (`--out`), where `shop-stock`'s server, worker and job build
-against that root's mirror of `rust-impl/shop-stock`, the storefront
-against its copy of `typescript/shop-storefront`, and `shop-web` in its
-copy of `web/shop-web`, while the example's packages keep the links
-`schemas/dist`'s install made. `PlaceOrder`
-reserves the
-stock through the client of `shop-stock` its `Deps` holds, which sends
-`shop-orders`' credential and forwards the shopper of the request its
-context belongs to, and refuses the order with `shop-stock`'s reason when
-the warehouse cannot fill it:
+product's image to `shop-media` through the URL `shop-api` signs, counts
+the product's stock on `shop-stock` as staff, low at two, opens a
+collection point through `shop-db`'s engine routes, fills a cart on
+`shop-cart` and picks a pickup slot, starts the checkout on `shop-orders`,
+which holds the units and the slot, sees another checkout beyond the
+stock refused, pays at acmepay, the fake provider in `go/acmepay`, whose
+signed webhook `shop-orders` records, sees the checkout placed, its order
+written and the sale reported to `shop-stock` in one trace, a sale
+reported with a shopper's session alone refused 401, the worker fulfil
+the order and `ReorderStock` file the product's restock request, and a
+refund two members of staff sign off made by `SettlePayments`, run with
+`stack run`; reads a cart from the storefront and the site and its
+config, checks that `shop-api` answers CORS for the site's origin and no
+other, sees `ShipOrders` ship an order, once with `stack run` and once on
+the schedule, and sees `OrderRestocks`, run with `stack run`, order the
+restock request. Then it runs `stack dev` and the job once more, into an
+output root of its own (`--out`), where `shop-stock`'s server, worker and
+job build against that root's mirror of `rust-impl/shop-stock`, the
+TypeScript servers against their copies of `typescript/shop-cart` and
+`typescript/shop-storefront`, and `shop-web` in its copy of `web/shop-web`,
+while the example's packages keep the links `schemas/dist`'s install
+made. A placed checkout writes its order once, by its unique
+`checkoutId`, and tells `shop-stock` what it sold through the client of
+`shop-stock` its `Deps` holds, which sends `shop-orders`' credential
+(`go/shop-orders/checkouts.go`):
 
-<Snippet file="go/shop-orders/orders.go" symbol="Orders.reserve" />
+<Snippet file="go/shop-orders/checkouts.go" symbol="placeOrder" />
 
 The worker's code is `NewWorkers` in `go/shop-orders/workers.go`, and the
 job's `NewJobs` in `go/shop-orders/jobs.go`:
@@ -992,13 +1001,13 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
 
-`shop-stock`'s reservation enqueues `StockLow` in its transaction when a
-line takes a product's level below its threshold
+`shop-stock` enqueues `StockLow` for each product a sale leaves low
 ([Rust servers](#rust-servers)). Its worker and job are
 `create_workers` and `create_jobs` in `rust-impl/shop-stock/src/lib.rs`.
 The worker files one open restock request per product, which a unique
-index in `shop-db` holds it to, and the job orders each open one, watching
-the `Shutdown` its entrypoint cancels on SIGTERM:
+index in `shop-db` holds it to, and the job files one for each product the
+engine lists low (`Stock.low`) and orders each open one, watching the
+`Shutdown` its entrypoint cancels on SIGTERM:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
@@ -1322,15 +1331,15 @@ runs, brings the copy up to date. A crate that inherits from a workspace
 (`workspace = true`) is refused, since the copy belongs to none.
 
 `examples/acme-shop`'s `shop-stock` is a Rust server. Its implementation,
-`rust-impl/shop-stock`, reads and writes `shop-db`'s `stock_level` table
-with tokio-postgres, which the HTTP runtime re-exports, over the pool its
-`Deps` holds, since no ORM is generated for Rust. A reservation takes
-every line off the shelf in one transaction, or none, and enqueues
-`StockLow` in it, with the runtime's `queue::enqueue` and the descriptor
-`shop-db`'s Rust types hold, for each line that takes its product's level
-below its threshold:
+`rust-impl/shop-stock`, keeps the stock in `shop-db`'s `Inventory`, which
+the engine keeps (D70): it calls the engine in-process, through the
+`Background` its `Deps` holds, on the blocking pool, since the engine is
+synchronous. It reads `shop-db`'s `product` table with tokio-postgres,
+which the HTTP runtime re-exports, over the pool its `Deps` holds, since
+no ORM is generated for Rust, and enqueues `StockLow` with the runtime's
+`queue::enqueue` and the descriptor `shop-db`'s Rust types hold:
 
-<Snippet file="rust-impl/shop-stock/src/lib.rs" from="/// Takes each line's units off the shelf" to="        Ok(levels)" />
+<Snippet file="rust-impl/shop-stock/src/lib.rs" symbol="engine_call" />
 
 The example commits `schemas/dist/Cargo.lock`, and its check fails when a
 build changes it. The Dockerfile builds the
@@ -1551,6 +1560,31 @@ and `--no-build` builds nothing. A deploy keeps the image the manifest
 records for a server whose context did not change. A parameterized
 member takes its values with `--param pr=123`.
 
+A deploy runs your project's code: its sidecar documents through Bun,
+the install of `schemas/dist`'s workspace, each site's build and each
+bundle's. Each of those processes gets an environment with no
+credential in it, so an install script cannot read
+`GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDFLARE_API_TOKEN` or
+`PULUMI_CONFIG_PASSPHRASE`, and a scratch home of its own, so a script
+looking under `~` finds no gcloud, Pulumi, wrangler or npm credentials;
+to hand one a variable it needs, such as a private registry's token,
+list its name in `SUPERSCHEMATIC_CHILD_ENV` (list `HOME` to keep your
+home, for a registry set up only in `~/.npmrc`). That stops a script
+that reads the usual variables and places, not one that opens a file
+under your real home by its path: every process you run can. To keep
+your project's code away from your credentials, run it first, before
+you sign in or in a shell that holds none, then deploy what it made:
+
+```sh
+superschematic stack prepare Staging          # no credentials needed
+superschematic stack deploy Staging --prepared schemas/dist/prepared/shop-stack
+```
+
+`stack prepare` evaluates the documents, writes each image's build
+context and builds each site and bundle into the directory; `stack plan`,
+`build`, `deploy` and `destroy` given `--prepared` read them from it and
+start no Bun, no install and no build. The generated CI works this way.
+
 The migration job's image is built once per release of the runner. A
 binary built from a checkout names no release, so set
 `SUPERSCHEMATIC_MIGRATE_IMAGE` to an image of `superschematic-migrate`, by
@@ -1705,6 +1739,7 @@ Its settings:
 | `compatibilityDate` | the extension's, `2026-09-15` | the Workers runtime's compatibility date |
 | `cpuMs` | Cloudflare's | the CPU time a request may take, in milliseconds |
 | `placement` | none | `"smart"` for Smart Placement |
+| `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
 
 The server's config reaches it as bindings: each setting and derived
 variable as plain text, a `Secret<T>` field as a binding to its Secrets
@@ -1726,12 +1761,38 @@ upload; builds the APIs on an isolate's first request, and again after a
 failure; and gives the runtime the client's address from
 `CF-Connecting-IP`. An isolate's memory is its own, and Cloudflare runs
 many: the storefront's carts live per isolate. `bundle.ts` bundles for
-workerd with Bun, and fails on a `node:` import, Bun's global, or a
-WebAssembly module other than superscalar's; `bun bundle.ts --check`,
+workerd with Bun, and fails on a `node:` import other than
+`node:async_hooks`, Bun's global, or a WebAssembly module other than
+superscalar's; `bun bundle.ts --check`,
 which the generated CI's `check` runs, bundles into a temporary
 directory. Resolution refuses a Go or Rust server, a name over 63
 characters and an API over the user model on Workers, whose runtime has
 no argon2.
+
+Each server's and job's version names the `nodejs_als` compatibility flag:
+the runtime carries a trace's context through `AsyncLocalStorage`, which
+the flag gives without the rest of Node. Export is off until the
+environment's `telemetry` names a collector:
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: {
+    accountId: "0123456789abcdef0123456789abcdef",
+    telemetry: { endpoint: "https://otel.acme.dev", sampleRatio: 0.25 },
+  },
+})
+export abstract class Staging {}
+```
+
+Each server and job then gets `OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_SERVICE_NAME`, its name, `OTEL_RESOURCE_ATTRIBUTES` with the
+environment, `cloud.provider=cloudflare`, the account and the bundle's
+digest as `service.version`, and the sampler, as plain text bindings.
+`fetch.ts` makes each request a server span and each call a client span
+that carries `traceparent`, and sends the spans a request ended after its
+response, through `waitUntil`: an isolate runs no I/O between requests.
+A collector that needs a header from a secret is not built yet.
 
 `examples/acme-shop`'s `storefront-stack` runs the storefront this way:
 
@@ -1776,10 +1837,9 @@ Its settings:
 | `locationHint` | none | `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc`: where R2 places the bucket |
 | `storageClass` | `Standard` | `InfrequentAccess` for new objects |
 | `deleteAfterDays` | none | a lifecycle rule deletes each object that many days after it was written |
+| `jurisdiction` | none | `eu` or `fedramp`: where R2 keeps the bucket's data; refused beside `locationHint`. Changing it replaces the bucket, which `stack plan` shows, and a bucket that holds objects stops the deploy, since R2 deletes only an empty one |
 
-There is no `jurisdiction`: a jurisdiction's bucket is reached at another
-S3 host, which the R2 credential does not carry yet, and no `versioning`,
-which R2 lacks.
+There is no `versioning`, which R2 lacks.
 
 Each server that lists the bucket gets an `r2_bucket` binding named after
 its field, `SHOP_MEDIA_BUCKET`, through which it puts, gets, deletes and
@@ -1789,7 +1849,9 @@ The token's id and value reach the server as `_R2_ACCESS_KEY_ID` and
 `_R2_TOKEN`, the value as a secret text binding, and the runtime's
 `signedUrl` presigns S3 URLs at
 `https://<accountId>.r2.cloudflarestorage.com/<bucket>/<object>` with
-them. The rule `buckets-never-public` refuses an r2.dev managed domain or
+them, or for a bucket in a jurisdiction, which reaches the server as
+`_R2_JURISDICTION`, at
+`https://<accountId>.<jurisdiction>.r2.cloudflarestorage.com/...`. The rule `buckets-never-public` refuses an r2.dev managed domain or
 a custom domain on a bucket.
 
 `stack destroy` of a member of a parameterized environment empties its
@@ -1892,6 +1954,7 @@ turns off, has the Worker and no trigger.
 | --- | --- | --- |
 | `logs` | `true` | Workers Logs |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a run may take, in milliseconds, up to 300000 |
+| `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
 
 A job's edges are its API's, as a server's are on Workers: it calls
 another server through a service binding with a key of its own, which
@@ -1912,8 +1975,30 @@ Cloudflare reads every schedule in UTC and stops a Cron Trigger's run
 after 15 minutes. So resolution refuses a job whose schedule runs in
 another time zone, and one whose timeout times its tries is over 15
 minutes: give such a job a shorter timeout or fewer retries, since the
-default timeout, ten minutes, leaves no room for a retry. The target runs
-no job on demand, so `stack run` refuses it.
+default timeout, ten minutes, leaves no room for a retry.
+
+Cloudflare cannot fire a deployed Worker's Cron Trigger on demand, so each
+job's Worker is also a Workflow, `<job>.workflow`, of the class `JobRun`
+that `scheduled.ts` exports. `stack run` and a job with `onDeploy: true`
+start an instance of it through Cloudflare's API with the run's token, its
+payload the digest of the bundle the deploy manifest records; the
+instance checks the Worker runs that bundle, then runs the job's tries in
+one step, as a firing does, and the command waits for it, at most every
+try's timeout and a few minutes more, terminating the instance when it
+gives up or you press Ctrl-C:
+
+```sh
+superschematic stack run Staging shop-storefront-sweep-carts
+```
+
+```text
+run job shop-storefront-sweep-carts of Staging (bundle sha256:5e0c…)
+  run Workflow acme-shop-staging-shop-storefront-sweep-carts, instance 3f2a…, and wait for it to end (logs: the Worker's Workers Logs)
+```
+
+A run whose last try fails exits non-zero with the job's error, and a
+deploy that runs the job stops at its jobs step, before the `contract`
+phase, as on gcp.
 
 ### Sites on Workers
 
@@ -1987,7 +2072,7 @@ The workflow:
   sets up the Rust release `tools.env` pins before the build, fails when
   `schemas/dist/Cargo.lock` is not committed or the build changed it, and
   compiles each Rust server, job and worker with `cargo check --locked`;
-  every job that builds sets up the same release. For a stack with a
+  `prepare` sets up the same release before its build. For a stack with a
   TypeScript server, job or worker it then installs `schemas/dist`'s Bun
   workspace with `bun install --frozen-lockfile`, failing when
   `schemas/dist/bun.lock` is not committed or no longer matches the
@@ -2001,7 +2086,14 @@ The workflow:
   on, and every job of a project that installs with npm sets up the
   Node.js release superschematic's own CI runs on, so `npm ci` runs on
   the same release from run to run.
-- After it, `plan-<environment>` runs `stack plan` for each cloud
+- Beside it, `prepare` runs all of your project's code the cloud jobs
+  need, with no credentials: the install, the build, the workspace's
+  install, and `stack prepare` for every environment with a cloud job,
+  which evaluates the sidecar documents, writes each image's build
+  context and builds each site and bundle. It uploads the result as the
+  artifact `prepared`. When a pull request with a preview closes, it
+  prepares the documents alone, for the destroy.
+- After both, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>
   --param <parameter>=<pull request number>` for each environment with one
@@ -2015,13 +2107,17 @@ The workflow:
   the `Production` environment required reviewers in the repository's
   settings, and each production deploy waits for their approval.
   `workflow_dispatch` runs the same on demand from the branch.
-- A deploy or preview job of an environment with a site sets up Bun,
-  even when the schemas root installs with npm, and installs the
-  workspace from `schemas/dist/bun.lock` after the build, since `stack
-  deploy` builds the site on the runner. Jobs, workers and buckets need
-  nothing more: the deploy builds a job's or a worker's image on the
-  target, as it builds a server's, and a bucket is a resource of the
-  environment's graph.
+- Every cloud job downloads `prepared`, installs the schemas root's
+  packages with `--ignore-scripts`, and runs its `stack` command with
+  `--prepared`: it runs no build, no sidecar document and no package's
+  script, on a Bun or Node.js downloaded from its release rather than
+  restored from the Actions cache, which `check` and `prepare` could
+  write.
+  `prepare` set up Bun, even when the schemas root installs with npm, and
+  built the sites and bundles. Jobs, workers and buckets need nothing
+  more: the deploy builds a job's or a worker's image on the target from
+  its prepared context, as it builds a server's, and a bucket is a
+  resource of the environment's graph.
 - One deploy runs at a time per environment, and one preview job per
   member.
 
@@ -2034,13 +2130,14 @@ Identity Federation, through the pool `stack bootstrap` creates for the
 GitHub repository of the git remote, as `<stack>-planner` or
 `<stack>-deployer`, with `google-github-actions/auth`, whose credentials
 file gives superschematic and Pulumi application default credentials.
-A job signs in last, right before its `stack` command: its installs and
-builds, which run the pull request's lockfiles and their packages'
-install scripts, run before any credential is on the runner, as they do
-in `check`. The job can still ask GitHub for an identity token from any
-step, and the `stack` command runs your TypeScript (its documents and
-each site's build) with the credentials, so treat a pull request from
-the repository as able to act as the job's account.
+A job signs in last, right before its `stack` command, and runs none of
+your project's code: GitHub lets any step of a job with `id-token: write`
+ask for an identity token, so the pull request's lockfiles, their
+packages' install scripts, the build, the sites' and bundles' builds and
+the sidecar documents run in `prepare`, which has no identity token and
+no secret. A pull request from the repository can still change the
+workflow itself, so treat its author as able to act as the job's
+account; what this stops is code its dependencies bring.
 The provider's name holds the project's number, `projectNumber` in the
 environment's `gcp` values, which bootstrap records and you may enter by
 hand. An environment that extends another inherits it. Until it is set,

@@ -1,23 +1,26 @@
 // Package projectengine builds the project's engine crate of a schema
 // whose types compose a behavior the core's engine archive does not run
-// (D58): the work queue's, or an extension's. A project's engine is a
-// value its build assembles, not a registry the linker collects: the
-// core's behaviors, the work queue's when the schema uses one of them, and
-// each extension behavior the schema composes, from the Rust crate its
+// (D58): the work queue's, the commerce behaviors' (D70), or an
+// extension's. A project's engine is a value its build assembles, not a
+// registry the linker collects: the core's behaviors, the work queue's
+// and the commerce ones when the schema uses one of them, and each
+// extension behavior the schema composes, from the Rust crate its
 // BehaviorSpec names (registry.BehaviorRust). A schema that composes the
 // core's behaviors alone needs no crate: the release's engine carries
-// them. The work queue's crate is the release's too, but the core's
-// archive, which a Go server links, leaves it out, so a schema that
-// composes one of its behaviors gets a crate whose archive holds it.
+// them. The work queue's and the commerce crates are the release's too,
+// and the core's Node-API addon carries both, but the core's archive,
+// which a Go server links, leaves them out, so a schema that composes one
+// of their behaviors gets a crate whose archive holds it.
 //
 // The crate is <output root>/engine/rust/<schema>, named
 // Naming.RustEngineCrate(schema) (<prefix><schema>-engine):
 //
 //   - Cargo.toml depends on superschematic-engine,
 //     superschematic-engine-behaviors and, when used,
-//     superschematic-engine-workqueue, by path at the [paths] keys
-//     engine_rust, engine_behaviors_rust and engine_workqueue_rust, or by
-//     version when a key is unset, all without their database features,
+//     superschematic-engine-workqueue and superschematic-engine-commerce,
+//     by path at the [paths] keys engine_rust, engine_behaviors_rust,
+//     engine_workqueue_rust and engine_commerce_rust, or by version when a
+//     key is unset, all without their database features,
 //     which the crate's own sqlite and postgres features (both by default)
 //     turn on; and on each extension's crate by path, its BehaviorRust.Path
 //     resolved against the project, the parent of the schemas root.
@@ -101,6 +104,7 @@ const (
 	EngineCrate    = "superschematic-engine"
 	BehaviorsCrate = "superschematic-engine-behaviors"
 	WorkQueueCrate = "superschematic-engine-workqueue"
+	CommerceCrate  = "superschematic-engine-commerce"
 	ABICrate       = "superschematic-engine-abi"
 	NapiCrate      = "superschematic-engine-napi"
 	// NapiBuildVersion is napi-build's, which the napi member's build
@@ -192,12 +196,14 @@ type Crate struct {
 	// Composed are the behaviors the schema's types compose, sorted by
 	// name.
 	Composed []string
-	// Engine, Behaviors and WorkQueue are the engine's crates the crate
-	// depends on; WorkQueue is nil when no composed behavior is the work
-	// queue's. ABI is the C ABI's, which the ffi member depends on, and
-	// Napi the Node-API addon's, which the napi member does.
+	// Engine, Behaviors, WorkQueue and Commerce are the engine's crates
+	// the crate depends on; WorkQueue is nil when no composed behavior is
+	// the work queue's, and Commerce when none is a commerce behavior
+	// (D70). ABI is the C ABI's, which the ffi member depends on, and Napi
+	// the Node-API addon's, which the napi member does.
 	Engine, Behaviors *Dependency
 	WorkQueue         *Dependency
+	Commerce          *Dependency
 	ABI               *Dependency
 	Napi              *Dependency
 	// Members are the workspace's members beside the crate (Members).
@@ -245,7 +251,8 @@ type Registration struct {
 }
 
 // Build returns the project engine crate of a schema, or nil when it needs
-// none: no type composes a behavior of the work queue or of an extension.
+// none: no type composes a behavior of the work queue, of the commerce
+// package or of an extension.
 // A nil crate with a non-empty reason is one the schema would need and
 // Build cannot write, because an extension behavior it composes names no
 // Rust crate, or names one the project does not hold. It fails when a type
@@ -277,6 +284,8 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 		switch {
 		case b.Extension == "" && b.Package == registry.WorkQueuePackage:
 			c.WorkQueue = &Dependency{Crate: WorkQueueCrate}
+		case b.Extension == "" && b.Package == registry.CommercePackage:
+			c.Commerce = &Dependency{Crate: CommerceCrate}
 		case b.Extension == "":
 		case !b.Rust.Declared():
 			missing = append(missing, fmt.Sprintf("%s (extension %s) names no Rust crate, and an extension's behavior runs from its crate alone", name, b.Extension))
@@ -301,7 +310,7 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Sprintf("no engine can run %s's behaviors, so no engine crate is written and an engine refuses the schema: %s (D58)", opts.SchemaName, strings.Join(missing, "; ")), nil
 	}
-	if len(crates) == 0 && c.WorkQueue == nil {
+	if len(crates) == 0 && c.WorkQueue == nil && c.Commerce == nil {
 		return nil, "", nil
 	}
 	for _, ext := range crates {
@@ -318,6 +327,11 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 	}
 	if c.WorkQueue != nil {
 		if c.WorkQueue, err = dependency(WorkQueueCrate, opts.Paths.EngineWorkQueueRust, opts.Dir); err != nil {
+			return nil, "", err
+		}
+	}
+	if c.Commerce != nil {
+		if c.Commerce, err = dependency(CommerceCrate, opts.Paths.EngineCommerceRust, opts.Dir); err != nil {
 			return nil, "", err
 		}
 	}
@@ -391,6 +405,9 @@ func (c *Crate) Features(feature string) string {
 	deps := []*Dependency{c.Engine, c.Behaviors}
 	if c.WorkQueue != nil {
 		deps = append(deps, c.WorkQueue)
+	}
+	if c.Commerce != nil {
+		deps = append(deps, c.Commerce)
 	}
 	quoted := make([]string, len(deps))
 	for i, d := range deps {

@@ -24,6 +24,13 @@
 //! when the router serves it, so the console's lists, which are live
 //! (`pages_live`), render a filter's or a page's results in place; without
 //! it they are GET forms and links that load the page (D44, amended).
+//!
+//! shop-db is an engine database (D58, D70), so the crate mounts its
+//! engine at `/engine` beside the JSON API, which the app opens on a SQLite
+//! file of its own (`open_engine`) and deploys shop-db's engine types in.
+//! The app keeps its own orders and sells nothing through the engine yet:
+//! the shop's checkouts, which hold stock and take payment, are the stack's,
+//! on shop-orders' Go server.
 
 use std::sync::Arc;
 
@@ -133,8 +140,15 @@ pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Resu
 /// the session cookie is not `Secure`.
 pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 
+/// shop-db's engine, which `app` mounts at `/engine`.
+pub type Engine = superschematic_engine::Engine;
+
+/// Opens shop-db's engine on the SQLite file at `path`, created if absent,
+/// and deploys shop-db's engine types in it, as `app` takes it.
+pub use acme_shop_orders_topcoat::engine::open as open_engine;
+
 /// The app: its pages, and shop-orders' JSON API and in-process operations
-/// over `shop`, in memory (`shop_in_memory`) or in SQLite
+/// over `shop`, shop-db's `engine` at `/engine`, in memory (`shop_in_memory`) or in SQLite
 /// (`acme_shop_orders_server::sqlite::SqliteShop`), whose callers are
 /// `users`' users. A page's caller is the user whose session the request
 /// carries, read by the identity runtime as the JSON API reads it. Topcoat's
@@ -152,14 +166,19 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// again meets its controls as the GET it becomes. Without `assets` the
 /// pages load no script, and the console's live lists are the GET forms and
 /// links they are without the runtime.
-pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
+pub fn app<S: ShopImplementation>(
+    shop: Arc<S>,
+    users: Arc<Service>,
+    engine: Arc<Engine>,
+    assets: Option<AssetConfig>,
+) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let authenticator = IdentityPageAuthenticator::of(&implementations);
     let builder = Router::builder()
         .discover()
         .app_context(users)
         .app_context(console_settings())
-        .shop_orders(implementations, authenticator);
+        .shop_orders(implementations, authenticator, engine);
     match assets {
         Some(assets) => builder.assets(assets).runtime().build(),
         None => builder.build(),

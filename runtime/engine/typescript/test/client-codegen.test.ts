@@ -47,9 +47,9 @@ const approver: Principal = { subject: 'ada', permissions: ['specs.approve'] };
 
 const authenticate: Authenticator = async (ctx) => (ctx.bearerToken === 'editor' ? editor : null);
 
-/** open publishes the vector's documents, in order. */
+/** open publishes the vector's documents, in order, on an engine that runs the commerce behaviors the commerce documents compose (D70). */
 function open(): Engine {
-  const engine = openTestEngine();
+  const engine = openTestEngine({ behaviors: ['Stock', 'Calendar', 'Holds', 'Payments'] });
   for (const document of corpus.documents) {
     engine.schemas.define(editor, document);
     engine.schemas.publish(editor, document.name);

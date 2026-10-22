@@ -161,6 +161,14 @@ type PlatformSpec struct {
 	// platform sets it, and not beside IdentityConfig.
 	NoIdentity string
 
+	// NoQueueClaims, when set, says why no worker claims the messages of a
+	// queue on a database this platform places (D53, amended): resolution
+	// refuses such a worker as unrealizable, giving the reason. The
+	// cloudflare.d1 platform sets it, since a D1 database is reached through
+	// a Worker's binding alone and no platform of Workers runs a worker's
+	// claim loop. Only a database platform sets it.
+	NoQueueClaims string
+
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
 	NameOf func(PlatformContext) any
@@ -298,6 +306,13 @@ type TargetSpec struct {
 	// kind may be missing; resolution then refuses a deployable of it on
 	// this target.
 	Platforms map[ir.DeployableKind]string
+
+	// Unplaced says, for a kind Platforms leaves out, why the target places
+	// none of it and where one runs instead: resolution refuses a
+	// deployable of that kind with the reason in place of saying to place
+	// it with a settings platform (the cloudflare target's queue workers,
+	// D64 amended). A kind may not be in both.
+	Unplaced map[ir.DeployableKind]string
 
 	// DatabasePlatforms names, by SQL dialect, the platform a database
 	// deployable goes on when no settings platform places it and every DB
@@ -724,6 +739,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
 		}
 	}
+	if spec.NoQueueClaims != "" && spec.Kind != ir.DeployableDatabase {
+		return fmt.Errorf("registry: %s platform %q says why no worker claims a queue on it; only a database platform places a queue", spec.Kind, spec.Name)
+	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")
 		if err != nil {
@@ -837,6 +855,16 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		platforms[kind] = platform
 	}
 	spec.Platforms = platforms
+	for _, kind := range slices.Sorted(maps.Keys(spec.Unplaced)) {
+		switch _, placed := platforms[kind]; {
+		case !kind.Valid():
+			return fmt.Errorf("registry: target %q says why it places no deployable kind %q (want %s)", spec.Name, kind, deployableKindList())
+		case placed:
+			return fmt.Errorf("registry: target %q names a platform for %s and says why it places none", spec.Name, kind)
+		case spec.Unplaced[kind] == "":
+			return fmt.Errorf("registry: target %q says why it places no %s with an empty reason", spec.Name, kind)
+		}
+	}
 	databases := make(map[string]string, len(spec.DatabasePlatforms))
 	for _, dialect := range slices.Sorted(maps.Keys(spec.DatabasePlatforms)) {
 		platform := spec.DatabasePlatforms[dialect]

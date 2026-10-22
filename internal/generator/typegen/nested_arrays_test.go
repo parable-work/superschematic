@@ -123,8 +123,6 @@ func TestDrawingListsOfLists(t *testing.T) {
 		{"empty inner lists", ` + "`" + `{"labels":[[]],"shades":[[],[]],"polygons":[[]],"samples":[[]]}` + "`" + `, nil},
 		{"null inner lists", ` + "`" + `{"labels":[["a"],null],"shades":[null],"polygons":[[],null],"samples":[null]}` + "`" + `,
 			map[string]string{"labels[1]": "required", "shades[0]": "required", "polygons[1]": "required", "samples[0]": "required"}},
-		{"bad element", ` + "`" + `{"labels":[["a"]],"shades":[["light"],["dark","purple"]],"polygons":[]}` + "`" + `,
-			map[string]string{"shades[1][1]": "enum"}},
 		{"absent required lists", ` + "`" + `{}` + "`" + `,
 			map[string]string{"labels": "required", "shades": "required", "polygons": "required"}},
 		{"outer list bound", ` + "`" + `{"labels":[],"shades":[],"polygons":[],"samples":[` + "`" + ` + strings.Repeat("[1],", 64) + ` + "`" + `[1]]}` + "`" + `,
@@ -148,6 +146,14 @@ func TestDrawingListsOfLists(t *testing.T) {
 				t.Fatalf("errors = %v, want %v", got, tc.want)
 			}
 		})
+	}
+
+	// An enum element the enum lacks is refused by the decoder, which
+	// names the field.
+	var bad Drawing
+	if err := json.Unmarshal([]byte(` + "`" + `{"labels":[["a"]],"shades":[["light"],["dark","purple"]],"polygons":[]}` + "`" + `), &bad); err == nil ||
+		!strings.Contains(err.Error(), ` + "`" + `string "purple"` + "`" + `) || !strings.Contains(err.Error(), "shades") {
+		t.Fatalf("decode of an unknown shade = %v, want the enum's refusal", err)
 	}
 
 	var ragged Drawing
@@ -191,11 +197,15 @@ import (
 
 func TestBoardListsOfLists(t *testing.T) {
 	var board Board
-	payload := ` + "`" + `{"labels":[["a"],[]],"states":[["empty","filled"],["bogus"]],"walls":[[{"x":0,"y":0}],null],"scores":[[1,2],[]]}` + "`" + `
+	payload := ` + "`" + `{"labels":[["a"],[]],"states":[["empty","filled"],["empty"]],"walls":[[{"x":0,"y":0}],null],"scores":[[1,2],[]]}` + "`" + `
 	if err := json.Unmarshal([]byte(payload), &board); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got, want := errorKeys(board.Validate()), []string{"states[1][0]", "walls[1]"}; !reflect.DeepEqual(got, want) {
+	var bogus Board
+	if err := json.Unmarshal([]byte(` + "`" + `{"states":[["empty"],["bogus"]]}` + "`" + `), &bogus); err == nil {
+		t.Fatal("decode of an unknown state passed; the enum's decoder must refuse it")
+	}
+	if got, want := errorKeys(board.Validate()), []string{"walls[1]"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("errors at %v, want %v", got, want)
 	}
 	if board.Scores[1] == nil || board.Walls[0][0] != (BoardPoint{}) {
@@ -223,8 +233,8 @@ func TestSaveGridInputListsOfLists(t *testing.T) {
 		{` + "`" + `{"labels":[["a"]],"shades":[["light"]],"polygons":[[]]}` + "`" + `, false, false, []string{}},
 		{` + "`" + `{"labels":[],"shades":[],"polygons":[],"weights":null}` + "`" + `, true, true, []string{}},
 		{` + "`" + `{"labels":[],"shades":[],"polygons":[],"weights":[[0.5],[]]}` + "`" + `, true, false, []string{}},
-		{` + "`" + `{"labels":[],"shades":[["dark","none"]],"polygons":[null],"weights":[[1],null]}` + "`" + `, true, false,
-			[]string{"polygons[0]", "shades[0][1]", "weights[1]"}},
+		{` + "`" + `{"labels":[],"shades":[["dark"]],"polygons":[null],"weights":[[1],null]}` + "`" + `, true, false,
+			[]string{"polygons[0]", "weights[1]"}},
 	}
 	for _, tc := range cases {
 		var input SaveGridInput
@@ -237,6 +247,11 @@ func TestSaveGridInputListsOfLists(t *testing.T) {
 		if got := errorKeys(input.Validate()); !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("%s: errors at %v, want %v", tc.payload, got, tc.want)
 		}
+	}
+
+	var unknown SaveGridInput
+	if err := json.Unmarshal([]byte(` + "`" + `{"labels":[],"shades":[["dark","none"]],"polygons":[]}` + "`" + `), &unknown); err == nil {
+		t.Fatal("decode of an unknown shade passed; the enum's decoder must refuse it")
 	}
 
 	view := GridView{Labels: [][]string{{"a"}}, Shades: [][]Shade{}, Polygons: [][]Point{{{X: 1, Y: 1}}}, Weights: [][]float64{{0.25, 0.75}}}

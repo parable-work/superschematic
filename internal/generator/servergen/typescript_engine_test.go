@@ -770,7 +770,7 @@ func typeScriptEngineImage(t *testing.T, project bool) {
 		}
 	}
 	copyTree(t, local.EngineTypeScript, filepath.Join(repoRoot, "runtime", "engine", "typescript"), "dist", "native")
-	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
+	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/engine-commerce/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
 		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
 	}
 	f := loadTypeScriptEngineFixture(t)
@@ -783,6 +783,7 @@ func typeScriptEngineImage(t *testing.T, project bool) {
 		paths.EngineRust, paths.EngineBehaviorsRust = filepath.Join(engine, "engine"), filepath.Join(engine, "behaviors")
 		paths.EngineABIRust, paths.EngineNapiRust = filepath.Join(engine, "abi"), filepath.Join(engine, "napi")
 		paths.EngineWorkQueueRust = filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust")
+		paths.EngineCommerceRust = filepath.Join(repoRoot, "runtime", "engine-commerce", "rust")
 		tag = "engine-project"
 		reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
 		if err != nil {

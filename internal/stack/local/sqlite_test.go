@@ -44,6 +44,43 @@ func liteStack() (*ir.Stack, []stack.Service) {
 	}
 }
 
+// liteWorkerStack is the lite stack with a worker, IndexNotes, of notes,
+// which claims notes-db's queue NoteWritten (D53, amended).
+func liteWorkerStack() (*ir.Stack, []stack.Service) {
+	s, services := liteStack()
+	s.Name = "lite-worker-stack"
+	for i := range services {
+		switch services[i].Name {
+		case "notes-db":
+			services[i].Queues = []string{"NoteWritten"}
+		case "notes":
+			services[i].Jobs = nil
+			services[i].Workers = []ir.Worker{{Name: "IndexNotes", Queue: "NoteWritten"}}
+		}
+	}
+	return s, services
+}
+
+// TestSQLiteWorkerGolden: a TypeScript worker whose queue's database lists
+// sqlite first claims on the SQLite file (D53, amended): its process's sql
+// edge goes through local.worker-sqlite and derives the file's url, as the
+// server's does.
+func TestSQLiteWorkerGolden(t *testing.T) {
+	s, services := liteWorkerStack()
+	reg := assemble(t)
+	checkGoldenEnvironment(t, reg, s, services, "Dev")
+	env := resolve(t, reg, s, services, "Dev")
+	var connectors []string
+	for _, e := range env.Edges {
+		if e.Kind == ir.EdgeSQL {
+			connectors = append(connectors, e.From+" by "+e.Connector)
+		}
+	}
+	if got, want := strings.Join(connectors, "; "), "notes by local.process-sqlite; notes-index-notes by local.worker-sqlite"; got != want {
+		t.Errorf("sql edges = %s, want %s", got, want)
+	}
+}
+
 // TestSQLiteGolden: the lite stack's Dev places notes-db on local.sqlite,
 // whose lowering is a SQLite file node under the state directory and no
 // container, and whose sql edges, the server's and the job's, derive a

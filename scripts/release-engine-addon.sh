@@ -8,7 +8,8 @@
 # layout: runtime/engine/typescript/npm/<target>/package.json (its os, cpu
 # and, on Linux, libc, which npm installs it by), its README, the LICENSE,
 # and superschematic-engine.<target>.node, the core's addon
-# (runtime/engine/rust/addon: the core's behaviors and the work queue's)
+# (runtime/engine/rust/addon: the core's behaviors, the work queue's and
+# the commerce ones)
 # built with the dist profile (fat LTO, one codegen unit, symbols
 # stripped) by scripts/engine-napi.sh --dist. The release adds each
 # package to @superschematic/engine's optionalDependencies at the release
@@ -18,7 +19,7 @@
 # Before packing, the addon is loaded and opens an engine on SQLite: it is
 # the core's, it speaks the facade's contract, it has no bridge to
 # behaviors written in TypeScript (the test addon's), and it runs the
-# core's behaviors and the work queue's. The package's version must be
+# core's behaviors, the work queue's and the commerce ones (D70). The package's version must be
 # <version>, which scripts/bump_version.py writes there.
 #
 # Usage:
@@ -74,7 +75,8 @@ fi
 
 # The addon as the facade loads it: the core's, the facade's contract
 # (src/native/addon.ts's NATIVE_ABI_VERSION), no bridge, and an engine on
-# SQLite with the core's behaviors and, named, the work queue's.
+# SQLite with the core's behaviors and, named, the work queue's and the
+# commerce ones.
 abi="$(sed -n "s/^export const NATIVE_ABI_VERSION = \([0-9][0-9]*\);$/\1/p" "$PKG/src/native/addon.ts")"
 node - "$addon" "$abi" "$stage/check.db" <<'JS'
 const [, , file, abi, path] = process.argv;
@@ -86,10 +88,10 @@ const fail = (message) => {
 if (addon.abiVersion() !== Number(abi)) fail(`speaks contract ${addon.abiVersion()}, the facade ${abi}`);
 if (addon.project() !== 'superschematic-engine-addon') fail(`is ${addon.project()}'s addon, not the core's`);
 if (addon.bridgeCall !== undefined) fail('has the test addon\'s bridge');
-const engine = addon.NativeEngine.open(JSON.stringify({ path, policy: 'allowAll', behaviors: ['Lease', 'Queue'] }));
+const engine = addon.NativeEngine.open(JSON.stringify({ path, policy: 'allowAll', behaviors: ['Lease', 'Queue', 'Stock', 'Calendar', 'Holds', 'Payments'] }));
 const names = JSON.parse(engine.callSync(JSON.stringify({ op: 'behaviors.names' })));
 engine.close();
-for (const name of ['Workflow', 'Timers', 'Lease', 'Queue']) {
+for (const name of ['Workflow', 'Timers', 'Lease', 'Queue', 'Stock', 'Calendar', 'Holds', 'Payments']) {
   if (!names.includes(name)) fail(`registers no ${name}: ${names.join(', ')}`);
 }
 JS

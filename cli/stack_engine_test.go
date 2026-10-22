@@ -172,14 +172,16 @@ func TestStackDevBuildsTheProjectsEngine(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
 		t.Skipf("cargo is not available: %v", err)
 	}
-	if _, err := exec.LookPath("bun"); err != nil {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
 	}
 	paths := testpaths.Local(t)
-	for _, dist := range []string{paths.HTTPRuntimeTypeScript, paths.EngineTypeScript} {
-		if _, err := os.Stat(filepath.Join(dist, "dist", "index.d.ts")); err != nil {
-			testpaths.RequireOrSkipTS(t, fmt.Sprintf("no dist/ in %s; run bun run build there: %v", dist, err))
-		}
+	// The HTTP runtime's dist/, built as the other TypeScript tests build
+	// it, so this test waits for theirs rather than reading it mid-build.
+	testpaths.BuildHTTPRuntime(t, bun, paths)
+	if _, err := os.Stat(filepath.Join(paths.EngineTypeScript, "dist", "index.d.ts")); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("no dist/ in %s; run bun run build there: %v", paths.EngineTypeScript, err))
 	}
 	t.Setenv("CGO_LDFLAGS", os.Getenv("CGO_LDFLAGS"))
 	t.Setenv(projectengine.AddonEnv, "")
@@ -229,6 +231,7 @@ func TestStackDevBuildsTheProjectsEngine(t *testing.T) {
 		{"engine_rust", paths.EngineRust},
 		{"engine_behaviors_rust", paths.EngineBehaviorsRust},
 		{"engine_workqueue_rust", paths.EngineWorkQueueRust},
+		{"engine_commerce_rust", paths.EngineCommerceRust},
 		{"engine_abi_rust", paths.EngineABIRust},
 		{"engine_napi_rust", paths.EngineNapiRust},
 	} {

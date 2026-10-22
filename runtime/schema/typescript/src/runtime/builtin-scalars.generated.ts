@@ -290,6 +290,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "sql": "BIGINT"
     }
   },
+  "Finance_Currency": {
+    "name": "Finance_Currency",
+    "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+    "primitive": "String",
+    "minLength": 3,
+    "maxLength": 3,
+    "pattern": "^[A-Z]{3}$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "USD",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": true,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "FinanceCurrency",
+      "json_schema": "string",
+      "sql": "VARCHAR(3)"
+    }
+  },
   "Finance_Money": {
     "name": "Finance_Money",
     "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
@@ -1347,6 +1373,7 @@ export const BUILTIN_SCALAR_VALUE_CLASSES: Record<string, string> = {
   "Crypto_SHA256": "string",
   "Design_Color": "string",
   "File_SizeBytes": "integer",
+  "Finance_Currency": "string",
   "Finance_Money": "integer",
   "Generic_Boolean": "boolean",
   "Generic_Float64": "number",

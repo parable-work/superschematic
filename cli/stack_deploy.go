@@ -24,7 +24,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/parable-work/superschematic/internal/generator/cigen"
-	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -74,6 +73,8 @@ type stackFlags struct {
 	programDir string
 	params     []string
 	outputRoot string
+	// prepared is --prepared, the directory `stack prepare` wrote.
+	prepared string
 }
 
 // register adds the shared flags; a command that runs one run of an
@@ -85,6 +86,12 @@ func (f *stackFlags) register(cmd *cobra.Command, run bool) {
 	if run {
 		cmd.Flags().StringArrayVar(&f.params, "param", nil, "a parameter's value for this run of a parameterized environment: <name>=<value> (repeatable)")
 	}
+}
+
+// registerPrepared adds --prepared, which plan, build, deploy and destroy
+// take (D47, amended).
+func (f *stackFlags) registerPrepared(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&f.prepared, "prepared", "", "the directory stack prepare wrote: read the sidecar documents, build contexts, sites and bundles from it, and run no project code (no Bun, no install, no build)")
 }
 
 // gateFlags are the hazard gate's flags, which plan and deploy share.
@@ -134,6 +141,11 @@ type deployContext struct {
 	stack       *ir.Stack
 	config      *schemaconfig.SchemaConfig
 	schemasRoot string
+
+	// prepared is what `stack prepare` wrote, when --prepared names it:
+	// the sidecar documents load from it, and a deploy's or a build's
+	// contexts, sites and bundles come from it (D47, amended).
+	prepared *stackdeploy.Prepared
 }
 
 func (c *deployContext) close() {
@@ -160,31 +172,25 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 		c.close()
 		return nil, err
 	}
-	schema, cfg, err := version.load(p.stack.Name)
+	if flags.prepared != "" {
+		if c.prepared, err = stackdeploy.ReadPrepared(flags.prepared); err != nil {
+			return fail(err)
+		}
+		if err := c.prepared.CheckProvenance(stackdeploy.CIProvenance()); err != nil {
+			return fail(err)
+		}
+		version.replay(c.prepared, p.repositoryRoot())
+	}
+	schema, cfg, st, services, err := version.stack(p)
 	if err != nil {
 		return fail(err)
 	}
-	c.schema = schema
-	st := ir.StackOf(schema)
-	if st == nil {
-		return fail(fmt.Errorf("stack %s: no class declares @stack", p.stack.Name))
+	if c.prepared != nil {
+		if err := c.prepared.CheckFor(st.Name, environment, false); err != nil {
+			return fail(err)
+		}
 	}
-	gen := registry.GenerateContext{
-		Schema:   schema,
-		Config:   cfg,
-		Registry: p.reg,
-		LoadDependency: func(name string) (*ir.Schema, error) {
-			s, _, err := version.load(name)
-			return s, err
-		},
-		Options: registry.Options{LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
-			_, c, err := version.load(name)
-			return c, err
-		}},
-	}
-	if c.services, err = stackgen.Services(gen, st); err != nil {
-		return fail(err)
-	}
+	c.schema, c.services = schema, services
 	if !stackHasEnvironment(st, environment) {
 		var known []string
 		for _, e := range st.Environments {
@@ -347,13 +353,34 @@ func (c *deployContext) options(cmd *cobra.Command, params map[string]string) st
 // (docs/stack-model.md, section 8.2). Each site's package is under the
 // parent of the schemas root, which the naming file's
 // [implementation_paths] are relative to (D55).
-func (c *deployContext) sources() *stackdeploy.Sources {
+//
+// With --prepared, the contexts, sites and bundles are the ones `stack
+// prepare` wrote for the environment, and nothing builds here (D47,
+// amended).
+func (c *deployContext) sources() (*stackdeploy.Sources, error) {
+	if c.prepared != nil {
+		if err := c.prepared.CheckFor(c.stack.Name, c.env.Environment, true); err != nil {
+			return nil, err
+		}
+		return &stackdeploy.Sources{Prepared: c.prepared}, nil
+	}
+	return c.project.sources(), nil
+}
+
+// sources says where the project's build wrote, and where its repository
+// and its sites' packages are.
+func (p *stackProject) sources() *stackdeploy.Sources {
 	return &stackdeploy.Sources{
-		OutputRoot:         c.project.outputRoot,
-		RepositoryRoot:     c.project.names.BuildContext(filepath.Dir(c.project.schemasRoot)),
-		ImplementationRoot: filepath.Dir(c.project.schemasRoot),
+		OutputRoot:         p.outputRoot,
+		RepositoryRoot:     p.names.BuildContext(p.repositoryRoot()),
+		ImplementationRoot: p.repositoryRoot(),
 	}
 }
+
+// repositoryRoot is the parent of the schemas root: the root a site's
+// package and the naming file's [implementation_paths] are relative to,
+// and a prepared document's sources (D47, amended).
+func (p *stackProject) repositoryRoot() string { return filepath.Dir(p.schemasRoot) }
 
 // digests returns the IR digest of each service the stack reaches:
 // `sha256:` and the hex SHA-256 of the IR's canonical JSON.
@@ -669,6 +696,7 @@ plans.`,
 		},
 	}
 	flags.register(cmd, true)
+	flags.registerPrepared(cmd)
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves: <site>=sha256:<digest> (repeatable)")
@@ -781,9 +809,13 @@ files did not change. A build writes no deploy manifest.`,
 				return err
 			}
 			defer c.close()
+			src, err := c.sources()
+			if err != nil {
+				return err
+			}
 			result, err := stackdeploy.Build(cmd.Context(), stackdeploy.BuildOptions{
 				Options:     c.options(cmd, params),
-				Sources:     *c.sources(),
+				Sources:     *src,
 				Deployables: append(slices.Clone(deployables), servers...),
 				Force:       force,
 			})
@@ -824,6 +856,7 @@ files did not change. A build writes no deploy manifest.`,
 		},
 	}
 	flags.register(cmd, true)
+	flags.registerPrepared(cmd)
 	cmd.Flags().StringArrayVar(&deployables, "deployable", nil, "build this server, job or site only (repeatable)")
 	cmd.Flags().StringArrayVar(&servers, "server", nil, "build this server only (repeatable); --deployable takes a job too")
 	cmd.Flags().BoolVar(&force, "force", false, "build a server or job whose context did not change")
@@ -925,7 +958,9 @@ removes.`,
 			}
 			var src *stackdeploy.Sources
 			if !noBuild {
-				src = c.sources()
+				if src, err = c.sources(); err != nil {
+					return err
+				}
 			}
 			ctx, stop := interruptible(cmd)
 			defer stop()
@@ -949,6 +984,7 @@ removes.`,
 		},
 	}
 	flags.register(cmd, true)
+	flags.registerPrepared(cmd)
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves, published before: <site>=sha256:<digest> (repeatable)")
@@ -1001,6 +1037,7 @@ run's deploy lock while it runs, as a deploy does.`,
 		},
 	}
 	flags.register(cmd, true)
+	flags.registerPrepared(cmd)
 	cmd.Flags().BoolVar(&yes, "yes", false, "destroy without asking")
 	return cmd
 }

@@ -161,7 +161,13 @@ server of an API on the database mounts the engine's routes,
 `/engine/<service>` unless set; `outputs.engine.policy` the access
 policy it opens the engine with, `permission` unless set; and
 `outputs.engine.retention` how long the event log keeps events, which the
-database's runner prunes, every event unless set
+database's runner prunes, every event unless set; and
+`outputs.engine.tools.invocation` the MCP invocation policy of an engine
+tool or a behavior operation (`Payments.capturePayment: ask`), which the
+build checks against the behaviors the engine types compose and requires
+for each commerce operation that moves money or stock, and
+`outputs.engine.tools.hidden` the behavior operations the engine's MCP
+tools leave out
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
 When a type of a DB or General schema
 composes an extension's behavior whose registration names a Rust crate,
@@ -574,7 +580,7 @@ It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
 its smoke runs `--check`. The core binary writes the behaviors the core
-declares into the two Rust crates that implement them: `Workflow`,
+declares into the three Rust crates that implement them: `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
 `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
 `StateRules`, `Numbering` and `Approvals` with `--package
@@ -582,7 +588,10 @@ declares into the two Rust crates that implement them: `Workflow`,
 (`runtime/engine/rust/behaviors/declarations`), and `Lease`,
 `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
 with `--package @superschematic/engine-workqueue` into the work queue's
-(`runtime/engine-workqueue/rust/declarations`) (`make behaviors`; `make
+(`runtime/engine-workqueue/rust/declarations`), and `Stock`, `Calendar`,
+`Holds` and `Payments` with `--package @superschematic/engine-commerce`
+into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
+D70) (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
 
@@ -846,13 +855,18 @@ answer, and a job whose scheduled run goes on; `stack dev`'s schedule
 skips the job's runs while this one goes on. Ctrl-C stops the run.
 
 On a cloud target, it runs the deployed job, with the image the deploy
-manifest records, through the target's job runner. It refuses a run whose
+manifest records, or the bundle for a job whose artifact is one, through
+the target's job runner. It builds nothing, and reads no `--prepared`
+directory. It refuses a run whose
 last deploy did not roll the job out, and a target that runs no job on
 demand. On gcp it runs an execution of the job's Cloud Run job as the
 last deploy left it, refusing one that runs another image than the
 manifest records, as during a deploy, and waits for it to end. When the
 last try fails, it reports that try's error, which it reads from the
-execution's logs in Cloud Logging, and the logs' URL.
+execution's logs in Cloud Logging, and the logs' URL. On cloudflare it
+starts an instance of the job's Workflow with the bundle the manifest
+records, refusing an instance that runs another bundle, waits for it to
+end, and reports the error the run threw.
 
 ```
 superschematic stack run Dev shop-orders-ship-orders
@@ -937,7 +951,7 @@ which no queue is claimed.
 | `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
 | `--yes` | off | `drop`: confirm `--all` |
 
-## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
+## `stack bootstrap`, `secrets set`, `prepare`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
 destroys the environments a Stack service declares
@@ -949,8 +963,9 @@ target only when it links the target's extension and the provisioner's
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
+`prepare` reaches no target and takes its own flags.
 
-Each of these commands takes these flags:
+Each of the others takes these flags:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -1030,6 +1045,49 @@ superschematic stack secrets set Staging
 superschematic stack secrets set Staging PaymentsSecrets.STRIPE_KEY
 ```
 
+### `stack prepare [environment...]`
+
+Run, with no credentials, all the project code that `stack plan`, `build`,
+`deploy` and `destroy` would otherwise run beside the target's
+credentials, and write what it made into a directory: each service's
+sidecar documents, evaluated with Bun; the build context of each server,
+job and worker whose Dockerfile `superschematic build-all` wrote; each
+site, built with its build script after one frozen install of the output
+root's workspace; and each bundle, built with `bun bundle.ts`. A site's or
+a bundle's files are kept as the tar stream their digest is of. It reaches
+no target. Given the directory with `--prepared`, `stack plan`, `build`,
+`deploy` and `destroy` read all of it from there and start no Bun, no
+install and no build, so a dependency's install script, a build plugin or
+a sidecar document never runs where the credentials are; a document whose
+file or imports changed since is refused. The generated GitHub workflow
+runs it in its `prepare` job, which holds no identity token and no
+secret. With no environment named it prepares every environment off the
+local target. Run `superschematic build-all` first.
+
+```
+superschematic stack prepare Staging
+superschematic stack deploy Staging --prepared schemas/dist/prepared/shop-stack
+```
+
+Every process a `stack` command starts to run your project's code, here
+or in a deploy without `--prepared`, gets an environment with no
+credential in it and a scratch home of its own, with your caches;
+`SUPERSCHEMATIC_CHILD_ENV` names more variables to pass, such as a private
+registry's token (`HOME` keeps your home), and never passes a
+`GOOGLE_*`, `CLOUDSDK_*`, `GCLOUD_*`, `GCP_*`, `CLOUDFLARE_*`, `CF_*`,
+`WRANGLER_*`, `PULUMI_*`, `AWS_*` or `ACTIONS_*` variable, nor
+`SSH_AUTH_SOCK`, `KUBECONFIG` or `VAULT_TOKEN`. A file under your real
+home stays readable to a process that names its path, so run `stack
+prepare` before you sign in. In CI, `--prepared` refuses a directory
+prepared at another commit or in another run (`GITHUB_SHA`,
+`GITHUB_RUN_ID`).
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--dir` | `<output-root>/prepared/<stack>` | write here; an earlier prepare's directory is replaced, and one holding anything else is refused |
+| `--no-build` | false | write the sidecar documents alone, which a plan or a destroy needs |
+| `--out` | `<schemas-root>/dist` | the output root `build-all` wrote |
+
 ### `stack plan <environment>`
 
 Show what `stack deploy` would do, changing nothing: the provisioner's plan
@@ -1056,6 +1114,7 @@ has a hazard of a `--fail-on` class that no `--allow` names.
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--out` | none | write the plan as JSON, for `stack deploy --expect` |
 | `--format` | `text` | print the plan as `text` or `json` |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack build <environment>`
 
@@ -1095,6 +1154,7 @@ A build writes no deploy manifest.
 | `--force` | false | build a server, job or worker whose context did not change, and upload a site's files that are there |
 | `--out` | none | write the result as JSON |
 | `--format` | `text` | print `--image`, `--site` and `--bundle` flags (`text`) or the result as `json` |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack deploy <environment>`
 
@@ -1159,12 +1219,15 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 | `--fail-on` | `all` | hazard classes that stop the deploy unless `--allow` names each hazard, comma-separated, `all`, or `none` |
 | `--allow` | none | a hazard id to acknowledge; repeatable |
 | `--expect` | none | a plan `stack plan --out` wrote: refuse migration plans other than its |
+| `--prepared` | none | the directory `stack prepare` wrote: read the sidecar documents, and for a deploy or a build each build context, site and bundle, from it, and run no Bun, install or build |
 
 ### `stack destroy <environment>`
 
 Remove every resource of the run and its deploy manifest. It asks for the
 run's name at a terminal unless `--yes`, and refuses without either. It
 holds the run's deploy lock while it runs, as a deploy does.
+`--prepared` reads the sidecar documents from what `stack prepare
+--no-build` wrote, and runs none of them.
 
 ### `stack unlock <environment>`
 

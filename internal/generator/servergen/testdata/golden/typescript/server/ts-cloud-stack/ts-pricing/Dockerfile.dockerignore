@@ -24,3 +24,4 @@ runtime/http/typescript/dist
 **/node_modules
 **/target
 **/.git
+**/.dist-build-*

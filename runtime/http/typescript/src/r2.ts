@@ -18,7 +18,9 @@ import type { BucketConnection, R2Credential } from './stackconfig.js';
 A bucket on R2 (D64, section 18.7 of docs/stack-model.md): D54's Bucket over
 a Worker's r2_bucket binding. Objects are put, got, deleted and listed
 through the binding. signedUrl presigns a V4 query-string URL for R2's S3
-API, https://<account>.r2.cloudflarestorage.com/<bucket>/<object>, with
+API, https://<account>.r2.cloudflarestorage.com/<bucket>/<object>, or
+https://<account>.<jurisdiction>.r2.cloudflarestorage.com/<bucket>/<object>
+for a bucket in a jurisdiction (eu, fedramp), with
 WebCrypto's HMAC, since a Worker has no identity to sign with: the bucket
 edge's account token, scoped to the bucket's objects, is the credential.
 R2 takes the token's id as the access key and the hex SHA-256 of its value
@@ -71,9 +73,13 @@ export function isR2BucketBinding(value: unknown): value is R2BucketBinding {
 /** The region R2's S3 API signs for. */
 export const R2_REGION = 'auto';
 
-/** The host of an account's R2 S3 API. */
-export function r2Host(account: string): string {
-  return `${account}.r2.cloudflarestorage.com`;
+/**
+ * The host of an account's R2 S3 API: <account>.r2.cloudflarestorage.com,
+ * or for a bucket in a jurisdiction, <account>.<jurisdiction>.r2.cloudflarestorage.com
+ * (D64, amended).
+ */
+export function r2Host(account: string, jurisdiction?: string): string {
+  return jurisdiction ? `${account}.${jurisdiction}.r2.cloudflarestorage.com` : `${account}.r2.cloudflarestorage.com`;
 }
 
 /** What openR2Bucket takes beside the binding and the connection. */
@@ -156,7 +162,7 @@ class R2Bucket implements Bucket {
     });
     return presignV4({
       method: options.method,
-      host: r2Host(credential.account),
+      host: r2Host(credential.account, credential.jurisdiction),
       path: `/${this.name}/${name}`,
       region: R2_REGION,
       accessKeyId: credential.accessKeyId,

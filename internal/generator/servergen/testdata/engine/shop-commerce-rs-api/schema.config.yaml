@@ -1,0 +1,14 @@
+# shop-commerce-api's twin in Rust, whose operations only a calling
+# service may call: its server opens shop-commerce-db's engine with the
+# behaviors() of the project's engine crate, which holds the commerce
+# crate, and mounts it at /engine/shop-commerce-db, where a verified
+# service stands in for an end user (D70, D58, D37).
+name: shop-commerce-rs-api
+kind: API
+public: true
+dependencies:
+  - { name: shop-commerce-db, kind: DB }
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

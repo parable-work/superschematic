@@ -96,7 +96,7 @@ function fields(bytes: Uint8Array): Field[] {
 }
 
 const text = (value: bigint | Uint8Array): string => new TextDecoder().decode(value as Uint8Array);
-const hex = (value: bigint | Uint8Array): string => Buffer.from(value as Uint8Array).toString('hex');
+const hex = (value: bigint | Uint8Array): string => Array.from(value as Uint8Array, byte => byte.toString(16).padStart(2, '0')).join('');
 const each = (bytes: Uint8Array, number: number): Uint8Array[] =>
   fields(bytes)
     .filter(f => f.number === number && f.wire === 2)
@@ -124,7 +124,8 @@ function attributes(messages: Uint8Array[]): Record<string, string> {
   return out;
 }
 
-function decodeExport(bytes: Uint8Array): ReceivedSpan[] {
+/** The spans of an ExportTraceServiceRequest, which a receiver under workerd decodes too. */
+export function decodeExport(bytes: Uint8Array): ReceivedSpan[] {
   const spans: ReceivedSpan[] = [];
   for (const resourceSpans of each(bytes, 1)) {
     const resource = attributes(each(resourceSpans, 1).flatMap(r => each(r, 1)));

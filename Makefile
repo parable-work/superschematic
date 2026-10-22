@@ -74,6 +74,7 @@ setup:
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/engine-workqueue/typescript && bun install
+	cd runtime/engine-commerce/typescript && bun install
 	cd runtime/schema/python && uv sync
 	cd runtime/versiongraph/python && uv sync
 
@@ -162,22 +163,26 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine's behaviors crate and the work queue's crate (D58) implement
-# the core's behaviors over a copy of each declaration
-# (internal/registry/behaviors), which the core with no extension linked
+# The engine's behaviors crate, the work queue's crate (D58) and the
+# commerce crate (D70) implement the core's behaviors over a copy of each
+# declaration (internal/registry/behaviors), which the core with no
+# extension linked
 # writes into the crate that implements it, by the npm package that ships
 # it (--package): each behavior embeds its copy with include_str!. CI fails
 # when a committed copy differs.
 ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
 WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
+COMMERCE_RUST_DECLARATIONS := runtime/engine-commerce/rust/declarations
 
 behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
 
 behaviors-check:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -188,6 +193,7 @@ ts:
 	scripts/engine-napi.sh --js-behaviors >/dev/null
 	cd runtime/engine/typescript && bun run typecheck && bun run build && bun run test
 	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
+	cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
 
@@ -242,7 +248,10 @@ rust:
 		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
 		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
 		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
-		&& cargo test --features postgres,otel
+		&& cargo test --features postgres,otel \
+		&& cargo clippy --all-targets --features sqlite -- -D warnings && cargo test --features sqlite \
+		&& cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings \
+		&& cargo test --features postgres,sqlite,logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -264,8 +273,9 @@ rust:
 # every feature combination of the databases (both, neither, and each
 # alone) and on the axum router over Postgres, as a Rust server builds it,
 # and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The work
-# queue's crate (runtime/engine-workqueue/rust) is a member, so it builds,
-# lints and tests here with the rest. The
+# queue's crate (runtime/engine-workqueue/rust) and the commerce crate
+# (runtime/engine-commerce/rust) are members, so they build, lint and test
+# here with the rest. The
 # engine reads schemas through runtime/schema/rust-ir, which needs the
 # superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
 # and the storage's tests run on SQLite, and on Postgres as well when
@@ -309,12 +319,19 @@ engine-go: engine-archive
 # Generated servers over the engine (D58), as CI's engine-servers job runs
 # them: servergen's engine entrypoint tests and the script three servers,
 # Go, Rust and TypeScript, answer alike over one engine database
-# (TestEngineServersAnswerOneScriptAlike), over the engine's archive, its
-# package and its Node-API addon, which this builds. They run offline, and
+# (TestEngineServersAnswerOneScriptAlike), and the commerce fixture's
+# servers in each language (TestCommerceEngineEntrypointServes*, D70),
+# which three answer one commerce script alike
+# (TestCommerceServersAnswerOneScriptAlike) and oversell nothing when
+# 1,000 claims race for the last units and one slot
+# (TestCommerceServersOversellNothing), over the engine's archive, its
+# package and its Node-API addon, which this builds. The holds-a-second
+# measurement, TestCommerceHoldsLoad, runs only with
+# SUPERSCHEMATIC_COMMERCE_LOAD=1. They run offline, and
 # on the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is
 # set; SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1 makes a missing toolchain or
 # database a failure rather than a skip.
-ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$$
+ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript|TestCommerceServersAnswerOneScriptAlike|TestCommerceServersOversellNothing)$$
 engine-servers: versiongraph engine-archive
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
@@ -444,12 +461,16 @@ docs:
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json and fixture-workqueue-json, whose types compose the
-# core's behaviors (D10): --emit-ir carries all twenty-two and json-schema
-# admits them. The engine runs the first eleven documents with its own
-# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
-# the work-queue package runs the last in
-# runtime/engine-workqueue/typescript/test/package.test.ts. It builds
+# fixture-timers-json, fixture-workqueue-json and fixture-commerce-json,
+# whose types compose the core's behaviors (D10): --emit-ir carries all
+# twenty-six and json-schema admits them; fixture-commerce-currency-json
+# holds a commerce currency in a Finance.Currency own field (D70). The
+# engine runs the first eleven documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
+# package runs fixture-workqueue-json in
+# runtime/engine-workqueue/typescript/test/package.test.ts, and the
+# commerce package's suites (runtime/engine-commerce/typescript) run its
+# behaviors on the addon. It builds
 # fixture-behaviors-json, a General schema, and fixture-engine-db-json,
 # whose engine types the sql generator leaves out and whose engine
 # document the build writes (D58).
@@ -487,8 +508,15 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
+	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
+		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Lease Assignment Queue Presence Blueprint Budget Retries; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers \
+		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

@@ -7,9 +7,13 @@
 //
 // It also declares Jobs, a method per job of ts-notes, and the type of the
 // implementation's createJobs (D52; section 8.7).
+//
+// It also declares Workers, a method per worker of ts-notes, and the type
+// of the implementation's createWorkers (D53; section 8.8).
 
 import type { Logger } from '@superschematic/http-runtime';
 import type { SqlDatabase } from '@superschematic/http-runtime/d1';
+import type { NoteWritten } from '@schemas/ts-notes-db-types';
 import type { EnvConfig } from './config';
 import type { Implementations } from './interfaces';
 
@@ -49,3 +53,24 @@ export interface Jobs {
  * createJobs: JobsConstructor.
  */
 export type JobsConstructor = (deps: Deps) => Jobs | Promise<Jobs>;
+
+/**
+ * The workers of ts-notes, a method per @worker class, each of which
+ * handles one message of its queue. A worker's entrypoint calls its method
+ * once per message it claims, with a signal that aborts when the worker
+ * stops and its grace is over. The message is done when the method
+ * resolves; a rejection fails it, and the queue retries it after its
+ * backoff until its retries are spent. A message may come again after a
+ * worker dies holding it, so a method is idempotent.
+ */
+export interface Workers {
+  /** Handles a message of the queue NoteWritten, 2 at a time unless an environment changes the worker's concurrency. */
+  indexNotes(message: NoteWritten, signal: AbortSignal): Promise<void>;
+}
+
+/**
+ * The type of the implementation's createWorkers, which a worker's
+ * entrypoint calls with the API's Deps. The scaffolded implementation
+ * exports createWorkers: WorkersConstructor.
+ */
+export type WorkersConstructor = (deps: Deps) => Workers | Promise<Workers>;

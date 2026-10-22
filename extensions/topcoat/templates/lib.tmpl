@@ -273,7 +273,14 @@ fn set_up(router: RouterBuilder, implementations: Implementations{{ if .HasAuth 
             RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
         );
 {{- if .Engine }}
-        let engine_routes = engine::routes(Arc::clone(&engine){{ if .HasAuth }}, Arc::clone(&implementations.authenticator){{ end }});
+{{- if .HasAuth }}
+        // The API's authenticator, the identity runtime's for a user
+        // model, as the engine's routes take it.
+        let authenticator: Arc<dyn api::runtime::Authenticator> = implementations.authenticator.clone();
+        let engine_routes = engine::routes(Arc::clone(&engine), authenticator);
+{{- else }}
+        let engine_routes = engine::routes(Arc::clone(&engine));
+{{- end }}
         router
             .route(TowerRoute::any("/api/{*rest}", json))
             .route(TowerRoute::any("{{ engineMount }}/{*rest}", engine_routes))

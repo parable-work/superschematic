@@ -114,7 +114,11 @@ func TestWriteAPIGoldenRawBodyChecks(t *testing.T) {
 		"\t\t\tif dataField != \"\" {\n" +
 			"\t\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors([]byte(dataField), \"caption\"); keyErrors.HasErrors() {\n" +
 			"\t\t\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\t\t\treturn\n\t\t\t\t}\n" +
-			"\t\t\t\tif err := json.Unmarshal([]byte(dataField), &input); err != nil {",
+			"\t\t\t\tif err := json.Unmarshal([]byte(dataField), &input); err != nil {\n" +
+			// A data part the decoder refuses is answered as a JSON body
+			// is: a string an enum lacks is "enum" at its path (D31,
+			// amended), and the problem names no Go type.
+			"\t\t\t\t\tRespondInputRefusal(w, r, bodyargs.DecodeRefusal(json.RawMessage(dataField), &input, err))",
 	} {
 		if !strings.Contains(string(routes), want) {
 			t.Errorf("routes.go has no\n%s", want)

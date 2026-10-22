@@ -5,6 +5,7 @@
 # builds from.
 *
 !ir
+!runtime/engine-commerce/rust
 !runtime/engine-workqueue/rust
 !runtime/engine/go
 !runtime/engine/rust

@@ -517,6 +517,16 @@ Directory of the work queue's behaviors for the Rust engine,
 depends on when a type composes one of them. Unset, it names the crate's
 version instead of a path.
 
+### `paths.engine_commerce_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine-commerce/rust`.
+
+Directory of the commerce behaviors for the Rust engine, `Stock`,
+`Calendar`, `Holds` and `Payments`, `superschematic-engine-commerce`
+(D70), which the project's engine crate depends on when a type composes
+one of them. Unset, it names the crate's version instead of a path.
+
 ### `paths.engine_abi_rust`
 
 Default: unset. This repository's own file sets
@@ -547,8 +557,9 @@ entrypoint of a Go server whose API's database holds engine types
 requires it, and its `go.mod` replaces it with this directory; unset, the
 module comes from the module proxy at the release's tag. The server's
 Dockerfile builds the engine's static archive from the Cargo workspace
-beside it (`../rust`), which reaches the work queue's crate, the schema
-IR's and the version graph's engine at their places in the same checkout;
+beside it (`../rust`), which reaches the work queue's crate, the commerce
+crate, the schema IR's and the version graph's engine at their places in
+the same checkout;
 unset, the image downloads it with the release's other archives.
 
 ### `paths.engine_typescript`

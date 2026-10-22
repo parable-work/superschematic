@@ -3,7 +3,7 @@ module github.com/parable-work/superschematic/runtime/engine/testdata/linkcheck
 go 1.26.4
 
 require (
-	github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921
+	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9
 	github.com/parable-work/superschematic/runtime/engine/go v0.0.0
 	github.com/parable-work/superschematic/runtime/versiongraph/go v0.0.0
 )

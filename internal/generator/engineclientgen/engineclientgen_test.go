@@ -31,6 +31,15 @@ var (
 		"examples/engine-jobs/schemas/jobs.schema.json",
 		"examples/engine-jobs/schemas/workers.schema.json",
 	}
+	// commerceSchemas compose the commerce behaviors (D70), in the order
+	// an engine defines them: Checkout holds Inventory and CollectionPoint,
+	// and Refund links Checkout.
+	commerceSchemas = []string{
+		"internal/generator/engineclientgen/testdata/commerce/Inventory.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/CollectionPoint.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/Checkout.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/Refund.schema.json",
+	}
 	// fixtureSchemas are in the order an engine defines them: Project's
 	// Rollups reads Task's Links when it is defined.
 	fixtureSchemas = []string{
@@ -50,6 +59,7 @@ var goldens = []struct {
 	{"examples/engine-notes/src/notes.client.ts", notesSchemas},
 	{"runtime/engine/typescript/test/generated/notes.ts", notesSchemas},
 	{"runtime/engine/typescript/test/generated/jobs.ts", jobsSchemas},
+	{"runtime/engine/typescript/test/generated/commerce.ts", commerceSchemas},
 	{"runtime/engine/typescript/test/generated/fixture.ts", fixtureSchemas},
 }
 
@@ -141,14 +151,15 @@ type parityField struct {
 
 // TestClientCodegenParity keeps runtime/engine/testdata/
 // client_codegen_parity.json equal to the generator's narrowings for the
-// fixture and notes schemas. The engine's suite holds its describe
+// fixture, notes and commerce schemas (D70), whose engines register the
+// commerce behaviors. The engine's suite holds its describe
 // document's create parameters to createParams, and the behaviors' fields
 // its reads return to fields.
 func TestClientCodegenParity(t *testing.T) {
 	reg := coreRegistry(t)
 	root := testpaths.RepoRoot(t)
 	corpus := parityCorpus{Comment: parityComment, Schemas: map[string]paritySchema{}}
-	paths := append(append([]string(nil), fixtureSchemas...), notesSchemas...)
+	paths := append(append(append([]string(nil), fixtureSchemas...), notesSchemas...), commerceSchemas...)
 	for _, path := range paths {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 		if err != nil {

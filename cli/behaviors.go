@@ -51,9 +51,10 @@ each JSON Schema's object keys sorted, two-space indents and a final
 newline, whatever the source file's layout. Other *.behavior.json files in
 the directory are removed. With --package, only the behaviors that npm
 package ships are written: the core's behaviors ship in
-@superschematic/engine (the crate runtime/engine/rust/behaviors) and
-@superschematic/engine-workqueue (runtime/engine-workqueue/rust), and
-each crate carries only its own. With --extension, only the behaviors that
+@superschematic/engine (the crate runtime/engine/rust/behaviors),
+@superschematic/engine-workqueue (runtime/engine-workqueue/rust) and
+@superschematic/engine-commerce (runtime/engine-commerce/rust), and each
+crate carries only its own. With --extension, only the behaviors that
 extension registered are written. Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when

@@ -125,6 +125,33 @@ A replayer reads them as it reads the engine's, with these differences:
   `bhv_budget__meters`, `engine_instances.bhv_queue__status`, which a second
   implementation keeps, as `../sqlite` holds it to.
 
+## The commerce package's files
+
+The `commerce-*.json` files are the commerce package's suite (D70),
+`runtime/engine-commerce/typescript/test`, recorded by the same recorder:
+its `test/helpers.ts` opens every engine through `recordOpen` with the
+package's behaviors named and calls `recordPackage('commerce-')`, and its
+`test/corpus.test.ts` holds them to what the recorder writes, through the
+same check, which rewrites only its own package's files:
+
+```
+cd runtime/engine-commerce/typescript && bun run build   # after the engine's
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/commerce-*.json; review the diff
+```
+
+`open`'s `behaviors` names the package's behaviors, `Stock`, `Calendar`,
+`Holds` and `Payments`, which a replayer registers by name after the
+core's; the files define no test behaviors. Every scenario runs on a fixed
+clock, and `commerce-holds-timers` and `commerce-payments-refunds` run the
+runner (`runner.runDue`): a Timers deadline moves a checkout out of
+`held`, and a Reactions rule moves a refund to `issued` or `failed`.
+`commerce-calendar` holds a desk's time in Europe/London, so a replayer's
+wall times come from the same IANA database (2026e, which the crate
+bundles). `commerce-payments`, `commerce-payments-holds` and
+`commerce-payments-refunds` are Payments': attempts, provider events and
+refunds, a claim's `Holds.total` and the `total_unknown` it fails closed
+with, and a refund instance asked, approved and settled.
+
 ## A file
 
 ```json

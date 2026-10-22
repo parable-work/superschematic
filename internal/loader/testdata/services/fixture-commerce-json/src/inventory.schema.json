@@ -1,0 +1,21 @@
+{
+  "name": "Inventory",
+  "role": "EmbeddedStruct",
+  "behaviors": [
+    {
+      "name": "Stock",
+      "config": {
+        "price": { "field": "priceCents", "currency": "GBP" },
+        "lowAt": { "field": "reorderAt" },
+        "maxPerHold": 99,
+        "backorder": false,
+        "permission": "stock.adjust"
+      }
+    }
+  ],
+  "fields": [
+    { "name": "sku", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 64 },
+    { "name": "priceCents", "typeRef": { "name": "Finance.Money" }, "required": true },
+    { "name": "reorderAt", "typeRef": { "name": "Generic.Int64" } }
+  ]
+}

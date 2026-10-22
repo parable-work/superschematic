@@ -15,6 +15,8 @@ acme-shop-orders-topcoat = { path = "../schemas/dist-rust/topcoat/shop-orders", 
 acme-shop-orders-server = { path = "../rust-server", features = ["sqlite"] }
 # The orders page's links to its other pages carry the filter's query.
 form_urlencoded = "1"
+# The engine the crate opens shop-db's engine types in, which app() takes.
+superschematic-engine = { path = "../../../runtime/engine/rust/engine", default-features = false, features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 topcoat = "0.10"

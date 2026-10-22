@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -76,6 +77,10 @@ type fakeAPI struct {
 	objects   map[string][]byte
 	meta      map[string]http.Header
 	calls     []string
+	// hosts are the hosts the S3 calls named, in order.
+	hosts []string
+	// instance is the status of the Workflow instance workflowCall keeps.
+	instance string
 }
 
 func (f *fakeAPI) reply(w http.ResponseWriter, status int, result any, info map[string]int) {
@@ -149,11 +154,44 @@ func (f *fakeAPI) rest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.reply(w, http.StatusOK, map[string]string{}, nil)
+	case strings.HasPrefix(path, acct+"/workflows/"):
+		f.workflowCall(w, r, strings.TrimPrefix(path, acct+"/workflows/"), body)
 	case r.Method == http.MethodPost && path == acct+"/r2/buckets":
 		var req struct{ Name string }
 		_ = json.Unmarshal(body, &req)
 		f.buckets[req.Name] = true
 		f.reply(w, http.StatusOK, map[string]string{"name": req.Name}, nil)
+	default:
+		f.t.Errorf("unexpected call %s %s", r.Method, r.URL)
+		f.reply(w, http.StatusNotFound, nil, nil)
+	}
+}
+
+// workflowCall answers the Workflow instance calls on one Workflow, "jobs":
+// a create, whose params must be JSON in a string, a read, and a
+// terminate, a second of which finds the instance ended (409).
+func (f *fakeAPI) workflowCall(w http.ResponseWriter, r *http.Request, rest string, body json.RawMessage) {
+	switch {
+	case rest != "jobs/instances" && !strings.HasPrefix(rest, "jobs/instances/"):
+		f.reply(w, http.StatusNotFound, nil, nil)
+	case r.Method == http.MethodPost && rest == "jobs/instances":
+		var req struct{ Params string }
+		if err := json.Unmarshal(body, &req); err != nil || req.Params != `{"bundle":"abc"}` {
+			f.t.Errorf("create instance: %s", body)
+		}
+		f.reply(w, http.StatusOK, map[string]string{"id": "i-1", "status": "queued"}, nil)
+	case r.Method == http.MethodGet && rest == "jobs/instances/i-1":
+		f.reply(w, http.StatusOK, map[string]any{"status": f.instance, "error": map[string]string{"name": "Error", "message": "boom"}}, nil)
+	case r.Method == http.MethodPatch && rest == "jobs/instances/i-1/status":
+		if string(body) != `{"status":"terminate"}` {
+			f.t.Errorf("terminate: %s", body)
+		}
+		if f.instance == WorkflowTerminated {
+			f.reply(w, http.StatusConflict, nil, nil)
+			return
+		}
+		f.instance = WorkflowTerminated
+		f.reply(w, http.StatusOK, map[string]string{"status": "terminated"}, nil)
 	default:
 		f.t.Errorf("unexpected call %s %s", r.Method, r.URL)
 		f.reply(w, http.StatusNotFound, nil, nil)
@@ -204,6 +242,7 @@ func (f *fakeAPI) secretsCall(w http.ResponseWriter, r *http.Request, rest strin
 // s3 answers R2's S3 calls on path-style URLs, after it checks the
 // signature with the token's S3 credentials.
 func (f *fakeAPI) s3(w http.ResponseWriter, r *http.Request) {
+	f.hosts = append(f.hosts, r.Host)
 	body, _ := io.ReadAll(r.Body)
 	if err := f.checkSignature(r, body); err != nil {
 		f.t.Errorf("%s %s: %v", r.Method, r.URL, err)
@@ -328,7 +367,7 @@ func newTestCloud(t *testing.T) (*restCloud, *fakeAPI) {
 	t.Cleanup(srv.Close)
 	c := NewCloud("tok-value").(*restCloud)
 	c.api = srv.URL + "/client/v4"
-	c.r2 = func(string) string { return srv.URL }
+	c.r2 = func(string, string) string { return srv.URL }
 	return c, api
 }
 
@@ -451,5 +490,79 @@ func TestCloudS3(t *testing.T) {
 	}
 	if verifies != 1 {
 		t.Errorf("the S3 calls verified the token %d times", verifies)
+	}
+}
+
+// TestCloudS3InAJurisdiction (D64, amended): the object calls of
+// InJurisdiction's Cloud go to the jurisdiction's S3 host over TLS,
+// `<account>.eu.r2.cloudflarestorage.com`, signed for that host, which the
+// stand-in signs again from the Host it received; the Cloud they came from
+// keeps the default host.
+func TestCloudS3InAJurisdiction(t *testing.T) {
+	api := &fakeAPI{
+		t: t, token: "tok-value", subdomain: "acme",
+		buckets: map[string]bool{"shop-media": true}, secrets: map[string]map[string]Secret{}, values: map[string]string{},
+		objects: map[string][]byte{}, meta: map[string]http.Header{},
+	}
+	srv := httptest.NewTLSServer(api)
+	t.Cleanup(srv.Close)
+	// Every host the Cloud dials reaches the stand-in, so the requests
+	// carry R2's real host names.
+	transport := srv.Client().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	c := NewCloud("tok-value").(*restCloud)
+	c.api = srv.URL + "/client/v4"
+	c.client = &http.Client{Transport: transport}
+	ctx := context.Background()
+	eu := c.InJurisdiction("eu")
+	if err := eu.PutObject(ctx, accountOf, "shop-media", "carts/ada.png", []byte("ada"), nil); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := eu.ListObjects(ctx, accountOf, "shop-media", "carts/")
+	if err != nil || !slices.Equal(keys, []string{"carts/ada.png"}) {
+		t.Errorf("ListObjects = %v, %v", keys, err)
+	}
+	if err := c.DeleteObject(ctx, accountOf, "shop-media", "carts/ada.png"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{accountOf + ".eu.r2.cloudflarestorage.com", accountOf + ".eu.r2.cloudflarestorage.com", accountOf + ".r2.cloudflarestorage.com"}
+	if !slices.Equal(api.hosts, want) {
+		t.Errorf("the S3 calls went to %v, want %v", api.hosts, want)
+	}
+	if cloud, err := cloudIn(c, ""); err != nil || cloud != Cloud(c) {
+		t.Errorf("cloudIn of the default jurisdiction = %v, %v", cloud, err)
+	}
+}
+
+// TestCloudWorkflows covers the Workflow instance calls: a create whose
+// params go as JSON in a string, a missing Workflow as fs.ErrNotExist, a
+// read with the run's error, and a terminate, which an ended instance
+// answers 409 and the Cloud takes as done.
+func TestCloudWorkflows(t *testing.T) {
+	c, api := newTestCloud(t)
+	ctx := context.Background()
+	id, err := c.CreateWorkflowInstance(ctx, accountOf, "jobs", map[string]string{"bundle": "abc"})
+	if err != nil || id != "i-1" {
+		t.Fatalf("CreateWorkflowInstance = %q, %v", id, err)
+	}
+	if _, err := c.CreateWorkflowInstance(ctx, accountOf, "other", map[string]string{"bundle": "abc"}); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("an instance of a missing Workflow: %v", err)
+	}
+	api.instance = WorkflowErrored
+	instance, err := c.WorkflowInstance(ctx, accountOf, "jobs", id)
+	if err != nil || !instance.Done() || instance.Error == nil || instance.Error.Message != "boom" {
+		t.Errorf("WorkflowInstance = %+v, %v", instance, err)
+	}
+	api.instance = "running"
+	for range 2 {
+		if err := c.TerminateWorkflowInstance(ctx, accountOf, "jobs", id); err != nil {
+			t.Errorf("TerminateWorkflowInstance: %v", err)
+		}
+	}
+	if !slices.Contains(api.calls, "GET /client/v4/accounts/"+accountOf+"/workflows/jobs/instances/i-1") {
+		t.Errorf("the calls were %v", api.calls)
 	}
 }

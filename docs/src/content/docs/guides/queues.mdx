@@ -23,10 +23,10 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
-| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
+| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
+| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
 | `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
 
 D53 and D68 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
@@ -169,17 +169,39 @@ queue whose message holds a list of either, a `POINT[]` or an
 `INTERVAL[]` column, stays out of `queues`, which says so, and the build
 refuses a Rust worker of it.
 
-In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`'s
-reservation, in Rust, enqueues in its transaction for each line that takes
-a product's level below its threshold:
+In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`,
+in Rust, enqueues when `shop-orders` tells it of a sale: one message for
+each product the sale left low, its Inventory's available units at or
+below its reorder level (`Stock.low`, which the engine keeps), all in one
+transaction:
 
 <Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="StockLow" />
 
-<Snippet file="rust-impl/shop-stock/src/lib.rs" from="if let Some(threshold) = fell_below" to="                levels.push(level);" />
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="        for (level, reorder_at) in &levels {" to="        tx.commit()" />
 
 The descriptor carries the statements the Go ORM runs, so a message
 enqueued from Rust is claimed alike by a worker in any language, and the
 other way round.
+
+### On SQLite
+
+A DB service that lists the sqlite dialect carries each queue's
+statements on SQLite too, with the same states, lease, backoff and
+retention (D53, amended), and a message crosses through its JSON form. A
+queue whose message holds a location or a `BYTEA` field has none, and
+says why. The Go ORM's `Enqueue<Queue>SQLite(ctx, tx, msg)` takes a
+`*sql.Tx` and `New<Queue>SQLiteQueue(db)` claims over a `*sql.DB` of any
+driver. In TypeScript, `enqueueStatement(db, queue, msg)` from
+`@superschematic/http-runtime/sqlite` or `/d1` is the statement you add to
+the batch whose writes caused the message, since a `SqlDatabase` has no
+interactive transaction, and `sqliteQueue(db, queue)` claims over one. The
+Rust runtime's `sqlite` feature adds `queue::enqueue_sqlite` and
+`queue::SqliteQueue`.
+
+A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
+worker claims there: Workers runs no claim loop, so an environment that
+places a worker on the cloudflare target does not resolve, and says that
+gcp or `stack dev` runs one.
 
 ## Write a worker
 
@@ -407,6 +429,7 @@ export abstract class Dev {}
 | Setting | What it sets |
 | --- | --- |
 | `instances` | how many instances run; one unless set. `stack dev` runs one process whatever it says |
+| `maxInstances` | the most instances a target may run as the queue's depth grows, `instances` then the fewest. No target scales a worker yet: gcp refuses a range, and `stack dev` runs one process |
 | `concurrency` | replaces the `@worker` decorator's |
 | `enabled` | `false` runs none, and the queue's messages wait |
 
@@ -414,9 +437,11 @@ export abstract class Dev {}
 The worker's entrypoint reads its concurrency from `WORKER_CONCURRENCY`,
 which the platform sets.
 
-The claims run on Postgres, the dialect of the Go ORM and of the
-TypeScript client, so an environment that places the queue's database on
-a platform of another dialect does not resolve.
+The claims run on Postgres, or on SQLite where `stack dev` places the
+queue's database on the environment's SQLite file and the worker is in
+TypeScript; a Go or Rust worker there does not resolve, since its `Deps`
+reach Postgres alone. An environment that places the queue's database on
+a platform of another dialect, or on D1, does not resolve either.
 
 ## On gcp
 

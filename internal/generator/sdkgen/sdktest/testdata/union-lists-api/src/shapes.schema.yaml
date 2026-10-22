@@ -15,14 +15,20 @@
 # amended): an unknown enum value, a malformed UUID, a nested object
 # without its required field, an inner union no member reads, a value of
 # another kind in a @strictJSON member, tags, and a member whose fields
-# are a superset of another's. The requests of union_requests.json run
-# against them.
+# are a superset of another's. Probe also holds a Status, a list of them,
+# a Ticket whose status is one, and a Temporal.Duration and a list of them
+# outside any union, which every decoder and validator reads alike (D31,
+# amended). The requests of union_requests.json run against them.
 name: union-lists-api
 kind: API
 scalars:
   # A UUID.
   Identity.UUID:
     name: Identity.UUID
+    languagePrimitive: string
+  # A duration's text.
+  Temporal.Duration:
+    name: Temporal.Duration
     languagePrimitive: string
 types:
   # A circle, by its radius.
@@ -228,11 +234,30 @@ types:
         typeRef: { name: string }
         required: true
         validatePattern: "^z"
-  # The probes, one union a field, each request setting one.
+  # A ticket, whose status is required.
+  Ticket:
+    name: Ticket
+    role: APIInput
+    fields:
+      - name: status
+        typeRef: { name: Status }
+        required: true
+  # The probes, one union a field, each request setting one, and an enum
+  # and a duration outside any union.
   Probe:
     name: Probe
     role: APIInput
     fields:
+      - name: status
+        typeRef: { name: Status }
+      - name: statuses
+        typeRef: { name: Status, isArray: true }
+      - name: ticket
+        typeRef: { name: Ticket }
+      - name: wait
+        typeRef: { name: Temporal.Duration }
+      - name: waits
+        typeRef: { name: Temporal.Duration, isArray: true }
       - name: enumCase
         typeRef: { name: EnumCase }
       - name: uuidCase

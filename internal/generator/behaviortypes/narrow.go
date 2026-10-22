@@ -97,6 +97,10 @@ var coreNarrowers = map[string]narrower{
 	"Blueprint":    narrowBlueprint,
 	"Budget":       narrowBudget,
 	"Retries":      narrowRetries,
+	"Stock":        narrowStock,
+	"Calendar":     narrowCalendar,
+	"Holds":        narrowHolds,
+	"Payments":     narrowPayments,
 }
 
 // idPattern is the pattern of an instance id, as the engine's declarations
@@ -782,4 +786,156 @@ func narrowBudget(n *Narrowing, config map[string]any, _ Target) error {
 		required = append(required, name)
 	}
 	return setField(n, "meters", map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}, true)
+}
+
+// Stock (D70): the counts and low are always there, every instance
+// starting at zero.
+func narrowStock(n *Narrowing, _ map[string]any, _ Target) error {
+	return setFields(n,
+		typedField{"onHand", integer(), true},
+		typedField{"held", integer(), true},
+		typedField{"available", integer(), true},
+		typedField{"low", boolean(), true},
+	)
+}
+
+// Calendar (D70): the time zone, the weekly hours, the config's until an
+// instance sets its own, and the closures that have not ended are always
+// there; hours have setOpeningHours' shape and a closure addClosure's
+// result's.
+func narrowCalendar(n *Narrowing, _ map[string]any, _ Target) error {
+	hours, err := at(n.Params["setOpeningHours"], "properties", "hours")
+	if err != nil {
+		return fmt.Errorf("operation setOpeningHours: %w", err)
+	}
+	week, ok := firstOf(hours)
+	if !ok {
+		return fmt.Errorf("operation setOpeningHours: hours is not one of an object and null")
+	}
+	closure, ok := n.Results["addClosure"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("operation addClosure has no result schema")
+	}
+	return setFields(n,
+		typedField{"timeZone", map[string]any{"type": "string"}, true},
+		typedField{"hours", cloneSchema(week), true},
+		typedField{"closures", map[string]any{"type": "array", "items": cloneSchema(closure)}, true},
+	)
+}
+
+// Holds (D70): an item names a hold of the config; items, state and total
+// are always there, with the shapes retakeHolds' result gives them, which
+// listHolds' and retakeHolds' results share.
+func narrowHolds(n *Narrowing, config map[string]any, target Target) error {
+	holds, _ := config["holds"].(map[string]any)
+	name := target.Base + "HoldName"
+	n.Aliases = append(n.Aliases, Alias{Name: name, Doc: fmt.Sprintf("A hold of %s's Holds, by name.", An(target.Base)), Schema: EnumOf(SortedKeys(holds))})
+	for _, op := range []string{"retakeHolds", "listHolds"} {
+		if err := setOperationProperty(n.Results, op, []string{"properties", "items", "items"}, "hold", ref(name, "")); err != nil {
+			return err
+		}
+	}
+	result, err := at(n.Results["retakeHolds"], "properties")
+	if err != nil {
+		return fmt.Errorf("operation retakeHolds: %w", err)
+	}
+	var fields []typedField
+	for _, field := range []string{"items", "state", "total"} {
+		schema, ok := result[field].(map[string]any)
+		if !ok {
+			return fmt.Errorf("operation retakeHolds: the result has no %s", field)
+		}
+		fields = append(fields, typedField{field, cloneSchema(schema), true})
+	}
+	return setFields(n, fields...)
+}
+
+// paymentsStates are what Payments.state holds.
+var paymentsStates = []string{"unpaid", "pending", "authorized", "paid", "partiallyRefunded", "refunded"}
+
+// Payments (D70): the amounts and state are always there; the currency is
+// absent while the amount comes from Holds.total and the claim holds
+// nothing priced. An attempt has openPayment's result's shape, with what
+// the provider reported and when it opened and last moved; the results
+// that give Payments.state after a call give it as the field does.
+func narrowPayments(n *Narrowing, _ map[string]any, _ Target) error {
+	opened, err := at(n.Results["openPayment"], "properties")
+	if err != nil {
+		return fmt.Errorf("operation openPayment: %w", err)
+	}
+	status, ok := opened["status"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("operation openPayment: the result has no status")
+	}
+	for _, op := range []string{"recordPaymentEvent", "settleRefundFor"} {
+		if err := setOperationProperty(n.Results, op, nil, "state", EnumOf(paymentsStates)); err != nil {
+			return err
+		}
+	}
+	str := func() map[string]any { return map[string]any{"type": "string"} }
+	attempt := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []any{"attempt", "provider", "amount", "currency", "status", "openedAt", "updatedAt"},
+		"properties": map[string]any{
+			"attempt":     str(),
+			"provider":    str(),
+			"providerRef": str(),
+			"amount":      integer(),
+			"currency":    str(),
+			"status":      cloneSchema(status),
+			"authorized":  integer(),
+			"captured":    integer(),
+			"brand":       str(),
+			"last4":       str(),
+			"openedAt":    integer(),
+			"updatedAt":   integer(),
+		},
+	}
+	return setFields(n,
+		typedField{"due", integer(), true},
+		typedField{"authorized", integer(), true},
+		typedField{"captured", integer(), true},
+		typedField{"refunded", integer(), true},
+		typedField{"outstanding", integer(), true},
+		typedField{"overpaid", integer(), true},
+		typedField{"currency", str(), false},
+		typedField{"state", EnumOf(paymentsStates), true},
+		typedField{"attempts", map[string]any{"type": "array", "items": attempt}, true},
+	)
+}
+
+// firstOf is the first schema of a node's oneOf or anyOf: the non-null
+// member of a nullable value.
+func firstOf(node map[string]any) (map[string]any, bool) {
+	for _, key := range []string{"oneOf", "anyOf"} {
+		if members, ok := node[key].([]any); ok && len(members) > 0 {
+			first, ok := members[0].(map[string]any)
+			return first, ok
+		}
+	}
+	return nil, false
+}
+
+// cloneSchema copies a decoded schema deeply, so a field's shape and the
+// operation it was read from can be narrowed apart.
+func cloneSchema(schema map[string]any) map[string]any {
+	return cloneValue(schema).(map[string]any)
+}
+
+func cloneValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, member := range v {
+			out[key] = cloneValue(member)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, member := range v {
+			out[i] = cloneValue(member)
+		}
+		return out
+	}
+	return value
 }

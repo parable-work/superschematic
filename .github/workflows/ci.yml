@@ -798,6 +798,17 @@ jobs:
           bun run typecheck
           bun run test
 
+      - name: runtime/engine-commerce/typescript typecheck + build + test (Node.js and Bun)
+        # Runs after the engine's build, which its scripts/link-local-deps.mjs
+        # links into node_modules, on the test addon, whose commerce
+        # behaviors are the Rust ones (D70). Its corpus check holds
+        # runtime/engine/testdata/scenarios/commerce-*.json to the recorder.
+        working-directory: runtime/engine-commerce/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)
         # The engine guide's example: the http runtime and the engine rebuilt
         # from the installs above, on the addon built above, linked into the
@@ -1002,7 +1013,8 @@ jobs:
 
   engine-rust:
     # The workspace has the work queue's crate (runtime/engine-workqueue/rust)
-    # as a member, so --workspace builds, lints and tests it too.
+    # and the commerce crate (runtime/engine-commerce/rust) as members, so
+    # --workspace builds, lints and tests them too.
     name: engine-rust (the Rust engine's workspace)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -1192,14 +1204,19 @@ jobs:
     # Generated servers mount the engine (D58), end to end, in the full tier
     # alone: servergen's engine entrypoint tests build desk-db's Go, Rust and
     # TypeScript servers, their jobs and runners, queue-db's server over
-    # the project's engine archive and desk-ts-api's over the project's
-    # engine addon (internal/generator/servergen/testdata/engine), and run
-    # each offline and on the Postgres below; and
+    # the project's engine archive, desk-ts-api's over the project's
+    # engine addon, and shop-commerce-db's servers in each language over
+    # the commerce crate (D70) (internal/generator/servergen/testdata/engine),
+    # and run each offline and on the Postgres below; and
     # TestEngineServersAnswerOneScriptAlike builds desk-trio-stack's three
     # servers over one engine database, runs one script against each and
     # requires their transcripts to be identical, each step the HTTP corpus
     # records in the corpus's shape, and the three to read what each other
-    # wrote and stream what each other commits. They need the three archives
+    # wrote and stream what each other commits;
+    # TestCommerceServersAnswerOneScriptAlike does the same for
+    # shop-checkout-stack's three commerce servers (D70), and
+    # TestCommerceServersOversellNothing races 1,000 claims over them for
+    # three units and for one slot. They need the three archives
     # a Go server links, the engine's package and its Node-API addon, which
     # the go job does not build, so they skip there and run here, where
     # SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS and
@@ -1296,7 +1313,7 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/engine-archive.sh --print)"
           go test -count=1 -timeout 80m -v \
-            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$' \
+            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript|TestCommerceServersAnswerOneScriptAlike|TestCommerceServersOversellNothing)$' \
             ./internal/generator/servergen/
 
   versiongraph:

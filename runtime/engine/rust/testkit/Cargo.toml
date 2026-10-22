@@ -11,8 +11,8 @@ publish = false
 [features]
 # The databases the replayer runs on, as the engine has them.
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
-postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite", "superschematic-engine-commerce/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres", "superschematic-engine-commerce/postgres"]
 # The HTTP corpus through the engine's axum router as well (D58): each
 # exchange in process through tower's oneshot, a stream's body pulled
 # frame by frame.
@@ -31,6 +31,9 @@ superschematic-engine-behaviors = { path = "../behaviors", default-features = fa
 # registered @superschematic/engine-workqueue, and the work queue's tests
 # open with the core's.
 superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
+# The commerce behaviors (D70), and the supply contract the commerce tests
+# hold a test supply and a stand-in claim to.
+superschematic-engine-commerce = { path = "../../../engine-commerce/rust", default-features = false }
 tokio = { version = "1.52.2", default-features = false, features = ["rt-multi-thread", "time"], optional = true }
 tower = { version = "0.5.3", default-features = false, features = ["util"], optional = true }
 

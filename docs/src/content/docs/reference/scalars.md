@@ -70,6 +70,7 @@ checked and stored.
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
+| `Finance.Currency` | ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY) | `VARCHAR(3)` | string / string / str / String | length 3 to 3; pattern `^[A-Z]{3}$`; its own validator | `USD` |
 | `Finance.Money` | Monetary amount in smallest currency unit (e.g., cents for USD) | `BIGINT` | int64 / number / int / i64 | 0 to 9007199254740991 | `1000` |
 
 ## Generic

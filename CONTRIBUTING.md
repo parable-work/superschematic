@@ -158,11 +158,11 @@ agent or a bot with write access counts.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule, and the docs' scalar page matches the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
-| `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`) match the core registry; `make behaviors` rewrites them |
+| `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
-| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript` and `runtime/engine-workqueue/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's and the work-queue package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
@@ -250,6 +250,46 @@ regenerated, not edited. Change the generator or the pin, run
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and
 commit it. CI fails on catalog or schema-file drift.
 
+### Shared build outputs
+
+`go test ./...` runs each package's tests in a process of its own, in
+parallel, and they share this checkout's built runtime packages: the HTTP
+runtime's and the engine's `dist/`, their `node_modules`, and the engine's
+addon in `runtime/engine/typescript/native/`. A test that needs the HTTP
+runtime built calls `testpaths.BuildHTTPRuntime` (or, for another package,
+`testpaths.BuildTypeScriptPackage`, naming each package whose `dist/` its
+build copies in, as the engine's copies the HTTP runtime's). It holds a
+lock on the package that every test process takes (`flock` on a file
+under the user's cache directory, keyed by the package's resolved path),
+and skips the build when what the build would read is what the last build
+there read and the package still holds what that build left. The inputs
+are the package's sources, manifest, lock file and tsconfigs, the scripts
+its build script names, the bun and node versions, and the copied
+packages' `dist/`. The outputs are its `dist/` and its `node_modules`
+symlinks. So the first test to need it builds it, the others wait for it,
+and none rebuilds it under another's feet. A test never runs `bun install`
+or `bun run build` in a runtime package itself, and never builds the
+engine's package or addon in place: it checks they are built and skips, or
+fails under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, as
+`requireEngineTypeScript` does, and builds a project's addon into a
+directory of its own (`scripts/engine-napi.sh --crate <dir> --out <dir>`).
+
+A build run outside the tests (`make ts`, CI, another terminal) never
+removes what a test reads, but it does not swap it in as a whole either.
+The HTTP runtime's, the engine's and the work queue's `bun run build`
+compile through `scripts/build-dist.mjs` into a `.dist-build-*` staging
+directory, then rename each changed file into `dist/` and remove the files
+the build no longer writes. So `dist/` is never missing, and no file in it
+is ever missing or half written, and a rebuild with the same output
+changes nothing. But while a build whose output changed moves its files
+in, a reader that holds no lock can load one build's module beside
+another's. The script's header says why it does not swap the whole
+directory. `scripts/engine-napi.sh` likewise renames the new addon over
+the old one in `native/`. `internal/testpaths`'s
+`TestBuildDistNeverLeavesDistMissing`,
+`TestBuildDistLeavesAnIdenticalRebuildAlone` and
+`TestBuildOnceAcrossProcesses` show this.
+
 ### Names come from the naming file
 
 Nothing in a generator or template hardcodes a module path, npm scope,
@@ -277,7 +317,8 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `stack`, `schema-ir`, `schema-runtime`,
-`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`, and the
+`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`,
+`engine-commerce`, and the
 engine's prebuilt addons `engine-darwin-arm64`, `engine-darwin-x64`,
 `engine-linux-x64-gnu` and `engine-linux-arm64-gnu`), the
 PyPI distributions (`superschematic-schema-runtime`, and

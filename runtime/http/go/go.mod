@@ -7,7 +7,7 @@ require (
 	github.com/go-chi/httprate v0.16.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921
+	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0
 	github.com/stretchr/testify v1.12.1
@@ -50,7 +50,7 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
-	google.golang.org/grpc v1.83.1 // indirect
+	google.golang.org/grpc v1.83.2 // indirect
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

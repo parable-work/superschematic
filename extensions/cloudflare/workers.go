@@ -79,14 +79,17 @@ const noIdentity = "the TypeScript identity runtime hashes passwords with node:c
 //   - cpuMs, the CPU time a request may take, Cloudflare's default when
 //     unset;
 //   - placement, `smart` for Smart Placement, which runs the Worker near
-//     the backends it calls.
+//     the backends it calls;
+//   - telemetry, which turns its trace export on or off against the
+//     environment's (telemetry.go).
 const workersSettings = `{
   "type": "object",
   "properties": {
     "logs": {"type": "boolean"},
     "compatibilityDate": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
     "cpuMs": {"type": "integer", "minimum": 1, "maximum": 300000},
-    "placement": {"enum": ["smart"]}
+    "placement": {"enum": ["smart"]},
+    "telemetry": {"type": "boolean"}
   },
   "additionalProperties": false
 }`
@@ -233,8 +236,10 @@ func customDomain(d ir.ResolvedDeployable, v accountValues, env registry.StackEn
 // bundleVersion returns the version properties of a deployable that runs
 // its bundle (section 18.5): the bundle's files as modules, each a
 // contentFile under the program's artifacts with its pinned hash, main.js
-// the main module; the compatibility date; the CPU limit and placement its
-// settings give; and its config as bindings (configBindings).
+// the main module; the compatibility date and WorkersCompatibilityFlags;
+// the CPU limit and placement its settings give; its config as bindings
+// (configBindings); and the bindings of its trace export, when it exports
+// (addTelemetry).
 func bundleVersion(ctx registry.PlatformContext, v accountValues) (map[string]any, error) {
 	d := ctx.Deployable
 	bindings, err := configBindings(ctx, v)
@@ -251,12 +256,16 @@ func bundleVersion(ctx registry.PlatformContext, v accountValues) (map[string]an
 		})
 	}
 	version := map[string]any{
-		"mainModule":        MainModule,
-		"modules":           modules,
-		"compatibilityDate": settingString(d.Settings, "compatibilityDate", CompatibilityDate),
+		"mainModule":         MainModule,
+		"modules":            modules,
+		"compatibilityDate":  settingString(d.Settings, "compatibilityDate", CompatibilityDate),
+		"compatibilityFlags": slices.Clone(WorkersCompatibilityFlags),
 	}
 	if len(bindings) > 0 {
 		version["bindings"] = bindings
+	}
+	if err := addTelemetry(ctx.Environment, v, d, version); err != nil {
+		return nil, err
 	}
 	if n, ok := d.Settings["cpuMs"]; ok {
 		version["limits"] = map[string]any{"cpuMs": n}

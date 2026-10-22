@@ -1,0 +1,35 @@
+# The commerce fixture's database (D70): its Inventory, CollectionPoint,
+# Checkout and Refund compose the four commerce behaviors, Stock, Calendar,
+# Holds and Payments, beside the core's, which the core's engine archive
+# leaves out, so its build writes the project's engine crate,
+# engine/rust/shop-commerce-db, with the commerce crate, whose archive a Go
+# server links in the core's place; a Rust server depends on the crate,
+# and a TypeScript one names the four in its engine options on the core's
+# addon. Its engine opens with the allowAll policy, so a verified service
+# may write, and outputs.engine.tools.invocation marks the operations that
+# move money or stock ask, which the core's declarations leave unmarked
+# and the build requires the deployment to name (D70, amended); the engine
+# document hides Payments' service operations (listPaymentActions,
+# recordPaymentEvent, settleRefundFor) itself, and tools.hidden adds
+# Stock's movement list.
+name: shop-commerce-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    rust: { enabled: true }
+  engine:
+    policy: allowAll
+    tools:
+      invocation:
+        Payments.openPayment: ask
+        Payments.capturePayment: ask
+        Payments.voidPayment: ask
+        Payments.refundPayment: ask
+        Payments.refundFor: ask
+        Stock.receiveStock: ask
+        Stock.adjustStock: ask
+        Stock.countStock: ask
+      hidden:
+        - Stock.listStockMovements

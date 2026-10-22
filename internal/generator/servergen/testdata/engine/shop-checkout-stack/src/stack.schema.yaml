@@ -1,0 +1,28 @@
+# shop-checkout-api, shop-checkout-rs-api and shop-checkout-ts-api,
+# shop-commerce-db's three APIs in Go, Rust and TypeScript, each on its
+# default server, which opens the engine on shop-commerce-db, whose types
+# compose the commerce behaviors, and mounts it at
+# /engine/shop-commerce-db: three servers over one engine database, as
+# three replicas of one shop in three languages would be. The stack runs
+# one runner of shop-commerce-db, in the language of the first API by
+# name, shop-checkout-api's Go (D70, D58). Its one environment, Local,
+# runs on the local target.
+kind: Stack
+types:
+  ShopTrio:
+    name: ShopTrio
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-checkout-api, kind: API }
+        - { name: shop-checkout-rs-api, kind: API }
+        - { name: shop-checkout-ts-api, kind: API }
+      expose:
+        - service: { name: shop-checkout-api, kind: API }
+        - service: { name: shop-checkout-rs-api, kind: API }
+        - service: { name: shop-checkout-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

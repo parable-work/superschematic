@@ -14,6 +14,9 @@
 //! - the work queue's (`Lease`, `Assignment`, `Queue`, `Presence`,
 //!   `Blueprint`, `Budget`, `Retries`)
 {{- end }}
+{{- if .Commerce }}
+//! - the commerce ones (`Stock`, `Calendar`, `Holds`, `Payments`)
+{{- end }}
 
 use {{ .Ident }} as project;
 

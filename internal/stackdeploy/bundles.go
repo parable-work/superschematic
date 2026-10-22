@@ -187,31 +187,40 @@ func (s *session) planBundles(ctx context.Context, prev *Manifest, given map[str
 			continue
 		}
 		what := kindOf(s.env, d.Name)
-		pkg := servergen.ServerDir(src.OutputRoot, s.env.Stack, d.Name)
-		script := filepath.Join(pkg, BundleScript)
-		if _, err := os.Stat(script); errors.Is(err, fs.ErrNotExist) {
-			if len(only) > 0 {
-				return p, fmt.Errorf("%s has no %s at %s: run `superschematic build-all` first, or give its bundle with --bundle", what, BundleScript, script)
+		var files *ArtifactFiles
+		if src.Prepared != nil {
+			// The bundle `stack prepare` built, with no credentials: the
+			// deploy builds nothing (D47, amended).
+			a := src.Prepared.Bundles[d.Name]
+			if a == nil {
+				if len(only) > 0 {
+					return p, fmt.Errorf("%s: %s holds no bundle of it; run `superschematic stack prepare` for its environment", what, src.Prepared.Dir)
+				}
+				s.logf("%s: %s holds no bundle of it, so its bundle comes from --bundle or the manifest", what, src.Prepared.Dir)
+				continue
 			}
-			s.logf("%s: no %s at %s, so its bundle comes from --bundle or the manifest", what, BundleScript, script)
-			continue
-		} else if err != nil {
-			return p, err
-		}
-		if err := s.install(ctx, src, "bundle"); err != nil {
-			return p, err
-		}
-		out, err := p.path(d.Name)
-		if err != nil {
-			return p, err
-		}
-		s.logf("%s: bun %s %s in %s", what, BundleScript, out, pkg)
-		if err := src.run()(ctx, pkg, s.log, "bun", BundleScript, out); err != nil {
-			return p, fmt.Errorf("bundle %s: %w", what, err)
-		}
-		files, err := DigestBundle(out)
-		if err != nil {
-			return p, fmt.Errorf("%s: %w", what, err)
+			dir, err := p.path(d.Name)
+			if err != nil {
+				return p, err
+			}
+			if files, err = src.Prepared.extract(a, "bundle", dir); err != nil {
+				return p, fmt.Errorf("%s: %w", what, err)
+			}
+		} else {
+			out, err := p.path(d.Name)
+			if err != nil {
+				return p, err
+			}
+			built, err := s.buildBundle(ctx, src, d, only, out)
+			if err != nil || !built {
+				if err != nil {
+					return p, err
+				}
+				continue
+			}
+			if files, err = DigestBundle(out); err != nil {
+				return p, fmt.Errorf("%s: %w", what, err)
+			}
 		}
 		if p.digests[d.Name] == files.Digest {
 			s.logf("%s: bundle %s, the one it runs", what, shortDigest(files.Digest))
@@ -224,6 +233,33 @@ func (s *session) planBundles(ctx context.Context, prev *Manifest, given map[str
 		p.files[d.Name] = files
 	}
 	return p, nil
+}
+
+// buildBundle builds the bundle of d with `bun bundle.ts out` in its
+// package, after the frozen install of the workspace. It reports false for
+// a package with no bundle.ts, which a build of every deployable passes
+// over and one of only refuses.
+func (s *session) buildBundle(ctx context.Context, src *Sources, d *ir.ResolvedDeployable, only []string, out string) (bool, error) {
+	what := kindOf(s.env, d.Name)
+	pkg := servergen.ServerDir(src.OutputRoot, s.env.Stack, d.Name)
+	script := filepath.Join(pkg, BundleScript)
+	if _, err := os.Stat(script); errors.Is(err, fs.ErrNotExist) {
+		if len(only) > 0 {
+			return false, fmt.Errorf("%s has no %s at %s: run `superschematic build-all` first, or give its bundle with --bundle", what, BundleScript, script)
+		}
+		s.logf("%s: no %s at %s, so its bundle comes from --bundle or the manifest", what, BundleScript, script)
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if err := s.install(ctx, src, "bundle"); err != nil {
+		return false, err
+	}
+	s.logf("%s: bun %s %s in %s", what, BundleScript, out, pkg)
+	if err := src.run()(ctx, pkg, s.log, "bun", BundleScript, out); err != nil {
+		return false, fmt.Errorf("bundle %s: %w", what, err)
+	}
+	return true, nil
 }
 
 // planBundlesFor plans the bundles of a deploy: it refuses a deployable

@@ -213,7 +213,11 @@ type Deployed struct {
 // request can be: a document whose live version has its hash is left as
 // it is, so a restart with the same documents writes nothing, and a
 // changed one becomes the next version if the compatibility rule allows
-// it. A server deploys before it reports ready.
+// it. A document whose behaviors' configs name another document deploys
+// after it, and one refused as an invalid schema, say because its config
+// names a schema not yet live, is tried again after the others; a pass
+// that deploys none of those left returns its first refusal. A server deploys before it reports
+// ready.
 func (e *Engine) Deploy(ctx context.Context, documents []json.RawMessage, options DeployOptions) ([]Deployed, error) {
 	if documents == nil {
 		documents = []json.RawMessage{}

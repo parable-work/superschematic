@@ -1,0 +1,151 @@
+{
+  "kind": "General",
+  "name": "Refund",
+  "description": "A refund two staff sign off before it is issued against its checkout's payment (D70).",
+  "scalars": {
+    "Finance.Money": {
+      "name": "Finance.Money",
+      "languagePrimitive": "number"
+    }
+  },
+  "types": {
+    "Refund": {
+      "name": "Refund",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": [
+              "requested",
+              "approved",
+              "issued",
+              "rejected",
+              "failed"
+            ],
+            "transitions": [
+              {
+                "from": "requested",
+                "to": "approved"
+              },
+              {
+                "from": "requested",
+                "to": "rejected"
+              },
+              {
+                "from": "approved",
+                "to": "issued"
+              },
+              {
+                "from": "approved",
+                "to": "failed"
+              }
+            ],
+            "outcomes": {
+              "rejected": "neutral",
+              "failed": "failure"
+            }
+          }
+        },
+        {
+          "name": "Approvals",
+          "config": {
+            "gates": {
+              "approved": {
+                "count": 2,
+                "permission": "refunds.approve"
+              }
+            }
+          }
+        },
+        {
+          "name": "Links",
+          "config": {
+            "links": {
+              "order": {
+                "schema": "Checkout",
+                "required": true
+              }
+            }
+          }
+        },
+        {
+          "name": "Numbering",
+          "config": {
+            "format": "RF-{yyyy}-{seq:5}",
+            "reset": "yearly"
+          }
+        },
+        {
+          "name": "StateRules",
+          "config": {
+            "states": {
+              "requested": {
+                "required": [
+                  "amountCents",
+                  "reason"
+                ]
+              },
+              "approved": {
+                "frozen": "all"
+              }
+            }
+          }
+        },
+        {
+          "name": "Payments",
+          "config": {
+            "amount": {
+              "field": "amountCents"
+            },
+            "currency": "GBP",
+            "refundOf": {
+              "link": "order"
+            },
+            "issueOn": [
+              "approved"
+            ],
+            "record": {
+              "permission": "payments.record"
+            }
+          }
+        },
+        {
+          "name": "Reactions",
+          "config": {
+            "rules": [
+              {
+                "when": {
+                  "changes": {
+                    "field": "Payments.state",
+                    "to": "refunded"
+                  }
+                },
+                "then": {
+                  "transition": "issued"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "amountCents",
+          "typeRef": {
+            "name": "Finance.Money"
+          },
+          "required": true
+        },
+        {
+          "name": "reason",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 500
+        }
+      ]
+    }
+  }
+}

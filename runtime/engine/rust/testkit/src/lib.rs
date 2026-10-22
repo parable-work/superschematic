@@ -38,6 +38,7 @@
 #[cfg(feature = "axum")]
 mod axum;
 pub mod behaviors;
+pub mod commerce_fixtures;
 pub mod core_fixtures;
 mod http;
 pub mod workqueue_fixtures;
@@ -1492,11 +1493,18 @@ impl AccessPolicy for AnswerPolicy {
 
 /// The files of the corpus a replay runs by default: the engine's own
 /// test files, whose scenarios need no behavior or few, the core
-/// behaviors' files and the work queue's (`workqueue-*`), whose engines
-/// register its behaviors by name after the core's
-/// ([`superschematic_engine_workqueue::behavior`]).
-pub const ENGINE_FILES: [&str; 45] = [
+/// behaviors' files, the work queue's (`workqueue-*`) and the commerce
+/// package's (`commerce-*`), whose engines register the package's
+/// behaviors by name after the core's ([`behaviors::package_behavior`]).
+pub const ENGINE_FILES: [&str; 52] = [
     "access",
+    "commerce-calendar",
+    "commerce-holds",
+    "commerce-holds-timers",
+    "commerce-payments",
+    "commerce-payments-holds",
+    "commerce-payments-refunds",
+    "commerce-stock",
     "compat",
     "core-approvals",
     "core-behaviors",

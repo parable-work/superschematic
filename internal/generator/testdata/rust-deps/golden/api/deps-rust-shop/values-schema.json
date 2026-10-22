@@ -25,6 +25,10 @@
       "type": "string",
       "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
     },
+    "DEPS_MEDIA_BUCKET_R2_JURISDICTION": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
+    },
     "DEPS_MEDIA_BUCKET_R2_TOKEN": {
       "type": "string",
       "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
@@ -186,7 +190,8 @@
           "DEPS_MEDIA_BUCKET_BINDING",
           "DEPS_MEDIA_BUCKET_R2_ACCOUNT",
           "DEPS_MEDIA_BUCKET_R2_ACCESS_KEY_ID",
-          "DEPS_MEDIA_BUCKET_R2_TOKEN"
+          "DEPS_MEDIA_BUCKET_R2_TOKEN",
+          "DEPS_MEDIA_BUCKET_R2_JURISDICTION"
         ]
       },
       {

@@ -11,15 +11,22 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Numbering", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Timers", "Variants", "Workflow"}
+var coreBehaviorNames = []string{"Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Holds", "Lease", "Links", "Numbering",
+	"Payments", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
-// implements; the engine implements the rest.
-var workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
+// implements, and commerceBehaviorNames the ones
+// @superschematic/engine-commerce does (D70); the engine implements the
+// rest.
+var (
+	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
+	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
+)
 
-// A registry with no extension declares the behaviors the engine and the
-// work-queue package implement, as the core's, under bare names, each with
-// the package that implements it, and holds each config to its schema.
+// A registry with no extension declares the behaviors the engine, the
+// work-queue package and the commerce package implement, as the core's,
+// under bare names, each with the package that implements it, and holds
+// each config to its schema.
 func TestCoreBehaviors(t *testing.T) {
 	reg := New(naming.Default())
 	finalizeWithCoreGenerators(t, reg)
@@ -32,8 +39,11 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s is registered by %q, want the core", name, b.Extension)
 		}
 		want := EnginePackage
-		if slices.Contains(workQueueBehaviorNames, name) {
+		switch {
+		case slices.Contains(workQueueBehaviorNames, name):
 			want = WorkQueuePackage
+		case slices.Contains(commerceBehaviorNames, name):
+			want = CommercePackage
 		}
 		if b.Package != want {
 			t.Errorf("%s is implemented by %q, want %q", name, b.Package, want)
@@ -75,7 +85,8 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Dependencies.blocked", "Lease.active", "Links.targets", "Rollups.values"}; !slices.Equal(volatile, want) {
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Dependencies.blocked", "Lease.active", "Links.targets", "Rollups.values",
+		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
 	if names := fieldNames(workflow.Fields); !slices.Equal(names, []string{"status", "enteredAt"}) {
@@ -189,6 +200,10 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s preconditionSchema = %s", b.Name, b.PreconditionSchema)
 		}
 	}
+	stock, _ := reg.Behavior("Stock")
+	calendar, _ := reg.Behavior("Calendar")
+	holds, _ := reg.Behavior("Holds")
+	payments, _ := reg.Behavior("Payments")
 	codes := func(b Behavior) []string {
 		var out []string
 		for _, veto := range b.Vetoes {
@@ -215,6 +230,12 @@ func TestCoreBehaviors(t *testing.T) {
 		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
 			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
 		{stateRules, []string{"missing_fields", "frozen_fields", "required_fields"}},
+		{stock, []string{"not_requested", "unavailable", "held", "over_max", "below_held"}},
+		{calendar, []string{"not_requested", "unavailable", "held", "outside_hours", "closed", "off_grid", "too_short", "too_long", "too_soon", "too_far",
+			"has_bookings", "window_too_long", "no_closure"}},
+		{holds, []string{"unavailable", "holds_missing", "held_fields", "committed", "too_many_items", "not_taking", "no_supply"}},
+		{payments, []string{"nothing_due", "amount_locked", "currency_mismatch", "over_capture", "exceeds_refundable", "unpaid", "unauthorized",
+			"payment_in_progress", "no_attempt", "not_linked", "key_reused", "attempt_closed", "not_configured", "total_unknown"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -494,6 +515,63 @@ func TestCoreBehaviors(t *testing.T) {
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "stuckAfter": 0}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "from": []}`, "behavior Retries config: "},
 		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "bestSoFar": true}`, "behavior Retries config: "},
+		{stock, `{"permission": "stock.adjust"}`, ""},
+		{stock, `{"price": {"field": "priceCents", "currency": "GBP"}, "lowAt": 5, "maxPerHold": 99, "backorder": false, "permission": "stock.adjust"}`, ""},
+		{stock, `{"price": {"field": "priceCents", "currency": {"field": "currency"}}, "lowAt": {"field": "reorderAt"}, "permission": "stock.adjust"}`, ""},
+		{stock, ``, "behavior Stock config: "},
+		{stock, `{"permission": ""}`, "behavior Stock config: "},
+		{stock, `{"price": {"field": "priceCents"}, "permission": "stock.adjust"}`, "behavior Stock config: "},
+		{stock, `{"price": {"field": "priceCents", "currency": "gbp"}, "permission": "stock.adjust"}`, "behavior Stock config: "},
+		{stock, `{"price": {"field": "priceCents", "currency": "POUND"}, "permission": "stock.adjust"}`, "behavior Stock config: "},
+		{stock, `{"lowAt": -1, "permission": "stock.adjust"}`, "behavior Stock config: "},
+		{stock, `{"maxPerHold": 0, "permission": "stock.adjust"}`, "behavior Stock config: "},
+		{stock, `{"permission": "stock.adjust", "reserveOn": ["held"]}`, "behavior Stock config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {"mon": [["09:00", "12:30"], ["13:30", "17:30"]], "sat": [["10:00", "16:00"]]}}`, ""},
+		{calendar, `{"timeZone": "Australia/Lord_Howe", "hours": {"sun": [["00:00", "24:00"]]}, "capacity": {"field": "chairs"}, "slotMs": 900000, "minMs": 900000,
+			"maxMs": 14400000, "bufferMs": {"before": 0, "after": 600000}, "leadMs": 7200000, "horizonMs": 5184000000, "permission": "calendar.manage"}`, ""},
+		{calendar, ``, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London"}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {"mon": [["9:00", "12:30"]]}}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {"mon": [["09:00", "24:30"]]}}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {"mon": [["09:00"]]}}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {"monday": [["09:00", "17:00"]]}}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {}, "capacity": 0}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {}, "slotMs": 1000}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "Europe/London", "hours": {}, "bufferMs": {"after": -1}}`, "behavior Calendar config: "},
+		{calendar, `{"timeZone": "", "hours": {}}`, "behavior Calendar config: "},
+		{holds, `{"holds": {"lines": {"each": {"field": "lines", "target": "inventoryId"}, "schema": "Inventory", "quantity": {"field": "quantity"}},
+			"pickup": {"link": "counter", "interval": {"start": "pickupAt", "durationMs": 900000}}},
+			"takeOn": ["held"], "commitOn": ["placed"], "releaseOn": ["expired", "cancelled"], "returnOn": ["returned"], "maxItems": 50}`, ""},
+		{holds, `{"holds": {"seat": {"link": "show", "quantity": 1}}}`, ""},
+		{holds, `{"holds": {"room": {"link": "room", "interval": {"start": "arrives", "end": "leaves"}}}}`, ""},
+		{holds, ``, "behavior Holds config: "},
+		{holds, `{"holds": {}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show"}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show", "quantity": 1, "interval": {"start": "at", "durationMs": 60000}}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show", "each": {"field": "lines", "target": "id"}, "schema": "Show", "quantity": 1}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"lines": {"each": {"field": "lines", "target": "id"}, "quantity": 1}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"room": {"link": "room", "interval": {"start": "arrives"}}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"room": {"link": "room", "interval": {"start": "arrives", "end": "leaves", "durationMs": 60000}}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"Seat": {"link": "show", "quantity": 1}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show", "quantity": 0}}}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show", "quantity": 1}}, "takeOn": []}`, "behavior Holds config: "},
+		{holds, `{"holds": {"seat": {"link": "show", "quantity": 1}}, "ttlMs": 900000}`, "behavior Holds config: "},
+		{payments, `{"amount": {"holds": true}, "record": {"permission": "payments.record"}}`, ""},
+		{payments, `{"amount": {"field": "totalCents"}, "currency": "GBP", "capture": "manual", "captureOn": ["shipped"], "require": {"placed": "authorized"},
+			"voidOn": ["expired", "cancelled"], "afterRelease": "refund", "refunds": {"permission": "payments.refund"}, "record": {"permission": "payments.record"}}`, ""},
+		{payments, `{"amount": {"field": "amountCents"}, "currency": {"field": "currency"}, "refundOf": {"link": "order"}, "issueOn": ["approved"],
+			"record": {"permission": "payments.record"}}`, ""},
+		{payments, ``, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"field": "totalCents"}, "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": false}, "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "currency": "EURO", "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "require": {"placed": "captured"}, "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "captureOn": ["shipped"], "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "capture": "automatic", "captureOn": ["shipped"], "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"field": "amountCents"}, "currency": "GBP", "refundOf": {"link": "order"}, "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "issueOn": ["approved"], "record": {"permission": "payments.record"}}`, "behavior Payments config: "},
+		{payments, `{"amount": {"holds": true}, "record": {"permission": "payments.record"}, "card": {"store": true}}`, "behavior Payments config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {
@@ -501,6 +579,147 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s %s: %v", test.behavior.Name, test.config, err)
 		case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
 			t.Errorf("%s %s: err = %v, want %q", test.behavior.Name, test.config, err, test.want)
+		}
+	}
+}
+
+// The commerce behaviors (D70). Stock and Calendar are supplies: each
+// declares the supply contract's operations under the same names, with the
+// same parameters but for what an item asks (a quantity of counted supply,
+// an interval of timed supply), so the two conflict, and Holds invokes
+// either by name. Holds requires Workflow; Payments' schema-level
+// listPaymentActions is the adapter's pull. Every config is required.
+func TestCommerceBehaviors(t *testing.T) {
+	reg := New(naming.Default())
+	finalizeWithCoreGenerators(t, reg)
+	stock, _ := reg.Behavior("Stock")
+	calendar, _ := reg.Behavior("Calendar")
+	holds, _ := reg.Behavior("Holds")
+	payments, _ := reg.Behavior("Payments")
+	for _, b := range []Behavior{stock, calendar, holds, payments} {
+		if b.Package != CommercePackage || !b.ConfigRequired() || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+			t.Errorf("%s: package %q, config required %v, precondition %s, create params %s; want %s, a config, and neither",
+				b.Name, b.Package, b.ConfigRequired(), b.PreconditionSchema, b.CreateParamsSchema, CommercePackage)
+		}
+	}
+	if !slices.Equal(stock.Conflicts, []string{"Calendar"}) || !slices.Equal(calendar.Conflicts, []string{"Stock"}) || len(stock.Requires) != 0 || len(calendar.Requires) != 0 {
+		t.Errorf("Stock conflicts %v requires %v, Calendar conflicts %v requires %v; want each conflicting with the other, and no requirement",
+			stock.Conflicts, stock.Requires, calendar.Conflicts, calendar.Requires)
+	}
+	if !slices.Equal(holds.Requires, []string{"Workflow"}) || len(payments.Requires) != 0 || len(holds.Conflicts) != 0 || len(payments.Conflicts) != 0 {
+		t.Errorf("Holds requires %v, Payments requires %v; want [Workflow] and none", holds.Requires, payments.Requires)
+	}
+	for _, want := range []struct {
+		behavior Behavior
+		fields   []string
+		ops      []string
+	}{
+		{stock, []string{"onHand", "held", "available", "low"}, []string{"receiveStock::true", "adjustStock::true", "countStock::true", "holdFor::true", "commitFor::true",
+			"releaseFor::true", "returnFor::true", "checkHold::false", "listStockMovements::false"}},
+		{calendar, []string{"timeZone", "hours", "closures"}, []string{"setOpeningHours::true", "addClosure::true", "removeClosure::true", "holdFor::true", "commitFor::true",
+			"releaseFor::true", "checkHold::false", "listBookings::false", "findAvailability:schema:false"}},
+		{holds, []string{"items", "state", "total"}, []string{"retakeHolds::true", "listHolds::false"}},
+		{payments, []string{"due", "authorized", "captured", "refunded", "outstanding", "overpaid", "currency", "state", "attempts"}, []string{"openPayment::true", "recordPaymentEvent::true",
+			"capturePayment::true", "voidPayment::true", "refundPayment::true", "listPaymentActions:schema:false", "refundFor::true", "settleRefundFor::true"}},
+	} {
+		var ops []string
+		for _, op := range want.behavior.Operations {
+			ops = append(ops, fmt.Sprintf("%s:%s:%v", op.Name, op.Scope, op.Writes))
+			if op.InvocationPolicy != "" {
+				t.Errorf("%s.%s names invocation policy %q; the core's behaviors name none", want.behavior.Name, op.Name, op.InvocationPolicy)
+			}
+		}
+		if got := fieldNames(want.behavior.Fields); !slices.Equal(got, want.fields) {
+			t.Errorf("%s fields = %v, want %v", want.behavior.Name, got, want.fields)
+		}
+		if !slices.Equal(ops, want.ops) {
+			t.Errorf("%s operations = %v, want %v", want.behavior.Name, ops, want.ops)
+		}
+	}
+
+	// The contract: what each supply's operation takes and returns is the
+	// same, but for the member that says what an item asks, which
+	// checkHold's also lists for the claim's other items.
+	operation := func(b Behavior, name string) BehaviorOperation {
+		for _, op := range b.Operations {
+			if op.Name == name {
+				return op
+			}
+		}
+		t.Fatalf("%s declares no %s", b.Name, name)
+		return BehaviorOperation{}
+	}
+	shape := func(raw json.RawMessage, drop string) string {
+		var schema map[string]any
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if properties, ok := schema["properties"].(map[string]any); ok && drop != "" {
+			if also, ok := properties["also"].(map[string]any); ok {
+				items := also["items"].(map[string]any)
+				listed, _ := json.Marshal(items["properties"].(map[string]any)[drop])
+				asked, _ := json.Marshal(properties[drop])
+				if string(listed) != string(asked) {
+					t.Errorf("also lists %s as %s, not as the call asks it, %s", drop, listed, asked)
+				}
+				delete(items["properties"].(map[string]any), drop)
+				items["required"] = []any{}
+			}
+			delete(properties, drop)
+			var required []any
+			for _, name := range schema["required"].([]any) {
+				if name != drop {
+					required = append(required, name)
+				}
+			}
+			schema["required"] = required
+		}
+		out, _ := json.Marshal(schema)
+		return string(out)
+	}
+	for _, name := range []string{"holdFor", "commitFor", "releaseFor", "checkHold"} {
+		counted, timed := operation(stock, name), operation(calendar, name)
+		if counted.Description != timed.Description || string(counted.ResultSchema) != string(timed.ResultSchema) {
+			t.Errorf("%s: Stock's and Calendar's description or result differ", name)
+		}
+		if shape(counted.ParamsSchema, "quantity") != shape(timed.ParamsSchema, "interval") {
+			t.Errorf("%s: Stock's params %s and Calendar's %s differ but for quantity and interval", name, counted.ParamsSchema, timed.ParamsSchema)
+		}
+		var params struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(counted.ParamsSchema, &params); err != nil || !slices.Equal(params.Required, []string{"holder", "hold", "item", "quantity"}) {
+			t.Errorf("%s: Stock's params require %v, want holder, hold, item and quantity", name, params.Required)
+		}
+		if err := json.Unmarshal(timed.ParamsSchema, &params); err != nil || !slices.Equal(params.Required, []string{"holder", "hold", "item", "interval"}) {
+			t.Errorf("%s: Calendar's params require %v, want holder, hold, item and interval", name, params.Required)
+		}
+	}
+	if string(operation(stock, "returnFor").ParamsSchema) != string(operation(stock, "holdFor").ParamsSchema) {
+		t.Errorf("Stock's returnFor takes other parameters than holdFor")
+	}
+	for _, supply := range []Behavior{stock, calendar} {
+		if !strings.Contains(string(operation(supply, "checkHold").ParamsSchema), `"also"`) {
+			t.Errorf("%s's checkHold takes no also", supply.Name)
+		}
+		if strings.Contains(string(operation(supply, "holdFor").ParamsSchema), `"also"`) {
+			t.Errorf("%s's holdFor takes also, which only checkHold reads", supply.Name)
+		}
+	}
+	for _, code := range []string{"not_requested", "unavailable", "held"} {
+		var inStock, inCalendar string
+		for _, veto := range stock.Vetoes {
+			if veto.Code == code {
+				inStock = veto.Description
+			}
+		}
+		for _, veto := range calendar.Vetoes {
+			if veto.Code == code {
+				inCalendar = veto.Description
+			}
+		}
+		if inStock == "" || inStock != inCalendar {
+			t.Errorf("veto %s: Stock's %q, Calendar's %q; want one description in both", code, inStock, inCalendar)
 		}
 	}
 }

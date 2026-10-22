@@ -309,6 +309,11 @@ type Options struct {
 	// Nil writes no src/engine.rs.
 	EngineDocument []byte
 
+	// SQLite is whether the DB service lists the sqlite dialect, whose
+	// statements each queue's descriptor in queues.rs then carries beside
+	// Postgres's (D53, amended).
+	SQLite bool
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -438,7 +443,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if opts.EngineDocument != nil {
 		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
 	}
-	if output.Queues, err = RustQueues(schema); err != nil {
+	if output.Queues, err = RustQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {

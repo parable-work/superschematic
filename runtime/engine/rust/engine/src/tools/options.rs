@@ -11,7 +11,18 @@
 //!   declaration's `invocationPolicy`, which must be one of the values, or
 //!   the default.
 //! - `invocation`: the policy of the operations every schema has and of the
-//!   engine's own tools, by operation name; the default when absent.
+//!   engine's own tools, by operation name, and of a behavior's operation,
+//!   by `<Behavior>.<operation>` (`Payments.capturePayment`,
+//!   `acme.Rating.rate`), which takes the place of its declaration's
+//!   `invocationPolicy` (D70); the default when absent. A deployment marks
+//!   an operation whose declaration names no policy, as the core's leave
+//!   money-moving ones, through it.
+//! - `hidden`: behavior operations, by `<Behavior>.<operation>`, that the
+//!   tools leave out: a service calls them through the API or in-process
+//!   (Payments' `recordPaymentEvent`, which a provider's adapter calls),
+//!   and no agent is offered them. A hidden tool reads `hidden: true` with
+//!   its reason in the tools document, and its call by MCP handle is a tool
+//!   the namespace does not have, as a mount's tool filter leaves one out.
 //! - `keys`: the vendor keys of the tool documents (`apigen.ToolKeys`,
 //!   section 3.14): the scalar key, the `_meta` key of a tool's guidance,
 //!   and keys written at the root of every argument schema.
@@ -107,8 +118,12 @@ pub const BUILTIN_TOOLS: [&str; 17] = [
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolOptions {
     pub invocation_policy: Option<InvocationPolicy>,
-    /// The policy of a built-in operation or engine tool, by its name.
+    /// The policy of a built-in operation or engine tool, by its name, or
+    /// of a behavior's operation, by `<Behavior>.<operation>`.
     pub invocation: Vec<(String, String)>,
+    /// The behavior operations the tools leave out, by
+    /// `<Behavior>.<operation>`: a service's, which no agent is offered.
+    pub hidden: Vec<String>,
     pub scalar_key: Option<String>,
     pub guidance_key: Option<String>,
     pub parameter_keys: Option<Vec<(String, Value)>>,
@@ -123,13 +138,18 @@ impl ToolOptions {
 
     /// Reads the options from the JSON the TypeScript engine takes:
     /// `{ invocationPolicy?: { key, values, default }, invocation?: {...},
-    /// keys?: { scalar?, guidance?, parameters?: [{ key, value }] } }`.
+    /// hidden?: [...], keys?: { scalar?, guidance?, parameters?: [{ key,
+    /// value }] } }`. An `invocation` that is not an object of strings, or a
+    /// `hidden` that is not a list of strings, is refused, naming each
+    /// problem, rather than left out: an operation it would mark must not
+    /// fall back to the default unseen.
     pub fn from_json(value: &Value) -> Result<Self> {
         let Value::Object(members) = value else {
             return Err(Error::usage(
-                "engine tool options: tools is { invocationPolicy?, invocation?, keys? }",
+                "engine tool options: tools is { invocationPolicy?, invocation?, hidden?, keys? }",
             ));
         };
+        let mut problems: Vec<String> = Vec::new();
         let mut options = ToolOptions::default();
         if let Some(policy) = members.get("invocationPolicy") {
             let text = |key: &str| policy.get(key).and_then(Value::as_str).unwrap_or_default();
@@ -151,12 +171,47 @@ impl ToolOptions {
                 default: text("default").to_owned(),
             });
         }
-        if let Some(Value::Object(invocation)) = members.get("invocation") {
-            for (name, value) in invocation {
-                if let Some(value) = value.as_str() {
-                    options.invocation.push((name.clone(), value.to_owned()));
+        match members.get("invocation") {
+            None => {}
+            Some(Value::Object(invocation)) => {
+                for (name, value) in invocation {
+                    match value.as_str() {
+                        Some(value) => options.invocation.push((name.clone(), value.to_owned())),
+                        None => problems.push(format!(
+                            "the invocation policy of {name} is {}, not a string",
+                            json::stringify(value)
+                        )),
+                    }
                 }
             }
+            Some(other) => problems.push(format!(
+                "invocation is an object of policies by name, not {}",
+                json::stringify(other)
+            )),
+        }
+        match members.get("hidden") {
+            None => {}
+            Some(Value::Array(names)) => {
+                for name in names {
+                    match name.as_str() {
+                        Some(name) => options.hidden.push(name.to_owned()),
+                        None => problems.push(format!(
+                            "hidden lists {}, not a <Behavior>.<operation> string",
+                            json::stringify(name)
+                        )),
+                    }
+                }
+            }
+            Some(other) => problems.push(format!(
+                "hidden is a list of <Behavior>.<operation> names, not {}",
+                json::stringify(other)
+            )),
+        }
+        if !problems.is_empty() {
+            return Err(Error::usage(format!(
+                "engine tool options: {}",
+                problems.join("; ")
+            )));
         }
         if let Some(Value::Object(keys)) = members.get("keys") {
             options.scalar_key = keys
@@ -195,6 +250,12 @@ pub(crate) struct ResolvedToolOptions {
     pub invocation_policy: InvocationPolicy,
     /// Each built-in tool's policy, in [`BUILTIN_TOOLS`]' order.
     pub invocation: Vec<(String, String)>,
+    /// The behavior operations the options set a policy for, each as
+    /// (behavior, operation, policy), in the order given.
+    pub operations: Vec<(String, String, String)>,
+    /// The behavior operations the tools leave out, each as (behavior,
+    /// operation), in the order given.
+    pub hidden: Vec<(String, String)>,
     pub keys: ToolKeys,
 }
 
@@ -208,6 +269,44 @@ impl ResolvedToolOptions {
                 value.as_str()
             })
     }
+
+    /// The policy of a behavior's operation: the options' for it, else
+    /// its declaration's, else the default.
+    pub fn operation_invocation<'a>(
+        &'a self,
+        behavior: &str,
+        operation: &str,
+        declared: Option<&'a str>,
+    ) -> &'a str {
+        self.operations
+            .iter()
+            .find(|(b, o, _)| b == behavior && o == operation)
+            .map(|(_, _, value)| value.as_str())
+            .or(declared)
+            .unwrap_or(self.invocation_policy.default.as_str())
+    }
+
+    /// Whether the tools leave a behavior's operation out.
+    pub fn hides(&self, behavior: &str, operation: &str) -> bool {
+        self.hidden
+            .iter()
+            .any(|(b, o)| b == behavior && o == operation)
+    }
+}
+
+/// A behavior operation's key in `invocation`, `<Behavior>.<operation>`,
+/// split at its last dot: the behavior's registered name, bare or
+/// qualified, and an operation name. `None` for a key with no dot, a
+/// built-in tool's.
+pub(crate) fn behavior_operation(key: &str) -> Option<(&str, &str)> {
+    key.rsplit_once('.')
+}
+
+// ^[A-Za-z][A-Za-z0-9_]*$, an operation's name.
+fn is_operation_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // The keys the mcp record and @mcp already use (ir.ValidateMCPInvocationKey).
@@ -275,10 +374,28 @@ pub(crate) fn resolve_tool_options(options: &ToolOptions) -> Result<ResolvedTool
             policy.values.join(", ")
         ));
     }
+    let mut operations = Vec::new();
     for (name, value) in &options.invocation {
-        if !BUILTIN_TOOLS.contains(&name.as_str()) {
+        if let Some((behavior, operation)) = behavior_operation(name) {
+            if !crate::behaviors::declaration::is_behavior_name(behavior)
+                || !is_operation_name(operation)
+            {
+                problems.push(format!(
+                    "invocation names {}, which is no behavior's operation (<Behavior>.<operation>)",
+                    json::quote(name)
+                ));
+            } else if !policy.values.contains(value) {
+                problems.push(format!(
+                    "the invocation policy of {name}, {}, is not one of {}",
+                    json::quote(value),
+                    policy.values.join(", ")
+                ));
+            } else {
+                operations.push((behavior.to_owned(), operation.to_owned(), value.clone()));
+            }
+        } else if !BUILTIN_TOOLS.contains(&name.as_str()) {
             problems.push(format!(
-                "invocation names {name}, which is not one of {}",
+                "invocation names {name}, which is not one of {}, nor a behavior's operation (<Behavior>.<operation>)",
                 BUILTIN_TOOLS.join(", ")
             ));
         } else if !policy.values.contains(value) {
@@ -287,6 +404,21 @@ pub(crate) fn resolve_tool_options(options: &ToolOptions) -> Result<ResolvedTool
                 json::quote(value),
                 policy.values.join(", ")
             ));
+        }
+    }
+    let mut hidden = Vec::new();
+    for name in &options.hidden {
+        match behavior_operation(name) {
+            Some((behavior, operation))
+                if crate::behaviors::declaration::is_behavior_name(behavior)
+                    && is_operation_name(operation) =>
+            {
+                hidden.push((behavior.to_owned(), operation.to_owned()));
+            }
+            _ => problems.push(format!(
+                "hidden names {}, which is no behavior's operation (<Behavior>.<operation>)",
+                json::quote(name)
+            )),
         }
     }
     let invocation = BUILTIN_TOOLS
@@ -340,6 +472,8 @@ pub(crate) fn resolve_tool_options(options: &ToolOptions) -> Result<ResolvedTool
     Ok(ResolvedToolOptions {
         invocation_policy: policy,
         invocation,
+        operations,
+        hidden,
         keys,
     })
 }
@@ -376,5 +510,128 @@ mod tests {
             "engine tool options: invocation policy key \"handle\" is a key @mcp already uses; "
         ));
         assert!(message.contains("invocation names publish"));
+    }
+
+    #[test]
+    fn a_behavior_operation_takes_the_policy_the_options_give_it() {
+        let resolved = resolve_tool_options(&ToolOptions {
+            invocation: vec![
+                ("Payments.capturePayment".into(), "ask".into()),
+                ("acme.Rating.rate".into(), "ask".into()),
+                ("delete".into(), "ask".into()),
+            ],
+            ..ToolOptions::default()
+        })
+        .unwrap();
+        assert_eq!(
+            resolved.operations,
+            vec![
+                ("Payments".into(), "capturePayment".into(), "ask".into()),
+                ("acme.Rating".into(), "rate".into(), "ask".into()),
+            ]
+        );
+        assert_eq!(resolved.invocation_of("delete"), "ask");
+        assert_eq!(
+            resolved.operation_invocation("Payments", "capturePayment", None),
+            "ask"
+        );
+        assert_eq!(
+            resolved.operation_invocation("Payments", "openPayment", None),
+            "auto"
+        );
+        assert_eq!(
+            resolved.operation_invocation("acme.Rating", "rate", Some("auto")),
+            "ask"
+        );
+        assert_eq!(
+            resolved.operation_invocation("acme.Rating", "clear", Some("ask")),
+            "ask"
+        );
+
+        let refused = resolve_tool_options(&ToolOptions {
+            invocation: vec![
+                ("Payments.refundPayment".into(), "maybe".into()),
+                (".capturePayment".into(), "ask".into()),
+                ("Payments.".into(), "ask".into()),
+            ],
+            ..ToolOptions::default()
+        });
+        let Err(Error::Usage(message)) = refused else {
+            panic!("refused")
+        };
+        assert!(message.contains(
+            "the invocation policy of Payments.refundPayment, \"maybe\", is not one of auto, ask"
+        ));
+        assert!(message
+            .contains("invocation names \".capturePayment\", which is no behavior's operation"));
+        assert!(
+            message.contains("invocation names \"Payments.\", which is no behavior's operation")
+        );
+    }
+
+    #[test]
+    fn hidden_names_behavior_operations() {
+        let resolved = resolve_tool_options(&ToolOptions {
+            hidden: vec![
+                "Payments.recordPaymentEvent".into(),
+                "acme.Rating.clear".into(),
+            ],
+            ..ToolOptions::default()
+        })
+        .unwrap();
+        assert!(resolved.hides("Payments", "recordPaymentEvent"));
+        assert!(resolved.hides("acme.Rating", "clear"));
+        assert!(!resolved.hides("Payments", "openPayment"));
+        let refused = resolve_tool_options(&ToolOptions {
+            hidden: vec!["create".into(), "Payments.".into()],
+            ..ToolOptions::default()
+        });
+        let Err(Error::Usage(message)) = refused else {
+            panic!("refused")
+        };
+        assert!(message.contains("hidden names \"create\", which is no behavior's operation"));
+        assert!(message.contains("hidden names \"Payments.\""));
+    }
+
+    // A value the options cannot hold is refused, not dropped: an
+    // operation it would mark must not fall back to the default unseen.
+    #[test]
+    fn from_json_refuses_what_it_cannot_hold() {
+        let read = ToolOptions::from_json(&serde_json::json!({
+            "invocation": {"Payments.capturePayment": "ask", "delete": "ask"},
+            "hidden": ["Payments.recordPaymentEvent"]
+        }))
+        .unwrap();
+        assert_eq!(
+            read.invocation,
+            vec![
+                ("Payments.capturePayment".to_owned(), "ask".to_owned()),
+                ("delete".to_owned(), "ask".to_owned())
+            ]
+        );
+        assert_eq!(read.hidden, vec!["Payments.recordPaymentEvent".to_owned()]);
+        for (given, says) in [
+            (
+                serde_json::json!({"invocation": {"Payments.capturePayment": true}}),
+                "the invocation policy of Payments.capturePayment is true, not a string",
+            ),
+            (
+                serde_json::json!({"invocation": ["Payments.capturePayment"]}),
+                "invocation is an object of policies by name",
+            ),
+            (
+                serde_json::json!({"hidden": "Payments.recordPaymentEvent"}),
+                "hidden is a list of <Behavior>.<operation> names",
+            ),
+            (
+                serde_json::json!({"hidden": [1]}),
+                "hidden lists 1, not a <Behavior>.<operation> string",
+            ),
+        ] {
+            let Err(Error::Usage(message)) = ToolOptions::from_json(&given) else {
+                panic!("{given} is refused")
+            };
+            assert!(message.contains(says), "{message}");
+        }
     }
 }

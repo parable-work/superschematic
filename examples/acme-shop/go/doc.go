@@ -1,7 +1,9 @@
 // Package shop is the shop's Go module: each API's implementation, a
 // package of its own at the path the naming file's [implementation_paths]
 // go template gives, go/{service} (go/shop-api and go/shop-orders), and the
-// tests, which serve both APIs and call them through their generated SDKs.
+// tests, which serve both APIs and call them through their generated SDKs;
+// and acmepay, a fake payment provider, which shop-orders' checkouts pay
+// through, over shop-db's engine (commerce_test.go; D70).
 //
 // No package here authenticates a caller. shop-db's User table has the
 // core User trait (D50), so both APIs' generated servers authenticate with

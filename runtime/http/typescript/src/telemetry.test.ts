@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { trace } from '@opentelemetry/api';
 import { Hono } from 'hono';
 import { startReceiver, type ReceivedSpan, type Receiver } from './otlp.testing.js';
+import { loggedEndpoint, spanURL } from './telemetry-core.js';
 import { googleAuth, googleAuthHeaders, startTelemetry, type Telemetry } from './telemetry.js';
 
 // The variables a test sets, cleared before each so the developer's shell
@@ -333,5 +334,13 @@ describe("Google's OTLP endpoint (D67, amended)", () => {
       metadata.stop(true);
       collector.stop(true);
     }
+  });
+});
+
+describe('what a span and a log line name of a URL', () => {
+  test('a client span records no userinfo, query or fragment, nor does a log line of the endpoint', () => {
+    expect(spanURL(new URL('https://ada:secret@pricing.example:8443/api/prices/tea?coupon=x#top'))).toBe('https://pricing.example:8443/api/prices/tea');
+    expect(loggedEndpoint('https://key:secret@otel.example/v1/traces?token=t')).toBe('https://otel.example/v1/traces');
+    expect(loggedEndpoint('not a url')).toBe('(no URL)');
   });
 });

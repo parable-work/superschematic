@@ -142,6 +142,12 @@ export interface Service {
 export interface R2Credential {
   /** The Cloudflare account's id. */
   readonly account: string;
+  /**
+   * The bucket's jurisdiction, eu or fedramp, whose buckets R2's S3 API
+   * serves at <account>.<jurisdiction>.r2.cloudflarestorage.com; absent is
+   * the default jurisdiction, at <account>.r2.cloudflarestorage.com.
+   */
+  readonly jurisdiction?: string;
   /** The token's id: R2's S3 access key. */
   readonly accessKeyId: string;
   /** The token's value, a secret: the hex SHA-256 of it is R2's S3 secret key. */
@@ -254,11 +260,14 @@ export function loadDatabase(field: string, env: StackEnv = processEnv()): Datab
 
 /** The shape of a bucket's endpoint: an http or https URL with a host. */
 const ENDPOINT = /^https?:\/\/[^/?#]+/u;
+/** The shape of an R2 jurisdiction: one DNS label of lowercase letters and digits, which the S3 host holds. */
+const JURISDICTION = /^[a-z0-9]+$/u;
 
 /**
  * Reads the bucket field named field: field_NAME, field_ENDPOINT when an
  * emulator serves the bucket (D54), and on Workers field_BINDING and the
- * three field_R2_ variables of its credential (D64). Throws
+ * three field_R2_ variables of its credential, with field_R2_JURISDICTION for a
+ * bucket in a jurisdiction (D64). Throws
  * StackConfigError without a name, for an endpoint that is no http or
  * https URL, for a binding beside an endpoint, for only some of the R2
  * variables, and for an R2 credential without a binding.
@@ -268,6 +277,7 @@ export function loadBucket(field: string, env: StackEnv = processEnv()): BucketC
   const endpoint = getenv(env, `${field}_ENDPOINT`);
   const binding = getenv(env, `${field}_BINDING`);
   const r2 = partition(env, [`${field}_R2_ACCOUNT`, `${field}_R2_ACCESS_KEY_ID`, `${field}_R2_TOKEN`]);
+  const jurisdiction = getenv(env, `${field}_R2_JURISDICTION`);
   const problems: string[] = [];
   if (name === '') problems.push(`required environment variable ${field}_NAME is not set`);
   if (endpoint !== '' && !ENDPOINT.test(endpoint)) {
@@ -285,13 +295,20 @@ export function loadBucket(field: string, env: StackEnv = processEnv()): BucketC
       `environment variables ${r2.set.join(', ')} are set and ${field}_BINDING is not; an R2 credential signs URLs for the bucket a Worker's binding reaches`
     );
   }
+  if (jurisdiction !== '' && r2.set.length === 0) {
+    problems.push(
+      `environment variable ${field}_R2_JURISDICTION is set and ${r2.unset.join(', ')} are not; a jurisdiction names the S3 host of an R2 credential's signed URLs`
+    );
+  } else if (jurisdiction !== '' && !JURISDICTION.test(jurisdiction)) {
+    problems.push(`environment variable ${field}_R2_JURISDICTION is ${quote(jurisdiction)}; want a jurisdiction of lowercase letters and digits, eu or fedramp`);
+  }
   if (problems.length > 0) throw new StackConfigError(problems);
   const [account, accessKeyId, token] = r2.values as [string, string, string];
   return {
     name,
     ...(endpoint !== '' ? { endpoint: endpoint.replace(/\/+$/u, '') } : {}),
     ...(binding !== '' ? { binding } : {}),
-    ...(r2.set.length > 0 ? { r2: { account, accessKeyId, token } } : {}),
+    ...(r2.set.length > 0 ? { r2: { account, accessKeyId, token, ...(jurisdiction !== '' ? { jurisdiction } : {}) } } : {}),
   };
 }
 

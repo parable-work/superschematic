@@ -4,14 +4,15 @@
 #
 # By default the addon is the core's, runtime/engine/rust/addon: the
 # engine's addon (export_engine_napi! from runtime/engine/rust/napi) over
-# the core's behaviors and the work queue's, written into
+# the core's behaviors, the work queue's and the commerce ones (D70),
+# written into
 # runtime/engine/typescript/native/, where @superschematic/engine's loader
 # (src/native/addon.ts) finds it: native/superschematic-engine.<triple>.node,
 # with the index.d.ts the napi CLI writes beside it. Both are gitignored; the
 # package's own declarations of the addon are in src/native/addon.ts, so its
 # build needs neither. An engine registers the core's behaviors when it
-# opens, then the work queue's its options name, so rebuild it after
-# pulling a branch that ports more or changes them.
+# opens, then the work queue's and the commerce ones its options name, so
+# rebuild it after pulling a branch that ports more or changes them.
 #
 # --crate names a project's addon crate instead: the napi/ member of the
 # engine crate the projectengine generator writes (engine/rust/<schema>/napi),
@@ -125,19 +126,31 @@ cd "$PKG"
 if [ ! -x node_modules/.bin/napi ]; then
   bun install --frozen-lockfile >&2
 fi
-# A stale addon of another triple or ABI must not linger beside the new one.
+# The build writes into a staging directory in $out, and each file then
+# moves into $out with a rename, which replaces the addon in one step: a
+# test loading the addon from native/ while this runs finds the old one or
+# the new one, never none (CONTRIBUTING.md, "Shared build outputs").
 mkdir -p "$out"
-rm -f "$out"/superschematic-engine.*.node
+staging="$(mktemp -d "$out/.build.XXXXXX")"
+trap 'rm -rf "$staging"' EXIT
 # The package's napi config names the file (binaryName) and its triple.
 node_modules/.bin/napi build --platform ${profile[@]+"${profile[@]}"} ${features[@]+"${features[@]}"} \
   --manifest-path "$crate/Cargo.toml" --package-json-path "$PKG/package.json" \
-  --output-dir "$out" --no-js ${locked[@]+-- "${locked[@]}"} >&2
+  --output-dir "$staging" --no-js ${locked[@]+-- "${locked[@]}"} >&2
 
 shopt -s nullglob
-built=("$out"/superschematic-engine.*.node)
+built=("$staging"/superschematic-engine.*.node)
 if [ "${#built[@]}" -ne 1 ]; then
-  echo "napi build left ${#built[@]} addons in $out, not one" >&2
+  echo "napi build left ${#built[@]} addons in $staging, not one" >&2
   exit 1
 fi
-echo "built ${built[0]} from $crate" >&2
-echo "${built[0]}"
+addon="$out/$(basename "${built[0]}")"
+for file in "$staging"/* "$staging"/.[!.]*; do
+  mv -f "$file" "$out/"
+done
+# A stale addon of another triple or ABI must not linger beside the new one.
+for stale in "$out"/superschematic-engine.*.node; do
+  [ "$stale" = "$addon" ] || rm -f "$stale"
+done
+echo "built $addon from $crate" >&2
+echo "$addon"

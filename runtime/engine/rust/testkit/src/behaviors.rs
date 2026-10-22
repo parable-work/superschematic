@@ -1805,9 +1805,9 @@ impl Behavior for Dispatch {
 /// A core behavior by name, alone, for a step that registers one again or
 /// an open that names one: the engine refuses it, as the TypeScript engine
 /// refuses a name already registered. A work-queue behavior's name finds
-/// it ([`superschematic_engine_workqueue::behavior`]), as a recording names
-/// the package's behaviors its engine registered. `None` for a name neither
-/// the core's nor the work queue's.
+/// it, and a commerce behavior's ([`package_behavior`]), as a recording
+/// names the package's behaviors its engine registered. `None` for a name
+/// none of theirs.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
         Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,
@@ -1830,8 +1830,17 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Approvals" => set.with(Approvals),
         "Numbering" => set.with(Numbering),
         "Timers" => set.with(Timers),
-        _ => return superschematic_engine_workqueue::behavior(name),
+        _ => return package_behavior(name),
     })
+}
+
+/// A behavior of a package beside the core's by name: the work queue's
+/// ([`superschematic_engine_workqueue::behavior`]), then the commerce
+/// behaviors ([`superschematic_engine_commerce::behavior`]), as a
+/// recording names the package's behaviors its engine registered.
+pub fn package_behavior(name: &str) -> Option<BehaviorSet> {
+    superschematic_engine_workqueue::behavior(name)
+        .or_else(|| superschematic_engine_commerce::behavior(name))
 }
 
 /// The stand-in a scenario lists among its test behaviors (`testBehaviors`)
@@ -1882,6 +1891,6 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Signal") => set.with(crate::workqueue_fixtures::Signal),
         (_, "test.Gate") => set.with(crate::workqueue_fixtures::Gate),
         (_, "test.Lock") => set.with(crate::workqueue_fixtures::Lock),
-        _ => return superschematic_engine_workqueue::behavior(name),
+        _ => return package_behavior(name),
     })
 }

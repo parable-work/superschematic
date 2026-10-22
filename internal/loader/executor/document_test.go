@@ -3,6 +3,7 @@ package executor
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -65,5 +66,33 @@ func TestRunDocument_MissingDefaultExportFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "default-export") {
 		t.Errorf("error does not name the missing default export: %v", err)
+	}
+}
+
+// TestRunDocument_SeesNoCredential: a sidecar document is the project's
+// code, and the harness runs it with no credential the command holds in
+// its environment (D47, amended).
+func TestRunDocument_SeesNoCredential(t *testing.T) {
+	requireBun(t)
+	for _, name := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL"} {
+		t.Setenv(name, "secret")
+	}
+	res, err := RunDocument(filepath.Join("testdata", "services", "fixture-deploy-env"), "deploy.values.ts")
+	if err != nil {
+		t.Fatalf("RunDocument() error: %v", err)
+	}
+	var doc struct {
+		Env []string `json:"env"`
+	}
+	if err := json.Unmarshal(res.Document, &doc); err != nil {
+		t.Fatalf("captured document is not JSON: %v", err)
+	}
+	for _, name := range doc.Env {
+		if strings.HasPrefix(name, "GOOGLE_") || strings.HasPrefix(name, "CLOUDSDK_") || strings.HasPrefix(name, "CLOUDFLARE_") || strings.HasPrefix(name, "PULUMI_") || strings.HasPrefix(name, "ACTIONS_") {
+			t.Errorf("the document reads %s", name)
+		}
+	}
+	if !slices.Contains(doc.Env, "PATH") {
+		t.Errorf("the document's environment %v has no PATH", doc.Env)
 	}
 }

@@ -419,7 +419,62 @@ declaration, else the default: the core's behaviors (`Workflow`,
 `Branches`, `Approvals`, `Numbering`, `Timers`, and `Reactions`, `Constants`, `Variants` and `StateRules`,
 which have no operations),
 which every engine registers, name none, and neither do the work-queue
-behaviors `@superschematic/engine-workqueue` implements.
+behaviors `@superschematic/engine-workqueue` implements or the commerce
+ones (`Stock`, `Calendar`, `Holds`, `Payments`) of
+`@superschematic/engine-commerce`.
+
+A deployment sets a policy the declarations leave out through the
+engine's `tools.invocation`: a built-in tool's by its name (`delete`,
+`defineSchema`), and a behavior operation's by
+`<Behavior>.<operation>` (`Payments.capturePayment`,
+`acme.Rating.rate`), which takes the place of its declaration's. A
+generated server's engine takes them from the engine database's
+`outputs.engine.tools.invocation`:
+
+```yaml
+outputs:
+  engine:
+    tools:
+      invocation:
+        Payments.openPayment: ask
+        Payments.capturePayment: ask
+        Payments.voidPayment: ask
+        Payments.refundPayment: ask
+        Payments.refundFor: ask
+        Stock.receiveStock: ask
+        Stock.adjustStock: ask
+        Stock.countStock: ask
+      hidden:
+        - Stock.listStockMovements
+```
+
+The build refuses a name that is neither an engine tool nor an operation
+a behavior the engine types compose declares, and a value the binary's
+policy does not hold, naming each; the engine document carries the map,
+and an engine refuses at open a behavior operation it does not run. D70
+leaves the commerce operations that move money or stock unmarked in the
+core's declarations, so that they register under any distribution's
+policy, and requires the deployment to mark them: a build whose engine
+types compose `Payments` or `Stock` is refused unless `invocation` names
+a policy for each of `Payments.openPayment`, `capturePayment`,
+`voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`,
+`adjustStock` and `countStock`, naming each it lacks.
+
+`tools.hidden` lists behavior operations the tools leave out: a service
+calls them through the API or in-process, and no agent is offered them.
+A hidden tool reads `hidden: true` with its reason, and a call by its
+MCP handle is a tool the namespace does not have; the operation itself
+still runs through the engine's API. The build refuses a name no
+composed behavior declares, and the engine document adds, wherever
+`Payments` is composed, its service operations: `listPaymentActions` and
+`recordPaymentEvent`, which a provider's adapter calls, and
+`settleRefundFor`, which a refunded instance calls on its refund. An
+engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
+is given. Three generated servers, in Go, Rust and TypeScript, list the
+same tools with the same policies over one commerce database
+(`TestCommerceServersAnswerOneScriptAlike`), and
+[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
+says why each of these operations asks.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under

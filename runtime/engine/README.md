@@ -16,15 +16,18 @@ documents, and the HTTP API as one request and one response any host
 mounts (`engine::api`), with the axum router a Rust server mounts it with
 (the `axum` feature); `superschematic-engine-behaviors` (`rust/behaviors`)
 the core's fifteen behaviors; the work queue's seven are
-`superschematic-engine-workqueue` (`runtime/engine-workqueue/rust`);
+`superschematic-engine-workqueue` (`runtime/engine-workqueue/rust`), and
+the commerce behaviors (D70) and their supply contract
+`superschematic-engine-commerce` (`runtime/engine-commerce/rust`);
 `superschematic-engine-testkit` (`rust/testkit`) replays the scenario and
 HTTP corpora (`testdata/`) on both databases. Each host language reaches
 it through a binding:
 
 - TypeScript: `@superschematic/engine` (`typescript/`), over the engine's
   Node-API addon (`rust/napi`, `export_engine_napi!`; `rust/addon`, the
-  core's addon, over the core's behaviors and the work queue's), which a
-  release ships prebuilt as `@superschematic/engine-<target>`. `openEngine`
+  core's addon, over the core's behaviors, the work queue's and the
+  commerce ones), which a release ships prebuilt as
+  `@superschematic/engine-<target>`. `openEngine`
   opens it on a SQLite file with every call synchronous; `openEngineAsync`
   with every call a promise, for a server on Postgres. `engineApp` and
   `engineMcp` (`./http`, `./mcp`) mount its own routes on Hono, and
@@ -1585,7 +1588,8 @@ lists the behaviors it declares; the core's lists the core's own
 `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`,
 `Timers`, `StateRules`, `Numbering` and `Approvals`, and the work-queue
 package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`,
-`Budget` and `Retries`), so its loader refuses any other.
+`Budget` and `Retries`, and the commerce package's `Stock`, `Calendar`,
+`Holds` and `Payments`, D70), so its loader refuses any other.
 
 ### The implementation
 
@@ -2534,7 +2538,12 @@ no extension linked. The core declares the work-queue behaviors too,
 `Retries`, which `runtime/engine-workqueue/rust` implements, in every
 binding (`runtime/engine-workqueue/README.md`): the engine refuses a
 schema that composes one until a deployment names it in `behaviors`
-(`workQueueBehaviors`, all seven). Each implementation embeds the copy of
+(`workQueueBehaviors`, all seven). The commerce behaviors, `Stock`,
+`Calendar`, `Holds` and `Payments` (D70), are the same:
+`runtime/engine-commerce/rust` implements them and the core's addon
+carries them (`runtime/engine-commerce/README.md`), a Go or Rust server
+links them through the project's engine crate, and a deployment names
+them in `behaviors` (`commerceBehaviors`). Each implementation embeds the copy of
 its declaration in its crate's `declarations/`, which the core binary
 writes (`make behaviors`) and CI checks (`make behaviors-check`). They
 reach the engine only through the plug-in interface above. A deployment
@@ -4885,7 +4894,7 @@ openEngine({
   path, policy,
   tools: {
     invocationPolicy: { key: 'confirm', values: ['never', 'always'], default: 'never' },
-    invocation: { delete: 'always', defineSchema: 'always' },
+    invocation: { delete: 'always', defineSchema: 'always', 'Payments.capturePayment': 'always' },
     keys: { scalar: 'x-acme-scalar', guidance: 'acme/operation-guidance', parameters: [{ key: 'x-acme-arguments', value: 1 }] },
   },
 });
@@ -4897,10 +4906,27 @@ openEngine({
   `search` and the namespace tools, `listNamespaces`, `createNamespace`,
   `archiveNamespace` and `unarchiveNamespace`) takes `invocation`'s value
   for it, else the default; a
-  behavior operation takes its declaration's `invocationPolicy`,
-  else the default. Registration refuses a declaration whose value is not
-  one of the values, as the compiler's `Finalize` does. The core's
-  behaviors name none, so they register under any policy.
+  behavior operation takes `invocation`'s value for
+  `<Behavior>.<operation>` (`Payments.capturePayment`, `acme.Rating.rate`),
+  else its declaration's `invocationPolicy`, else the default, in its
+  tool, the describe document and the behavior's own document.
+  Registration refuses a declaration whose value is not one of the
+  values, as the compiler's `Finalize` does. The core's behaviors name
+  none, so they register under any policy; a deployment marks the ones
+  it wants confirmed, such as the commerce operations that move money or
+  stock (D70), through `invocation`. A generated server takes it from
+  the engine database's `outputs.engine.tools.invocation`, which the
+  build requires to name each commerce operation that moves money or
+  stock wherever `Payments` or `Stock` is composed (D70, amended).
+- `hidden` lists behavior operations, by `<Behavior>.<operation>`, that
+  the tools leave out: a service calls them through the API or
+  in-process, and no agent is offered them. Such a tool reads `hidden:
+  true` with its reason, and a call by its MCP handle is
+  `UnknownToolError`; the operation still runs through `instances`. A
+  generated server's engine document hides Payments' service operations
+  (`listPaymentActions`, `recordPaymentEvent`, `settleRefundFor`) beside
+  the database's `outputs.engine.tools.hidden`; an engine opened by hand
+  hides only what it is given.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.
@@ -4909,8 +4935,15 @@ openEngine({
 registry refuses: a key `@mcp` already uses or not a letter followed by
 letters, digits or underscores, no values, a value that is not lowercase
 letters, digits, `_` and `-` starting with a letter, a value listed twice,
-a default or an `invocation` value outside the values, and a parameter
-key that is empty, repeated, the scalar key or one the core writes.
+a default or an `invocation` value outside the values, an `invocation`
+value that is not a string or an `invocation` that is not an object, an
+`invocation` name that is neither a built-in tool nor
+`<Behavior>.<operation>`, a `hidden` that is not a list of
+`<Behavior>.<operation>` strings, and a parameter key that is empty,
+repeated, the scalar key or one the core writes. Once its behaviors are
+registered it refuses, as a usage error, an `invocation` or `hidden`
+name for a behavior it does not run or an operation the behavior does
+not declare.
 
 ## MCP
 

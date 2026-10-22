@@ -239,4 +239,4 @@ export type {
   TypeDisplay,
 } from './types/tools.js';
 export { BUILTIN_TOOLS, DEFAULT_INVOCATION_POLICY, DEFAULT_TOOL_KEYS, resolveToolOptions } from './native/tool-options.js';
-export type { BuiltinTool, InvocationPolicy, ResolvedToolOptions, ToolKeys, ToolOptions } from './native/tool-options.js';
+export type { BehaviorOperation, BuiltinTool, InvocationPolicy, ResolvedToolOptions, ToolKeys, ToolOptions } from './native/tool-options.js';

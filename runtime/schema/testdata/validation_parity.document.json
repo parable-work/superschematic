@@ -151,6 +151,21 @@
         "sql": "BIGINT"
       }
     },
+    "Finance_Currency": {
+      "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+      "maxLength": 3,
+      "minLength": 3,
+      "pattern": "^[A-Z]{3}$",
+      "type": "string",
+      "x-example": "USD",
+      "x-hasCustomValidate": true,
+      "x-scalar": "Finance_Currency",
+      "x-typeMapping": {
+        "go": "FinanceCurrency",
+        "json_schema": "string",
+        "sql": "VARCHAR(3)"
+      }
+    },
     "Finance_Money": {
       "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
       "maximum": 9007199254740991,
@@ -699,6 +714,15 @@
         "url": {
           "$ref": "#/definitions/scalars/Network_Url"
         },
+        "wait": {
+          "$ref": "#/definitions/scalars/Temporal_Duration"
+        },
+        "waits": {
+          "items": {
+            "$ref": "#/definitions/scalars/Temporal_Duration"
+          },
+          "type": "array"
+        },
         "when": {
           "$ref": "#/definitions/scalars/Temporal_DateTime"
         },
@@ -937,7 +961,6 @@
       "maxLength": 32,
       "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
       "type": "string",
-      "x-example": "30s",
       "x-hasCustomNormalize": true,
       "x-hasCustomParse": true,
       "x-hasCustomValidate": true,
@@ -945,7 +968,10 @@
       "x-typeMapping": {
         "go": "TemporalDuration",
         "json_schema": "string",
-        "sql": "INTERVAL"
+        "python": "str",
+        "rust": "String",
+        "sql": "INTERVAL",
+        "typescript": "string"
       }
     },
     "Temporal_Hours": {

@@ -209,6 +209,18 @@ const ArtifactsDir = "artifacts"
 // (D64).
 const BundleDigestToken = "{bundle-digest}"
 
+// BundleDigestVariable is the variable a job whose artifact is a bundle
+// reads the hex digest of its own bundle from, where its platform puts
+// BundleDigestToken, which a deploy pins; and JobRunClass is the class the
+// job's bundle exports, through which the platform's job runner runs the
+// job once and checks it runs the bundle the deploy manifest records: a
+// Workflow's on Cloudflare (D64, amended). The server generator writes both
+// into a job's scheduled.ts, and the platform names both.
+const (
+	BundleDigestVariable = "SUPERSCHEMATIC_BUNDLE"
+	JobRunClass          = "JobRun"
+)
+
 // BundleFileTokenPrefix begins a BundleFileToken.
 const BundleFileTokenPrefix = "{bundle-sha256:"
 
