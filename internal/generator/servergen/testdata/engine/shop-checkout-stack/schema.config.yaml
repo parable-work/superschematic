@@ -1,0 +1,3 @@
+name: shop-checkout-stack
+kind: Stack
+outputs: {}

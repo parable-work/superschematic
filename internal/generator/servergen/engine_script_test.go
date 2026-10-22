@@ -958,6 +958,9 @@ func member(v any, path ...string) any {
 //     a session's expiresAt to the millisecond (TypeScript), the
 //     microsecond (Rust) and the nanosecond with its trailing zeros dropped
 //     (Go), and D50 names a date-time and no precision.
+//   - A Numbering record's label and seq are {{label:N}} and {{seq:N}},
+//     numbered by label: the counts are the namespace's, which the runs
+//     share, as cursors are.
 //   - An MCP answer's X-Request-Id is left out (hostHeaders says why).
 //
 // Request ids are not symbols: the script sends its own, script-N, as
@@ -1039,6 +1042,13 @@ func (s *scriptSymbols) walk(v any, path []string) any {
 	}
 	switch v := v.(type) {
 	case map[string]any:
+		// A Numbering record's seq is the number its label prints, so
+		// both are written as the label's symbol, numbered alike.
+		if label, ok := v["label"].(string); ok && key == "Numbering" {
+			symbol := s.symbol("label", label)
+			v["label"], v["seq"] = symbol, strings.Replace(symbol, "label", "seq", 1)
+			return v
+		}
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
