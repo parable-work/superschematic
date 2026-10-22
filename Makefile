@@ -113,13 +113,11 @@ go-goldens: schema-file-types
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the
-# graph descriptor's rule. The agent skill's scalar, decorator and behavior
-# catalogs, and the docs' scalar page, are written from the same package,
-# the registry and the authoring packages. CI fails when a committed
+# graph descriptor's rule, and the docs' scalar page with the table
+# `superschematic catalog scalars` prints. CI fails when a committed
 # catalog differs.
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
-	go run ./internal/tools/agentcatalog -check
 
 # The schema-file JSON Schema and TypeScript types in ir/typescript, and the
 # engine's Rust schema reader's copy of the JSON Schema, are written from

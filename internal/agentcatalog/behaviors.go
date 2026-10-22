@@ -1,4 +1,4 @@
-package main
+package agentcatalog
 
 import (
 	"bytes"
@@ -34,7 +34,6 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	}
 
 	var b bytes.Buffer
-	b.WriteString(generatedHeader("<!--", " -->"))
 	b.WriteString("# Engine behaviors\n\n")
 	b.WriteString("A behavior adds fields, operations, checks and storage to a type that an\n")
 	b.WriteString("engine runs (`@superschematic/engine`, in TypeScript or Rust): an engine\n")
@@ -46,13 +45,10 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	b.WriteString("named by its qualified name, `Workflow.status`.\n\n")
 	b.WriteString("Every type an engine runs also has the create, get, list, update and\n")
 	b.WriteString("delete operations, which the lists below leave out. An extension's\n")
-	b.WriteString("behaviors are named `<extension>.<Name>`; `superschematic behaviors`\n")
-	b.WriteString("prints the declaration of every behavior the binary you run knows.\n")
+	b.WriteString("behaviors are named `<extension>.<Name>`, and their configs are given as\n")
+	b.WriteString("the JSON Schema the declaration checks them against.\n")
 
 	for _, beh := range reg.Behaviors() {
-		if beh.Extension != "" {
-			continue
-		}
 		fmt.Fprintf(&b, "\n## `%s`\n\n", beh.Name)
 		if beh.Description != "" {
 			b.WriteString(cell(beh.Description) + "\n\n")
@@ -60,6 +56,16 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 		switch config, ok := configTypes[beh.Name]; {
 		case len(beh.ConfigSchema) == 0:
 			b.WriteString("- Takes no config.\n")
+		case beh.Extension != "":
+			schema, err := compactJSON(beh.ConfigSchema)
+			if err != nil {
+				return nil, fmt.Errorf("behavior %s: %w", beh.Name, err)
+			}
+			required := "optional"
+			if beh.ConfigRequired() {
+				required = "required"
+			}
+			fmt.Fprintf(&b, "- Registered by the `%s` extension. Config, %s: %s\n", beh.Extension, required, schema)
 		case !ok:
 			return nil, fmt.Errorf("behavior %s takes a config, but %s names no type for it", beh.Name, behaviorConfigs)
 		case beh.ConfigRequired():
