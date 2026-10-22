@@ -221,8 +221,9 @@ jobs:
         # platform, built with the dist profile (fat LTO, one codegen unit,
         # symbols stripped) and loaded before it is packed: the core's, the
         # facade's contract, no test bridge, an engine on SQLite with the
-        # core's behaviors and the work queue's. On Linux it logs the newest
-        # glibc symbol version it needs, the oldest glibc it loads on.
+        # core's behaviors, the work queue's and the commerce ones (D70). On
+        # Linux it logs the newest glibc symbol version it needs, the oldest
+        # glibc it loads on.
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
           NAME: ${{ matrix.name }}

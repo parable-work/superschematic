@@ -589,7 +589,43 @@ impl Engine {
             streams: crate::api::stream::OpenStreams::default(),
         };
         engine.behaviors().register_set(options.behaviors)?;
+        engine.check_operation_invocations()?;
         Ok(engine)
+    }
+
+    /// Refuses tool options that set the policy of a behavior operation
+    /// this engine does not run (D70): a behavior it has no registration
+    /// of, or an operation its declaration does not declare.
+    fn check_operation_invocations(&self) -> Result<()> {
+        let registry = self.catalog.registry();
+        let mut problems = Vec::new();
+        for (behavior, operation, _) in &self.tools.options.operations {
+            match registry.lookup(behavior) {
+                None => problems.push(format!(
+                    "invocation names {behavior}.{operation}, and this engine runs no behavior {behavior}"
+                )),
+                Some(registered)
+                    if !registered
+                        .declaration
+                        .operations
+                        .iter()
+                        .any(|declared| declared.name == *operation) =>
+                {
+                    problems.push(format!(
+                        "invocation names {behavior}.{operation}, which is no operation of {behavior}"
+                    ))
+                }
+                Some(_) => {}
+            }
+        }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::usage(format!(
+                "engine tool options: {}",
+                problems.join("; ")
+            )))
+        }
     }
 
     /// The engine in an `Arc`, as a host keeps it: what the runner's

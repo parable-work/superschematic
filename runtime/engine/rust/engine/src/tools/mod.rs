@@ -321,10 +321,7 @@ impl<'e> Tools<'e> {
             )
             .into());
         };
-        Ok(behavior_document(
-            &behavior.declaration,
-            self.invocation_policy(),
-        ))
+        Ok(behavior_document(&behavior.declaration, self.options()))
     }
 
     /// The describe document of a schema's live version: it asks the policy
@@ -1164,10 +1161,13 @@ impl<'e> Tools<'e> {
                         )
                     });
                 tool.writes = operation.writes;
-                tool.policy = operation
-                    .invocation_policy
-                    .clone()
-                    .unwrap_or_else(|| options.invocation_policy.default.clone());
+                tool.policy = options
+                    .operation_invocation(
+                        &behavior.name,
+                        &operation.name,
+                        operation.invocation_policy.as_deref(),
+                    )
+                    .to_owned();
                 tool.http_method = "POST";
                 tool.http_path = format!(
                     "{}/operations/{}",
@@ -1987,8 +1987,10 @@ fn behavior_summary(declaration: &BehaviorDeclaration) -> Value {
 
 /// A behavior's document: its declaration with every list present and
 /// each operation's scope, whether it writes and its invocation policy
-/// under the policy's key.
-fn behavior_document(declaration: &BehaviorDeclaration, policy: &InvocationPolicy) -> Value {
+/// under the policy's key: the tool options' for it, else its
+/// declaration's, else the default.
+fn behavior_document(declaration: &BehaviorDeclaration, options: &ResolvedToolOptions) -> Value {
+    let policy = &options.invocation_policy;
     let mut out = Map::new();
     out.insert("name".into(), Value::from(declaration.name.as_str()));
     if let Some(description) = declaration.description.as_deref().filter(|d| !d.is_empty()) {
@@ -2024,12 +2026,11 @@ fn behavior_document(declaration: &BehaviorDeclaration, policy: &InvocationPolic
                     entry.insert("writes".into(), Value::Bool(operation.writes));
                     entry.insert(
                         policy.key.clone(),
-                        Value::from(
-                            operation
-                                .invocation_policy
-                                .clone()
-                                .unwrap_or_else(|| policy.default.clone()),
-                        ),
+                        Value::from(options.operation_invocation(
+                            &declaration.name,
+                            &operation.name,
+                            operation.invocation_policy.as_deref(),
+                        )),
                     );
                     entry.insert(
                         "paramsSchema".into(),

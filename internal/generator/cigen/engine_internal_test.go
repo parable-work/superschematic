@@ -10,7 +10,8 @@ import (
 )
 
 // TestProjectEngine: an engine database whose types compose the work
-// queue's behavior, or one the registry does not hold, needs the project's
+// queue's behavior, a commerce behavior (D70), or one the registry does
+// not hold, needs the project's
 // engine archive; one whose types compose the core's alone, and one the
 // build cannot load, does not (D58).
 func TestProjectEngine(t *testing.T) {
@@ -18,6 +19,7 @@ func TestProjectEngine(t *testing.T) {
 	schemas := map[string]*ir.Schema{
 		"core-db":  {Name: "core-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{"Ticket": {Name: "Ticket", Behaviors: []ir.BehaviorRef{{Name: "Workflow"}, {Name: "Timers"}}}}},
 		"queue-db": {Name: "queue-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{"Job": {Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Workflow"}, {Name: "Lease"}}}}},
+		"shop-db":  {Name: "shop-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{"Checkout": {Name: "Checkout", Behaviors: []ir.BehaviorRef{{Name: "Workflow"}, {Name: "Holds"}, {Name: "Payments"}}}}},
 		"ext-db":   {Name: "ext-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{"Product": {Name: "Product", Behaviors: []ir.BehaviorRef{{Name: "acme.Rating"}}}}},
 	}
 	c := registry.GenerateContext{Registry: reg, LoadDependency: func(name string) (*ir.Schema, error) {
@@ -26,7 +28,7 @@ func TestProjectEngine(t *testing.T) {
 		}
 		return nil, errors.New("no such service")
 	}}
-	for db, want := range map[string]bool{"core-db": false, "queue-db": true, "ext-db": true, "missing-db": false} {
+	for db, want := range map[string]bool{"core-db": false, "queue-db": true, "shop-db": true, "ext-db": true, "missing-db": false} {
 		if got := projectEngine(c, db); got != want {
 			t.Errorf("projectEngine(%s) = %t, want %t", db, got, want)
 		}

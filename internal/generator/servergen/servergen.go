@@ -963,7 +963,7 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		// The release's archives hold the core's engine archive beside
 		// superscalar's and the version graph's (D58), not a project's.
 		if p := in.EngineProject; p != nil {
-			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds and no release ships (D58, amended), and the naming file's [paths] scalar_go is unset; set scalar_go, engine_go and the engine crates' keys (engine_rust, engine_behaviors_rust, engine_workqueue_rust, engine_abi_rust) to a checkout's runtimes", p.Database, p.Dir), nil
+			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds and no release ships (D58, amended), and the naming file's [paths] scalar_go is unset; set scalar_go, engine_go and the engine crates' keys (engine_rust, engine_behaviors_rust, engine_workqueue_rust, engine_commerce_rust, engine_abi_rust) to a checkout's runtimes", p.Database, p.Dir), nil
 		}
 		d.Archives = archives
 		if in.VersionGraphGo != "" {

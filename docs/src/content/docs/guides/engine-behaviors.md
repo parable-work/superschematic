@@ -447,8 +447,8 @@ The Rust engine (D58) runs an extension's behavior from a Rust crate
 that implements the engine's `Behavior` trait, which the extension's
 `BehaviorSpec` names (`Rust`: the crate, its path in the project and
 the expression that registers it). When a DB or General schema's types
-compose such a behavior, or one of the work queue's, which the core's
-engine archive leaves out, the `projectengine` generator writes the
+compose such a behavior, or one of the work queue's or the commerce
+ones, which the core's engine archive leaves out, the `projectengine` generator writes the
 project's engine crate, `engine/rust/<service>`, named
 `<rust_crate_prefix><service>-engine`:
 
@@ -460,8 +460,9 @@ pub fn behaviors() -> BehaviorSet {
 ```
 
 It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
-`engine_behaviors_rust` and, when a type composes a work-queue behavior,
-`engine_workqueue_rust`, and on each extension's crate by its path. A
+`engine_behaviors_rust` and, when a type composes a work-queue behavior
+or a commerce one, `engine_workqueue_rust` or `engine_commerce_rust`,
+and on each extension's crate by its path. A
 Rust host links the crate and opens the engine with `behaviors()` and
 `tools()`, the binary's invocation policy and vendor keys (acme's crate
 for `shop-ratings` is `acme-shop-ratings-engine`):

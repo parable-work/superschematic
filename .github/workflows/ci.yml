@@ -1204,9 +1204,10 @@ jobs:
     # Generated servers mount the engine (D58), end to end, in the full tier
     # alone: servergen's engine entrypoint tests build desk-db's Go, Rust and
     # TypeScript servers, their jobs and runners, queue-db's server over
-    # the project's engine archive and desk-ts-api's over the project's
-    # engine addon (internal/generator/servergen/testdata/engine), and run
-    # each offline and on the Postgres below; and
+    # the project's engine archive, desk-ts-api's over the project's
+    # engine addon, and shop-commerce-db's servers in each language over
+    # the commerce crate (D70) (internal/generator/servergen/testdata/engine),
+    # and run each offline and on the Postgres below; and
     # TestEngineServersAnswerOneScriptAlike builds desk-trio-stack's three
     # servers over one engine database, runs one script against each and
     # requires their transcripts to be identical, each step the HTTP corpus
@@ -1308,7 +1309,7 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/engine-archive.sh --print)"
           go test -count=1 -timeout 80m -v \
-            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$' \
+            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript)$' \
             ./internal/generator/servergen/
 
   versiongraph:

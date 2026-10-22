@@ -517,6 +517,16 @@ Directory of the work queue's behaviors for the Rust engine,
 depends on when a type composes one of them. Unset, it names the crate's
 version instead of a path.
 
+### `paths.engine_commerce_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine-commerce/rust`.
+
+Directory of the commerce behaviors for the Rust engine, `Stock`,
+`Calendar`, `Holds` and `Payments`, `superschematic-engine-commerce`
+(D70), which the project's engine crate depends on when a type composes
+one of them. Unset, it names the crate's version instead of a path.
+
 ### `paths.engine_abi_rust`
 
 Default: unset. This repository's own file sets

@@ -845,12 +845,13 @@ the core's `projectengine` generator (`internal/generator/projectengine`)
 writes the project's engine crate, `engine/rust/<schema>`, named
 `<rust_crate_prefix><schema>-engine`. It depends on
 `superschematic-engine`, `superschematic-engine-behaviors` and, when the
-schema composes one of the work queue's behaviors,
-`superschematic-engine-workqueue`, by path at the `[paths]` keys
-`engine_rust`, `engine_behaviors_rust` and `engine_workqueue_rust` (by
-version when unset), and on each extension's crate by its path in the
-project. Its `behaviors()` registers the core's behaviors, the work
-queue's and each composed extension behavior, by `Register`; `tools()` is
+schema composes one of their behaviors, `superschematic-engine-workqueue`
+and `superschematic-engine-commerce` (D70), by path at the `[paths]` keys
+`engine_rust`, `engine_behaviors_rust`, `engine_workqueue_rust` and
+`engine_commerce_rust` (by version when unset), and on each extension's
+crate by its path in the project. Its `behaviors()` registers the core's
+behaviors, the work queue's, the commerce ones and each composed
+extension behavior, by `Register`; `tools()` is
 the D11 options the binary registers, under which an operation that names
 a value of the extension's invocation policy registers; and `COMPOSED`
 lists the behaviors the schema's types compose, which its test finds

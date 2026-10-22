@@ -11,7 +11,12 @@
 //!   declaration's `invocationPolicy`, which must be one of the values, or
 //!   the default.
 //! - `invocation`: the policy of the operations every schema has and of the
-//!   engine's own tools, by operation name; the default when absent.
+//!   engine's own tools, by operation name, and of a behavior's operation,
+//!   by `<Behavior>.<operation>` (`Payments.capturePayment`,
+//!   `acme.Rating.rate`), which takes the place of its declaration's
+//!   `invocationPolicy` (D70); the default when absent. A deployment marks
+//!   an operation whose declaration names no policy, as the core's leave
+//!   money-moving ones, through it.
 //! - `keys`: the vendor keys of the tool documents (`apigen.ToolKeys`,
 //!   section 3.14): the scalar key, the `_meta` key of a tool's guidance,
 //!   and keys written at the root of every argument schema.
@@ -107,7 +112,8 @@ pub const BUILTIN_TOOLS: [&str; 17] = [
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolOptions {
     pub invocation_policy: Option<InvocationPolicy>,
-    /// The policy of a built-in operation or engine tool, by its name.
+    /// The policy of a built-in operation or engine tool, by its name, or
+    /// of a behavior's operation, by `<Behavior>.<operation>`.
     pub invocation: Vec<(String, String)>,
     pub scalar_key: Option<String>,
     pub guidance_key: Option<String>,
@@ -195,6 +201,9 @@ pub(crate) struct ResolvedToolOptions {
     pub invocation_policy: InvocationPolicy,
     /// Each built-in tool's policy, in [`BUILTIN_TOOLS`]' order.
     pub invocation: Vec<(String, String)>,
+    /// The behavior operations the options set a policy for, each as
+    /// (behavior, operation, policy), in the order given.
+    pub operations: Vec<(String, String, String)>,
     pub keys: ToolKeys,
 }
 
@@ -208,6 +217,37 @@ impl ResolvedToolOptions {
                 value.as_str()
             })
     }
+
+    /// The policy of a behavior's operation: the options' for it, else
+    /// its declaration's, else the default.
+    pub fn operation_invocation<'a>(
+        &'a self,
+        behavior: &str,
+        operation: &str,
+        declared: Option<&'a str>,
+    ) -> &'a str {
+        self.operations
+            .iter()
+            .find(|(b, o, _)| b == behavior && o == operation)
+            .map(|(_, _, value)| value.as_str())
+            .or(declared)
+            .unwrap_or(self.invocation_policy.default.as_str())
+    }
+}
+
+/// A behavior operation's key in `invocation`, `<Behavior>.<operation>`,
+/// split at its last dot: the behavior's registered name, bare or
+/// qualified, and an operation name. `None` for a key with no dot, a
+/// built-in tool's.
+pub(crate) fn behavior_operation(key: &str) -> Option<(&str, &str)> {
+    key.rsplit_once('.')
+}
+
+// ^[A-Za-z][A-Za-z0-9_]*$, an operation's name.
+fn is_operation_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // The keys the mcp record and @mcp already use (ir.ValidateMCPInvocationKey).
@@ -275,10 +315,28 @@ pub(crate) fn resolve_tool_options(options: &ToolOptions) -> Result<ResolvedTool
             policy.values.join(", ")
         ));
     }
+    let mut operations = Vec::new();
     for (name, value) in &options.invocation {
-        if !BUILTIN_TOOLS.contains(&name.as_str()) {
+        if let Some((behavior, operation)) = behavior_operation(name) {
+            if !crate::behaviors::declaration::is_behavior_name(behavior)
+                || !is_operation_name(operation)
+            {
+                problems.push(format!(
+                    "invocation names {}, which is no behavior's operation (<Behavior>.<operation>)",
+                    json::quote(name)
+                ));
+            } else if !policy.values.contains(value) {
+                problems.push(format!(
+                    "the invocation policy of {name}, {}, is not one of {}",
+                    json::quote(value),
+                    policy.values.join(", ")
+                ));
+            } else {
+                operations.push((behavior.to_owned(), operation.to_owned(), value.clone()));
+            }
+        } else if !BUILTIN_TOOLS.contains(&name.as_str()) {
             problems.push(format!(
-                "invocation names {name}, which is not one of {}",
+                "invocation names {name}, which is not one of {}, nor a behavior's operation (<Behavior>.<operation>)",
                 BUILTIN_TOOLS.join(", ")
             ));
         } else if !policy.values.contains(value) {
@@ -340,6 +398,7 @@ pub(crate) fn resolve_tool_options(options: &ToolOptions) -> Result<ResolvedTool
     Ok(ResolvedToolOptions {
         invocation_policy: policy,
         invocation,
+        operations,
         keys,
     })
 }
@@ -376,5 +435,62 @@ mod tests {
             "engine tool options: invocation policy key \"handle\" is a key @mcp already uses; "
         ));
         assert!(message.contains("invocation names publish"));
+    }
+
+    #[test]
+    fn a_behavior_operation_takes_the_policy_the_options_give_it() {
+        let resolved = resolve_tool_options(&ToolOptions {
+            invocation: vec![
+                ("Payments.capturePayment".into(), "ask".into()),
+                ("acme.Rating.rate".into(), "ask".into()),
+                ("delete".into(), "ask".into()),
+            ],
+            ..ToolOptions::default()
+        })
+        .unwrap();
+        assert_eq!(
+            resolved.operations,
+            vec![
+                ("Payments".into(), "capturePayment".into(), "ask".into()),
+                ("acme.Rating".into(), "rate".into(), "ask".into()),
+            ]
+        );
+        assert_eq!(resolved.invocation_of("delete"), "ask");
+        assert_eq!(
+            resolved.operation_invocation("Payments", "capturePayment", None),
+            "ask"
+        );
+        assert_eq!(
+            resolved.operation_invocation("Payments", "openPayment", None),
+            "auto"
+        );
+        assert_eq!(
+            resolved.operation_invocation("acme.Rating", "rate", Some("auto")),
+            "ask"
+        );
+        assert_eq!(
+            resolved.operation_invocation("acme.Rating", "clear", Some("ask")),
+            "ask"
+        );
+
+        let refused = resolve_tool_options(&ToolOptions {
+            invocation: vec![
+                ("Payments.refundPayment".into(), "maybe".into()),
+                (".capturePayment".into(), "ask".into()),
+                ("Payments.".into(), "ask".into()),
+            ],
+            ..ToolOptions::default()
+        });
+        let Err(Error::Usage(message)) = refused else {
+            panic!("refused")
+        };
+        assert!(message.contains(
+            "the invocation policy of Payments.refundPayment, \"maybe\", is not one of auto, ask"
+        ));
+        assert!(message
+            .contains("invocation names \".capturePayment\", which is no behavior's operation"));
+        assert!(
+            message.contains("invocation names \"Payments.\", which is no behavior's operation")
+        );
     }
 }

@@ -249,6 +249,54 @@ func TestBuildCarriesTheToolOptionsAndTheBehaviors(t *testing.T) {
 	}
 }
 
+// outputs.engine.tools.invocation reaches the document's tools when it
+// names engine tools and operations of the behaviors the engine types
+// compose, each with a value of the binary's policy (D70); Build refuses
+// one that does not, naming every problem.
+func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
+	s := desk()
+	s.Types["Account"].Behaviors = append(s.Types["Account"].Behaviors,
+		ir.BehaviorRef{Name: "Payments", Config: json.RawMessage(`{"amount":{"field":"due"},"currency":"GBP","record":{"permission":"payments.record"}}`)},
+		ir.BehaviorRef{Name: "Stock", Config: json.RawMessage(`{"permission":"stock.manage"}`)})
+	invocation := map[string]string{"Payments.capturePayment": "ask", "Payments.refundPayment": "ask", "Stock.adjustStock": "ask", "delete": "ask"}
+	doc := build(t, s, enginedoc.Options{Invocation: invocation})
+	if !reflect.DeepEqual(doc.Tools.Invocation, invocation) {
+		t.Errorf("Tools.Invocation = %v, want %v", doc.Tools.Invocation, invocation)
+	}
+	data, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"invocation": {
+      "Payments.capturePayment": "ask",`; !strings.Contains(string(data), want) {
+		t.Errorf("the document's tools lack the invocation:\n%s", data)
+	}
+
+	_, err = enginedoc.Build(s, enginedoc.Options{SchemaName: "desk-db", Registry: coreRegistry(t), MetaSchema: stubMetaSchema, Invocation: map[string]string{
+		"Payments.capturePay":  "ask",
+		"Holds.retakeHolds":    "ask",
+		"Payments.voidPayment": "confirm",
+		"publish":              "ask",
+		"acme.Rating.rate":     "ask",
+		"Comments.comment":     "ask",
+	}})
+	for _, want := range []string{
+		"outputs.engine.tools.invocation: ",
+		"Holds.retakeHolds names behavior Holds, which no engine type composes",
+		"Payments.capturePay names no operation of Payments (openPayment, recordPaymentEvent, capturePayment, voidPayment, refundPayment, listPaymentActions, refundFor, settleRefundFor)",
+		`the policy of Payments.voidPayment, "confirm", is not one of invocationPolicy's values (auto, ask)`,
+		"acme.Rating.rate names behavior acme.Rating, which no engine type composes",
+		"publish is neither an engine tool (create, get, list",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Build = %v, want it refused saying %q", err, want)
+		}
+	}
+	if err != nil && strings.Contains(err.Error(), "Comments.comment") {
+		t.Errorf("Build refused Comments.comment, an operation of a composed behavior: %v", err)
+	}
+}
+
 // Without a meta-schema of its own, Build takes the registry's: what
 // superschematic json-schema prints.
 func TestBuildReadsTheRegistrysMetaSchema(t *testing.T) {

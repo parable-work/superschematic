@@ -824,8 +824,9 @@ registry.BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Registe
 so a build of a schema of this project whose types compose acme.Rating
 writes the project's engine crate, `dist/engine/rust/<service>`, named
 `acme-<service>-engine`: it depends on the engine's crates at the
-naming file's `engine_rust`, `engine_behaviors_rust` and
-`engine_workqueue_rust`, and on `acme-behaviors`, and its `behaviors()`
+naming file's `engine_rust`, `engine_behaviors_rust`,
+`engine_workqueue_rust` and `engine_commerce_rust` (whichever the schema
+needs), and on `acme-behaviors`, and its `behaviors()`
 is the core's behaviors and `acme_behaviors::Rating`, under acme's tool
 options (`tools()`): the library a Rust server links. Its workspace's
 member `ffi/`, `acme-<service>-engine-ffi`, is the engine's C ABI over

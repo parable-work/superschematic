@@ -31,7 +31,9 @@ const projectengineGenerator = "projectengine"
 // checks when a server opens it; retention is the event log's, the
 // engine's RetentionOptions with its ranges, an age, a count or both,
 // checked here so that no entrypoint opens an engine that refuses it
-// (D58).
+// (D58); tools.invocation is the MCP invocation policy of a built-in tool
+// or a behavior operation by name, which enginedoc checks against the
+// binary's policy and the behaviors the engine types compose (D70).
 var engineOutputSchema = []byte(`{
 	"type": "object",
 	"additionalProperties": false,
@@ -47,6 +49,17 @@ var engineOutputSchema = []byte(`{
 				"properties": {"rules": {"type": "array", "items": {"type": "object"}}}
 			}
 		]},
+		"tools": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"invocation": {
+					"type": "object",
+					"propertyNames": {"pattern": "^(?:[A-Za-z][A-Za-z0-9_]*|(?:[A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[A-Za-z][A-Za-z0-9_]*)$"},
+					"additionalProperties": {"type": "string", "minLength": 1}
+				}
+			}
+		},
 		"retention": {
 			"type": "object",
 			"additionalProperties": false,
@@ -83,6 +96,7 @@ func (m *runMemo) buildEngineDocument() ([]byte, error) {
 		Namespace:    r.Outputs.EngineNamespace(),
 		Registry:     r.Registry,
 		Dependencies: deps,
+		Invocation:   r.Outputs.EngineInvocation(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: engine document for %s: %w", r.Config.Name, err)

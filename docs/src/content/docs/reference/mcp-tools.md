@@ -419,7 +419,37 @@ declaration, else the default: the core's behaviors (`Workflow`,
 `Branches`, `Approvals`, `Numbering`, `Timers`, and `Reactions`, `Constants`, `Variants` and `StateRules`,
 which have no operations),
 which every engine registers, name none, and neither do the work-queue
-behaviors `@superschematic/engine-workqueue` implements.
+behaviors `@superschematic/engine-workqueue` implements or the commerce
+ones (`Stock`, `Calendar`, `Holds`, `Payments`) of
+`@superschematic/engine-commerce`.
+
+A deployment sets a policy the declarations leave out through the
+engine's `tools.invocation`: a built-in tool's by its name (`delete`,
+`defineSchema`), and a behavior operation's by
+`<Behavior>.<operation>` (`Payments.capturePayment`,
+`acme.Rating.rate`), which takes the place of its declaration's. A
+generated server's engine takes them from the engine database's
+`outputs.engine.tools.invocation`:
+
+```yaml
+outputs:
+  engine:
+    tools:
+      invocation:
+        Payments.openPayment: ask
+        Payments.capturePayment: ask
+        Payments.voidPayment: ask
+        Payments.refundPayment: ask
+        Stock.adjustStock: ask
+```
+
+The build refuses a name that is neither an engine tool nor an operation
+a behavior the engine types compose declares, and a value the binary's
+policy does not hold, naming each; the engine document carries the map,
+and an engine refuses at open a behavior operation it does not run. D70
+leaves the commerce operations that move money or stock unmarked in the
+core's declarations, so that they register under any distribution's
+policy, and expects a deployment to mark them so.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under

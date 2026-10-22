@@ -783,6 +783,7 @@ func typeScriptEngineImage(t *testing.T, project bool) {
 		paths.EngineRust, paths.EngineBehaviorsRust = filepath.Join(engine, "engine"), filepath.Join(engine, "behaviors")
 		paths.EngineABIRust, paths.EngineNapiRust = filepath.Join(engine, "abi"), filepath.Join(engine, "napi")
 		paths.EngineWorkQueueRust = filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust")
+		paths.EngineCommerceRust = filepath.Join(repoRoot, "runtime", "engine-commerce", "rust")
 		tag = "engine-project"
 		reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
 		if err != nil {
