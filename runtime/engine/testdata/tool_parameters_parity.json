@@ -74,6 +74,10 @@
         "languagePrimitive": "string",
         "name": "File.SizeBytes"
       },
+      "Finance.Currency": {
+        "languagePrimitive": "string",
+        "name": "Finance.Currency"
+      },
       "Finance.Money": {
         "languagePrimitive": "string",
         "name": "Finance.Money"
@@ -642,6 +646,12 @@
             "name": "catalogFileSizeBytes",
             "typeRef": {
               "name": "File.SizeBytes"
+            }
+          },
+          {
+            "name": "catalogFinanceCurrency",
+            "typeRef": {
+              "name": "Finance.Currency"
             }
           },
           {
@@ -1275,6 +1285,17 @@
               "null"
             ],
             "x-superschematic-scalar": "File.SizeBytes"
+          },
+          "catalogFinanceCurrency": {
+            "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+            "maxLength": 3,
+            "minLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "Finance.Currency"
           },
           "catalogFinanceMoney": {
             "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
@@ -2056,7 +2077,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:096e29570da6c02299afa83fb6ccf3c95ddb92fa1ebdb1887adfa853852193f3"
+      "inputSchemaDigest": "sha256:6ba385e3b6427a139547801e34c978461ebc96cca010f596c202d7c6052faf45"
     },
     {
       "name": "a distribution's keys",
@@ -2452,6 +2473,17 @@
               "null"
             ],
             "x-acme-scalar": "File.SizeBytes"
+          },
+          "catalogFinanceCurrency": {
+            "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+            "maxLength": 3,
+            "minLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "Finance.Currency"
           },
           "catalogFinanceMoney": {
             "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
@@ -3235,7 +3267,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:6d153068cca17d88de14643f37bd09320495baff46c8be25e87b0dab6a92c591"
+      "inputSchemaDigest": "sha256:fcd48709b9c30d39494e30fa751b8ee77b659f872fb63045b1f31446ebabca1d"
     },
     {
       "name": "no keys",
@@ -3603,6 +3635,16 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "catalogFinanceCurrency": {
+            "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+            "maxLength": 3,
+            "minLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -4330,7 +4372,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:f8065218cc64d43323b7bf9a2c9cae6662b1bf5d0db94ecf5e848f96c847b994"
+      "inputSchemaDigest": "sha256:cb436714ab8e3feb7ab65cbad1572352bdcd5e9b6689296e033ee42f1f006833"
     }
   ],
   "defaults": {
