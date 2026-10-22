@@ -882,7 +882,10 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		// The pointer edits below never apply to a list: the elements of
 		// T[] and T[][] are value types, so [][]*T cannot arise.
 		goType := normalizeImportedGoType(cf.TargetType, importAliases)
-		if !isInput && cf.IsScalar && !cf.Required && !cf.DistinctNull && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
+		// An optional integer-like scalar keeps its pointer unless it declares
+		// a default; see codegen.GoOptionalIntegerScalarIsPointer.
+		if !isInput && cf.IsScalar && !cf.Required && !cf.DistinctNull && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike &&
+			!codegen.GoOptionalIntegerScalarIsPointer(cf.Required, cf.IsArray, cf.IsMap, cf.Default) {
 			goType = strings.TrimPrefix(goType, "*")
 		}
 		// A Go union is an interface and already nilable. A pointer to it is

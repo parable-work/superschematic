@@ -35,37 +35,8 @@ func TestOptionalBoolEnvVarStaysNilWhenUnset(t *testing.T) {
 		&ir.FieldDef{Name: "FEATURE_DEFAULT_OFF", TypeRef: ir.TypeRef{Name: "boolean"}, Default: &no},
 	)
 
-	output, err := envgen.Generate(schema, "fixture-general")
-	if err != nil {
-		t.Fatalf("generate env config: %v", err)
-	}
-	types, err := typegen.Generate(schema, typegen.Options{
-		SchemaName: "fixture-general",
-		ModulePath: output.TypesModule,
-		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
-	})
-	if err != nil {
-		t.Fatalf("generate types: %v", err)
-	}
-
-	paths := testpaths.Local(t)
-	root := t.TempDir()
-	typesDir := filepath.Join(root, "types", "go", "fixture-general")
-	configDir := filepath.Join(root, "api", "fixture-general")
-	if err := typegen.SetReplacePaths(types, paths, typesDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := typegen.WriteTypes(types, typesDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := envgen.SetReplacePaths(output, paths, configDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := envgen.WriteConfigModule(output, configDir); err != nil {
-		t.Fatal(err)
-	}
-
-	code := `package ` + output.PackageName + `
+	runGeneratedLoaderTest(t, schema, "optional_bool_test.go", func(output *envgen.ConfigOutput) string {
+		return `package ` + output.PackageName + `
 
 import "testing"
 
@@ -104,7 +75,45 @@ func TestOptionalBool(t *testing.T) {
 	}
 }
 `
-	if err := os.WriteFile(filepath.Join(configDir, "optional_bool_test.go"), []byte(code), 0o644); err != nil {
+	})
+}
+
+// runGeneratedLoaderTest writes fixture-general's types module and env
+// loader for schema, adds the test source code returns as file, and runs
+// it with go test.
+func runGeneratedLoaderTest(t *testing.T, schema *ir.Schema, file string, code func(*envgen.ConfigOutput) string) {
+	t.Helper()
+	output, err := envgen.Generate(schema, "fixture-general")
+	if err != nil {
+		t.Fatalf("generate env config: %v", err)
+	}
+	types, err := typegen.Generate(schema, typegen.Options{
+		SchemaName: "fixture-general",
+		ModulePath: output.TypesModule,
+		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatalf("generate types: %v", err)
+	}
+
+	paths := testpaths.Local(t)
+	root := t.TempDir()
+	typesDir := filepath.Join(root, "types", "go", "fixture-general")
+	configDir := filepath.Join(root, "api", "fixture-general")
+	if err := typegen.SetReplacePaths(types, paths, typesDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := typegen.WriteTypes(types, typesDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := envgen.SetReplacePaths(output, paths, configDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := envgen.WriteConfigModule(output, configDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, file), []byte(code(output)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tidy := exec.Command("go", "mod", "tidy")

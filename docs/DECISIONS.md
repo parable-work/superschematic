@@ -9038,3 +9038,28 @@ and skips that half until then. The client parity corpus and the
 `@superschematic/engine-commerce` npm package wait for the behaviors.
 
 acme-shop and the cross-language proof follow.
+
+### D21, amended: a nullable Go integer scalar keeps an explicit `0`
+
+D21 kept every optional integer scalar (`Generic.Int64`, `Temporal.Seconds`,
+`Network.Port` and the other scalars whose Go type is an integer) a value
+type with `omitempty`, so `encoding/json` left out an explicit `0`, as it
+had left out `false`. A field whose `0` means something other than absent,
+such as a retry budget of `0` that must not inherit a wider default, lost
+it on a Go read and write. Only the version graph's `sequence` field kept
+its `0`, through `ir.FieldDef.DistinctNull`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A nullable integer scalar without a default is a pointer in the generated Go output types (`MaxRetries *GenericInt64`), tagged `omitempty`: nil is absent, and a set `0` is written. One with a default stays the value type. `codegen.GoOptionalIntegerScalarIsPointer` is the one rule; typegen, ormgen and envgen call it, so a type, its repository and its env loader agree. | `DistinctNull` on each field that needs its `0`, which an author cannot declare; `omitzero`, which also leaves `0` out |
+| A pointer field's `min` and `max` validations check an explicit `0`, which the value type skipped as unset. The ORM scans a NULL column to nil. The env loader leaves an unset variable nil. | |
+| The Go env loader reads a scalar variable, a number scalar included, as its raw string and passes it to the scalar's `Parse` function. It used to read a number scalar with the integer loader and then handed the `int` to that string parser, so a loader with an integer scalar variable did not compile. | |
+| Input types keep `InputField[T]`. TypeScript, Python, Rust, SQL and SDK output does not change. `DistinctNull` stays for the version graph's `sequence`; it no longer changes that field's Go type. | |
+
+Optional `number` and `string` fields keep value types with `omitempty`.
+
+`typegen`'s `TestOptionalIntegerFieldTypes` and
+`TestOptionalIntegerKeepsExplicitZero` and envgen's
+`TestOptionalIntegerEnvVarKeepsExplicitZero` cover these shapes.
+
+The rule is reversible until the first release.

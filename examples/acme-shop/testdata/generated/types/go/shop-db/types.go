@@ -3599,7 +3599,7 @@ type StockLevel struct {
 
 	Quantity GenericInt64 `json:"quantity"`
 
-	Threshold GenericInt64 `json:"threshold,omitempty"`
+	Threshold *GenericInt64 `json:"threshold,omitempty"`
 }
 
 // MaskSecrets returns a copy of StockLevel with secret fields cleared.
@@ -3671,9 +3671,9 @@ func (t *StockLevel) Validate() ValidationErrors {
 
 	// Validate threshold (optional)
 
-	// Validate optional value field only when it is set
-	if !reflect.ValueOf(t.Threshold).IsZero() {
-		if valid, fieldErrs := validateGenericInt64Value(t.Threshold, false); !valid {
+	// Validate optional pointer field
+	if t.Threshold != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Threshold, false); !valid {
 			errors.SetFieldErrors("threshold", fieldErrs)
 		}
 	}

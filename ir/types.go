@@ -563,10 +563,11 @@ type FieldDef struct {
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 
 	// DistinctNull marks an optional field whose null is a state of its own,
-	// not its type's zero value. The Go generators, which render any other
-	// optional integer scalar as a plain value that reads null back as zero,
-	// give it a pointer: nil is null and zero is zero. Only the version-graph
-	// expansion sets it; no authoring form declares it.
+	// not its type's zero value. The Go generators, which render an optional
+	// integer scalar with a declared default as a plain value that reads null
+	// back as zero, give it a pointer: nil is null and zero is zero. An
+	// optional integer scalar without a default is a pointer anyway. Only the
+	// version-graph expansion sets it; no authoring form declares it.
 	DistinctNull bool `json:"distinctNull,omitempty" yaml:"distinctNull,omitempty" jsonschema:"-"`
 
 	// Extensions holds extension decorator data keyed by extension name; see

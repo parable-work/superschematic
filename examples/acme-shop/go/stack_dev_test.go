@@ -216,7 +216,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatal(err)
 	}
 	threshold := stocktypes.InputField[stocktypes.GenericInt64]{Set: true, Value: 2}
-	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3, Threshold: threshold}); err != nil || level.Quantity != 3 || level.Threshold != 2 {
+	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3, Threshold: threshold}); err != nil || level.Quantity != 3 || level.Threshold == nil || *level.Threshold != 2 {
 		t.Fatalf("SetStock = %+v, %v", level, err)
 	}
 	stock, err := anyone.StockNamespace.ListStock(ctx)
