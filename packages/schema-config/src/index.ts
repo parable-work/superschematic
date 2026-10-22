@@ -371,4 +371,10 @@ export function service<K extends SchemaKindName, C = unknown, J extends string 
   };
 }
 
+/**
+ * On a class of a General or API schema: its fields are the service's
+ * environment variables, with a generated loader and values-schema.json. On
+ * an API it is the config of the API's server, whose fields a stack's `env`
+ * binds.
+ */
 export const envVars: ClassDecorator = () => {};

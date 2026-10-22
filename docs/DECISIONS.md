@@ -9622,3 +9622,40 @@ trace from `shop-orders` into `shop-stock`, and
 `TestStackInitOverAcmeShop` resolves the stack on gcp.
 `internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
 holds the policy fix. The rule is reversible until the first release.
+
+## D71. `init` writes a schemas root and `new service` writes a service, refusing every file that exists
+
+No command wrote a schemas root or a service. A person, or a coding agent
+following the agent skill, wrote about six files per service by hand from
+`examples/acme-shop`: the naming file, the base tsconfig whose `paths`
+reach a checkout's authoring packages, the output root's ignore rules, and
+per service a config, a package name, a tsconfig, an index and a schema
+file. The tsconfig paths and the `outputs` block were what came out wrong:
+a DB without Go types, an SDK without types in its language. D59 turned
+scaffolding a project down for `stack init`, which starts from a tree that
+already has APIs; these are the commands that start the tree.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic init [<schemas-root>]`, `./schemas` without one, writes `superschematic.toml` with `go_module_root`, `npm_scope` and a `[paths]` table, `tsconfig.base.json`, a `.gitignore` and an empty `services/`. The naming file's `[paths]` names each of acme-shop's keys whose directory the checkout has, relative to the parent of the schemas root as the naming file requires, and `build_context` only when the checkout holds the project, saying in a comment what to set otherwise. | A minimal naming file with no `[paths]`, whose generated `go.mod` files then require versions no proxy serves (a checkout-built binary pins nothing). `stack init`'s covering-`.gitignore` edit, which writes into a repository's own file; init owns the schemas root it creates. |
+| The base tsconfig is acme-shop's options with three `paths`: `@superschematic/*` to `<checkout>/packages/*/src/index.ts`, `superscalar` to the checkout's `third_party/superscalar/bindings/typescript/src/index.ts`, and `<npm_scope>/*` to `./services/*/src/index.ts`. | One entry per authoring package, as acme-shop lists them, which the next package outdates. Absolute paths, which differ per machine. |
+| The checkout is `--superschematic`, else the checkout that holds the schemas root, else, at a terminal, an answer. It must have `packages/schema-config/src/index.ts` and superscalar's TypeScript entry, which `make setup` checks out. Without one, init refuses: nothing is published, so a schemas root with no checkout does not build. `--go-module-root` and `--npm-scope` default to `example.com/<project>` and `@<project>`, the project being the directory that holds the schemas root. At a terminal init asks for each value no flag gives, with the line prompter `stack init` asks with (D59); without one, it takes the defaults. | Paths to `node_modules`, for packages no registry serves yet. The core defaults, `example.com/schemas` and `@schemas`, which every project would then share. |
+| `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site [--root <schemas-root>]` writes `services/<name>/`: `schema.config.ts`, `package.json` naming `<npm_scope>/<name>`, `tsconfig.json` extending the base, `src/index.ts`, and for DB, API and General `src/<name>.schema.ts`, a starter to rename: a table with a `@key`, a GET operation returning a view, an object type. A Bucket and a Site declare nothing in schema files, so they get none. `--root` defaults to the working directory when it holds the naming file, else `./schemas`. A Stack service is `stack init`'s, which reads the tree. | A starter per kind with more in it (an authDb, a calls list), which names services the tree may not have. One command for a whole project, a DB and an API wired together, whose shape fits one example. |
+| The outputs block loads: a DB has Go and TypeScript types, the Go types every DB needs; an API has Go and TypeScript types, a Go server and Go and TypeScript SDKs, each with its language's types; a General schema has Go and TypeScript types; a Bucket has `outputs: {}`; a Site has none. | Go alone, which leaves a TypeScript caller or a TypeScript server to edit the config before its first use. Every language, which the first build pays for and Python and Rust need toolchains for. |
+| `new service` then builds the service once, as `build` does, into `<schemas-root>/dist`, which writes `src/service.generated.ts`, the handle other configs import (D34). A build that fails leaves the files written and says so. A Site's build writes its code's mirror under `web/<name>` as every build of a Site does. | Writing the sentinel alone, which leaves the starter schema unchecked until the next build. |
+| Neither command replaces a file. Each checks every file it would write first, refuses naming each that exists and writes nothing, then creates each file exclusively. `new service` also refuses a name another service's config has, and a directory with a config in another form. There is no `--force`. | `--force`, which for a schemas root or a service is deleting a person's files; they move them aside. |
+
+Status: built. `cli/init.go` and `cli/new.go` are the commands, and
+`cli/init_test.go` drives them: init into a temporary directory against
+this checkout, its defaults in and outside a checkout and from a scripted
+terminal, its refusals; `new service` of each kind, whose files and first
+build it checks, then a `build-all` of the whole tree after the API's
+config imports the DB's and the bucket's handles; the root found from the
+working directory and from `--root`; and its refusals.
+
+Not built: a check or watch loop that gives an agent each edit's errors
+without a build, and a template per scenario (an API with its DB and
+sign-in). Once the authoring packages and runtimes are published, init
+writes `paths` to them and no `[paths]` table.
+
+The commands are reversible until the first release.
