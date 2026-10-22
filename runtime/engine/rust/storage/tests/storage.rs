@@ -679,6 +679,124 @@ fn a_host_transaction_holds_every_transaction_inside_it_as_a_savepoint() {
     }
 }
 
+/// What a test keeps on a transaction ([`Tx::memo`]).
+#[derive(Default)]
+struct Memo(std::sync::Mutex<Vec<&'static str>>);
+
+fn kept(tx: &Tx<'_>) -> Vec<&'static str> {
+    tx.memo::<Memo>().0.lock().unwrap().clone()
+}
+
+fn keep(tx: &Tx<'_>, what: &'static str) {
+    tx.memo::<Memo>().0.lock().unwrap().push(what);
+}
+
+#[test]
+fn a_transactions_memo_is_its_own_and_a_rollback_and_each_call_in_a_hold_drop_it() {
+    for target in targets("a_transactions_memo") {
+        let db = target.open();
+        notes(&db);
+        write(&db, |tx| {
+            keep(tx, "kept");
+            assert!(
+                Arc::ptr_eq(&tx.memo::<Memo>(), &tx.memo::<Memo>()),
+                "one memo a transaction"
+            );
+            tx.savepoint(|tx| {
+                keep(tx, "released");
+                Ok::<_, Error>(())
+            })?;
+            assert_eq!(
+                kept(tx),
+                ["kept", "released"],
+                "a released savepoint keeps it"
+            );
+            let refused = tx.savepoint(|tx| -> Result<()> {
+                keep(tx, "rolled back");
+                Err(Error::Value {
+                    message: "refused".into(),
+                })
+            });
+            assert!(refused.is_err());
+            assert!(kept(tx).is_empty(), "a rolled-back savepoint drops it");
+            keep(tx, "again");
+            // A statement tried in a savepoint of its own that fails rolls
+            // back too.
+            assert!(tx
+                .try_run("INSERT INTO missing VALUES (?)", params!["x"])
+                .is_err());
+            assert!(kept(tx).is_empty(), "a failed try_ statement drops it");
+            keep(tx, "last");
+            Ok(())
+        })
+        .unwrap();
+        write(&db, |tx| {
+            assert!(kept(tx).is_empty(), "another transaction starts with none");
+            Ok(())
+        })
+        .unwrap();
+        // A host's statements may run between its calls, so each call
+        // begins and ends with nothing kept.
+        db.hold(|tx| {
+            keep(tx, "host");
+            write(&db, |tx| {
+                assert!(kept(tx).is_empty(), "a call in a hold begins with none");
+                keep(tx, "call");
+                Ok(())
+            })?;
+            assert!(kept(tx).is_empty(), "a call in a hold leaves none");
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn what_a_transaction_reads_holds_still_but_in_a_settled_read_of_the_catalog_alone() {
+    for target in targets("what_a_transaction_reads_holds_still") {
+        let db = target.open();
+        // On SQLite one writer excludes every other and a read sees one
+        // snapshot; on Postgres a writer locks its namespaces, and a read
+        // at READ COMMITTED holds still only what it locks.
+        let postgres = db.dialect() == Dialect::Postgres;
+        write(&db, |tx| {
+            assert!(tx.stable("default"));
+            assert_eq!(tx.stable("other"), !postgres);
+            tx.lock_namespace("other")?;
+            assert!(tx.stable("other"));
+            Ok(())
+        })
+        .unwrap();
+        db.write(Lock::Namespaces(&["a", "b"]), |tx| {
+            assert!(tx.stable("a") && tx.stable("b"));
+            assert_eq!(tx.stable("default"), !postgres);
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+        db.write(Lock::Catalog, |tx| {
+            assert!(tx.stable("any"));
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+        db.read(|tx| {
+            assert!(tx.stable("any"), "a read sees one snapshot");
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+        db.read_settled(NS, |tx| {
+            assert!(tx.stable("default"));
+            assert_eq!(tx.stable("other"), !postgres);
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+        db.read_settled(Lock::Catalog, |tx| {
+            assert_eq!(tx.stable("default"), !postgres);
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+    }
+}
+
 #[test]
 fn the_notifier_wakes_a_waiter_when_a_write_that_notified_commits() {
     for target in targets("the_notifier_wakes_a_waiter") {

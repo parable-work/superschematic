@@ -44,6 +44,7 @@ use superschematic_engine_storage::{sql_string, Dialect, Row, Sql, SqlValue, Tx}
 
 use crate::errors::{join_and, Result, SchemaIssue};
 use crate::json;
+use crate::reads::Reads;
 use crate::registry::document::{
     array_depth, field_name, fields_of, flag, is_map, json_key, type_of, types_of, SchemaModel,
 };
@@ -628,6 +629,7 @@ fn inline_values(
         let data = store.fill(tx, &stored, &filled)?;
         let namespace = row.text("namespace")?;
         let id = row.text("id")?;
+        Reads::forget_instance(tx, namespace, schema, id);
         tx.run(
             "UPDATE engine_instances SET data = ?, value_refs = ? WHERE namespace = ? AND schema = ? AND id = ?",
             &[

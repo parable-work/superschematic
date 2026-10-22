@@ -265,7 +265,10 @@ impl Schemas<'_> {
         engine.db.read(|tx| {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = self.readable(&view, principal, name, namespace)?;
-            engine.catalog.find(tx, &view, name, &namespace, which)
+            Ok(engine
+                .catalog
+                .find(tx, &view, name, &namespace, which)?
+                .map(Arc::unwrap_or_clone))
         })
     }
 
@@ -419,7 +422,7 @@ impl Schemas<'_> {
             let namespace = self.readable(&view, principal, name, options.namespace)?;
             let which = options.version.map_or(Which::Live, Which::Version);
             match engine.catalog.find(tx, &view, name, &namespace, which)? {
-                Some(record) => Ok(record),
+                Some(record) => Ok(Arc::unwrap_or_clone(record)),
                 None => {
                     let which = match options.version {
                         None => "no live version".to_owned(),

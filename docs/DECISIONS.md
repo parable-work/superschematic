@@ -9167,6 +9167,26 @@ checkouts the oversell test leaves in their carts, whose pending items
 each read their supply, took about 58 seconds in pages of 100, and one
 page of 500 passed the 30-second route timeout.
 
+A transaction now reads each schema document and instance row once,
+and a read-only call each behavior field once (D58, amended below).
+`TestCommerceHoldsLoad`, which also lists 1,000 one-item carts through
+each server in pages of 100, ran before and after on the same laptop,
+one after the other, three servers and 24 clients against Postgres 17
+in a local VM:
+
+| | before | after |
+|---|---|---|
+| 1-item claims | 5.9 a second (6 holds) | 12.1 a second (12 holds) |
+| 10-item claims | 3.1 a second (31 holds) | 5.1 a second (51 holds) |
+| 50-item claims | 0.6 a second (32 holds) | 1.5 a second (75 holds) |
+| checkouts created | 9 to 12.5 a second | 24 to 27 a second |
+| 1,000 carts listed through Go, Rust, TypeScript | 56 s, 71 s, 57 s | 9.4 s, 12.4 s, 9.5 s |
+
+The Rust server is a debug build, as the test builds it. A 10-item hold
+runs 396 statements where it ran 677; what is left is mostly the
+behaviors' own tables and the references, which a namespace per shop
+still keeps from queueing on each other.
+
 The guide "Selling and booking with the engine"
 (`docs/src/content/docs/guides/commerce.md`) and
 `runtime/engine-commerce/README.md` describe the four behaviors, the
@@ -9622,3 +9642,62 @@ trace from `shop-orders` into `shop-stock`, and
 `TestStackInitOverAcmeShop` resolves the stack on gcp.
 `internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
 holds the policy fix. The rule is reversible until the first release.
+
+### D58, amended: a transaction reads each schema document and instance row once, and a read-only call each behavior field once
+
+D70's load measurement put a checkout's time in round trips under the
+namespace's lock, not in the database's work. Statement logging of one
+10-item hold through `shop-commerce-db`'s Go server on Postgres counted
+677 statements, about 40 ms of database time in a call of about 240 ms:
+the live schema's document read 109 times, each behavior's columns read
+by a statement of their own 109 times, and the instance rows read 109
+times more, 78 of them in a behavior's batch read and 31 alone. Each
+hook asked again, since nothing kept what the call had read: `live()`
+read and parsed the document, `existing()` read the row, and every
+behavior's `columns().get()` read its own columns. Listing carts was
+worse: one page of 100 checkouts in `cart`, whose pending items each read
+their supply, ran 13,206 statements (2,701 document reads, 2,701 batch
+instance reads, 2,100 column reads), since a field reader that reads its
+own instance (`Payments` reads `Holds.total`, which reads `Links`) runs
+every reader of the instance again, so listing 1,000 took 60 seconds. The
+indexes were not the cause: the page's filter reads
+`bhv_workflow___index_status`, its order `engine_instances_list`, and
+each behavior's table its key; every statement ran in microseconds.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A transaction keeps what it read (`Reads`, `engine/src/reads.rs`), on the storage's `Tx` (`Tx::memo`): each stored schema document looked up, by the namespace it was looked up from, its name and which document (live, draft or a version), absent ones included; and each instance row, by namespace, schema and id, absent ones included. Hooks, `instances.get`, `get_many`, invokes and `schemas.config` read through it. A document is kept parsed and shared (`Arc<SchemaRecord>`); the public registry calls return a copy as before. Behavior configs were already parsed once per published version, in the version's runtime, which the process keeps (D58), so `schemas.config` reads the kept document. | A cache per process, which another engine's commits would have to clear through notifications, and which would serve a replica stale documents and rows between a commit and its notice; a cache per `Execution`, which every nested read and invoke makes anew |
+| It is the transaction's alone. The storage drops it when a savepoint rolls back (a nested call that failed, and a `try_` statement that failed), so nothing a rolled-back write left is read; when the transaction ends; and as each engine call begins and ends inside a host's transaction (`Db::hold`), whose own statements, `engine.storage`'s among them, run between calls. The engine drops an instance's row at each statement that writes it: a create, an update, a delete, an operation's sequence, `update()`'s own fields, a behavior's `columns().set()`, and publish's index rewrite. Those are every write of `engine_instances`: a behavior's SQL cannot name the table (the checker refuses it, `core_workflow.rs`'s `forceStatus`), and reads it through a common table expression that writes nothing. Each change to the catalog, a define, a publish (the draft dropped as unchanged included) and a behavior's storage, which adds columns, drops everything kept. | Dropping the cache at every statement that changed a row (`Tx::changes`), which a hold changes hundreds of times |
+| It keeps only what no other engine can change while the transaction runs, so a replica's commits are seen exactly when they would be without it (`Tx::stable`). The catalog: every transaction holds the catalog's lock at least shared, or reads one snapshot, and only an exclusive holder changes it. An instance row: on SQLite always, its one writer excluding every other and its reads seeing one snapshot; on Postgres in a read of one snapshot (REPEATABLE READ), a transaction that holds the catalog's lock exclusively, and one that holds the row's namespace's lock, a writer's exclusive or a settled read's shared, since every write of a namespace's instances holds its lock (D16). A settled read of the catalog alone reads at READ COMMITTED and keeps no row. | Keeping every row a write transaction reads, which in a namespace whose lock it does not hold would hide another engine's commit that READ COMMITTED shows |
+| An instance is kept as two rows: its own columns, and every behavior column the reading version composes (`VersionRuntime::columns`, built with the version's runtime), which one statement reads and each behavior's `columns().get()` takes its own from: one statement per instance until the next write of it, not one per behavior per hook. A list's page and a batch read select both at once and keep them; a batch read reads only the ids the transaction has not. A column the row lacks is read by its own statement, as before. Every statement names its columns. | `SELECT *`, which Postgres refuses once another engine's publish adds a behavior's columns to the table, since the connection's prepared statement then returns another row type (`cached plan must not change result type`, which `replicas_migrations.rs` met) |
+| In a read-only transaction that holds its namespace still, each behavior field of an instance is read once a call and kept on the call's chain (`Execution::fields`), since nothing a reader reads can change and the call's principal and time are fixed: a reader that reads its own instance's other behaviors, and a list whose instances read one supply, read each field once. A write keeps no field: its hooks change what readers read. | Readers that read many instances at once, which every behavior's reader API would have to learn; a memo in write transactions, cleared at every write |
+
+A behavior's own statements are not kept: a statement's answer need not
+be a function of what the transaction reads (`random()`), and a
+behavior's tables change through its own SQL. They are most of what is
+left: the 10-item hold runs 396 statements, 58 of them reads of
+`engine_references` and about 200 of the behaviors' tables (Links,
+Holds, Stock and Payments, whose nine field readers each read its
+tables, and which `run_operation` runs before and after each operation
+for its patch), and a page of 100 carts runs 2,206, 1,700 of them
+Payments'.
+
+Status: built. The profile of the same 10-item hold runs 396
+statements, of which 2 read the schema document and 44 an instance's
+rows (21 its own columns, 21 its behaviors' columns, 2 a batch read), in
+about 185 ms; a page of 100 carts runs 2,206 statements in about 1.4 s,
+and the 1,000 list in 10.1 s, from 59.7 s, through one Go server.
+D70's Status records `TestCommerceHoldsLoad` before and after.
+`storage.rs`'s
+`a_transactions_memo_is_its_own_and_a_rollback_and_each_call_in_a_hold_drop_it`
+and
+`what_a_transaction_reads_holds_still_but_in_a_settled_read_of_the_catalog_alone`
+hold the memo's life and `Tx::stable` on SQLite and Postgres; the
+testkit's `engine_reads.rs` holds, on both, that a read after a nested
+write in the same call sees it (a behavior's columns, a create a read
+before it found missing) and one after a rolled-back write does not, that
+a list's page reads each instance's behaviors as a get does (which fails
+when `columns().set()` keeps the row), and that a call in a host's
+transaction sees what the host's statements wrote since the call before.
+The engine's suites, the scenario and HTTP corpora, the Go binding's
+replay, the TypeScript suite and the servers' tests pass unchanged.
