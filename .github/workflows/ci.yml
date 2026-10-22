@@ -1212,7 +1212,11 @@ jobs:
     # servers over one engine database, runs one script against each and
     # requires their transcripts to be identical, each step the HTTP corpus
     # records in the corpus's shape, and the three to read what each other
-    # wrote and stream what each other commits. They need the three archives
+    # wrote and stream what each other commits;
+    # TestCommerceServersAnswerOneScriptAlike does the same for
+    # shop-checkout-stack's three commerce servers (D70), and
+    # TestCommerceServersOversellNothing races 1,000 claims over them for
+    # three units and for one slot. They need the three archives
     # a Go server links, the engine's package and its Node-API addon, which
     # the go job does not build, so they skip there and run here, where
     # SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS and
@@ -1309,7 +1313,7 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/engine-archive.sh --print)"
           go test -count=1 -timeout 80m -v \
-            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript)$' \
+            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript|TestCommerceServersAnswerOneScriptAlike|TestCommerceServersOversellNothing)$' \
             ./internal/generator/servergen/
 
   versiongraph:
