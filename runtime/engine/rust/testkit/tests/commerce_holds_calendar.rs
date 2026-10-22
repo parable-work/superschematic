@@ -335,131 +335,146 @@ fn assert_desk(engine: &Engine, desk: &str) {
 fn a_booking_holds_its_desk_through_commit_expiry_and_delete() {
     for target in targets("holds_calendar_life") {
         let engine = open(&target);
-        let created = book(&engine, "b1", "d1", tue(10, 0), tue(11, 0));
-        // In draft the slot is asked, not held, and Calendar prices
-        // nothing.
-        assert_eq!(created.behaviors["Holds"]["state"], "pending");
-        assert_eq!(
-            created.behaviors["Holds"]["total"],
-            json!({"amount": 0, "currency": null})
-        );
-        move_to(&engine, "b1", "held").expect("b1 holds");
-        assert_eq!(
-            holds_of(&engine, "b1")["items"],
-            json!([{"hold": "slot", "item": 0, "schema": "Desk", "id": "d1",
-                    "startMs": tue(10, 0), "endMs": tue(11, 0), "state": "held"}])
-        );
-        assert_desk(&engine, "d1");
-
-        // b2 asks the same hour: the guard lists it with what conflicts.
-        book(&engine, "b2", "d1", tue(10, 30), tue(11, 30));
-        let (behavior, _, _, code, details) = veto(move_to(&engine, "b2", "held"));
-        assert_eq!(
-            (behavior.as_str(), code.as_deref()),
-            ("Holds", Some("unavailable"))
-        );
-        assert_eq!(
-            details.expect("details")["items"][0]["conflict"],
-            json!({"startMs": tue(10, 0), "endMs": tue(11, 0)})
-        );
-        assert_eq!(status(&engine, "b2"), "draft");
-
-        // While held, StateRules and Holds keep what it asks.
-        let moved = engine.instances().update(
-            &alice(),
-            "Booking",
-            "b1",
-            &json!({"slotEnd": iso(tue(11, 30))}),
-            WriteOptions::default(),
-        );
-        let (behavior, action, _, code, _) = veto(moved);
-        assert_eq!(action, "update");
-        assert!(
-            matches!(
-                (behavior.as_str(), code.as_deref()),
-                ("StateRules", _) | ("Holds", Some("held_fields"))
-            ),
-            "{behavior} {code:?}"
-        );
-
-        // Booked commits the slot; the runner hands Holds.state turning
-        // committed to Reactions, which confirms the booking.
-        move_to(&engine, "b1", "booked").expect("book");
-        assert_eq!(holds_of(&engine, "b1")["state"], "committed");
-        assert_eq!(status(&engine, "b1"), "booked");
-        engine.runner().run_due().expect("the runner");
-        assert_eq!(status(&engine, "b1"), "confirmed");
-        assert_eq!(states(&engine, "b1"), ["committed"]);
-        assert_eq!(bookings(&engine, "d1")[0]["state"], "committed");
-        assert_desk(&engine, "d1");
-
-        // b3 holds the afternoon, and its deadline lets it go.
-        book(&engine, "b3", "d1", tue(14, 0), tue(15, 0));
-        move_to(&engine, "b3", "held").expect("b3 holds");
-        engine
-            .clock()
-            .advance(15 * MINUTE + 5_000)
-            .expect("advance");
-        engine.runner().run_due().expect("the runner");
-        assert_eq!(status(&engine, "b3"), "expired");
-        assert_eq!(states(&engine, "b3"), ["released"]);
-        assert_eq!(bookings(&engine, "d1").len(), 1);
-        assert_desk(&engine, "d1");
-        // Its time is free again: b4 takes it.
-        book(&engine, "b4", "d1", tue(14, 0), tue(15, 0));
-        move_to(&engine, "b4", "held").expect("b4 holds");
-        move_to(&engine, "b4", "cancelled").expect("b4 lets go");
-
-        // A booking whose committed time is to come is not deleted, nor
-        // its desk.
-        let (behavior, _, reason, code, details) = veto(delete(&engine, "Booking", "b1"));
-        assert_eq!(
-            (behavior.as_str(), code.as_deref()),
-            ("Holds", Some("committed"))
-        );
-        assert_eq!(
-            reason,
-            "the claim holds 1 committed item of time that has not ended"
-        );
-        assert_eq!(
-            details,
-            Some(json!({"items": [{"hold": "slot", "item": 0}]}))
-        );
-        let (behavior, _, _, code, _) = veto(delete(&engine, "Desk", "d1"));
-        assert_eq!(
-            (behavior.as_str(), code.as_deref()),
-            ("Calendar", Some("held"))
-        );
-
-        // Once the hour has passed, both go: the desk keeps the deleted
-        // booking's time, which no claim answers for.
-        engine.clock().set(tue(11, 0)).expect("set the clock");
-        assert!(delete(&engine, "Booking", "b1").expect("delete b1"));
-        let kept = bookings(&engine, "d1");
-        assert_eq!(kept.len(), 1);
-        assert_eq!(
-            (
-                kept[0]["holder"]["id"].clone(),
-                kept[0]["state"].clone(),
-                kept[0]["retired"].clone()
-            ),
-            (json!("b1"), json!("committed"), json!(true))
-        );
-        assert_desk(&engine, "d1");
-
-        // A booking created again as b1 holds afresh, and checkHold and
-        // holdFor agree.
-        book(&engine, "b1", "d1", tue(12, 0), tue(13, 0));
-        let listed = invoke(&engine, "Booking", "b1", "listHolds", json!({})).expect("listHolds");
-        assert_eq!(listed["items"][0]["check"], json!({"fits": true}));
-        move_to(&engine, "b1", "held").expect("b1 holds again");
-        assert_eq!(states(&engine, "b1"), ["held"]);
-        assert_desk(&engine, "d1");
-        move_to(&engine, "b1", "cancelled").expect("b1 lets go");
-
-        assert!(delete(&engine, "Desk", "d1").expect("delete the desk"));
-        assert!(bookings(&engine, "d2").is_empty());
+        held_then_confirmed(&engine);
+        expired_and_taken(&engine);
+        deleted_once_spent(&engine);
     }
+}
+
+/// b1 holds Tuesday's ten o'clock, which b2 cannot take; StateRules
+/// keeps what it asks; booked commits it and a rule confirms it.
+fn held_then_confirmed(engine: &Engine) {
+    let created = book(engine, "b1", "d1", tue(10, 0), tue(11, 0));
+    // In draft the slot is asked, not held, and Calendar prices
+    // nothing.
+    assert_eq!(created.behaviors["Holds"]["state"], "pending");
+    assert_eq!(
+        created.behaviors["Holds"]["total"],
+        json!({"amount": 0, "currency": null})
+    );
+    move_to(engine, "b1", "held").expect("b1 holds");
+    assert_eq!(
+        holds_of(engine, "b1")["items"],
+        json!([{"hold": "slot", "item": 0, "schema": "Desk", "id": "d1",
+                "startMs": tue(10, 0), "endMs": tue(11, 0), "state": "held"}])
+    );
+    assert_desk(engine, "d1");
+
+    // b2 asks the same hour: the guard lists it with what conflicts.
+    book(engine, "b2", "d1", tue(10, 30), tue(11, 30));
+    let (behavior, _, _, code, details) = veto(move_to(engine, "b2", "held"));
+    assert_eq!(
+        (behavior.as_str(), code.as_deref()),
+        ("Holds", Some("unavailable"))
+    );
+    assert_eq!(
+        details.expect("details")["items"][0]["conflict"],
+        json!({"startMs": tue(10, 0), "endMs": tue(11, 0)})
+    );
+    assert_eq!(status(engine, "b2"), "draft");
+
+    // While held, StateRules and Holds keep what it asks.
+    let moved = engine.instances().update(
+        &alice(),
+        "Booking",
+        "b1",
+        &json!({"slotEnd": iso(tue(11, 30))}),
+        WriteOptions::default(),
+    );
+    let (behavior, action, _, code, _) = veto(moved);
+    assert_eq!(action, "update");
+    assert!(
+        matches!(
+            (behavior.as_str(), code.as_deref()),
+            ("StateRules", _) | ("Holds", Some("held_fields"))
+        ),
+        "{behavior} {code:?}"
+    );
+
+    // Booked commits the slot; the runner hands Holds.state turning
+    // committed to Reactions, which confirms the booking.
+    move_to(engine, "b1", "booked").expect("book");
+    assert_eq!(holds_of(engine, "b1")["state"], "committed");
+    assert_eq!(status(engine, "b1"), "booked");
+    engine.runner().run_due().expect("the runner");
+    assert_eq!(status(engine, "b1"), "confirmed");
+    assert_eq!(states(engine, "b1"), ["committed"]);
+    assert_eq!(bookings(engine, "d1")[0]["state"], "committed");
+    assert_desk(engine, "d1");
+}
+
+/// b3 holds the afternoon, its deadline lets it go, and b4 takes it.
+fn expired_and_taken(engine: &Engine) {
+    // b3 holds the afternoon, and its deadline lets it go.
+    book(engine, "b3", "d1", tue(14, 0), tue(15, 0));
+    move_to(engine, "b3", "held").expect("b3 holds");
+    engine
+        .clock()
+        .advance(15 * MINUTE + 5_000)
+        .expect("advance");
+    engine.runner().run_due().expect("the runner");
+    assert_eq!(status(engine, "b3"), "expired");
+    assert_eq!(states(engine, "b3"), ["released"]);
+    assert_eq!(bookings(engine, "d1").len(), 1);
+    assert_desk(engine, "d1");
+    // Its time is free again: b4 takes it.
+    book(engine, "b4", "d1", tue(14, 0), tue(15, 0));
+    move_to(engine, "b4", "held").expect("b4 holds");
+    move_to(engine, "b4", "cancelled").expect("b4 lets go");
+}
+
+/// Committed time to come keeps b1 and its desk; once spent, both go, and
+/// a booking made again as b1 holds afresh.
+fn deleted_once_spent(engine: &Engine) {
+    // A booking whose committed time is to come is not deleted, nor
+    // its desk.
+    let (behavior, _, reason, code, details) = veto(delete(engine, "Booking", "b1"));
+    assert_eq!(
+        (behavior.as_str(), code.as_deref()),
+        ("Holds", Some("committed"))
+    );
+    assert_eq!(
+        reason,
+        "the claim holds 1 committed item of time that has not ended"
+    );
+    assert_eq!(
+        details,
+        Some(json!({"items": [{"hold": "slot", "item": 0}]}))
+    );
+    let (behavior, _, _, code, _) = veto(delete(engine, "Desk", "d1"));
+    assert_eq!(
+        (behavior.as_str(), code.as_deref()),
+        ("Calendar", Some("held"))
+    );
+
+    // Once the hour has passed, both go: the desk keeps the deleted
+    // booking's time, which no claim answers for.
+    engine.clock().set(tue(11, 0)).expect("set the clock");
+    assert!(delete(engine, "Booking", "b1").expect("delete b1"));
+    let kept = bookings(engine, "d1");
+    assert_eq!(kept.len(), 1);
+    assert_eq!(
+        (
+            kept[0]["holder"]["id"].clone(),
+            kept[0]["state"].clone(),
+            kept[0]["retired"].clone()
+        ),
+        (json!("b1"), json!("committed"), json!(true))
+    );
+    assert_desk(engine, "d1");
+
+    // A booking created again as b1 holds afresh, and checkHold and
+    // holdFor agree.
+    book(engine, "b1", "d1", tue(12, 0), tue(13, 0));
+    let listed = invoke(engine, "Booking", "b1", "listHolds", json!({})).expect("listHolds");
+    assert_eq!(listed["items"][0]["check"], json!({"fits": true}));
+    move_to(engine, "b1", "held").expect("b1 holds again");
+    assert_eq!(states(engine, "b1"), ["held"]);
+    assert_desk(engine, "d1");
+    move_to(engine, "b1", "cancelled").expect("b1 lets go");
+
+    assert!(delete(engine, "Desk", "d1").expect("delete the desk"));
+    assert!(bookings(engine, "d2").is_empty());
 }
 
 #[test]
