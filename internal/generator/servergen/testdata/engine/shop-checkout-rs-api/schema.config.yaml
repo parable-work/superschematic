@@ -1,0 +1,14 @@
+# shop-commerce-db's API in Rust, one of the three the commerce script
+# runs against (D70): it serves the user model's session routes, its
+# members holding the permissions their roles grant, and its server opens
+# shop-commerce-db's engine and mounts it at /engine/shop-commerce-db,
+# behind the session the identity runtime authenticates and the service
+# caller its service authenticator verifies (D58, D50, D37).
+name: shop-checkout-rs-api
+kind: API
+public: true
+authDb: shop-commerce-db
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

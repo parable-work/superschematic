@@ -52,7 +52,8 @@ type TypeScriptEngine struct {
 
 	// Behaviors are the behaviors the engine types compose beside the
 	// core's, which the engine registers by name after the core's: the
-	// work queue's, sorted, which the core's addon carries, then the
+	// work queue's and the commerce ones (D70), sorted, which the core's
+	// addon carries, then the
 	// extensions', sorted, which the project's engine crate's addon
 	// carries (its napi member, EngineProject).
 	Behaviors []string
@@ -189,7 +190,7 @@ func (s *TypeScriptServer) newTypeScriptEngine(d *TypeScriptDatabase, info *apig
 		switch {
 		case b.Extension != "":
 			extensions = append(extensions, b.Name)
-		case b.Package == registry.WorkQueuePackage:
+		case b.Package == registry.WorkQueuePackage, b.Package == registry.CommercePackage:
 			e.Behaviors = append(e.Behaviors, b.Name)
 		}
 	}

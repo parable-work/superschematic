@@ -1806,7 +1806,12 @@ The access policy is `outputs.engine.policy` of the database's config,
 `permission` unless set, and the event log's retention
 `outputs.engine.retention`, none unless set, which every entrypoint on the
 database opens the engine with and the database's runner alone prunes
-with. The first API on the database, by name, mounts
+with; the engine document's tools carry `outputs.engine.tools.invocation`,
+the invocation policy of each tool or behavior operation the deployment
+marks, which a database that composes `Payments` or `Stock` must give
+each of their operations that move money or stock, and
+`outputs.engine.tools.hidden` with Payments' service operations, the
+operations no agent is offered (D70, amended). The first API on the database, by name, mounts
 the engine's routes, its event stream and its MCP endpoint at
 `outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
 its own routes and behind its middleware: the request log, and the
@@ -1842,7 +1847,10 @@ what another wrote and streams what another commits, a session one signed
 in reaches the others, since the user model's tables are the database's,
 and the database has one runner. `TestEngineServersAnswerOneScriptAlike`
 runs one script against a Go, a Rust and a TypeScript server over one
-database and requires their answers to be the same (D58).
+database and requires their answers to be the same (D58), and
+`TestCommerceServersAnswerOneScriptAlike` does the same for three servers
+over a database whose types compose the commerce behaviors, linked
+through the project's engine crate (D70).
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on
@@ -1924,8 +1932,8 @@ one of two places (D47, amended):
   that opens the engine (D58) gets a third, which builds the core's engine
   archive (`superschematic-engine-ffi`) from the Cargo workspace beside
   `[paths] engine_go`, with the crates it reaches by path at their places
-  in the checkout: the work queue's crate, the schema IR's and the schema
-  runtime's, the version graph's engine and core, and superscalar's
+  in the checkout: the work queue's crate, the commerce crate, the schema
+  IR's and the schema runtime's, the version graph's engine and core, and superscalar's
   crates with their workspace's manifest, which its core takes its lints
   from.
   Without `[paths] engine_go` such an entrypoint gets no Dockerfile from a
@@ -2926,13 +2934,13 @@ server lists what is left and signs a URL that downloads it (section
 the Rust runner of its engine database, and runs them offline and on
 Postgres (D58).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
-over `shop-db` whose reservations admit only `shop-orders`' Go server,
-which reserves an order's stock through `shop-stock`'s Go SDK with its
-edge's credential and the shopper it forwards. A reservation that takes a
-product's level below its threshold enqueues `StockLow` in its
-transaction; `shop-stock`'s Rust worker `ReorderStock` files the
-product's restock request, and its Rust job `OrderRestocks`, which
-the test runs with `stack run`, orders it (D65).
+over `shop-db`'s engine type `Inventory` (D70), whose sales admit only
+`shop-orders`, which tells it what a placed checkout sold through
+`shop-stock`'s Go SDK with its edge's credential. A sale that leaves a
+product low enqueues `StockLow` in one transaction; `shop-stock`'s Rust
+worker `ReorderStock` files the product's restock request, and its Rust
+job `OrderRestocks`, which the test runs with `stack run`, orders it
+(D65).
 
 Trace export is section 8.11's (D67).
 

@@ -13,7 +13,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

@@ -28,9 +28,9 @@ import (
 
 // The project's engine on the local target (D58). A Go or TypeScript
 // entrypoint whose engine database composes a behavior the core's engine
-// leaves out, the work queue's or an extension's, opens the engine built
-// from the project's engine crate, which the database's build writes at
-// engine/rust/<db> under the output root; its module's
+// leaves out, the work queue's, a commerce one or an extension's, opens
+// the engine built from the project's engine crate, which the database's
+// build writes at engine/rust/<db> under the output root; its module's
 // projectengine.LinkFile names the crate and the member it takes. Before it
 // builds or runs the entrypoint the provisioner builds that member with
 // cargo, as a checkout's Dockerfile does in its engine stage:
@@ -181,6 +181,7 @@ var engineCrates = map[string]string{
 	projectengine.EngineCrate:    "engine_rust",
 	projectengine.BehaviorsCrate: "engine_behaviors_rust",
 	projectengine.WorkQueueCrate: "engine_workqueue_rust",
+	projectengine.CommerceCrate:  "engine_commerce_rust",
 	projectengine.ABICrate:       "engine_abi_rust",
 	projectengine.NapiCrate:      "engine_napi_rust",
 }
@@ -218,7 +219,7 @@ func checkEngineCrate(crate, member, database string) error {
 		}
 	}
 	if len(byVersion) > 0 {
-		return fmt.Errorf("the engine crate of %s depends on %s by version, as a build whose naming file leaves those [paths] keys unset writes it, and no registry serves the engine's crates; set them to a superschematic checkout's runtime/engine/rust and runtime/engine-workqueue/rust crates", database, strings.Join(byVersion, ", "))
+		return fmt.Errorf("the engine crate of %s depends on %s by version, as a build whose naming file leaves those [paths] keys unset writes it, and no registry serves the engine's crates; set them to a superschematic checkout's runtime/engine/rust, runtime/engine-workqueue/rust and runtime/engine-commerce/rust crates", database, strings.Join(byVersion, ", "))
 	}
 	return nil
 }

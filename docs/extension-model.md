@@ -845,12 +845,13 @@ the core's `projectengine` generator (`internal/generator/projectengine`)
 writes the project's engine crate, `engine/rust/<schema>`, named
 `<rust_crate_prefix><schema>-engine`. It depends on
 `superschematic-engine`, `superschematic-engine-behaviors` and, when the
-schema composes one of the work queue's behaviors,
-`superschematic-engine-workqueue`, by path at the `[paths]` keys
-`engine_rust`, `engine_behaviors_rust` and `engine_workqueue_rust` (by
-version when unset), and on each extension's crate by its path in the
-project. Its `behaviors()` registers the core's behaviors, the work
-queue's and each composed extension behavior, by `Register`; `tools()` is
+schema composes one of their behaviors, `superschematic-engine-workqueue`
+and `superschematic-engine-commerce` (D70), by path at the `[paths]` keys
+`engine_rust`, `engine_behaviors_rust`, `engine_workqueue_rust` and
+`engine_commerce_rust` (by version when unset), and on each extension's
+crate by its path in the project. Its `behaviors()` registers the core's
+behaviors, the work queue's, the commerce ones and each composed
+extension behavior, by `Register`; `tools()` is
 the D11 options the binary registers, under which an operation that names
 a value of the extension's invocation policy registers; and `COMPOSED`
 lists the behaviors the schema's types compose, which its test finds
@@ -1100,8 +1101,11 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
 `Approvals`. It declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
-`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
-(`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`,
+and the commerce behaviors the optional `@superschematic/engine-commerce`
+package implements (D70): `Stock`, `Calendar`, `Holds` and `Payments`.
+Each spec names its package (`registry.EnginePackage`,
+`registry.WorkQueuePackage` or `registry.CommercePackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
@@ -1259,9 +1263,11 @@ the core binary, each into the Rust crate that implements it (D58): `make
 behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
 with `--package @superschematic/engine` and the work queue's
 `runtime/engine-workqueue/rust/declarations` with `--package
-@superschematic/engine-workqueue`, so each crate carries only the
+@superschematic/engine-workqueue` and the commerce crate's
+`runtime/engine-commerce/rust/declarations` with `--package
+@superschematic/engine-commerce`, so each crate carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space
@@ -1731,7 +1737,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`; the commerce package's `Stock`, `Calendar`, `Holds`, `Payments` (D70) (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

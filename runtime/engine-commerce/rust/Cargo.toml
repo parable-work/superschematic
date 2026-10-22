@@ -1,0 +1,44 @@
+[package]
+name = "superschematic-engine-commerce"
+description = "The commerce behaviors (D70) for the Rust engine (D58): Stock, Calendar, Holds and Payments, and the supply contract a claim holds supply through, each over the declaration the compiler registers"
+# A member of the engine's workspace (runtime/engine/rust), outside its
+# directory, as the work queue's crate is: one lock file, and one toolchain
+# for every archive a binding links (D58).
+workspace = "../../engine/rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The databases the engine runs on, as the engine has them.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
+
+[dependencies]
+# Calendar's time zones (D70): the IANA database bundled into the binary
+# (tzdb-bundle-always) and no other, neither the host's zone files nor its
+# system zone (no tzdb-zoneinfo, tz-system), so every server built from the
+# lock file computes the same slots. A rule change ships with a release.
+# Unlicense OR MIT, as jiff-tzdb is.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# The plug-in API an extension's behavior uses, and nothing else of the
+# engine: these behaviors reach it as any extension's do, and an
+# extension's supply uses the supply module the same way.
+superschematic-engine = { path = "../../engine/rust/engine", default-features = false }
+# The core's behaviors, for what Holds reads as they do: a link's targets
+# (link_many) and a date-time as Timers reads one (parse_date_time).
+superschematic-engine-behaviors = { path = "../../engine/rust/behaviors", default-features = false }
+# superscalar's core, by path from the checkout superscalar.pin names, as
+# the engine's schema reader links it: Finance.Currency's ISO 4217 table,
+# which `currency` checks a config's code against.
+superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
+
+[lints]
+workspace = true

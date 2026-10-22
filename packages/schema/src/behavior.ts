@@ -2,8 +2,9 @@
  * The config each behavior takes, keyed by the behavior's registered name.
  * It lists the behaviors the core declares (internal/registry/behaviors in
  * the superschematic repository), which @superschematic/engine implements,
- * and the work-queue behaviors, which @superschematic/engine-workqueue
- * implements.
+ * the work-queue behaviors, which @superschematic/engine-workqueue
+ * implements, and the commerce behaviors (D70), which
+ * @superschematic/engine-commerce implements.
  * An extension's authoring package adds its behaviors by module
  * augmentation, as it adds an invocation policy key to MCPToolOptions:
  *
@@ -67,6 +68,14 @@ export interface BehaviorConfigs {
   Budget: BudgetConfig;
   /** Retries per failure class, with caps, kept results and stuck detection; it requires Workflow. */
   Retries: RetriesConfig;
+  /** Units a supply counts: on hand, held by claims, and every movement, held and committed through the supply contract; it conflicts with Calendar. */
+  Stock: StockConfig;
+  /** Time a supply opens: weekly hours in a time zone, closures and a capacity, held and booked through the supply contract; it conflicts with Stock. */
+  Calendar: CalendarConfig;
+  /** One claim's holds on any supply, taken, committed, released and returned as its Workflow moves; it requires Workflow. */
+  Holds: HoldsConfig;
+  /** What the instance owes and the payments and refunds that settle it, through a provider adapter outside the engine. */
+  Payments: PaymentsConfig;
 }
 
 /** Workflow's config. */
@@ -690,6 +699,130 @@ export interface RetriesConfig {
   readonly from?: readonly string[];
   /** The permission a principal needs to record an attempt. */
   readonly permission?: string;
+}
+
+/** An own field of the type, by JSON key, that holds a value in place of a literal. */
+export interface FieldSource {
+  readonly field: string;
+}
+
+/** An ISO 4217 currency code, three uppercase letters, as Finance.Currency holds one. */
+export type CurrencyCode = string;
+
+/** Stock's config. */
+export interface StockConfig {
+  /** The unit price holdFor returns and Holds keeps on each item: an own integer field in the currency's minor units, and its currency. */
+  readonly price?: StockPrice;
+  /** Stock.low is true while available is at or below this count, or the count an own integer field holds. */
+  readonly lowAt?: number | FieldSource;
+  /** The most units one item of a claim may hold. */
+  readonly maxPerHold?: number;
+  /** Whether a hold may take more than is available; false when absent. */
+  readonly backorder?: boolean;
+  /** The permission a caller needs to receive, adjust and count stock; its .override counts below what claims hold. */
+  readonly permission: string;
+}
+
+/** The unit price of a Stock config. */
+export interface StockPrice {
+  /** An own integer field, such as a Finance.Money field, holding the unit price in the currency's minor units. */
+  readonly field: string;
+  /** An ISO 4217 code, or an own Finance.Currency field that holds one. */
+  readonly currency: CurrencyCode | FieldSource;
+}
+
+/** A wall time, "HH:MM", from "00:00" to "24:00". */
+export type WallTime = string;
+
+/** Weekly opening hours: each day a list of [open, close] wall-time ranges; a day absent or empty is closed. */
+export type CalendarWeek = {
+  readonly [day in "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"]?: readonly (readonly [WallTime, WallTime])[];
+};
+
+/** Calendar's config. Durations are milliseconds. */
+export interface CalendarConfig {
+  /** The IANA time zone the hours are wall times in; an instance may set its own. */
+  readonly timeZone: string;
+  /** The weekly opening hours an instance has until it sets its own. */
+  readonly hours: CalendarWeek;
+  /** How many holds may overlap at any instant, or the count an own integer field holds; 1 when absent. */
+  readonly capacity?: number | FieldSource;
+  /** The start grid from each opening time; any whole minute when absent. */
+  readonly slotMs?: number;
+  /** The shortest hold; slotMs when absent. */
+  readonly minMs?: number;
+  /** The longest hold; a day when absent. */
+  readonly maxMs?: number;
+  /** Time kept free before and after each hold, which counts against capacity. */
+  readonly bufferMs?: { readonly before?: number; readonly after?: number };
+  /** How long ahead of its start a hold must be made; 0 when absent. */
+  readonly leadMs?: number;
+  /** How far ahead a hold may start; no limit when absent. */
+  readonly horizonMs?: number;
+  /** The permission a caller needs to set an instance's hours and closures; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/** Holds' config. */
+export interface HoldsConfig {
+  /** The holds, by name: camelCase. */
+  readonly holds: Readonly<Record<string, HoldsHold>>;
+  /** The states of the type's Workflow whose entry takes the holds, and the create into one; the create alone when absent. */
+  readonly takeOn?: readonly string[];
+  /** The states whose entry commits what is held. */
+  readonly commitOn?: readonly string[];
+  /** The states whose entry releases what is held, such as an expiry a Timers deadline moves the claim to. */
+  readonly releaseOn?: readonly string[];
+  /** The states whose entry returns the units of counted supply the claim committed. */
+  readonly returnOn?: readonly string[];
+  /** The most items the holds may ask together; 100 when absent. */
+  readonly maxItems?: number;
+}
+
+/**
+ * One hold of a Holds config: a single-valued link to the supply, or an
+ * own list field whose elements each name a supply of schema; and the
+ * units each item asks of counted supply, or the time of timed supply. An
+ * each hold reads its fields from the list's element.
+ */
+export type HoldsHold = (
+  | { readonly link: string; readonly each?: never; readonly schema?: never }
+  | { readonly each: { readonly field: string; readonly target: string }; readonly schema: string; readonly link?: never }
+) &
+  (
+    | { readonly quantity: number | FieldSource; readonly interval?: never }
+    | { readonly interval: HoldsInterval; readonly quantity?: never }
+  );
+
+/** The time a timed hold's item asks: from a date-time field to another, or for durationMs. */
+export type HoldsInterval =
+  | { readonly start: string; readonly end: string; readonly durationMs?: never }
+  | { readonly start: string; readonly durationMs: number; readonly end?: never };
+
+/** Payments' config. */
+export interface PaymentsConfig {
+  /** What the instance owes: an own integer field in the currency's minor units, or the type's Holds.total. */
+  readonly amount: FieldSource | { readonly holds: true };
+  /** The currency of an amount from a field: an ISO 4217 code, or an own Finance.Currency field. */
+  readonly currency?: CurrencyCode | FieldSource;
+  /** automatic: the provider captures what it authorizes; manual: captureOn states capture it. */
+  readonly capture?: "automatic" | "manual";
+  /** With capture manual, the states whose entry captures what is authorized. */
+  readonly captureOn?: readonly string[];
+  /** Per state of the type's Workflow, what a move into it waits for. */
+  readonly require?: Readonly<Record<string, "authorized" | "paid">>;
+  /** The states whose entry cancels open attempts and voids authorized ones. */
+  readonly voidOn?: readonly string[];
+  /** What becomes of money captured while the instance is in a voidOn state; keep when absent. */
+  readonly afterRelease?: "refund" | "keep";
+  /** Who refunds directly with refundPayment. */
+  readonly refunds?: { readonly permission: string };
+  /** Who reports what providers did: the adapter's principal. */
+  readonly record: { readonly permission: string };
+  /** Makes the instance a refund of the instance a required link of the type's Links config names. */
+  readonly refundOf?: { readonly link: string };
+  /** With refundOf, the states whose entry asks the linked instance to refund the amount. */
+  readonly issueOn?: readonly string[];
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

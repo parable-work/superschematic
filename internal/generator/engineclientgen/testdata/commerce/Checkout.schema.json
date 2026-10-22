@@ -1,0 +1,236 @@
+{
+  "kind": "General",
+  "name": "Checkout",
+  "description": "A checkout that holds its lines' units and a pickup slot while it waits for payment (D70), and is placed once paid.",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number"
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "languagePrimitive": "string"
+    }
+  },
+  "types": {
+    "Checkout": {
+      "name": "Checkout",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": [
+              "cart",
+              "held",
+              "placed",
+              "expired",
+              "cancelled"
+            ],
+            "transitions": [
+              {
+                "from": "cart",
+                "to": "held"
+              },
+              {
+                "from": "held",
+                "to": "placed"
+              },
+              {
+                "from": "held",
+                "to": "expired"
+              },
+              {
+                "from": "held",
+                "to": "cancelled"
+              },
+              {
+                "from": "cart",
+                "to": "cancelled"
+              }
+            ],
+            "outcomes": {
+              "expired": "failure",
+              "cancelled": "neutral"
+            }
+          }
+        },
+        {
+          "name": "Links",
+          "config": {
+            "links": {
+              "counter": {
+                "schema": "CollectionPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "Holds",
+          "config": {
+            "holds": {
+              "lines": {
+                "each": {
+                  "field": "lines",
+                  "target": "inventoryId"
+                },
+                "schema": "Inventory",
+                "quantity": {
+                  "field": "quantity"
+                }
+              },
+              "pickup": {
+                "link": "counter",
+                "interval": {
+                  "start": "pickupAt",
+                  "durationMs": 900000
+                }
+              }
+            },
+            "takeOn": [
+              "held"
+            ],
+            "commitOn": [
+              "placed"
+            ],
+            "releaseOn": [
+              "expired",
+              "cancelled"
+            ],
+            "maxItems": 50
+          }
+        },
+        {
+          "name": "Timers",
+          "config": {
+            "deadlines": {
+              "holdExpiry": {
+                "start": {
+                  "enters": "held"
+                },
+                "afterMs": 900000,
+                "then": {
+                  "transition": "expired"
+                },
+                "until": {
+                  "leaves": "held"
+                }
+              },
+              "backstop": {
+                "start": {
+                  "enters": "held"
+                },
+                "afterMs": 7200000,
+                "then": {
+                  "transition": "expired"
+                },
+                "until": {
+                  "leaves": "held"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Payments",
+          "config": {
+            "amount": {
+              "holds": true
+            },
+            "require": {
+              "placed": "paid"
+            },
+            "voidOn": [
+              "expired",
+              "cancelled"
+            ],
+            "afterRelease": "refund",
+            "refunds": {
+              "permission": "payments.refund"
+            },
+            "record": {
+              "permission": "payments.record"
+            }
+          }
+        },
+        {
+          "name": "Reactions",
+          "config": {
+            "rules": [
+              {
+                "when": {
+                  "changes": {
+                    "field": "Payments.state",
+                    "to": "paid"
+                  }
+                },
+                "then": {
+                  "transition": "placed"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "Numbering",
+          "config": {
+            "format": "ORD-{yyyy}-{seq:5}",
+            "reset": "yearly"
+          }
+        },
+        {
+          "name": "StateRules",
+          "config": {
+            "states": {
+              "held": {
+                "frozen": [
+                  "lines",
+                  "pickupAt"
+                ]
+              },
+              "placed": {
+                "frozen": "all"
+              }
+            }
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "lines",
+          "typeRef": {
+            "name": "CheckoutLine",
+            "isArray": true
+          },
+          "required": true
+        },
+        {
+          "name": "pickupAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ]
+    },
+    "CheckoutLine": {
+      "name": "CheckoutLine",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "inventoryId",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "quantity",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        }
+      ]
+    }
+  }
+}

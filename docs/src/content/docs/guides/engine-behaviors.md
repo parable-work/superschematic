@@ -20,13 +20,18 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-two behaviors, so every binary's meta-schema
+The core declares twenty-six behaviors, so every binary's meta-schema
 admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. The other seven are claimable work, the
-work queue's Rust behaviors, which the engine's addon is built with; the
+and registers them when it opens. Seven are claimable work, the work
+queue's Rust behaviors, which the engine's addon is built with; the
 engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
-`@superschematic/engine-workqueue`).
+`@superschematic/engine-workqueue`). The last four, `Stock`, `Calendar`,
+`Holds` and `Payments`, are commerce (D70): the core declares them with
+the package `@superschematic/engine-commerce`, the core's addon carries
+them and a project's engine crate links them, and an engine runs them
+once a deployment names them (`commerceBehaviors`), as a generated
+server does.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -46,6 +51,7 @@ in the engine's `behaviors` option (`workQueueBehaviors`, from
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
+| `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
 
 A running engine lists the behaviors it runs, an extension's included,
 at `GET /behaviors`, and returns one's declaration at
@@ -443,8 +449,8 @@ The Rust engine (D58) runs an extension's behavior from a Rust crate
 that implements the engine's `Behavior` trait, which the extension's
 `BehaviorSpec` names (`Rust`: the crate, its path in the project and
 the expression that registers it). When a DB or General schema's types
-compose such a behavior, or one of the work queue's, which the core's
-engine archive leaves out, the `projectengine` generator writes the
+compose such a behavior, or one of the work queue's or the commerce
+ones, which the core's engine archive leaves out, the `projectengine` generator writes the
 project's engine crate, `engine/rust/<service>`, named
 `<rust_crate_prefix><service>-engine`:
 
@@ -456,8 +462,9 @@ pub fn behaviors() -> BehaviorSet {
 ```
 
 It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
-`engine_behaviors_rust` and, when a type composes a work-queue behavior,
-`engine_workqueue_rust`, and on each extension's crate by its path. A
+`engine_behaviors_rust` and, when a type composes a work-queue behavior
+or a commerce one, `engine_workqueue_rust` or `engine_commerce_rust`,
+and on each extension's crate by its path. A
 Rust host links the crate and opens the engine with `behaviors()` and
 `tools()`, the binary's invocation policy and vendor keys (acme's crate
 for `shop-ratings` is `acme-shop-ratings-engine`):
@@ -1699,6 +1706,8 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 
 - [Work queues](/superschematic/guides/work-queues/): leases, claims,
   worker heartbeats, stamped children, budgets and retries.
+- [Selling and booking](/superschematic/guides/commerce/): stock, time,
+  a claim's holds on both, and payments and refunds.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors):
   the behavior interface, for writing your own.
 - [Write an extension](/superschematic/extending/write-an-extension/#a-behavior):

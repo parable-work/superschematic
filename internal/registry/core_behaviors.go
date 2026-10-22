@@ -7,9 +7,11 @@ import (
 
 // coreBehaviorFiles holds the declarations of the behaviors the core
 // declares, one JSON file each (D16 in docs/DECISIONS.md), under bare
-// names: every behavior @superschematic/engine ships, and every one the
-// optional @superschematic/engine-workqueue package does. Each package's
-// Rust crate (D58: runtime/engine/rust/behaviors, runtime/engine-workqueue/rust)
+// names: every behavior @superschematic/engine ships, every one the
+// optional @superschematic/engine-workqueue package does, and the commerce
+// behaviors the optional @superschematic/engine-commerce package does
+// (D70). Each package's Rust crate (D58: runtime/engine/rust/behaviors,
+// runtime/engine-workqueue/rust, runtime/engine-commerce/rust)
 // carries a copy of the declarations it implements, which `superschematic
 // behaviors --package <name> --out` writes and CI checks
 // (docs/extension-model.md section 3.16).
@@ -27,6 +29,10 @@ const (
 	// behaviors (in the engine's addon, by name) a deployment registers
 	// with the engine to run them.
 	WorkQueuePackage = "@superschematic/engine-workqueue"
+	// CommercePackage is @superschematic/engine-commerce, whose behaviors
+	// (D70: Stock, Calendar, Holds and Payments) a deployment registers
+	// with the engine to run them, as it registers the work queue's.
+	CommercePackage = "@superschematic/engine-commerce"
 )
 
 // coreBehaviors are the core's behavior declarations, by file name, with
@@ -54,6 +60,10 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"blueprint", WorkQueuePackage},
 	{"budget", WorkQueuePackage},
 	{"retries", WorkQueuePackage},
+	{"stock", CommercePackage},
+	{"calendar", CommercePackage},
+	{"holds", CommercePackage},
+	{"payments", CommercePackage},
 }
 
 // coreBehaviorSpecs returns the core's BehaviorSpecs. A declaration that

@@ -945,9 +945,10 @@ For a DB or General schema whose types compose the behavior, the build's
 `projectengine` generator writes the project's engine crate,
 `engine/rust/<service>`, named `<rust_crate_prefix><service>-engine`: it
 depends on the engine's crates at the `[paths]` keys `engine_rust`,
-`engine_behaviors_rust` and `engine_workqueue_rust`, and on yours at its
-path, and its `behaviors()` registers the core's behaviors, the work
-queue's when the schema uses one, then yours; `tools()` carries your
+`engine_behaviors_rust`, `engine_workqueue_rust` and
+`engine_commerce_rust`, and on yours at its path, and its `behaviors()`
+registers the core's behaviors, the work queue's and the commerce ones
+when the schema uses one, then yours; `tools()` carries your
 binary's invocation policy and vendor keys, under which an operation that
 names your policy's value registers. Each server language takes the
 engine from that crate its own way

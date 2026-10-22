@@ -8795,6 +8795,385 @@ holder's new session too until the other takes the lease
 (`hand_over`), and held in 20 runs of 20 beside a release build, the
 first taking its lease again in two of them.
 
+## D70. A claim holds stock and time until it is paid or let go, through supplies, holds and payments the engine keeps
+
+D56 gave business records deadlines, state rules, numbers and sign-offs,
+and left "holds, stock, calendars and payments" for later, to build on
+it. A shop, a salon or a rental desk sells two kinds of supply: units it
+counts and time on a resource. A claim, such as a checkout, a booking or
+a rental, holds some of each while it waits for money, and either keeps
+what it holds once paid or lets it go when it expires or is cancelled.
+D58 put the engine in every server, over one writer per namespace, so a
+check of what is free and the hold that takes it cannot race across
+replicas or languages.
+
+This entry adds four behaviors that the core declares:
+- `Stock`, units a supply counts;
+- `Calendar`, time a supply opens;
+- `Holds`, one claim's holds on any supply, tied to its Workflow;
+- `Payments`, what a claim owes and the payments and refunds that settle
+  it.
+
+They are implemented in a third first-party package beside the work
+queue's.
+
+Three rules hold throughout, beside D56's.
+- An amount is a whole number of a currency's minor units, and whatever
+  holds one names its currency: an ISO 4217 code, which superscalar's
+  `Finance.Currency` scalar holds. Amounts of two currencies are never
+  added.
+- The engine opens no connection to a payment provider. Payments records
+  what is to be done, and an adapter outside the engine does it and
+  reports back, as search's vectors are computed outside and settled in
+  (D16, amended).
+- A supply hears from a claim only through the supply contract's
+  operations. It checks each call against the claim's own `Holds` field,
+  as Budget's scope operations check the instance that calls them.
+
+### Money
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A currency is an ISO 4217 code: a config gives one as a literal (`"GBP"`) or names an own field of the type (`{ field }`), which is a `Finance.Currency`, superscalar's scalar of the active List One codes with their minor-unit exponents. An amount is an integer of minor units, a `Finance.Money` field or a count the behavior keeps. The engine checks a literal code against the same list. | A `Finance.Price` object scalar of amount and currency, like `Geo.Location`, which every SQL column and SDK would carry as JSON; decimal amounts, which every language rounds its own way; acme's `amountCents` and `currency` pair with no scalar, which no generator can format |
+
+### The supply contract and `Holds`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A supply behavior serves the instance operations `holdFor`, `commitFor`, `releaseFor` and, for counted supply, `returnFor`, plus the read-only `checkHold`. Each takes the holder (`{schema, id}`), the hold's name, the item's index and its `quantity` or its `interval` (`{startMs, endMs}`). `Holds` writes an item's new state before it calls the supply, in the same transaction, and a supply refuses a call unless the holder's `Holds.items` already shows that item, asking what the call asks, in the state the call moves the supply's record to (`not_requested`), so a caller cannot hold or release by calling it directly. Its rows, keyed by holder, hold and item, make each call idempotent and move only forward. What does not fit is `unavailable`, its details giving the supply, the hold and item, what was asked and what is free. `Stock` and `Calendar` declare the same operations and conflict. | A supply operation per behavior (`holdStock`, `bookSlot`), which Holds would name supply by supply and an extension's supply could not join; Budget's `reserveFor` itself, whose meters, leases and scopes a supply does not have; trusting the caller's parameters, which lets anyone free stock |
+| A supply may name an own integer field as its unit price, with a currency: `holdFor` returns it, and Holds keeps it on the item. A line keeps the price it was held at, and the shopper never sets it. | A general copy-at-create mechanism, which nothing but a price needs yet; reading the price again at payment, which charges what the product costs then |
+| `Holds` requires `Workflow`. Its config is a map of named holds:<br>- each hold is a single-valued `link`, or `each`, an own list field whose elements name a `target` id in a `schema`;<br>- each hold has a `quantity` (an integer or a field) for counted supply, or an `interval` (`start` with `end` or `durationMs`, each a `date-time` field) for time, read from the list's element for an `each` hold;<br>- the config names the states it takes in (`takeOn`, the create when absent), commits in (`commitOn`), releases in (`releaseOn`) and returns in (`returnOn`), and at most `maxItems` items, 100 when absent.<br><br>A many-valued link is refused, as D56 refuses one wherever one target is read. | A hold per `OrderLine` instance, each with a Workflow of its own, so one checkout moves N state machines; a TTL in Holds' config, a second expiry mechanism beside Timers |
+| A create into a `takeOn` state, or a transition into one, writes the claim's items as `pending`. Its guard asks each supply's `checkHold`, counting what the claim's other items still to hold ask of the same instance (`also`), and vetoes with `unavailable`, listing every item that does not fit. Its `afterChange` then holds them in the same transaction, each call in a savepoint, so the claim holds all of its items or none. Entering a `commitOn`, `releaseOn` or `returnOn` state commits, releases or returns them. `afterChange` reads the status from the instance as it is, never from which operation ran, so a Timers fire, a Lease expiry and a Reactions move are each caught, as Timers' arming is (D56). `retakeHolds` takes them again in a `takeOn` state after a supply refused. | Holding in `afterChange` alone, whose failure is an internal error a client cannot read; releasing only on `transition`, which a Timers move would skip |
+| A transition into a `commitOn` state while an item is not held is vetoed with `holds_missing`. While the claim holds, an update that changes a field a hold reads is vetoed with `held_fields`. A delete releases what the claim holds and leaves what it committed so: units stay sold and time booked, since a return is a move into a `returnOn` state and never a delete. It is vetoed with `committed` while the claim holds committed time that has not ended. A claim records a reference to each supply it holds, and a supply refuses its own delete while it holds anything (`held`): an item held, or committed time that has not ended. Holds has no release operation: a claim lets go by a move of its status, which runs its guards and leaves its event. | `releaseHolds` beside the Workflow, a second way to end a claim that no state shows; leaving the lines to StateRules alone, which a schema may not compose |
+| `Holds.items` gives each item's hold, supply, quantity or interval, state (`pending`, `held`, `committed`, `released`, `returned`), and unit price and currency when the supply gives them. `Holds.state` is the least advanced item's state, `none` before any. `Holds.total` is the sum of the priced items' prices: an item without a price (time, or units of a Stock with no `price`) adds nothing, and with none priced it is `{ amount: 0, currency: null }`. It is null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly, so a reader that needs money, such as Payments, fails closed on null. None of them is volatile: each moves only with the claim's own events, so a Reactions rule hears `Holds.state` turn `committed`. Reactions' `holds` trigger, a rollup that comes to hold, is a rule key and never meets the behavior's name. | A total computed at read from the supplies, which moves when a supply's price does |
+| A hold expires through a Timers deadline the schema writes, such as `{ start: { enters: "held" }, afterMs, then: { transition: "expired" } }`, with `expired` among the `releaseOn` states. Holds' guidance names a `takeOn` state that no deadline leaves. A hold is let go at most Timers' `sweepMs` after its deadline while the runner runs, and when the runner comes back if it is off (D58, amended). | An expiry sweep in Holds, which D56's Timers was built first to avoid; refusing a `takeOn` state with no deadline, which a quote held until withdrawn needs |
+| A namespace's commerce writes serialize on D58's namespace lock, which is what keeps two shoppers from holding the last unit. A shop or tenant is a namespace of its own, and a load test measures the rate. | A lock per supply, which needs a D58 amendment and breaks behaviors that read across instances; a Postgres row lock or exclusion constraint, which SQLite lacks |
+
+### `Stock`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Stock` counts units on an instance. Its fields:<br>- `Stock.onHand`;<br>- `Stock.held`;<br>- `Stock.available`, which is `onHand − held` and never below 0 unless `backorder`;<br>- `Stock.low`, true at or below `lowAt` (an integer or an own field). `low` is volatile, since the config moves it, and is a list filter. | `available` alone, which hides what is promised from what is on the shelf; `low` as a column written at each movement, which a config change would leave stale |
+| `receiveStock`, `adjustStock` and `countStock` need the config's `permission`, which the config must give, each with a reason. A count or an adjustment below what is held is `below_held`, a count unless the caller holds the permission's `.override`. One item holds at most `maxPerHold` (`over_max`). `commitFor` takes units out of `onHand` and `held` (they are sold), and `returnFor` puts back at most what that item committed. | A count that silently leaves promised units unbacked |
+| Each change of `onHand` is a row of an append-only movement table: kind (`receive`, `adjust`, `count`, `commit`, `return`), delta, reason, holder and actor. `on_hand` is kept as a column that always equals the sum of the movements. `listStockMovements` pages them by D60's cursor. | Only the count, which leaves no reason for a change; reading the count as the sum at every read, a scan per read |
+| A new version may change the price field, `lowAt` and `maxPerHold`. `backorder` may turn off only while no instance is below zero. `Stock` joins a schema that has instances, each starting at zero, and leaves only one that has none. | Budget with a store's config, which brings leases, daily meters and scope chains into a stock count |
+
+### `Calendar`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Calendar` opens a resource's time:<br>- weekly hours as `["HH:MM", "HH:MM"]` ranges per day in an IANA `timeZone`;<br>- a `capacity` (an integer or an own field);<br>- a start grid (`slotMs`);<br>- length bounds (`minMs`, `maxMs`);<br>- buffers before and after a hold;<br>- a lead time and a horizon (`leadMs`, `horizonMs`), read against the engine's clock;<br>- `permission`.<br><br>`setOpeningHours` and `addClosure`/`removeClosure` change an instance's own hours and closures. A closure over held time is `has_bookings` unless forced with the permission's `.override`. | Hours as an own field the config names, whose shape no behavior's parameters check; durations in ISO 8601, which D56's rule leaves out |
+| `holdFor` checks, in order:<br>- the opening hours and closures (`outside_hours`, `closed`);<br>- the grid (`off_grid`);<br>- the length bounds (`too_short`, `too_long`);<br>- the lead time and horizon (`too_soon`, `too_far`);<br>- capacity: the most holds over any instant of the interval, buffers included, must stay below it (`unavailable`, with the conflicting interval).<br><br>Holds are rows of `(instance, start_ms, end_ms)`, indexed by instance and start, and the overlap read is the same on both databases. | A Postgres exclusion constraint, which SQLite lacks and the namespace's one writer makes unnecessary; counting overlapping holds, which over-counts a long hold that two short ones overlap at different times |
+| Local times become instants through `jiff` with its time zone database bundled, so every server built from one lock file computes the same slots. A wall time that DST skips has no slot, and a repeated one gives two. The schema-level, read-only `findAvailability({ startMs, endMs, durationMs, ids?, where?, limit })` gives free slots across instances: at most 500, over at most 31 days (`window_too_long`), by `holdFor`'s rules. `listBookings` reads an instance's holds over the same window. | The system's zone files, which differ between a distroless image and a laptop; chrono-tz, whose API is further from the Temporal names superscalar's scalars use; joint availability across two resources' schemas, which the caller intersects for now |
+| Hours, the grid, buffers, lead time and horizon may change in a new version, and apply to holds made after it. `capacity` falls no lower than the current peak. `timeZone` changes only while no instance holds future time, and an instance's own zone, through `setOpeningHours`, only while it holds none (`has_bookings`). | Moving held time when the hours change, which a business does by hand with its customers |
+
+### `Payments`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Payments` keeps what an instance owes and how it is settled. The amount due comes from an own integer field (`{ field }`), in the config's currency or an own field's, or from `Holds.total` (`{ holds: true }`), which carries its own. Its fields are `due`, `authorized`, `captured`, `refunded`, `outstanding` (`due − captured`, never below 0), `currency`, `state` and the last twenty `attempts`. `state` is one of `unpaid`, `pending`, `authorized`, `paid`, `partiallyRefunded` and `refunded`. None of them is volatile, so a Reactions rule hears `Payments.state` turn `paid`. | A card or a payer on the instance, which brings it into PCI scope; a `paid` boolean, which a partial capture or a refund cannot show |
+| `openPayment({ provider, idempotencyKey })` records an attempt and the action that creates it at the provider, and returns the attempt and its amount; the same key returns the same attempt, and the key reused with other parameters is `key_reused`. While an attempt is open the amount does not change (`amount_locked`). `capturePayment`, `voidPayment` and `refundPayment` record actions. A refund above what is captured and not yet refunded or asked is `exceeds_refundable`, and refunding needs `refunds.permission`. The core's declarations name no invocation policy, so they register under any distribution's; a deployment that wants these four confirmed marks them in the engine's tools config: its `invocation` takes a behavior operation as `<Behavior>.<operation>` (`Payments.capturePayment: ask`) in its declaration's place, beside the built-in tools it already took, and a generated server's engine takes it from the engine database's `outputs.engine.tools.invocation`, which the build checks against the binary's policy and the behaviors the engine types compose, and which the engine document carries. An engine refuses one naming a behavior it does not run or an operation the behavior does not declare when it opens. | Calling the provider inside the call, which holds the namespace's lock across the network and breaks D16's synchronous hooks; an invocation policy in the declarations, which a distribution with other values than the core's would refuse; a list of confirmed operations in the core, which the deployment could not change |
+| An adapter outside the engine reads the actions waiting for its provider through the schema-level, read-only `listPaymentActions`, and calls the provider with each action's id as the provider's idempotency key. It reports every outcome, and every provider event, through `recordPaymentEvent({ provider, eventId, attempt or providerRef, kind, amount, currency, at })`, which needs `record.permission`, which the config must give. An event applies once per `(provider, eventId)`; a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late changes nothing. An event in another currency is `currency_mismatch`. | Storing a provider's raw event, which holds the payer's name, email and address; trusting delivery order, which no provider promises |
+| `require: { <state>: "authorized" or "paid" }` vetoes a transition into the state until the payment meets it (`unauthorized`, `unpaid`). `voidOn` states void the open attempts as the instance enters them. With `capture: "manual"`, `captureOn` states capture what is authorized. A move out of a state while an attempt is `processing` is vetoed with `payment_in_progress`, so a hold's expiry fired by Timers does not let go of what is being paid for; Timers records the veto as the deadline's outcome (D56), and a longer second deadline catches a payment that never reports. Money captured on an instance already in a `voidOn` state is refunded when `afterRelease` is `"refund"`, and kept for an operator when it is `"keep"`, the default. | Letting the expiry win, which sells a paid customer's stock to someone else |
+| A refund that needs sign-off is an instance of its own: Workflow, Approvals' gate, a required link to what it refunds, Numbering, and Payments with `refundOf: { link }` and `issueOn` states. Entering an `issueOn` state invokes `refundFor` on the linked instance's Payments. That instance checks the link and the amount and records the refund action, and when the provider's refund event is reported to it, it invokes `settleRefundFor` back on the refund. A shop without sign-off calls `refundPayment` directly. | A count of approvers inside Payments, a second sign-off mechanism beside D56's Approvals; a Reactions `then` that invokes any operation, which D16 turned down |
+| A new version may change `require`, `voidOn`, `captureOn` and the permissions. The currency and the source of the amount stay while any attempt exists. `Payments` joins a schema that has instances and leaves only one with no attempts. | |
+
+### Providers, webhooks and personal data
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A provider's adapter is the API's own code; the repository ships no official one. acme-shop carries the example over a fake provider, `acmepay`, with Stripe-shaped signing, which `stack dev` and the tests run:<br>- the operation that opens a payment calls the provider;<br>- an `@webhook @hmacVerified({ provider })` operation (D26, D28) maps each provider event to `recordPaymentEvent`, and answers 2xx for an unknown event or a veto and 503 for `busy`;<br>- a job (D52) drains the waiting actions and asks the provider about attempts stuck in `processing`.<br><br>Each calls the engine in-process as a service principal the database's engine policy names. The provider's key and signing secret are `Secret<T>` fields of the API's config (stack-model 4.2), in each platform's secret store (D63, D64), never in the engine's config, document or log. | A Rust `PaymentProvider` in the engine's runner, which needs the runner to read secrets and config it does not have (D58, amended); an adapter per language in the runtimes, three implementations of each provider; a real provider's test mode in CI, which needs its keys |
+| Payments' parameters hold no card data. Every schema is closed:<br>- `providerRef` is limited by pattern;<br>- the display hint is a brand and a four-digit `last4`;<br>- metadata is at most ten string pairs.<br><br>The documentation names the provider's hosted fields as the only way a card is entered, which keeps a merchant to SAQ A, and says a schema must add no card fields of its own. | Tokenising cards in the engine, which brings every server into PCI scope; a loader that refuses own fields named like card data, which refuses legitimate names and misses others |
+
+### Packaging
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core declares `Stock`, `Calendar`, `Holds` and `Payments` under bare names in `internal/registry/behaviors`, with the package `@superschematic/engine-commerce` (`registry.CommercePackage`). The crate `superschematic-engine-commerce` in `runtime/engine-commerce/rust` implements them on the plug-in API alone, carries their declarations in `declarations/` (`make behaviors`, checked by `make behaviors-check`), and its `supply` module gives an extension's supply the contract's types and the holder check. Go and Rust servers link it through the project's engine crate when a schema composes one of them, as they link the work queue's (`[paths] engine_commerce_rust`). The core's Node-API addon carries it beside the work queue's. | The core's behavior crate, which would put a time zone database in every Go server's archive; an extension, which would qualify the names and leave them out of the core's catalog |
+| The engine client generator narrows the four behaviors' fields, operations and parameters (D49). | |
+| acme-shop's stock and checkout move onto the engine: `Inventory` (`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`, `Payments`) and `Refund`. The `Order` table and its queues stay, and a placed checkout writes its row. | A separate commerce slice beside acme's tables, which proves nothing acme's servers do |
+
+This entry amends:
+- D11, whose engine tool options take a behavior operation's invocation
+  policy, which the engine database's config sets;
+- D16, whose catalog gains the four behaviors and a third package;
+- D58, whose project engine crate and addon gain the commerce crate.
+
+It uses:
+- D56's Timers for expiry, Approvals for refunds, Numbering for numbers,
+  StateRules for frozen claims and Reactions' `changes` for what follows a
+  payment;
+- D26 and D28 for webhooks, D37 for the adapter's principal, and D52 for
+  its job.
+
+Status: built and proved across languages, and acme-shop is built.
+The core declares the four behaviors, twenty-six in
+all, with the package `@superschematic/engine-commerce`, and
+`runtime/engine-commerce/rust/declarations` carries their copies;
+`@superschematic/schema` types their configs. `fixture-commerce-json`
+and its TypeScript twin compose all four with Workflow, Links, Timers,
+Reactions, Numbering, StateRules and Approvals and load to the same IR,
+and `make cli-smoke` builds the JSON form. `superscalar.pin` names
+62b300e7, which adds `Finance.Currency` (superscalar#86):
+`fixture-commerce-currency`, whose currency is a `Finance.Currency` own
+field, loads in both forms to the same IR (`TestCommerceCurrencyFields`)
+and `make cli-smoke` builds its JSON form; the Go runtime refuses `ABC`
+(`TestFinanceCurrencyThroughTheCore`), and the engine refuses it as a
+`Finance.Currency` field's value
+(`a_finance_currency_field_takes_only_active_iso_4217_codes`). The names
+and rules are reversible until the first release.
+
+Stock (M2) and Holds (M3) are built in `runtime/engine-commerce/rust`,
+registered by `commerce()` and carried by the core's addon. Each has a
+Rust suite in the test kit (`tests/commerce_stock.rs`,
+`tests/commerce_holds.rs`) on SQLite and Postgres, which checks after
+every step that `Stock.onHand` is the sum of the movements, `held` the
+sum of the records that hold, and that every held or committed item
+matches its supply's record. The suites cover all or none, expiry
+through the runner, the late-payment race and two claims racing for the
+last units on two engines over one Postgres. The late-payment race runs
+on Payments over the claim's `Holds.total`: an attempt reported
+`processing` vetoes the expiry (`payment_in_progress`), its capture
+places the checkout through a Reactions rule on `Payments.state`, a
+failed payment lets the backstop release it, and a capture after the
+release leaves it released and asks a refund (`afterRelease: refund`).
+The package
+`@superschematic/engine-commerce` (`runtime/engine-commerce/typescript`)
+holds their names and types, and its suite records
+`commerce-{stock,holds,holds-timers}.json`, which the test kit replays.
+What the build settled:
+- `Holds.items` shows each item the claim's fields and links ask that it
+  has not taken as `pending`, so a cart shows what it would hold.
+- An update in a `takeOn` state that changes what a claim holding
+  nothing asks takes the holds, refused as an entry is.
+- `parse_config` refuses a transition from a `releaseOn` or `returnOn`
+  state into a `takeOn` state, since a supply records each item of a
+  claim once.
+- A supply takes `releaseFor` alone for a holder that is gone, which a
+  claim's delete makes: it releases what was held, leaves what was
+  committed, and retires the records (amended by the supply review
+  below).
+- Stock refuses its delete while it holds units, not while claims have
+  committed some, which are sold.
+- `Stock.low` filters through a column each write sets, so after a new
+  version moves a literal `lowAt` the filter follows each instance's next
+  write while the field answers at once.
+- Under the default dotted permissions the permission covers its
+  `.override`.
+- A literal currency is checked against ISO 4217 through superscalar's
+  `Finance.Currency` table (`currency.rs`), so `ABC` is refused.
+
+M4, `Calendar`, is built in the commerce crate (`src/calendar`) and
+registered in `NAMES`, so the core's Node-API addon carries it. It links
+`jiff` 0.2.38 with only `std` and `tzdb-bundle-always`: the IANA database
+(2026e, from `jiff-tzdb` 0.1.9, Unlicense OR MIT) is in the binary and no
+host zone file is read. The release (`dist`) addon for darwin-arm64 grew
+from 14,705,536 to 15,532,288 bytes (+827 KB, 5.6%), and gzipped from
+6,398,402 to 6,700,423 (+302 KB); the database itself is 207 KB. The Go
+core archive does not link the crate. The start grid is in wall time, a
+whole number of `slotMs` after the opening time of the range a start lies
+in, so a grid time a change skips has no slot, and a hold's length is
+elapsed time. Where the build settled what this entry left open:
+- `findAvailability` reads at most 100 instances, by id, and answers
+  `truncated` when more match; its `where` takes the type's own fields
+  that hold a string, a number or a boolean, as a list's equality does,
+  not a behavior's; a duration outside `minMs` and `maxMs` is vetoed
+  `too_short` or `too_long`;
+- `outside_hours`, `closed`, `off_grid`, `too_short`, `too_long`,
+  `too_soon` and `too_far` carry `unavailable`'s details with what they
+  turn on (`timeZone`, `closure`, `slotMs`, `minMs`, `maxMs`,
+  `earliestMs`, `latestMs`), and `has_bookings` lists the holds;
+- under the default dotted permission matcher, the config's permission
+  covers its own `.override`, so `force` is a separate right only under a
+  deployment's matcher;
+- the peak a new version's capacity may not fall below, and a capacity
+  field's update (vetoed `has_bookings`), counts the holds that have not
+  ended, without buffers; a new version refused for capacity or zone is a
+  `BehaviorConfigError` of the publish; Calendar leaves only a schema with
+  no instances;
+- a resource with held time, or committed time that has not ended, is not
+  deleted (`held`), as the contract's helper counts (amended by the
+  supply review below; past bookings once kept it for good).
+
+`commerce_calendar.rs` in testkit, the core-calendar suite, runs it
+through the contract and testkit's Holds stand-in on SQLite and Postgres:
+thirteen cases, among them the daylight-saving Sundays of Europe/London,
+America/New_York and Australia/Lord_Howe held to Python's zoneinfo
+instants, a sweep held to a minute-scan model, and two engines racing
+eight threads for two places. The commerce package's TypeScript suite
+covers it (`test/calendar.test.ts`), and its recording,
+`commerce-calendar.json`, is in the corpus the test kit replays.
+
+The supply review of Stock, Holds and Calendar settled:
+- An interval of the contract lies from 1900 to 9000, in its paramsSchema
+  and in `SupplyCall::parse`. Calendar reads hours, closures and holds
+  over an interval's first `maxMs` and a minute only, so one of centuries
+  costs what the longest hold does and is `too_long` once that much is
+  open; before, one call could hang a server under the namespace lock.
+  Holds lists an item whose own date-time fields ask time outside the
+  bounds as `unavailable` without asking the supply.
+- `checkHold` takes `also`, the asks of the claim's other items still to
+  hold of the same instance: a count Stock subtracts from what is
+  available, intervals Calendar counts against capacity. Holds' guard and
+  `listHolds` send it, so two lines of one supply that do not fit
+  together are each listed, rather than failing in `afterChange`.
+- A claim's delete leaves committed units sold: a gone holder's
+  `releaseFor` is the only call a supply takes for it, so no caller gives
+  a deleted claim's units back, and the ledger records no return that
+  did not happen.
+- A gone holder's records retire: a `retired` key column, 0 while the
+  holder lives, keeps their state, so committed time stays booked, and
+  frees the holder's id, so a claim created again with it holds afresh.
+  `listBookings` marks such time `retired`. Calendar's `checkHold` reads
+  the record as Stock's does, so both agree with `holdFor`.
+- A resource and a claim whose committed time has ended are deleted;
+  committed time to come keeps both.
+- `findAvailability` sweeps each instance's sorted holds once, jumps past
+  a full stretch, a closure and a closed stretch, and stops at
+  `MAX_FIND_WORK` (two million), answering `truncated`.
+- Stock's held and commit arithmetic is checked against what a JSON
+  number holds; backorder turns off only with no instance below zero, as
+  this entry says; without backorder a commit is `unavailable` while it
+  would leave fewer than 0 on hand, which a count with the override can
+  cause, and an adjustment up is taken while it leaves too few.
+- The `closures` field reads from now with a limit of 100, and
+  `parse_config` refuses a `takeOn` state's transition to itself, which
+  would start the hold's expiry again.
+
+`commerce_holds_calendar.rs` holds a desk's time through a booking's real
+Holds beside Workflow, Links, Timers, StateRules and Reactions (a rule on
+`Holds.state` turning `committed`), on SQLite and Postgres: commit,
+expiry, the delete that waits for committed time to pass, a claim
+created again with a deleted one's id, an interval of centuries refused
+at once, and two sessions of one desk listed together. Calendar's suite
+times `findAvailability` on a full calendar of 100 instances; Stock's
+covers the counts under backorder and after an override count.
+
+M5, `Payments`: built in `runtime/engine-commerce/rust` (`payments.rs`)
+and registered by `commerce()`, with its own tables of attempts, actions,
+refunds, a refund instance's issues and the provider events it recorded,
+the same SQL on both databases. A literal currency, and the code an
+instance pays in, is checked against `Finance.Currency`'s table through
+the crate's `currency` module, which Stock's builder added. The
+testkit's `commerce_payments` and `commerce_payments_refunds` pass on
+SQLite and Postgres:
+idempotent and reordered events, `amount_locked` from a field, a real
+`Holds.total` (the stand-in is gone, D70 amended below), `require`,
+`voidOn` and `payment_in_progress`,
+`afterRelease`, manual capture and over-capture, direct refunds, a
+currency mismatch, and a Refund issued after two Approvals sign-offs,
+numbered by Numbering and moved to issued by Reactions. Where the table
+above left a choice:
+- an attempt's statuses rank `open < requiresAction < processing <
+  failed < authorized < cancelled < captured`, so a payment that succeeds
+  after a failed try is caught and money a provider captured is counted
+  whatever came before it;
+- an event id applies once per namespace and provider: the same id with
+  other content, or on another instance, is `key_reused`;
+- `openPayment` opens no second attempt while one is in flight
+  (`nothing_due`): a payer who switches method voids the first;
+- a refund draws on one captured attempt;
+- `listPaymentActions` and `settleRefundFor` need `record.permission`
+  too, and `refundFor` takes a call only from a refund instance whose link
+  points here, in an `issueOn` state, for its own amount;
+- with `amount: { holds: true }` the type lists Payments after Holds, and
+  `require` names no initial state;
+- a new version keeps the currency, the amount's source and `refundOf`,
+  and Payments leaves a schema, only while the schema has no instances,
+  which is what the engine's configChange can see;
+- a delete waits while an attempt is in flight (`payment_in_progress`),
+  and the recorded events stay after it so a redelivery is still a
+  repeat.
+
+The plumbing is built. The project's engine crate depends on
+`superschematic-engine-commerce` when a type composes a commerce
+behavior, at `[paths] engine_commerce_rust`, which the local target's
+check of a crate by version, the release's refusal and the naming
+reference name; a Go server links its archive, a Rust server its
+`behaviors()`, and a TypeScript server names the four on the core's
+addon, whose release check now opens them. `outputs.engine.tools.invocation`
+reaches every entrypoint through the engine document, and the engine and
+its TypeScript facade take `<Behavior>.<operation>` in `tools.invocation`
+(`a_behavior_operation_takes_the_invocation_policy_the_tool_options_give_it`,
+`TestBuildCarriesTheDeploymentsInvocationPolicies`). `behaviortypes`
+narrows the four, and `runtime/engine/typescript/test/generated/commerce.ts`
+is their client. servergen's `shop-commerce-db` fixture, with an API in
+Go, Rust and TypeScript, builds and serves offline in all three
+(`TestCommerceEngineEntrypointServes`, `…Rust`, `…TypeScript`); on
+Postgres each deploys the document and answers one script, the MCP
+tools' policies included, now that the crate registers all four
+behaviors. The client parity corpus carries the commerce schemas, and
+the release publishes `@superschematic/engine-commerce` (D70, amended
+below).
+
+acme-shop is built (D70, amended below: acme-shop sells, books and
+refunds through the engine).
+
+The cross-language proof (M8). servergen's `shop-checkout-stack` serves
+`shop-commerce-db`'s three APIs, in Go, Rust and TypeScript, each naming
+the database as its authDb, so its members hold the permissions their
+roles grant, beside one runner; the database gains the user model, a
+`Bay` of capacity 1 with a `Booking` that holds it, and a two-second
+hold expiry. `TestCommerceServersAnswerOneScriptAlike` runs the design's
+script against each server on one Postgres, its ids, logins, provider
+and event ids tagged per run: staff receive three units, which a shopper
+may not; a cart holds two and a pickup slot, owes `total_unknown` while
+they are pending and their price once held, and a second cart's two are
+`unavailable`; a payment opens twice under one key, and the adapter,
+staff holding `payments.record`, lists its action and records
+`processing`, `captured`, the capture again (`applied: false`), a late
+`requiresAction` (ignored) and an event in EUR (`currency_mismatch`),
+which a shopper may not record; placing commits the units and the slot;
+a refund past what is refundable is `exceeds_refundable`, and a Refund
+its creator may not sign and one sign-off cannot approve is approved by
+two, asked of the checkout, and settled by the provider's refund event;
+then two checkouts hold a unit each, one paying, and the runner expires
+the unpaid one, its unit back, vetoes the paying one's expiry
+(`payment_in_progress`, the deadline fired with the outcome `vetoed`)
+and moves the Refund to issued, and once the late capture is recorded
+places the paying one through Reactions. After each run onHand is the
+sum of the ledger's movements. The three normalised transcripts, 65
+exchanges each, are identical: a Numbering label and seq are symbols,
+since the runs share the namespace's count. Each server then reads what
+each other wrote, with its own staff's session and the writer's, alike.
+`TestCommerceServersOversellNothing` moves 1,000 checkouts cart→held at
+once, a third through each server and at most 32 requests in flight to
+each, for an Inventory's three units: three hold, 997 are vetoed
+`unavailable` and stay in their carts, and Stock's ledger holds (onHand
+the sum of the movements, held the sum of the held checkouts' items,
+none available); 1,000 bookings of one slot of the Bay hold one. With
+128 in flight to each server, the moves at the back of the namespace's
+queue waited past the servers' 30-second engine route timeout and
+answered 504 `gateway_timeout` (12 and 189 of the 1,000 in two runs),
+and still exactly three held. CI's engine-servers job and `make
+engine-servers` run both.
+
+`TestCommerceHoldsLoad`, which runs only with
+`SUPERSCHEMATIC_COMMERCE_LOAD=1`, measured three servers and 24 clients
+on a laptop against Postgres 17 in a local VM: checkouts of one item
+held at 6.2 a second (6 holds a second), of ten items at 2.6 (26 holds
+a second), and of fifty at 0.7 (35 holds a second); checkouts were
+created at about 12 a second. In the oversell test the refused moves ran
+at about 13 a second, and the Bay's bookings, a type of fewer behaviors,
+at about 60. Statement logging puts the time in round trips under the
+namespace lock rather than in the database's work: holding a checkout
+of ten items ran about 680 statements in one transaction, with about
+7 ms of database time, and creating one about 165. Each behavior's hook
+reads the schema's document and the instance again, 109 times each in
+that hold, so a cache of those reads within a transaction is the first
+step to a faster checkout; until then a namespace per shop keeps shops
+from queueing on each other. Reads pay the same way: listing the 997
+checkouts the oversell test leaves in their carts, whose pending items
+each read their supply, took about 58 seconds in pages of 100, and one
+page of 500 passed the 30-second route timeout.
+
+The guide "Selling and booking with the engine"
+(`docs/src/content/docs/guides/commerce.md`) and
+`runtime/engine-commerce/README.md` describe the four behaviors, the
+supply contract, totals and currency, the payment adapter outside the
+engine, refunds with Approvals, expiry with Timers and the MCP tools'
+policy.
+
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 
 D21 kept every optional integer scalar (`Generic.Int64`, `Temporal.Seconds`,
@@ -8819,6 +9198,83 @@ Optional `number` and `string` fields keep value types with `omitempty`.
 `TestOptionalIntegerEnvVarKeepsExplicitZero` cover these shapes.
 
 The rule is reversible until the first release.
+
+### D58, amended: a deploy orders its documents by the schemas their configs name, and tries a refused one again after the others
+
+A server's deploy defined and published its engine document's schemas in
+the document's order, the engine types' name order, and stopped at the
+first refusal. A behavior whose config reads another schema's live
+version (Rollups' source, a Holds supply, a Payments `refundOf` link's
+target, D70) was refused when that schema came later by name:
+shop-commerce-db's Checkout, which holds Inventory, never deployed, so
+no commerce server became ready.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Engine::deploy` first orders the documents so that each comes after the others its behaviors' configs name: a string anywhere in a type's behavior config equal to another document's name. Documents that name each other, directly or not, keep the order given among themselves, and so does every document otherwise. | The engine document's generator ordering the schemas, which needs every behavior's references, an extension's included, known to the compiler; the order given alone, which made a document's validity depend on its types' names |
+| It then deploys in passes. A document refused as an invalid schema (`InvalidSchema`, which a behavior's config refusal is) is tried again in the next pass; a pass that deploys none of those left returns its first refusal in the dependency order, every other document deployed, so a supply that cannot deploy fails with its own refusal and not with its claim's "no live version". Any other error (an incompatible change, a busy or unavailable database) stops the deploy at once, as before. There are at most as many passes as documents, so at most n(n+1)/2 attempts. | Retrying every refusal, which retried an unavailable database and returned a dependent's refusal before its cause's |
+| A draft with the document's hash, which a publish refused a pass before left, is published again without a second define, so a retry writes no second draft and no second define event. The result lists the documents in the order given. The Go binding's `Deploy` and the TypeScript `deploy` call it. | |
+
+`commerce_holds.rs`'s `a_deploy_publishes_a_claim_after_the_supplies_it_names`
+deploys Checkout before Counter and Inventory on SQLite and Postgres:
+with an Inventory whose Stock config is wrong it fails with Inventory's
+refusal while Counter deploys; with a good one each schema is defined
+once; a second deploy writes nothing; and a config naming a schema that
+is never live is refused after the rest deployed. `deploy.rs`'s order
+tests cover a chain and a cycle.
+
+### D70, amended: Payments fails closed, pays one refund per approval, asks back a double charge, and a deployment names every money-moving operation's policy
+
+A review of Payments and its plumbing found that:
+- one approved Refund could drain its order through `refundFor`, which
+  took a refund per caller key;
+- `amount: { holds: true }` read a null `Holds.total` as 0, so `require:
+  paid` passed with nothing paid;
+- a late capture of an attempt that had failed charged the payer twice,
+  with no signal;
+- the operations that move money or stock were `auto` MCP tools unless
+  the deployment said otherwise, and the adapter's own operations were
+  offered to end users;
+- `settleRefundFor` trusted its caller's status and amount.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One live refund per refund instance: while one it asked is `requested`, `sent` or `succeeded`, `refundFor` returns it under its key and refuses any other (`key_reused`). After one failed it takes only the key the refund instance derives from itself and the failures before (`<schema>:<id>.<n>`), which `issue` already sends. | Trusting the caller's key, which the review's drain used; refusing every direct call, which nested invokes cannot tell from a forged one |
+| With `amount: { holds: true }` what is owed is unknown while an item is `pending` (its price comes when it is held), or while `Holds.total` is null over priced items (two currencies, or a sum past what an integer holds). `due` reads 0 then, and `openPayment` and a move into a `require` state veto with the new code `total_unknown`. A claim whose items carry no price owes 0, so a free booking moves. `Holds.total` sums the priced items only (cm-fix-supply's Holds change); Payments reads `Holds.items` too, so it holds to this before and after that change. | `due` 0 for a null total, the review's finding; a nullable `due`, which every client and SDK would carry |
+| `openPayment` gives each earlier `failed` attempt a `void` action, and a capture that pays what is due voids the other attempts still open. A capture that arrives anyway is counted; what it brings past what is due is the new field `Payments.overpaid`, and Payments asks it back with a refund keyed `overpaid:<eventId>`. That refund leaves `state` `paid`. `refundPayment` refuses the `overpaid:` and `release:` keys, which are Payments' own. | A new `overpaid` state, which a rule listening for `paid` would miss; refusing the capture, which leaves money taken and unrecorded |
+| `settleRefundFor` reads the refunded instance's refund row (Payments' tables are namespace-wide) and refuses a status or an amount other than what that instance recorded (`not_linked`). Defining a refund's schema refuses a `record.permission` other than its target's, since the adapter settles both in one call. The module's documentation says the engine policy must let the adapter write `settleRefundFor`, and the issuing principal write `refundFor`. | A config-time check of the engine policy, which the schema registry cannot see |
+| A build whose engine types compose the core's `Payments` or `Stock` is refused unless `outputs.engine.tools.invocation` names a policy for each operation that moves money or stock, naming each it lacks: `Payments.openPayment`, `capturePayment`, `voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`, `adjustStock` and `countStock` (`enginedoc.MoneyOperations`). | Filling in `ask` silently, which a distribution with other values could not take; a warning, which a build log hides |
+| A new engine tool option, `tools.hidden`, lists behavior operations the tools leave out. Such a tool reads `hidden: true` with its reason, and its call by MCP handle is `UnknownToolError`; the operation still runs through the engine's API. `outputs.engine.tools.hidden` sets it, which the build checks. The engine document adds Payments' service operations wherever Payments is composed: `listPaymentActions` and `recordPaymentEvent`, which the adapter calls, and `settleRefundFor`, which a refunded instance calls (`enginedoc.ServiceOperations`). An engine opened by hand hides only what it is given. | A value of `invocation`, which is the binary's policy's to define; a `service` flag in the declarations, which every distribution's registry and the engine's declaration reader would have to learn; the access policy alone, which hides a tool from a caller only per deployment |
+| `ToolOptions::from_json` and `resolveToolOptions` refuse a non-string `invocation` value, a non-object `invocation` and a `hidden` that is not a list of strings, naming each, rather than dropping them to the default. | |
+
+`@superschematic/engine-commerce` names all four behaviors and types
+Payments' config and record. The release packs and publishes it after
+the engine, beside the work queue's package, so a TypeScript deployment
+can name and type the commerce behaviors from it.
+
+This amends D11, whose engine tool options gain `hidden`.
+
+Status: built. The new behavior is tested in four places:
+- the testkit's `commerce_payments` and `commerce_payments_refunds`, on
+  SQLite and Postgres: made-up keys after approval, a forged settlement,
+  the record permission, a late capture voided and asked back, and
+  `total_unknown` for pending lines, two currencies and an overflow over
+  real Stock and Holds, with a free claim placed;
+- `tools.rs` and the TypeScript `tools.test.ts`, for `hidden` and the
+  refused option shapes;
+- `enginedoc`'s and servergen's build tests, for the refusal and the
+  hidden list;
+- the commerce package's `payments`, `payments-refunds` and
+  `payments-holds` suites, recorded as `commerce-payments*.json`, which
+  the testkit replays.
+
+servergen's commerce entrypoint tests lost the `NAMES` gate. Without a
+Postgres they skip after the offline half, or fail under
+`SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1`. On Postgres, Go, Rust and
+TypeScript each hold a pickup slot through Calendar and Holds, meet
+`total_unknown` and `nothing_due`, place the free checkout and read its
+booking, and show the MCP tools' policies and hidden operations. The
+client parity corpus carries the commerce schemas.
 
 ### D31, amended: a Go enum refuses a string it lacks, and a Go duration reads its text as every validator does
 
@@ -9128,3 +9584,41 @@ spans reach a collector from `waitUntil`; and a presigned PUT and GET for
 an EU bucket, with the edge's token scoped to it.
 
 The rule is reversible until the first release.
+
+### D70, amended: acme-shop sells, books and refunds through the engine
+
+D70 moved acme-shop's stock and checkout onto the engine: `Inventory`
+(`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`,
+`Payments`) and `Refund`, with the `Order` table and its queues staying.
+Building it settled where each piece runs and what the old shop keeps.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cart is a TypeScript API of its own, `shop-cart`: a shopper's cart is a `Checkout` in `cart`, and the pickup slots are `CollectionPoint`'s `findAvailability`. `shop-storefront` keeps its carts in memory, since `storefront-stack` runs it as a Cloudflare Worker, which cannot load the engine (D64). | Moving the storefront's carts onto the engine, which ends `storefront-stack`'s `Staging`; the storefront calling `shop-orders`, whose `calls` edge brings `shop-orders` and `shop-db` into that stack |
+| `shop-stock`'s `reserveStock` goes. `shop-orders` tells `shop-stock` what a placed checkout sold through a `@requireService` operation with no user clause, `stockSold`, since a payment's webhook brings no shopper, and `shop-stock` enqueues `StockLow` for each product the sale left low (`Stock.low`). `StockLow` and `ReorderStock` stay, so the Go to Rust service call (D37, D57) and the Rust worker and job (D65) keep their proofs; `OrderRestocks` also files a request for each `Inventory` the engine lists low with none open, which a count or an adjustment leaves, and then orders the open ones. | Retiring `StockLow` and `ReorderStock` for `OrderRestocks` over `Stock.low` alone, which drops the queue's proof; a `Reactions` rule, which moves statuses and runs no project code |
+| `placeOrder` stays, an order taken in one step that holds no stock and takes no payment, which the Rust server, the Topcoat app and the SDKs' tests place. The Rust server answers the checkouts 501, and the Topcoat app mounts the engine at `/engine` on a SQLite file of its own and sells nothing through it yet. | Retiring `placeOrder`, which takes the D60–D62 and Topcoat proofs with it |
+| The runner's `Reactions` rule places a paid checkout after the webhook that recorded the capture answered, so the `Order` row (unique `checkoutId`) is written when `shop-orders` next looks: the webhook, if the checkout is placed already, `getCheckout`, or `SettlePayments`, which reads every placed checkout. The row's lines are the prices `Holds` held. | The webhook moving the checkout to `placed` itself, which races the rule |
+| `go/acmepay` is the provider: intents, cancellations, refunds and webhooks signed `t=…,v1=` (HMAC-SHA256 of `t.body`, five minutes' tolerance, two secrets during a rotation), with idempotency keys. Every change is an event with an id, which its API's answer names, so the adapter records the answer under the event's id and the webhook that brings the same event applies once. It takes a payer's test token and refuses any other field, a card number among them. `stack dev` runs no process of a project's own, so acmepay runs beside it at `ACMEPAY_URL`'s default address, `127.0.0.1:4250`, with `Dev`'s secrets, and the tests run it in-process. | A real provider's test mode, which needs its keys; an API of the stack's that serves the fake in `Dev` alone, which a stack cannot declare per environment |
+| An engine id that a type's `Identity.UUID` field names is that UUID's canonical text, as the scalar writes it (base62): a line's `inventoryId` names an `Inventory` whose id is its product's, and a checkout's `customerId` is the shopper's id as the engine stores it. | The UUID's hyphenated form, which the engine's `Identity.UUID` fields would hold in the other form, so no hold found its supply |
+| `shop-db`'s policy is rules, the first that matches deciding: `shop-orders` reads and writes, `shop-cart` writes checkouts and reads the stock and the counters, `shop-stock` the stock, any other service nothing, the runner (`shop-db-engine-runner`) each type by its name, then staff by their roles (`refunds.approve`, `orders.any`, `stock.write`, `calendar.manage`). Every `Payments` operation asks; `receiveStock` is `auto`, a warehouse's routine its ledger records with a reason; `adjustStock` and `countStock` ask, since each takes units out of sale. | `allowAll`, which a deployment should not copy; the runner's rule after the staff's, which a read of a checkout by the runner met first |
+
+A build of one stack, `superschematic build`, read its engine database's
+config only where build-all hands it over, so its servers opened the
+engine with the default `permission` policy rather than the database's;
+the engine's settings now come from the config either way (D58).
+
+Status: built. `examples/acme-shop/go/commerce_test.go` opens `shop-db`'s
+engine on SQLite with the project's engine archive and the policy
+`shop-stack`'s servers open it with, and serves `shop-orders` over it:
+a checkout holds two units and a pickup slot, another finds one free
+(`unavailable`), acmepay's signed capture places it through the runner, a
+webhook signed with another secret, with none or long ago is refused, a
+resent one changes nothing, the order is written once and `shop-stock`
+told of the sale, the slot is committed, and a refund two members of
+staff sign off is made by `SettlePayments` and issued, once. acmepay has
+tests of its own. `TestStackDevRunsTheShop` runs the same sale on
+`stack dev` over Postgres, `shop-cart` on Bun included, with the sale one
+trace from `shop-orders` into `shop-stock`, and
+`TestStackInitOverAcmeShop` resolves the stack on gcp.
+`internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
+holds the policy fix. The rule is reversible until the first release.

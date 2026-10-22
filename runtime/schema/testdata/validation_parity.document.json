@@ -151,6 +151,21 @@
         "sql": "BIGINT"
       }
     },
+    "Finance_Currency": {
+      "description": "ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY)",
+      "maxLength": 3,
+      "minLength": 3,
+      "pattern": "^[A-Z]{3}$",
+      "type": "string",
+      "x-example": "USD",
+      "x-hasCustomValidate": true,
+      "x-scalar": "Finance_Currency",
+      "x-typeMapping": {
+        "go": "FinanceCurrency",
+        "json_schema": "string",
+        "sql": "VARCHAR(3)"
+      }
+    },
     "Finance_Money": {
       "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
       "maximum": 9007199254740991,

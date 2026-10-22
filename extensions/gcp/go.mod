@@ -47,7 +47,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261019142557-bab3060b8921 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect

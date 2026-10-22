@@ -555,9 +555,1198 @@
           ]
         }
       }
+    },
+    {
+      "kind": "General",
+      "name": "Inventory",
+      "description": "Units a shop counts and prices (D70): Stock with a unit price in GBP and a reorder level.",
+      "scalars": {
+        "Finance.Money": {
+          "name": "Finance.Money",
+          "languagePrimitive": "number"
+        },
+        "Generic.Int64": {
+          "name": "Generic.Int64",
+          "languagePrimitive": "number"
+        }
+      },
+      "types": {
+        "Inventory": {
+          "name": "Inventory",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Stock",
+              "config": {
+                "price": {
+                  "field": "priceCents",
+                  "currency": "GBP"
+                },
+                "lowAt": {
+                  "field": "reorderAt"
+                },
+                "maxPerHold": 99,
+                "backorder": false,
+                "permission": "stock.adjust"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "sku",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMaxLength": 64
+            },
+            {
+              "name": "priceCents",
+              "typeRef": {
+                "name": "Finance.Money"
+              },
+              "required": true
+            },
+            {
+              "name": "reorderAt",
+              "typeRef": {
+                "name": "Generic.Int64"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "General",
+      "name": "CollectionPoint",
+      "description": "A counter that opens fifteen-minute pickup slots (D70): Calendar in Europe/London, four at a time.",
+      "types": {
+        "CollectionPoint": {
+          "name": "CollectionPoint",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Calendar",
+              "config": {
+                "timeZone": "Europe/London",
+                "hours": {
+                  "mon": [
+                    [
+                      "09:00",
+                      "12:30"
+                    ],
+                    [
+                      "13:30",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "sat": [
+                    [
+                      "10:00",
+                      "16:00"
+                    ]
+                  ]
+                },
+                "capacity": 4,
+                "slotMs": 900000,
+                "minMs": 900000,
+                "maxMs": 900000,
+                "bufferMs": {
+                  "after": 300000
+                },
+                "leadMs": 7200000,
+                "horizonMs": 5184000000,
+                "permission": "calendar.manage"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "name",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMaxLength": 200
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "General",
+      "name": "Checkout",
+      "description": "A checkout that holds its lines' units and a pickup slot while it waits for payment (D70), and is placed once paid.",
+      "scalars": {
+        "Generic.Int64": {
+          "name": "Generic.Int64",
+          "languagePrimitive": "number"
+        },
+        "Temporal.DateTime": {
+          "name": "Temporal.DateTime",
+          "languagePrimitive": "string"
+        }
+      },
+      "types": {
+        "Checkout": {
+          "name": "Checkout",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "config": {
+                "states": [
+                  "cart",
+                  "held",
+                  "placed",
+                  "expired",
+                  "cancelled"
+                ],
+                "transitions": [
+                  {
+                    "from": "cart",
+                    "to": "held"
+                  },
+                  {
+                    "from": "held",
+                    "to": "placed"
+                  },
+                  {
+                    "from": "held",
+                    "to": "expired"
+                  },
+                  {
+                    "from": "held",
+                    "to": "cancelled"
+                  },
+                  {
+                    "from": "cart",
+                    "to": "cancelled"
+                  }
+                ],
+                "outcomes": {
+                  "expired": "failure",
+                  "cancelled": "neutral"
+                }
+              }
+            },
+            {
+              "name": "Links",
+              "config": {
+                "links": {
+                  "counter": {
+                    "schema": "CollectionPoint"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Holds",
+              "config": {
+                "holds": {
+                  "lines": {
+                    "each": {
+                      "field": "lines",
+                      "target": "inventoryId"
+                    },
+                    "schema": "Inventory",
+                    "quantity": {
+                      "field": "quantity"
+                    }
+                  },
+                  "pickup": {
+                    "link": "counter",
+                    "interval": {
+                      "start": "pickupAt",
+                      "durationMs": 900000
+                    }
+                  }
+                },
+                "takeOn": [
+                  "held"
+                ],
+                "commitOn": [
+                  "placed"
+                ],
+                "releaseOn": [
+                  "expired",
+                  "cancelled"
+                ],
+                "maxItems": 50
+              }
+            },
+            {
+              "name": "Timers",
+              "config": {
+                "deadlines": {
+                  "holdExpiry": {
+                    "start": {
+                      "enters": "held"
+                    },
+                    "afterMs": 900000,
+                    "then": {
+                      "transition": "expired"
+                    },
+                    "until": {
+                      "leaves": "held"
+                    }
+                  },
+                  "backstop": {
+                    "start": {
+                      "enters": "held"
+                    },
+                    "afterMs": 7200000,
+                    "then": {
+                      "transition": "expired"
+                    },
+                    "until": {
+                      "leaves": "held"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Payments",
+              "config": {
+                "amount": {
+                  "holds": true
+                },
+                "require": {
+                  "placed": "paid"
+                },
+                "voidOn": [
+                  "expired",
+                  "cancelled"
+                ],
+                "afterRelease": "refund",
+                "refunds": {
+                  "permission": "payments.refund"
+                },
+                "record": {
+                  "permission": "payments.record"
+                }
+              }
+            },
+            {
+              "name": "Reactions",
+              "config": {
+                "rules": [
+                  {
+                    "when": {
+                      "changes": {
+                        "field": "Payments.state",
+                        "to": "paid"
+                      }
+                    },
+                    "then": {
+                      "transition": "placed"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Numbering",
+              "config": {
+                "format": "ORD-{yyyy}-{seq:5}",
+                "reset": "yearly"
+              }
+            },
+            {
+              "name": "StateRules",
+              "config": {
+                "states": {
+                  "held": {
+                    "frozen": [
+                      "lines",
+                      "pickupAt"
+                    ]
+                  },
+                  "placed": {
+                    "frozen": "all"
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "lines",
+              "typeRef": {
+                "name": "CheckoutLine",
+                "isArray": true
+              },
+              "required": true
+            },
+            {
+              "name": "pickupAt",
+              "typeRef": {
+                "name": "Temporal.DateTime"
+              }
+            }
+          ]
+        },
+        "CheckoutLine": {
+          "name": "CheckoutLine",
+          "role": "EmbeddedStruct",
+          "fields": [
+            {
+              "name": "inventoryId",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "quantity",
+              "typeRef": {
+                "name": "Generic.Int64"
+              },
+              "required": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "General",
+      "name": "Refund",
+      "description": "A refund two staff sign off before it is issued against its checkout's payment (D70).",
+      "scalars": {
+        "Finance.Money": {
+          "name": "Finance.Money",
+          "languagePrimitive": "number"
+        }
+      },
+      "types": {
+        "Refund": {
+          "name": "Refund",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "config": {
+                "states": [
+                  "requested",
+                  "approved",
+                  "issued",
+                  "rejected",
+                  "failed"
+                ],
+                "transitions": [
+                  {
+                    "from": "requested",
+                    "to": "approved"
+                  },
+                  {
+                    "from": "requested",
+                    "to": "rejected"
+                  },
+                  {
+                    "from": "approved",
+                    "to": "issued"
+                  },
+                  {
+                    "from": "approved",
+                    "to": "failed"
+                  }
+                ],
+                "outcomes": {
+                  "rejected": "neutral",
+                  "failed": "failure"
+                }
+              }
+            },
+            {
+              "name": "Approvals",
+              "config": {
+                "gates": {
+                  "approved": {
+                    "count": 2,
+                    "permission": "refunds.approve"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Links",
+              "config": {
+                "links": {
+                  "order": {
+                    "schema": "Checkout",
+                    "required": true
+                  }
+                }
+              }
+            },
+            {
+              "name": "Numbering",
+              "config": {
+                "format": "RF-{yyyy}-{seq:5}",
+                "reset": "yearly"
+              }
+            },
+            {
+              "name": "StateRules",
+              "config": {
+                "states": {
+                  "requested": {
+                    "required": [
+                      "amountCents",
+                      "reason"
+                    ]
+                  },
+                  "approved": {
+                    "frozen": "all"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Payments",
+              "config": {
+                "amount": {
+                  "field": "amountCents"
+                },
+                "currency": "GBP",
+                "refundOf": {
+                  "link": "order"
+                },
+                "issueOn": [
+                  "approved"
+                ],
+                "record": {
+                  "permission": "payments.record"
+                }
+              }
+            },
+            {
+              "name": "Reactions",
+              "config": {
+                "rules": [
+                  {
+                    "when": {
+                      "changes": {
+                        "field": "Payments.state",
+                        "to": "refunded"
+                      }
+                    },
+                    "then": {
+                      "transition": "issued"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "amountCents",
+              "typeRef": {
+                "name": "Finance.Money"
+              },
+              "required": true
+            },
+            {
+              "name": "reason",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true,
+              "validateMaxLength": 500
+            }
+          ]
+        }
+      }
     }
   ],
   "schemas": {
+    "Checkout": {
+      "createParams": {
+        "Links": {
+          "additionalProperties": false,
+          "description": "The links the instance holds from its create, by name, each held to link's rules.",
+          "properties": {
+            "counter": {
+              "additionalProperties": false,
+              "description": "The CollectionPoint instance counter points at: its id.",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+              "properties": {
+                "id": {
+                  "description": "The target's id.",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": [
+                "string",
+                "object"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "fields": {
+        "Holds": {
+          "items": {
+            "schema": {
+              "description": "Each item the claim's holds ask, in hold and item order: { hold, item, schema, id, quantity or startMs and endMs, state, unitPrice?, currency? }, the supply it names, what it asks, its state (pending, held, committed, released, returned), and the unit price the supply held it at. An item's state only advances.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "currency": {
+                    "type": "string"
+                  },
+                  "endMs": {
+                    "description": "When it ends.",
+                    "type": "integer"
+                  },
+                  "hold": {
+                    "description": "The hold's name in the config.",
+                    "enum": [
+                      "lines",
+                      "pickup"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "The supply's id.",
+                    "type": "string"
+                  },
+                  "item": {
+                    "description": "The item's index in its hold.",
+                    "type": "integer"
+                  },
+                  "quantity": {
+                    "description": "The units it asks, of counted supply.",
+                    "type": "integer"
+                  },
+                  "schema": {
+                    "description": "The supply's schema.",
+                    "type": "string"
+                  },
+                  "startMs": {
+                    "description": "When the time it asks starts, of timed supply.",
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "held",
+                      "committed",
+                      "released",
+                      "returned"
+                    ],
+                    "type": "string"
+                  },
+                  "unitPrice": {
+                    "description": "The unit price the supply held it at, in the currency's minor units.",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "hold",
+                  "item",
+                  "schema",
+                  "id",
+                  "state"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "state": {
+            "schema": {
+              "description": "The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed.",
+              "enum": [
+                "none",
+                "pending",
+                "held",
+                "committed",
+                "released",
+                "returned"
+              ],
+              "type": "string"
+            },
+            "present": true
+          },
+          "total": {
+            "schema": {
+              "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amount": {
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "amount",
+                    "currency"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "present": true
+          }
+        },
+        "Links": {
+          "targets": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.",
+              "properties": {
+                "counter": {
+                  "additionalProperties": false,
+                  "description": "The CollectionPoint instance counter points at.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "schema": {
+                      "enum": [
+                        "CollectionPoint"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": false
+          }
+        },
+        "Numbering": {
+          "label": {
+            "schema": {
+              "description": "The number as the format prints it, unique within its scope; absent until it is numbered.",
+              "type": "string"
+            },
+            "present": false
+          },
+          "seq": {
+            "schema": {
+              "description": "The instance's number in its count, from 1; absent until it is numbered.",
+              "type": "integer"
+            },
+            "present": false
+          }
+        },
+        "Payments": {
+          "attempts": {
+            "schema": {
+              "description": "The last twenty attempts, newest first: { attempt, provider, providerRef?, amount, currency, status, authorized?, captured?, brand?, last4?, openedAt, updatedAt }.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "integer"
+                  },
+                  "attempt": {
+                    "type": "string"
+                  },
+                  "authorized": {
+                    "type": "integer"
+                  },
+                  "brand": {
+                    "type": "string"
+                  },
+                  "captured": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "last4": {
+                    "type": "string"
+                  },
+                  "openedAt": {
+                    "type": "integer"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "providerRef": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "open",
+                      "requiresAction",
+                      "processing",
+                      "authorized",
+                      "captured",
+                      "failed",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "attempt",
+                  "provider",
+                  "amount",
+                  "currency",
+                  "status",
+                  "openedAt",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "authorized": {
+            "schema": {
+              "description": "What the provider has authorized and not voided or captured.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "captured": {
+            "schema": {
+              "description": "What the provider has captured.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "currency": {
+            "schema": {
+              "description": "The ISO 4217 code of every amount.",
+              "type": "string"
+            },
+            "present": false
+          },
+          "due": {
+            "schema": {
+              "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "outstanding": {
+            "schema": {
+              "description": "due less captured, never below 0.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "overpaid": {
+            "schema": {
+              "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "refunded": {
+            "schema": {
+              "description": "What the provider has refunded.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "state": {
+            "schema": {
+              "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid.",
+              "enum": [
+                "unpaid",
+                "pending",
+                "authorized",
+                "paid",
+                "partiallyRefunded",
+                "refunded"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        },
+        "Timers": {
+          "deadlines": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed.",
+              "properties": {
+                "backstop": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dueAt": {
+                      "type": "integer"
+                    },
+                    "fired": {
+                      "type": "boolean"
+                    },
+                    "firedAt": {
+                      "type": "integer"
+                    },
+                    "outcome": {
+                      "enum": [
+                        "moved",
+                        "skipped",
+                        "vetoed",
+                        "forbidden"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "dueAt",
+                    "fired"
+                  ],
+                  "type": "object"
+                },
+                "holdExpiry": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dueAt": {
+                      "type": "integer"
+                    },
+                    "fired": {
+                      "type": "boolean"
+                    },
+                    "firedAt": {
+                      "type": "integer"
+                    },
+                    "outcome": {
+                      "enum": [
+                        "moved",
+                        "skipped",
+                        "vetoed",
+                        "forbidden"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "dueAt",
+                    "fired"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          }
+        },
+        "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "status": {
+            "schema": {
+              "description": "The state the instance is in.",
+              "enum": [
+                "cart",
+                "held",
+                "placed",
+                "expired",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        }
+      }
+    },
+    "CollectionPoint": {
+      "createParams": {},
+      "fields": {
+        "Calendar": {
+          "closures": {
+            "schema": {
+              "description": "The closures that have not ended, soonest first, at most 100: { closure, startMs, endMs, reason }.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "closure": {
+                    "description": "The closure's id.",
+                    "type": "string"
+                  },
+                  "endMs": {
+                    "description": "When it ends, in epoch milliseconds.",
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "startMs": {
+                    "description": "When it starts, in epoch milliseconds.",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "closure",
+                  "startMs",
+                  "endMs",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "hours": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The instance's weekly opening hours: its own when setOpeningHours set them, else the config's.",
+              "properties": {
+                "fri": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "mon": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "sat": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "sun": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "thu": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "tue": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                },
+                "wed": {
+                  "items": {
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "prefixItems": [
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      },
+                      {
+                        "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                        "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                        "type": "string"
+                      }
+                    ],
+                    "type": "array"
+                  },
+                  "maxItems": 12,
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          },
+          "timeZone": {
+            "schema": {
+              "description": "The time zone the instance's hours are in: its own when setOpeningHours set one, else the config's.",
+              "type": "string"
+            },
+            "present": true
+          }
+        }
+      }
+    },
+    "Inventory": {
+      "createParams": {},
+      "fields": {
+        "Stock": {
+          "available": {
+            "schema": {
+              "description": "onHand less held: what a new hold can take. Never below 0 unless the config allows backorder.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "held": {
+            "schema": {
+              "description": "The units claims hold and have neither committed nor released.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "low": {
+            "schema": {
+              "description": "Whether available is at or below the config's lowAt; false without one. A list filters on it, so where Stock.low is true lists what to reorder.",
+              "type": "boolean"
+            },
+            "present": true
+          },
+          "onHand": {
+            "schema": {
+              "description": "The units on hand: received, adjusted and counted, less what claims committed, plus what they returned. Always the sum of the instance's movements.",
+              "type": "integer"
+            },
+            "present": true
+          }
+        }
+      }
+    },
     "Project": {
       "createParams": {},
       "fields": {
@@ -706,6 +1895,275 @@
               "enum": [
                 "open",
                 "closed"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        }
+      }
+    },
+    "Refund": {
+      "createParams": {
+        "Links": {
+          "additionalProperties": false,
+          "description": "The links the instance holds from its create, by name, each held to link's rules.",
+          "properties": {
+            "order": {
+              "additionalProperties": false,
+              "description": "The Checkout instance order points at: its id.",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+              "properties": {
+                "id": {
+                  "description": "The target's id.",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": [
+                "string",
+                "object"
+              ]
+            }
+          },
+          "required": [
+            "order"
+          ],
+          "type": "object"
+        }
+      },
+      "fields": {
+        "Approvals": {
+          "gates": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The sign-offs not yet consumed, by gated state: { <state>: { signedBy } }, each subject that signed, in the order they signed; a gate with none is absent.",
+              "properties": {
+                "approved": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "signedBy": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "signedBy"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          }
+        },
+        "Links": {
+          "targets": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.",
+              "properties": {
+                "order": {
+                  "additionalProperties": false,
+                  "description": "The Checkout instance order points at.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "schema": {
+                      "enum": [
+                        "Checkout"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "order"
+              ],
+              "type": "object"
+            },
+            "present": true
+          }
+        },
+        "Numbering": {
+          "label": {
+            "schema": {
+              "description": "The number as the format prints it, unique within its scope; absent until it is numbered.",
+              "type": "string"
+            },
+            "present": false
+          },
+          "seq": {
+            "schema": {
+              "description": "The instance's number in its count, from 1; absent until it is numbered.",
+              "type": "integer"
+            },
+            "present": false
+          }
+        },
+        "Payments": {
+          "attempts": {
+            "schema": {
+              "description": "The last twenty attempts, newest first: { attempt, provider, providerRef?, amount, currency, status, authorized?, captured?, brand?, last4?, openedAt, updatedAt }.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "integer"
+                  },
+                  "attempt": {
+                    "type": "string"
+                  },
+                  "authorized": {
+                    "type": "integer"
+                  },
+                  "brand": {
+                    "type": "string"
+                  },
+                  "captured": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "last4": {
+                    "type": "string"
+                  },
+                  "openedAt": {
+                    "type": "integer"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "providerRef": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "open",
+                      "requiresAction",
+                      "processing",
+                      "authorized",
+                      "captured",
+                      "failed",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "attempt",
+                  "provider",
+                  "amount",
+                  "currency",
+                  "status",
+                  "openedAt",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "authorized": {
+            "schema": {
+              "description": "What the provider has authorized and not voided or captured.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "captured": {
+            "schema": {
+              "description": "What the provider has captured.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "currency": {
+            "schema": {
+              "description": "The ISO 4217 code of every amount.",
+              "type": "string"
+            },
+            "present": false
+          },
+          "due": {
+            "schema": {
+              "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "outstanding": {
+            "schema": {
+              "description": "due less captured, never below 0.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "overpaid": {
+            "schema": {
+              "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "refunded": {
+            "schema": {
+              "description": "What the provider has refunded.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "state": {
+            "schema": {
+              "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid.",
+              "enum": [
+                "unpaid",
+                "pending",
+                "authorized",
+                "paid",
+                "partiallyRefunded",
+                "refunded"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        },
+        "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "status": {
+            "schema": {
+              "description": "The state the instance is in.",
+              "enum": [
+                "requested",
+                "approved",
+                "issued",
+                "rejected",
+                "failed"
               ],
               "type": "string"
             },

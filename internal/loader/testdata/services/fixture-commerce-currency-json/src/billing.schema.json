@@ -1,0 +1,66 @@
+{
+  "kind": "General",
+  "name": "billing",
+  "description": "Prices and invoices in the currency each instance holds, a Finance.Currency own field, under the core's commerce behaviors (D70): a product's stock is priced in its own currency, and an invoice is due its total in its own, and is paid before it closes.",
+  "scalars": {
+    "Finance.Currency": {
+      "name": "Finance.Currency",
+      "languagePrimitive": "string"
+    },
+    "Finance.Money": {
+      "name": "Finance.Money",
+      "languagePrimitive": "number"
+    }
+  },
+  "types": {
+    "Product": {
+      "name": "Product",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Stock",
+          "config": { "price": { "field": "priceMinor", "currency": { "field": "currency" } }, "lowAt": 3, "permission": "products.stock" }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "priceMinor", "typeRef": { "name": "Finance.Money" }, "required": true },
+        { "name": "currency", "typeRef": { "name": "Finance.Currency" }, "required": true }
+      ]
+    },
+    "Invoice": {
+      "name": "Invoice",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["open", "closed", "void"],
+            "transitions": [
+              { "from": "open", "to": "closed" },
+              { "from": "open", "to": "void" }
+            ],
+            "outcomes": { "void": "neutral" }
+          }
+        },
+        {
+          "name": "Payments",
+          "config": {
+            "amount": { "field": "totalMinor" },
+            "currency": { "field": "currency" },
+            "capture": "manual",
+            "captureOn": ["closed"],
+            "require": { "closed": "authorized" },
+            "voidOn": ["void"],
+            "refunds": { "permission": "invoices.refund" },
+            "record": { "permission": "invoices.record" }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "totalMinor", "typeRef": { "name": "Finance.Money" }, "required": true },
+        { "name": "currency", "typeRef": { "name": "Finance.Currency" }, "required": true }
+      ]
+    }
+  }
+}

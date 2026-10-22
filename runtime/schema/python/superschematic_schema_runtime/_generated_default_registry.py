@@ -80,6 +80,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Design.Color": _validator("Design.Color"),
     "Embedding.Vector": _validator("Embedding.Vector"),
     "File.SizeBytes": _validator("File.SizeBytes"),
+    "Finance.Currency": _validator("Finance.Currency"),
     "Finance.Money": _validator("Finance.Money"),
     "Generic.Boolean": _validator("Generic.Boolean"),
     "Generic.Float64": _validator("Generic.Float64"),

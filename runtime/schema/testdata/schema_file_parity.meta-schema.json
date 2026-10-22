@@ -588,6 +588,268 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Calendar"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "bufferMs": {
+                    "additionalProperties": false,
+                    "description": "Time kept free around each hold, which counts against capacity as the hold does.",
+                    "properties": {
+                      "after": {
+                        "description": "Milliseconds after a hold that no other may overlap; 0 when absent.",
+                        "maximum": 86400000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "before": {
+                        "description": "Milliseconds before a hold that no other may overlap; 0 when absent.",
+                        "maximum": 86400000,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "capacity": {
+                    "description": "How many holds may overlap at any instant: a count, or an own integer field of the type ({ field }) whose value of at least 1 is the instance's; 1 when absent.",
+                    "oneOf": [
+                      {
+                        "maximum": 10000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "description": "An own integer field of the type, by JSON key.",
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "horizonMs": {
+                    "description": "How far ahead a hold may start, by the engine's clock; no limit when absent.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "hours": {
+                    "additionalProperties": false,
+                    "description": "The weekly opening hours an instance has until it sets its own: each day, mon to sun, a list of [open, close] wall-time ranges, each closing after it opens, none overlapping. A day absent or empty is closed.",
+                    "properties": {
+                      "fri": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "mon": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "sat": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "sun": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "thu": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "tue": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      },
+                      "wed": {
+                        "items": {
+                          "maxItems": 2,
+                          "minItems": 2,
+                          "prefixItems": [
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            },
+                            {
+                              "description": "A wall time, HH:MM, from 00:00 to 24:00.",
+                              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+                              "type": "string"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "maxItems": 12,
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "leadMs": {
+                    "description": "How long ahead of its start a hold must be made, by the engine's clock; 0 when absent.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "maxMs": {
+                    "description": "The longest hold, in milliseconds; a day when absent.",
+                    "maximum": 2678400000,
+                    "minimum": 60000,
+                    "type": "integer"
+                  },
+                  "minMs": {
+                    "description": "The shortest hold, in milliseconds; slotMs when absent.",
+                    "minimum": 60000,
+                    "type": "integer"
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs to set an instance's hours and to add or remove its closures; a closure over held time needs its .override. Nobody may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "slotMs": {
+                    "description": "The start grid, in milliseconds: a hold starts a whole number of slots after an opening time. Any whole minute when absent.",
+                    "maximum": 86400000,
+                    "minimum": 60000,
+                    "type": "integer"
+                  },
+                  "timeZone": {
+                    "description": "The IANA time zone the hours are wall times in, such as Europe/London; an instance may set its own.",
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_+/-]*$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timeZone",
+                  "hours"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Comments"
               }
             }
@@ -692,6 +954,214 @@
                 "type": "object"
               }
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Holds"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "commitOn": {
+                    "description": "The states whose entry commits what is held; a move into one while an item is not held is refused.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "holds": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "allOf": [
+                        {
+                          "oneOf": [
+                            {
+                              "required": [
+                                "link"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "each",
+                                "schema"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "oneOf": [
+                            {
+                              "required": [
+                                "quantity"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "interval"
+                              ]
+                            }
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "each": {
+                          "additionalProperties": false,
+                          "description": "An own list field of the type whose elements each name a supply of schema: one item per element.",
+                          "properties": {
+                            "field": {
+                              "description": "An own list field of the type, by JSON key: one item per element.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "target": {
+                              "description": "The field of each element, by JSON key, that holds the supply's id.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "interval": {
+                          "additionalProperties": false,
+                          "description": "Timed supply: the time each item asks, from start to end, or to durationMs after start. start and end are date-time fields of the list's element for an each hold, own fields of the type for a link hold.",
+                          "oneOf": [
+                            {
+                              "required": [
+                                "end"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "durationMs"
+                              ]
+                            }
+                          ],
+                          "properties": {
+                            "durationMs": {
+                              "description": "How long it lasts, in milliseconds.",
+                              "minimum": 60000,
+                              "type": "integer"
+                            },
+                            "end": {
+                              "description": "The date-time field it ends at, by JSON key.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "start": {
+                              "description": "The date-time field the interval starts at, by JSON key.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "start"
+                          ],
+                          "type": "object"
+                        },
+                        "link": {
+                          "description": "A single-valued link of the type's Links config whose target is the supply: one item.",
+                          "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "description": "Counted supply: the units each item asks, a count or a field ({ field }), an integer field of the list's element for an each hold, an own field of the type for a link hold.",
+                          "oneOf": [
+                            {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "field": {
+                                  "description": "The field, by JSON key.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "field"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "schema": {
+                          "description": "The supply's schema, for an each hold: it composes a supply, such as Stock or Calendar.",
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "The holds, by name: camelCase, at most 64 characters.",
+                    "maxProperties": 16,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+                    },
+                    "type": "object"
+                  },
+                  "maxItems": {
+                    "description": "The most items the claim's holds may ask together; 100 when absent.",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "releaseOn": {
+                    "description": "The states whose entry releases what is held, such as a hold's expiry or a cancellation.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "returnOn": {
+                    "description": "The states whose entry returns the units of counted supply the claim committed.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "takeOn": {
+                    "description": "The states of the type's Workflow whose entry takes the holds, and the create into one of them; the create alone when absent.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "holds"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
           }
         },
         {
@@ -998,6 +1468,256 @@
                 },
                 "required": [
                   "format"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Payments"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "amount": {
+                          "required": [
+                            "field"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "amount"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "currency"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "refundOf"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "issueOn"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "issueOn"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "refundOf"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "captureOn"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "capture": {
+                          "const": "manual"
+                        }
+                      },
+                      "required": [
+                        "capture"
+                      ]
+                    }
+                  }
+                ],
+                "properties": {
+                  "afterRelease": {
+                    "description": "What becomes of money captured while the instance is in a voidOn state, such as a payment reported after a hold expired: refund records a refund of it; keep leaves it for an operator. keep when absent.",
+                    "enum": [
+                      "refund",
+                      "keep"
+                    ],
+                    "type": "string"
+                  },
+                  "amount": {
+                    "description": "What the instance owes: an own integer field of the type, in the currency's minor units ({ field }), or the claim's Holds.total ({ holds: true }), which carries its currency.",
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "description": "An own integer field of the type, by JSON key, such as a Finance.Money field.",
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "holds": {
+                            "const": true,
+                            "description": "The type's Holds.total."
+                          }
+                        },
+                        "required": [
+                          "holds"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "capture": {
+                    "description": "automatic: a provider captures what it authorizes. manual: captureOn states capture it. automatic when absent.",
+                    "enum": [
+                      "automatic",
+                      "manual"
+                    ],
+                    "type": "string"
+                  },
+                  "captureOn": {
+                    "description": "With capture manual, the states whose entry captures what is authorized.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "currency": {
+                    "description": "The currency of an amount from a field: an ISO 4217 code, or an own Finance.Currency field of the type ({ field }) that holds one. Holds.total carries its own.",
+                    "oneOf": [
+                      {
+                        "description": "An ISO 4217 code; the engine checks it is one.",
+                        "pattern": "^[A-Z]{3}$",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "description": "An own Finance.Currency field of the type, by JSON key.",
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "issueOn": {
+                    "description": "With refundOf, the states whose entry asks the linked instance to refund the amount.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "record": {
+                    "additionalProperties": false,
+                    "description": "Who reports what providers did: the adapter's principal.",
+                    "properties": {
+                      "permission": {
+                        "description": "The permission recordPaymentEvent needs: the adapter's service holds it.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "permission"
+                    ],
+                    "type": "object"
+                  },
+                  "refundOf": {
+                    "additionalProperties": false,
+                    "description": "Makes the instance a refund of the instance a link names: its amount is refunded from that instance's payments.",
+                    "properties": {
+                      "link": {
+                        "description": "A required, single-valued link of the type's Links config to the instance refunded, which composes Payments.",
+                        "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "link"
+                    ],
+                    "type": "object"
+                  },
+                  "refunds": {
+                    "additionalProperties": false,
+                    "description": "Who refunds directly; nobody, but a refund instance, when absent.",
+                    "properties": {
+                      "permission": {
+                        "description": "The permission refundPayment needs.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "permission"
+                    ],
+                    "type": "object"
+                  },
+                  "require": {
+                    "additionalProperties": {
+                      "enum": [
+                        "authorized",
+                        "paid"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "Per state of the type's Workflow, what a move into it waits for: authorized, every amount due authorized or paid; paid, every amount due captured.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "type": "object"
+                  },
+                  "voidOn": {
+                    "description": "The states whose entry cancels the open attempts and voids the authorized ones.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "amount",
+                  "record"
                 ],
                 "type": "object"
               }
@@ -1857,6 +2577,108 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Stock"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "backorder": {
+                    "description": "Whether a hold may take more than is available, leaving available below 0; false when absent.",
+                    "type": "boolean"
+                  },
+                  "lowAt": {
+                    "description": "Stock.low is true while available is at or below this: a count, or an own integer field of the type ({ field }) that holds one, while it holds one. Stock.low is false when absent.",
+                    "oneOf": [
+                      {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "description": "An own integer field of the type, by JSON key.",
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "maxPerHold": {
+                    "description": "The most units one item of a claim may hold; no limit when absent.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs to receive, adjust and count stock; a count below what claims hold needs its .override.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "price": {
+                    "additionalProperties": false,
+                    "description": "The unit price holdFor returns and Holds keeps on each item, so a line keeps the price it was held at: an own integer field of the type and its currency. No price when absent.",
+                    "properties": {
+                      "currency": {
+                        "description": "The price's currency: an ISO 4217 code, or an own Finance.Currency field of the type ({ field }) that holds one.",
+                        "oneOf": [
+                          {
+                            "description": "An ISO 4217 code; the engine checks it is one.",
+                            "pattern": "^[A-Z]{3}$",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "field": {
+                                "description": "An own Finance.Currency field of the type, by JSON key.",
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "field"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "field": {
+                        "description": "An own integer field of the type, by JSON key, holding the unit price in the currency's minor units, such as a Finance.Money field.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "field",
+                      "currency"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "permission"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Timers"
               }
             }
@@ -2216,12 +3038,15 @@
             "Blueprint",
             "Branches",
             "Budget",
+            "Calendar",
             "Comments",
             "Constants",
             "Dependencies",
+            "Holds",
             "Lease",
             "Links",
             "Numbering",
+            "Payments",
             "Presence",
             "Queue",
             "Reactions",
@@ -2230,6 +3055,7 @@
             "Rollups",
             "Search",
             "StateRules",
+            "Stock",
             "Timers",
             "Variants",
             "Workflow",

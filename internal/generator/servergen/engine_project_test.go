@@ -279,7 +279,7 @@ func TestTheEngineProjectDockerfileBuildsAnImageThatServes(t *testing.T) {
 	repoRoot := dockerRepo(t)
 	repo := testpaths.RepoRoot(t)
 	copyTree(t, filepath.Join(repo, "runtime", "engine", "go"), filepath.Join(repoRoot, "runtime", "engine", "go"), "lib")
-	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
+	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/engine-commerce/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
 		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
 	}
 	f := loadEngineFixture(t)

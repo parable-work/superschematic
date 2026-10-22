@@ -75,7 +75,13 @@ server of an API on the database mounts the engine's routes,
 `/engine/<service>` unless set; `outputs.engine.policy` the access
 policy it opens the engine with, `permission` unless set; and
 `outputs.engine.retention` how long the event log keeps events, which the
-database's runner prunes, every event unless set
+database's runner prunes, every event unless set; and
+`outputs.engine.tools.invocation` the MCP invocation policy of an engine
+tool or a behavior operation (`Payments.capturePayment: ask`), which the
+build checks against the behaviors the engine types compose and requires
+for each commerce operation that moves money or stock, and
+`outputs.engine.tools.hidden` the behavior operations the engine's MCP
+tools leave out
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
 When a type of a DB or General schema
 composes an extension's behavior whose registration names a Rust crate,
@@ -488,7 +494,7 @@ It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
 its smoke runs `--check`. The core binary writes the behaviors the core
-declares into the two Rust crates that implement them: `Workflow`,
+declares into the three Rust crates that implement them: `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
 `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
 `StateRules`, `Numbering` and `Approvals` with `--package
@@ -496,7 +502,10 @@ declares into the two Rust crates that implement them: `Workflow`,
 (`runtime/engine/rust/behaviors/declarations`), and `Lease`,
 `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
 with `--package @superschematic/engine-workqueue` into the work queue's
-(`runtime/engine-workqueue/rust/declarations`) (`make behaviors`; `make
+(`runtime/engine-workqueue/rust/declarations`), and `Stock`, `Calendar`,
+`Holds` and `Payments` with `--package @superschematic/engine-commerce`
+into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
+D70) (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
 

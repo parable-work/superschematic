@@ -1,0 +1,19 @@
+name: shop-commerce-ts-api
+kind: API
+types:
+  Shelf:
+    name: Shelf
+    role: APIView
+    fields:
+      - name: skus
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: ShopQueries
+    serviceCallers: { mode: require }
+    operations:
+      - name: shelf
+        typeRef: { name: Shelf }
+        required: true
+        httpMethod: GET
+        restPath: shelf

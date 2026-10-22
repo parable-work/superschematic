@@ -10,31 +10,43 @@ import {
 } from "@superschematic/api";
 import { ShopOrders } from "@acme/shop-orders";
 
-// How many units of a product the warehouse holds: a row of shop-db's
-// StockLevel table, or none, for a product the warehouse has never stocked.
-// A reservation that takes the quantity below the threshold files a
-// restock request for the product.
+// How many units of a product the warehouse holds: shop-db's Inventory of
+// the product, kept by the engine's Stock behavior (D70), or none, for a
+// product the warehouse has never stocked. onHand is on the shelf, held
+// what checkouts hold of it until they are paid for or let go, and
+// available what is left to sell. A product is low once available falls to
+// its reorderAt.
 export abstract class StockView {
   productId: Identity.UUID;
-  quantity: Generic.Int64;
-  threshold: Nullable<Generic.Int64>;
+  onHand: Generic.Int64;
+  held: Generic.Int64;
+  available: Generic.Int64;
+  reorderAt: Nullable<Generic.Int64>;
+  low: boolean;
 }
 
-// A threshold left out keeps the level's own, none for a product never
-// stocked; zero turns it off.
+// A count of the shelf, with the level at which the product is low: one
+// left out keeps the Inventory's own, none for a product never stocked;
+// zero turns it off.
 export abstract class SetStockInput {
   quantity: Validate<Generic.Int64, { min: 0 }>;
-  threshold: Nullable<Validate<Generic.Int64, { min: 0 }>>;
+  reorderAt: Nullable<Validate<Generic.Int64, { min: 0 }>>;
 }
 
-// One line of a reservation: a product and how many of it.
-export abstract class ReserveStockLine {
+// A delivery booked in.
+export abstract class ReceiveStockInput {
+  quantity: Validate<Generic.Int64, { min: 1 }>;
+  reason: Validate<string, { minLength: 1; maxLength: 200 }>;
+}
+
+// One line of a placed checkout: a product and how many of it sold.
+export abstract class SoldLine {
   productId: Identity.UUID;
   quantity: Validate<Generic.Int64, { min: 1; max: 99 }>;
 }
 
-export abstract class ReserveStockInput {
-  lines: Validate<ReserveStockLine[], { listMin: 1; listMax: 50 }>;
+export abstract class StockSoldInput {
+  lines: Validate<SoldLine[], { listMin: 1; listMax: 50 }>;
 }
 
 // Reading stock: anyone may.
@@ -52,27 +64,32 @@ export class StockQueries {
   }
 }
 
-// Staff who hold stock.write set how many units of a product the
-// warehouse holds, and the threshold it is restocked below.
+// Staff who hold stock.write count a product's shelf, which stocks a
+// product the warehouse never held, and set the level it is low at, and
+// book deliveries in. Each is a movement of the Inventory's Stock, with
+// its reason, which the engine keeps.
 export class StockMutations extends Authenticated {
   @rest(HttpMethod.PUT, "stock/{productId}")
   @requirePermission(["stock.write"])
   setStock(productId: Identity.UUID, input: SetStockInput): StockView {
     throw new Error("schema declaration only");
   }
+
+  @rest(HttpMethod.POST, "stock/{productId}/receipts")
+  @requirePermission(["stock.write"])
+  receiveStock(productId: Identity.UUID, input: ReceiveStockInput): StockView {
+    throw new Error("schema declaration only");
+  }
 }
 
-// Reserving stock takes it off the shelf, for every line or for none: a
-// line the warehouse cannot fill is refused 409. Only shop-orders' server
-// reserves, placing an order for the shopper it forwards, who must hold
-// orders.write, as placing the order needs. A line that takes a product's
-// level below its threshold enqueues StockLow, which the worker
-// ReorderStock handles.
-export class StockReservations {
-  @rest(HttpMethod.POST, "stock/reservations")
-  @requirePermission(["orders.write"])
+// What a placed checkout sold, which only shop-orders reports, its server
+// or its job, with no shopper: a product the sale left low enqueues
+// StockLow, which the worker ReorderStock handles. The checkout's Holds
+// took the units off the shelf already; this reads them.
+export class StockSales {
+  @rest(HttpMethod.POST, "stock/sold")
   @requireService({ from: [ShopOrders] })
-  reserveStock(input: ReserveStockInput): StockView[] {
+  stockSold(input: StockSoldInput): StockView[] {
     throw new Error("schema declaration only");
   }
 }

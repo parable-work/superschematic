@@ -8,6 +8,7 @@ package shopapi
 
 import (
 	orm "example.com/acme/orm/shop-db"
+	engine "github.com/parable-work/superschematic/runtime/engine/go"
 	"github.com/parable-work/superschematic/runtime/http/go/bucket"
 	"go.uber.org/zap"
 )
@@ -28,6 +29,13 @@ type Deps struct {
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	ShopMedia bucket.Bucket
+
+	// Engine is the engine of shop-db, the API's engine database
+	// (D58), which the entrypoint opens in the background, so it starts while
+	// the database is not up yet: Engine.Wait(ctx) returns it once it opens,
+	// and Engine.Engine() at once, or why it is not open. Its types'
+	// instances are the engine's, in namespace shop-db.
+	Engine *engine.Background
 
 	// Logger is the API's logger.
 	Logger *zap.Logger

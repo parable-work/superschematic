@@ -299,7 +299,7 @@ func engineCheckout(paths naming.LocalPaths) string {
 
 // projectEngine reports whether the engine of the engine database db
 // composes a behavior the core's engine archive does not run, the work
-// queue's or an extension's, so its servers link the archive of the
+// queue's, a commerce one (D70) or an extension's, so its servers link the archive of the
 // project's engine crate, which the build writes (D58). A database the
 // build cannot load is left to the generators that read it.
 func projectEngine(c registry.GenerateContext, db string) bool {

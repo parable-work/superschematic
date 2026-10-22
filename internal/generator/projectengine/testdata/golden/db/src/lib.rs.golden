@@ -24,6 +24,7 @@ use superschematic_engine::{BehaviorSet, ToolOptions};
 pub const COMPOSED: &[&str] = &[
     "Comments",
     "Lease",
+    "Stock",
     "Workflow",
     "acme.Flag",
     "acme.Rating",
@@ -33,11 +34,13 @@ pub const COMPOSED: &[&str] = &[
 /// Every behavior the engine runs, in the order it registers them: the
 /// core's (`superschematic_engine_behaviors::core`),
 /// the work queue's (`superschematic_engine_workqueue::workqueue`),
+/// the commerce ones (`superschematic_engine_commerce::commerce`, D70),
 /// then each extension behavior the schema composes, by name.
 #[rustfmt::skip]
 pub fn behaviors() -> BehaviorSet {
     superschematic_engine_behaviors::core()
         .extend(superschematic_engine_workqueue::workqueue())
+        .extend(superschematic_engine_commerce::commerce())
         .with(acme_behaviors::flag::Flag::new())
         .with(acme_behaviors::Rating)
         .with(desk_triage::Triage)

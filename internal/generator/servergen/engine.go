@@ -220,6 +220,7 @@ type EngineProject struct {
 // which names every crate under crates/ a member.
 var engineCrates = []string{
 	"runtime/engine-workqueue/rust",
+	"runtime/engine-commerce/rust",
 	"runtime/schema/rust-ir",
 	"runtime/schema/rust",
 	"runtime/versiongraph/rust-engine",

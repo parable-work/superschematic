@@ -32,12 +32,18 @@ pub const COMPOSED: &[&str] = &[
 {{- if .WorkQueue }}
 /// the work queue's (`superschematic_engine_workqueue::workqueue`),
 {{- end }}
+{{- if .Commerce }}
+/// the commerce ones (`superschematic_engine_commerce::commerce`, D70),
+{{- end }}
 /// then each extension behavior the schema composes, by name.
 #[rustfmt::skip]
 pub fn behaviors() -> BehaviorSet {
     superschematic_engine_behaviors::core()
 {{- if .WorkQueue }}
         .extend(superschematic_engine_workqueue::workqueue())
+{{- end }}
+{{- if .Commerce }}
+        .extend(superschematic_engine_commerce::commerce())
 {{- end }}
 {{- range .Registrations }}
         .with({{ .Register }})

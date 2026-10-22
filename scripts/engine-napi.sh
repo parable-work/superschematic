@@ -4,14 +4,15 @@
 #
 # By default the addon is the core's, runtime/engine/rust/addon: the
 # engine's addon (export_engine_napi! from runtime/engine/rust/napi) over
-# the core's behaviors and the work queue's, written into
+# the core's behaviors, the work queue's and the commerce ones (D70),
+# written into
 # runtime/engine/typescript/native/, where @superschematic/engine's loader
 # (src/native/addon.ts) finds it: native/superschematic-engine.<triple>.node,
 # with the index.d.ts the napi CLI writes beside it. Both are gitignored; the
 # package's own declarations of the addon are in src/native/addon.ts, so its
 # build needs neither. An engine registers the core's behaviors when it
-# opens, then the work queue's its options name, so rebuild it after
-# pulling a branch that ports more or changes them.
+# opens, then the work queue's and the commerce ones its options name, so
+# rebuild it after pulling a branch that ports more or changes them.
 #
 # --crate names a project's addon crate instead: the napi/ member of the
 # engine crate the projectengine generator writes (engine/rust/<schema>/napi),
