@@ -9134,12 +9134,16 @@ exchanges each, are identical: a Numbering label and seq are symbols,
 since the runs share the namespace's count. Each server then reads what
 each other wrote, with its own staff's session and the writer's, alike.
 `TestCommerceServersOversellNothing` moves 1,000 checkouts cart→held at
-once, a third through each server and at most 128 requests in flight to
+once, a third through each server and at most 32 requests in flight to
 each, for an Inventory's three units: three hold, 997 are vetoed
 `unavailable` and stay in their carts, and Stock's ledger holds (onHand
 the sum of the movements, held the sum of the held checkouts' items,
-none available); 1,000 bookings of one slot of the Bay hold one. CI's
-engine-servers job and `make engine-servers` run both.
+none available); 1,000 bookings of one slot of the Bay hold one. With
+128 in flight to each server, the moves at the back of the namespace's
+queue waited past the servers' 30-second engine route timeout and
+answered 504 `gateway_timeout` (12 and 189 of the 1,000 in two runs),
+and still exactly three held. CI's engine-servers job and `make
+engine-servers` run both.
 
 `TestCommerceHoldsLoad`, which runs only with
 `SUPERSCHEMATIC_COMMERCE_LOAD=1`, measured three servers and 24 clients
@@ -9155,7 +9159,10 @@ of ten items ran about 680 statements in one transaction, with about
 reads the schema's document and the instance again, 109 times each in
 that hold, so a cache of those reads within a transaction is the first
 step to a faster checkout; until then a namespace per shop keeps shops
-from queueing on each other.
+from queueing on each other. Reads pay the same way: listing the 997
+checkouts the oversell test leaves in their carts, whose pending items
+each read their supply, took about 58 seconds in pages of 100, and one
+page of 500 passed the 30-second route timeout.
 
 The guide "Selling and booking with the engine"
 (`docs/src/content/docs/guides/commerce.md`) and

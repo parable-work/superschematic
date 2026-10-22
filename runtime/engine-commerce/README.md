@@ -27,6 +27,9 @@ configs and records (`StockRecord`, `HoldsRecord`, `PaymentsRecord`,
 The guide is
 [Selling and booking with the engine](../../docs/src/content/docs/guides/commerce.md);
 this file is the reference for every refusal, event and config change.
+`examples/acme-shop` sells, books and refunds through the four behaviors
+in Go, Rust and TypeScript, with a fake provider, `acmepay`, and its
+webhook (`examples/acme-shop/README.md`).
 
 ```ts
 import { openEngine } from '@superschematic/engine';

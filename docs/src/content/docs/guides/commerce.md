@@ -22,9 +22,7 @@ They build on [the core's behaviors](/superschematic/guides/engine-behaviors/):
 `Timers` lets a hold expire, `Approvals` gates a refund, `Numbering`
 numbers orders and refunds, `StateRules` freezes a placed order, and a
 `Reactions` rule places a checkout once it is paid. The acme shop sells
-and books through these behaviors; its
-[README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md)
-walks through its checkout, its provider double and its webhook.
+and books through these behaviors ([acme-shop](#the-acme-shop)).
 
 This page assumes you know [the engine](/superschematic/guides/engine/)
 and [engine behaviors](/superschematic/guides/engine-behaviors/). The
@@ -65,7 +63,10 @@ The permissions the behaviors check (`stock.adjust`, `payments.record`,
 Over HTTP, a service that stands in for an end user holds none, so the
 payment adapter calls the engine in-process (`engine.Call` in Go, the
 `Deps` engine in TypeScript and Rust) with a principal of its own that
-holds `payments.record`.
+holds `payments.record`. A rules policy names that service, the staff
+roles, and the runner, `<db>-engine-runner`, which moves claims for
+`Timers` and `Reactions`: the first rule that matches decides, so the
+runner's rule comes before the staff rules.
 
 ## A shop's types
 
@@ -450,7 +451,11 @@ agent can sell and book. Two settings decide what it may do unasked:
   operation that moves money or stock: `Payments.openPayment`,
   `capturePayment`, `voidPayment`, `refundPayment` and `refundFor`, and
   `Stock.receiveStock`, `adjustStock` and `countStock`. `ask` makes an
-  agent's client confirm each call.
+  agent's client confirm each call. The choice is the deployment's: the
+  example below asks for all eight, and the acme shop asks for the five
+  that move a shopper's money and for adjusting and counting stock, but
+  lets an agent receive stock unasked, since a receipt is routine and
+  another movement reverses it.
 - **`tools.hidden`.** The engine document hides Payments' service
   operations wherever it is composed: `listPaymentActions` and
   `recordPaymentEvent`, which the adapter calls, and `settleRefundFor`.
@@ -490,7 +495,9 @@ local VM, a checkout of one item held at about 6 a second, of ten items
 26 holds a second, and of fifty 35 holds a second. The time is in the
 statements each move runs under the lock, a few hundred for a checkout
 of ten items, each a round trip to the database, rather than in the
-database's own work; a database closer to the servers is faster. Give
+database's own work; a database closer to the servers is faster. A
+move that waits in the queue past a server's 30-second engine route
+timeout answers 504 `gateway_timeout`, which a client asks again. Give
 each shop a namespace of its own.
 
 ## Personal data
@@ -503,6 +510,32 @@ change's diff until retention prunes it. Turn the engine database's
 retention on for a commerce namespace
 ([retention](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#retention)),
 and keep the payer's identity with the provider.
+
+## The acme shop
+
+`examples/acme-shop` is the worked example. Its shop database's engine
+types are `Inventory` (`Stock`), `CollectionPoint` (`Calendar`),
+`Checkout` (`Workflow`, `Links`, `Holds`, `Timers`, `Payments`,
+`Reactions`, `Numbering` and `StateRules`) and `Refund` (two
+`Approvals` sign-offs, `Numbering`, and `Payments` with `refundOf`), and
+each service plays one part in its own language:
+
+- a TypeScript API is the cart: a `Checkout` in `cart`, and pickup slots
+  from `CollectionPoint`'s `findAvailability`;
+- the Go orders API starts a checkout (`cart` to `held`), opens its
+  payment and calls the provider, receives the provider's events at a
+  webhook verified by `@hmacVerified` (a `t=…,v1=…` HMAC with a
+  five-minute tolerance), drains the waiting actions in a settle job,
+  and asks refunds;
+- the Rust stock API runs over `Inventory`;
+- `acmepay`, a fake provider in Go, takes test tokens only and refuses
+  card numbers, signs its webhooks and honours idempotency keys, so
+  `stack dev` and the tests pay without a real provider.
+
+A TypeScript server runs the commerce behaviors on the core's addon,
+and the Go and Rust servers link the project's engine crate. The
+[README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md)
+walks through it.
 
 ## The proof
 
@@ -530,5 +563,5 @@ run's own ids and times are written as symbols.
   composes beside these.
 - The acme shop's
   [README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md):
-  a shop that sells and books through these behaviors, with a provider
-  double and its webhook.
+  a cart, an orders API with a payment adapter and its webhook, a stock
+  API and a fake provider, in three languages.

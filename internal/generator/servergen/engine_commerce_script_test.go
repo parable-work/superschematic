@@ -599,8 +599,11 @@ func checkCommerceInterop(t *testing.T, servers []*scriptServer, staff map[*scri
 }
 
 // commerceClient sends the oversell and load tests' requests, many at once:
-// at most 128 in flight to each server.
-var commerceClient = &http.Client{Transport: &http.Transport{MaxConnsPerHost: 128, MaxIdleConnsPerHost: 128}, Timeout: 2 * time.Minute}
+// at most 32 in flight to each server. Every move waits on the namespace's
+// one writer, a checkout's for some 75 ms, and a server answers an engine
+// route 504 gateway_timeout after 30 s: with 128 in flight to each server
+// the last of the queue waited past it.
+var commerceClient = &http.Client{Transport: &http.Transport{MaxConnsPerHost: 32, MaxIdleConnsPerHost: 32}, Timeout: 2 * time.Minute}
 
 // commerceSend sends method to path on server as authorization, with body
 // unless empty, and returns the status and the answer parsed. A busy
@@ -659,8 +662,8 @@ func commerceMember(t *testing.T, server *scriptServer, tool engineDatabaseTools
 	return "Bearer " + token
 }
 
-// createAll creates n instances on the servers in turn, n at once at most
-// 32 at a time, the body of each body(i), and fails the test unless each is
+// createAll creates n instances on the servers in turn, at most 32 at a
+// time, the body of each body(i), and fails the test unless each is
 // created.
 func createAll(t *testing.T, servers []*scriptServer, authorization string, n int, path string, body func(i int) string) {
 	t.Helper()
@@ -713,14 +716,16 @@ func holdAll(t *testing.T, servers []*scriptServer, authorization, instances str
 	return answers
 }
 
-// listAll reads every instance of the list at path, a where query's, page
-// by page.
+// listAll reads every instance of the list at path, a where query's, in
+// pages of 100: a page of 500 checkouts in their carts, each reading what
+// its pending items ask of their supply, took past a server's 30-second
+// engine route timeout.
 func listAll(t *testing.T, server *scriptServer, authorization, path string) []any {
 	t.Helper()
 	var all []any
 	cursor := ""
 	for {
-		page := path + "&limit=500"
+		page := path + "&limit=100"
 		if cursor != "" {
 			page += "&cursor=" + url.QueryEscape(cursor)
 		}
@@ -745,7 +750,7 @@ const commerceOversellMoves = 1000
 // TestCommerceServersOversellNothing: three servers, Go, Rust and
 // TypeScript, over one Postgres, and 1,000 checkouts, each asking for one
 // of an Inventory's three units, moved cart→held at once, a third through
-// each server (at most 128 requests in flight to each). The namespace's
+// each server (at most 32 requests in flight to each). The namespace's
 // one writer (D58) lets exactly three hold: the rest are vetoed
 // unavailable and stay in their carts. Stock's ledger holds afterwards:
 // held is the sum of what the held checkouts hold, onHand the sum of the
@@ -808,9 +813,11 @@ func TestCommerceServersOversellNothing(t *testing.T) {
 		if len(held) != 3 || heldUnits != 3 {
 			t.Errorf("%d checkouts are held, holding %v units, want 3 holding 3", len(held), heldUnits)
 		}
+		listed := time.Now()
 		if carts := listAll(t, servers[0], staff, checkouts+"?where="+url.QueryEscape(`{"Workflow.status":"cart"}`)); len(carts) != commerceOversellMoves-3 {
 			t.Errorf("%d checkouts are left in their carts, want %d", len(carts), commerceOversellMoves-3)
 		}
+		t.Logf("the checkouts left in their carts listed in %s", time.Since(listed).Round(time.Millisecond))
 	})
 
 	t.Run("time", func(t *testing.T) {
