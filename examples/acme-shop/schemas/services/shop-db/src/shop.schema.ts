@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, Relation, User as UserTrait, UserRole, index, key, searchField, unique } from "@superschematic/db";
+import { AutoGenerate, User as UserTrait, UserRole, key, searchField, unique } from "@superschematic/db";
 
 // Timestamps every table carries.
 export abstract class Auditable {
@@ -57,20 +57,4 @@ export abstract class Product extends Auditable {
   // The name of the product's image in shop-api's bucket, shop-media,
   // once an upload URL is handed out for it.
   imageObject: Nullable<Validate<string, { maxLength: 1024 }>>;
-}
-
-// How many units of a product the warehouse holds, one row per product.
-@index<StockLevel>(["product"], { unique: true, name: "one_per_product" })
-export abstract class StockLevel extends Auditable {
-  @key
-  id: AutoGenerate<Identity.UUID>;
-
-  product: Relation<Product, { onDelete: "CASCADE" }>;
-
-  quantity: Generic.Int64;
-
-  // The level below which the product is restocked: a reservation that
-  // takes the quantity below it enqueues StockLow. A product with none, or
-  // with zero, is never restocked.
-  threshold: Nullable<Generic.Int64>;
 }

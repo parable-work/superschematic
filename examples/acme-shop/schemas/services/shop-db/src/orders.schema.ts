@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate, jsonField } from "@superschematic/schema";
-import { AutoGenerate, HasMany, Relation, index, key, queue, searchField } from "@superschematic/db";
+import { AutoGenerate, HasMany, Relation, index, key, queue, searchField, unique } from "@superschematic/db";
 
 import { Auditable, Product, User } from "./shop.schema";
 
@@ -46,6 +46,12 @@ export abstract class Order extends Auditable {
 
   // Why the order was cancelled, when it was.
   cancelReason: Nullable<Validate<string, { maxLength: 500 }>>;
+  // The engine's Checkout the order was placed from, once paid (D70);
+  // none for an order placeOrder took. Unique, so a checkout writes one
+  // order however often shop-orders looks at it. The column is nullable,
+  // so a migration adds it to a database that holds orders already.
+  @unique
+  checkoutId: Nullable<Identity.UUID>;
 
   // The sum of each line's quantity times its unit price, written when the
   // order is placed: its lines do not change after. A migration plan adds

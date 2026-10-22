@@ -56,14 +56,26 @@ in and authenticate them against these tables
 
 Then the catalog:
 
-<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['Product', 'StockLevel']} />
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol="Product" />
 
 `Default<boolean, true>` is a default for decoders, not for the database:
 when a JSON or YAML payload leaves `inStock` out, the generated Go and
 TypeScript decoders fill in `true`. The column itself has no SQL default.
-`@index` with `unique` keeps one stock row per product, which `shop-stock`,
-the API that reads and writes it, relies on
-([Indexes](/superschematic/guides/database-tables/#indexes)).
+
+A product's restock requests, which `shop-stock` files and orders:
+
+<Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="RestockRequest" />
+
+`@index` with `unique` over `openProductId` keeps one open request per
+product, which `shop-stock`, the API that reads and writes the table,
+relies on ([Indexes](/superschematic/guides/database-tables/#indexes)).
+
+How many units of a product the warehouse holds is no table: `shop-db`'s
+`Inventory`, in `src/commerce.schema.ts`, composes the engine's `Stock`
+behavior, so the engine keeps it, with the checkouts that hold units and
+pickup slots and the refunds staff sign off. The build writes those types'
+engine document, and the SQL and the ORM leave them out
+([Engine behaviors](/superschematic/guides/engine-behaviors/)).
 
 ## Build
 
@@ -81,7 +93,7 @@ snake case, and each class comment becomes the table comment:
 
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from="CREATE TABLE product (" to="COMMENT ON TABLE product" />
 
-<Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE stock_level" to="ON DELETE CASCADE;" />
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE restock_request" to="ON DELETE CASCADE;" />
 
 ## The row types
 
@@ -90,7 +102,7 @@ snake case, and each class comment becomes the table comment:
     <Snippet file="testdata/generated/types/go/shop-db/types.go" symbol="Product" />
     `Id` is a pointer because the database generates it, and so is
     `UpdatedAt` because it is nullable. A `Relation` field holds the
-    related row: `Session.User` is a `User` and `StockLevel.Product` a
+    related row: `Session.User` is a `User` and `RestockRequest.Product` a
     `Product`.
   </TabItem>
   <TabItem label="TypeScript">

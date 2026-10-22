@@ -1,10 +1,11 @@
 export {
-  ReserveStockInput,
-  ReserveStockLine,
+  ReceiveStockInput,
   SetStockInput,
+  SoldLine,
   StockMutations,
   StockQueries,
-  StockReservations,
+  StockSales,
+  StockSoldInput,
   StockView
 } from "./stock.schema";
 export * from "./service.generated";

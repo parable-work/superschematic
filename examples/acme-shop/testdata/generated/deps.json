@@ -274,6 +274,37 @@
       "deps": null
     },
     {
+      "id": "shop-cart-api",
+      "language": "typescript",
+      "kind": "api",
+      "name": "@acme/shop-cart-api",
+      "path": "api/shop-cart",
+      "service": "shop-cart",
+      "deps": [
+        "shop-cart-types"
+      ]
+    },
+    {
+      "id": "shop-cart-sdk",
+      "language": "typescript",
+      "kind": "sdk",
+      "name": "@acme/shop-cart-sdk",
+      "path": "sdk/typescript/shop-cart",
+      "service": "shop-cart",
+      "deps": [
+        "shop-cart-types"
+      ]
+    },
+    {
+      "id": "shop-cart-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-cart-types",
+      "path": "types/typescript/shop-cart",
+      "service": "shop-cart",
+      "deps": null
+    },
+    {
       "id": "shop-common-types",
       "language": "typescript",
       "kind": "types",

@@ -2931,13 +2931,13 @@ server lists what is left and signs a URL that downloads it (section
 the Rust runner of its engine database, and runs them offline and on
 Postgres (D58).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
-over `shop-db` whose reservations admit only `shop-orders`' Go server,
-which reserves an order's stock through `shop-stock`'s Go SDK with its
-edge's credential and the shopper it forwards. A reservation that takes a
-product's level below its threshold enqueues `StockLow` in its
-transaction; `shop-stock`'s Rust worker `ReorderStock` files the
-product's restock request, and its Rust job `OrderRestocks`, which
-the test runs with `stack run`, orders it (D65).
+over `shop-db`'s engine type `Inventory` (D70), whose sales admit only
+`shop-orders`, which tells it what a placed checkout sold through
+`shop-stock`'s Go SDK with its edge's credential. A sale that leaves a
+product low enqueues `StockLow` in one transaction; `shop-stock`'s Rust
+worker `ReorderStock` files the product's restock request, and its Rust
+job `OrderRestocks`, which the test runs with `stack run`, orders it
+(D65).
 
 Trace export is section 8.11's (D67).
 

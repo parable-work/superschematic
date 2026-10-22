@@ -10,7 +10,30 @@ import (
 	types "example.com/acme/types/go/shop-orders"
 	"fmt"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
+	gohttp "net/http"
 )
+
+// WebhookVerifier wraps a webhook handler with provider-specific verification (for example Stytch HMAC).
+type WebhookVerifier func(gohttp.Handler) gohttp.Handler
+
+// CheckoutsImplementation defines the interface for checkouts namespace handlers.
+// Implement in internal/route-impl to provide business logic.
+type CheckoutsImplementation interface {
+	// GetCheckout handles GET /api/checkouts/{id}
+	//
+	// A placed checkout's order is written the first time it is read, if
+	// SettlePayments has not written it yet.
+	GetCheckout(ctx context.Context, id types.IdentityUUID) (*types.CheckoutView, error)
+	// PayCheckout handles POST /api/checkouts/{id}/pay
+	PayCheckout(ctx context.Context, id types.IdentityUUID) (*types.CheckoutPayment, error)
+	// RequestRefund handles POST /api/checkouts/{id}/refunds
+	//
+	// Asks for a refund of a placed checkout, which two members of staff
+	// sign off before it is issued.
+	RequestRefund(ctx context.Context, id types.IdentityUUID, input *types.RequestRefundInput) (*types.RefundView, error)
+	// StartCheckout handles POST /api/checkouts/{id}/start
+	StartCheckout(ctx context.Context, id types.IdentityUUID, input *types.StartCheckoutInput) (*types.CheckoutView, error)
+}
 
 // OrderImplementation defines the interface for order namespace handlers.
 // Implement in internal/route-impl to provide business logic.
@@ -45,6 +68,13 @@ type OrderImplementation interface {
 	// It cancels the caller's own order, or any customer's for staff;
 	// another customer's order is not found, as getOrder answers.
 	CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error)
+}
+
+// PaymentWebhooksImplementation defines the interface for payment-webhooks namespace handlers.
+// Implement in internal/route-impl to provide business logic.
+type PaymentWebhooksImplementation interface {
+	// PaymentEvents handles POST /api/payments/acmepay/events
+	PaymentEvents(ctx context.Context, input *types.AcmepayEvent) (*types.PaymentEventReceipt, error)
 }
 
 // ProductCatalogImplementation defines the interface for product-catalog namespace handlers.
@@ -102,22 +132,38 @@ type ProductReviewsImplementation interface {
 // Implementations holds all namespace implementation interfaces.
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Implementations struct {
-	Order          OrderImplementation
-	ProductCatalog ProductCatalogImplementation
-	ProductReviews ProductReviewsImplementation
+	Checkouts       CheckoutsImplementation
+	Order           OrderImplementation
+	PaymentWebhooks PaymentWebhooksImplementation
+	ProductCatalog  ProductCatalogImplementation
+	ProductReviews  ProductReviewsImplementation
+	// WebhookVerifiers supplies verification middleware per @hmacVerified provider (wired in route-impl).
+	WebhookVerifiers map[string]WebhookVerifier
 }
 
 // ValidateImplementations checks that all required implementations are provided.
 // Returns an error if any implementation is nil.
 func (i *Implementations) ValidateImplementations() error {
+	if i.Checkouts == nil {
+		return fmt.Errorf("Implementations.Checkouts is required")
+	}
 	if i.Order == nil {
 		return fmt.Errorf("Implementations.Order is required")
+	}
+	if i.PaymentWebhooks == nil {
+		return fmt.Errorf("Implementations.PaymentWebhooks is required")
 	}
 	if i.ProductCatalog == nil {
 		return fmt.Errorf("Implementations.ProductCatalog is required")
 	}
 	if i.ProductReviews == nil {
 		return fmt.Errorf("Implementations.ProductReviews is required")
+	}
+	if i.WebhookVerifiers == nil {
+		return fmt.Errorf("Implementations.WebhookVerifiers is required")
+	}
+	if i.WebhookVerifiers["acmepay"] == nil {
+		return fmt.Errorf("Implementations.WebhookVerifiers for provider acmepay is required")
 	}
 	return nil
 }

@@ -116,21 +116,6 @@ type SessionRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *SessionFilter) (int, error)
 }
 
-// StockLevelRepositoryInterface defines the contract for StockLevel data access.
-type StockLevelRepositoryInterface interface {
-	GetOne(ctx context.Context, id types.IdentityUUID, opts *StockLevelGetOptions) (*types.StockLevel, error)
-	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.StockLevel, error)
-	FindOne(ctx context.Context, filter *StockLevelFilter, opts *StockLevelFindOptions) (*types.StockLevel, error)
-	FindMany(ctx context.Context, filter *StockLevelFilter, opts *StockLevelFindOptions) ([]*types.StockLevel, int, error)
-	FindPage(ctx context.Context, filter *StockLevelFilter, opts *StockLevelPageOptions) (*StockLevelPage, error)
-	CreateOne(ctx context.Context, input *types.StockLevel) (*types.StockLevel, error)
-	CreateMany(ctx context.Context, inputs []*types.StockLevel) ([]*types.StockLevel, error)
-	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StockLevelUpdate) (*types.StockLevel, error)
-	UpdateMany(ctx context.Context, filter *StockLevelFilter, update *StockLevelUpdate) (int, error)
-	DeleteOne(ctx context.Context, id types.IdentityUUID) error
-	DeleteMany(ctx context.Context, filter *StockLevelFilter) (int, error)
-}
-
 // UserRepositoryInterface defines the contract for User data access.
 type UserRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UserGetOptions) (*types.User, error)
@@ -188,7 +173,6 @@ type DatabaseInterface interface {
 	GetReviewRepository() ReviewRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
-	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
@@ -205,7 +189,6 @@ type TxInterface interface {
 	GetReviewRepository() ReviewRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
-	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
 	GetUserCredentialRepository() UserCredentialRepositoryInterface
 	GetUserRoleGrantRepository() UserRoleGrantRepositoryInterface
@@ -221,7 +204,6 @@ type NoOpDatabase struct {
 	Review         *NoOpReviewRepository
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
-	StockLevel     *NoOpStockLevelRepository
 	User           *NoOpUserRepository
 	UserCredential *NoOpUserCredentialRepository
 	UserRoleGrant  *NoOpUserRoleGrantRepository
@@ -236,7 +218,6 @@ type NoOpTx struct {
 	Review         *NoOpReviewRepository
 	Role           *NoOpRoleRepository
 	Session        *NoOpSessionRepository
-	StockLevel     *NoOpStockLevelRepository
 	User           *NoOpUserRepository
 	UserCredential *NoOpUserCredentialRepository
 	UserRoleGrant  *NoOpUserRoleGrantRepository
@@ -260,8 +241,6 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.Role = db.Role
 	db.Session = &NoOpSessionRepository{}
 	tx.Session = db.Session
-	db.StockLevel = &NoOpStockLevelRepository{}
-	tx.StockLevel = db.StockLevel
 	db.User = &NoOpUserRepository{}
 	tx.User = db.User
 	db.UserCredential = &NoOpUserCredentialRepository{}
@@ -714,64 +693,6 @@ func (r *NoOpSessionRepository) DeleteMany(_ context.Context, _ *SessionFilter) 
 	return 0, nil
 }
 
-func (db *NoOpDatabase) GetStockLevelRepository() StockLevelRepositoryInterface {
-	return db.StockLevel
-}
-
-func (tx *NoOpTx) GetStockLevelRepository() StockLevelRepositoryInterface {
-	return tx.StockLevel
-}
-
-// NoOpStockLevelRepository provides deterministic no-op repository behavior.
-type NoOpStockLevelRepository struct{}
-
-func (r *NoOpStockLevelRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *StockLevelGetOptions) (*types.StockLevel, error) {
-	return nil, ErrNotFound
-}
-
-func (r *NoOpStockLevelRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.StockLevel, error) {
-	return map[types.IdentityUUID]*types.StockLevel{}, nil
-}
-
-func (r *NoOpStockLevelRepository) FindOne(_ context.Context, _ *StockLevelFilter, _ *StockLevelFindOptions) (*types.StockLevel, error) {
-	return nil, ErrNotFound
-}
-
-func (r *NoOpStockLevelRepository) FindMany(_ context.Context, _ *StockLevelFilter, _ *StockLevelFindOptions) ([]*types.StockLevel, int, error) {
-	return []*types.StockLevel{}, 0, nil
-}
-
-func (r *NoOpStockLevelRepository) FindPage(_ context.Context, _ *StockLevelFilter, _ *StockLevelPageOptions) (*StockLevelPage, error) {
-	return &StockLevelPage{Rows: []*types.StockLevel{}}, nil
-}
-
-func (r *NoOpStockLevelRepository) CreateOne(_ context.Context, input *types.StockLevel) (*types.StockLevel, error) {
-	return input, nil
-}
-
-func (r *NoOpStockLevelRepository) CreateMany(_ context.Context, inputs []*types.StockLevel) ([]*types.StockLevel, error) {
-	if inputs == nil {
-		return []*types.StockLevel{}, nil
-	}
-	return inputs, nil
-}
-
-func (r *NoOpStockLevelRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *StockLevelUpdate) (*types.StockLevel, error) {
-	return nil, ErrNotFound
-}
-
-func (r *NoOpStockLevelRepository) UpdateMany(_ context.Context, _ *StockLevelFilter, _ *StockLevelUpdate) (int, error) {
-	return 0, nil
-}
-
-func (r *NoOpStockLevelRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
-	return nil
-}
-
-func (r *NoOpStockLevelRepository) DeleteMany(_ context.Context, _ *StockLevelFilter) (int, error) {
-	return 0, nil
-}
-
 func (db *NoOpDatabase) GetUserRepository() UserRepositoryInterface {
 	return db.User
 }
@@ -965,8 +886,6 @@ var (
 	_ RoleRepositoryInterface           = (*NoOpRoleRepository)(nil)
 	_ SessionRepositoryInterface        = (*SessionRepository)(nil)
 	_ SessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
-	_ StockLevelRepositoryInterface     = (*StockLevelRepository)(nil)
-	_ StockLevelRepositoryInterface     = (*NoOpStockLevelRepository)(nil)
 	_ UserRepositoryInterface           = (*UserRepository)(nil)
 	_ UserRepositoryInterface           = (*NoOpUserRepository)(nil)
 	_ UserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)

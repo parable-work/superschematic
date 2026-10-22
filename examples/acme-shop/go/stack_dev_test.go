@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ import (
 	ordersns "example.com/acme/sdk/go/shop-orders/namespaces"
 	orderspages "example.com/acme/sdk/go/shop-orders/runtime"
 	stocksdk "example.com/acme/sdk/go/shop-stock"
+	"example.com/acme/shop/acmepay"
 	apitypes "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
 	orderstypes "example.com/acme/types/go/shop-orders"
@@ -44,9 +46,11 @@ import (
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; shop-stock on its
 // generated Rust entrypoint, which cargo builds with the implementation in
-// rust-impl/shop-stock (D57); and shop-storefront on its generated
-// TypeScript entrypoint, which Bun runs with the implementation in
-// typescript/shop-storefront (D51). Every connection string, URL and port
+// rust-impl/shop-stock (D57); shop-cart and shop-storefront on their
+// generated TypeScript entrypoints, which Bun runs with the implementations
+// in typescript/shop-cart and typescript/shop-storefront (D51); and
+// shop-db's engine runner, which runs its engine types' reactions and
+// deadlines (D58, D70). Every connection string, URL and port
 // the test uses comes from the environment the build resolved. The test
 // waits for each server's /readyz, creates a user in shop-db with the
 // identity runtime's store, as staff would through the administration
@@ -55,15 +59,22 @@ import (
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
 // would, and reads back from shop-media. Anyone lists shop-stock's stock,
-// and staff set the product's level. PlaceOrder reserves the order's stock
-// on shop-stock through its Go SDK, which sends shop-orders' service
-// credential and forwards the shopper, and an order beyond the stock is
-// refused 409; a reservation with the shopper's session and no service
-// credential is refused 401. PlaceOrder enqueues an OrderPlaced message on
-// shop-db's queue in the order's transaction, and shop-orders' worker
-// FulfilOrders, a process of its own on its generated entrypoint with the
-// implementation's NewWorkers, claims it and fulfils the order (section
-// 8.8, D53). It reads the static site shop-web, which
+// and staff count the product's shelf, which gives it an Inventory in
+// shop-db's engine (D70). Staff open a collection point through the
+// engine's routes; a cart on shop-cart takes two units and a pickup slot
+// from the slots it lists; shop-orders' startCheckout holds them, and a
+// second checkout beyond the stock is refused 409 unavailable. acmepay,
+// the fake provider, which the test runs where ACMEPAY_URL points with the
+// keys of Dev's secrets, takes the payment and posts the capture to
+// shop-orders' webhook, signed; the runner places the checkout, whose
+// order shop-orders writes, enqueuing OrderPlaced, and tells shop-stock
+// what it sold through its Go SDK with shop-orders' service credential; a
+// sale reported with the shopper's session and no service credential is
+// refused 401. A refund two members of staff sign off through the engine's
+// routes is made at acmepay by SettlePayments, run with stack run.
+// shop-orders' worker FulfilOrders, a process of its own on its generated
+// entrypoint with the implementation's NewWorkers, claims the OrderPlaced
+// message and fulfils the order (section 8.8, D53). It reads the static site shop-web, which
 // stack dev built and serves with its config, and asks shop-api, as a
 // browser would, whether the site's origin may call it, and another origin
 // (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
@@ -75,24 +86,24 @@ import (
 // shopper's own and staff every customer's, and a product's reviews
 // searched by their words and paged (D60, D61, D62); a shopper gets and
 // cancels no other customer's order.
-// The order took the product's level below the threshold staff set, so
-// shop-stock's reservation enqueued StockLow in its transaction, and
+// The sale left the product low, at the level staff set, so shop-stock
+// enqueued StockLow, and
 // shop-stock's worker ReorderStock, a Rust process on its generated
 // entrypoint with the implementation's create_workers, files the product's
 // restock request in shop-db; shop-stock's job OrderRestocks, a Rust job
 // Dev runs only on demand, orders it when stack run runs it (D65). Every
 // server, job and worker exports its traces to an OTLP receiver of the
 // test's own, which the test's environment names and stack dev hands on
-// (D67): an order is one trace from shop-orders' Go server through its call
-// to shop-stock's Rust server, the storefront's requests are spans named by
+// (D67): a sale is one trace from shop-orders' Go call to shop-stock's
+// Rust server, the storefront's requests are spans named by
 // their routes, each worker makes a span of the message it handles, and
 // each job's process sends the span of its run before it exits. The
 // test stops the stack as Ctrl-C does, which with --remove-data removes
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
 // against that root's mirror of rust-impl/shop-stock and its own API
-// crates, and shop-storefront against its mirror of
-// typescript/shop-storefront, and runs the job there with stack run. The
+// crates, and shop-cart and shop-storefront against their mirrors of
+// typescript/shop-cart and typescript/shop-storefront, and runs the job there with stack run. The
 // project's own TypeScript packages keep the links the default output
 // root's install made.
 //
@@ -126,14 +137,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	traces := otlptest.Start(t)
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", traces.URL)
 	t.Setenv("OTEL_BSP_SCHEDULE_DELAY", "500")
+	// acmepay, where shop-orders' ACMEPAY_URL defaults to, with the keys of
+	// the environment's secrets file, which stack dev hands shop-orders.
+	pay := startAcmepay(t)
 	dev := startStackDev(t, binary, shopStack)
 	output := dev.output
-	env := dev.waitUntilRunning(t, outputRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
+	env := dev.waitUntilRunning(t, outputRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
+	pay.provider.SetWebhookURL(env.servers["shop-orders"] + "/api/payments/acmepay/events")
 
 	// Staff, who hold products, orders and stock, add and stock the
 	// products, and order them too.
 	ctx := context.Background()
-	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Ada Lovelace", "products", "orders", "stock")
+	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Ada Lovelace", "products", "orders", "stock", "calendar.manage")
 	n := time.Now().UnixNano()
 
 	// shop-api: staff add a product, and it is listed.
@@ -195,15 +210,16 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
 
-	// shop-stock, on its Rust server (D57): anyone reads the stock, which
-	// holds none of the new product, and is refused setting it; staff, who
-	// hold stock.write, set the product's level to three, restocked below
-	// two, and anyone sees it.
+	// shop-stock, on its Rust server (D57), over shop-db's Inventory, which
+	// the engine keeps (D70): anyone reads the stock, which holds none of
+	// the new product, and is refused counting it; staff, who hold
+	// stock.write, count three on the shelf, low at two, and anyone sees
+	// it.
 	anyone, err := stocksdk.New(stocksdk.SDKConfig{BaseURL: env.servers["shop-stock"]})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 0 {
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.OnHand != 0 {
 		t.Fatalf("GetStock of a product never stocked = %+v, %v; want none", level, err)
 	}
 	_, err = anyone.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3})
@@ -215,8 +231,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	threshold := stocktypes.InputField[stocktypes.GenericInt64]{Set: true, Value: 2}
-	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3, Threshold: threshold}); err != nil || level.Quantity != 3 || level.Threshold == nil || *level.Threshold != 2 {
+	reorderAt := stocktypes.InputField[stocktypes.GenericInt64]{Set: true, Value: 2}
+	if level, err := staff.StockNamespace.SetStock(ctx, product.Id.String(), stocktypes.SetStockInput{Quantity: 3, ReorderAt: reorderAt}); err != nil ||
+		level.OnHand != 3 || level.Available != 3 || level.ReorderAt == nil || *level.ReorderAt != 2 || level.Low {
 		t.Fatalf("SetStock = %+v, %v", level, err)
 	}
 	stock, err := anyone.StockNamespace.ListStock(ctx)
@@ -224,72 +241,169 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("ListStock = %+v, %v; want three of %s", stock, err, product.Id)
 	}
 
-	// shop-orders: staff order two of it, as a shopper would, in one
-	// transaction over the order and its lines, which reserves them on
-	// shop-stock. That leaves one, below the threshold, so the reservation
-	// enqueues StockLow in its transaction.
+	// A collection point, which staff who hold calendar.manage open through
+	// shop-db's engine routes, which shop-orders' server mounts.
+	engineRoutes := env.servers["shop-orders"] + "/engine/shop-db/namespaces/shop-db/schemas"
+	counter := mustUUID(t, fmt.Sprintf("00000000-0000-4000-9000-%012d", n%1_000_000_000_000)).String()
+	if status, body := call(t, http.MethodPost, engineRoutes+"/CollectionPoint/instances", token,
+		fmt.Sprintf(`{"id": %q, "data": {"name": "Front counter"}}`, counter)); status != http.StatusCreated {
+		t.Fatalf("open a collection point: %d %s", status, body)
+	}
+
+	// shop-cart, on Bun over the engine: staff, as a shopper would, open a
+	// cart, put two green teas in it, and choose the first pickup slot the
+	// counter has two days on.
+	carts := env.servers["shop-cart"]
+	status, body := call(t, http.MethodPost, carts+"/api/carts", token, "")
+	var opened struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &opened) != nil || opened.Data.ID == "" {
+		t.Fatalf("open a cart: %d %s", status, body)
+	}
+	cart := carts + "/api/carts/" + opened.Data.ID
+	if status, body := call(t, http.MethodPost, cart+"/lines", token, fmt.Sprintf(`{"productId": %q, "quantity": 2}`, product.Id)); status != http.StatusOK {
+		t.Fatalf("add a cart line: %d %s", status, body)
+	}
+	from := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	status, body = call(t, http.MethodGet, carts+"/api/pickup-slots?days=7&from="+from, "", "")
+	var slots struct {
+		Data []struct {
+			CollectionPointID string `json:"collectionPointId"`
+			StartsAt          string `json:"startsAt"`
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &slots) != nil || len(slots.Data) == 0 || slots.Data[0].CollectionPointID != counter {
+		t.Fatalf("the pickup slots: %d %s", status, body)
+	}
+	if status, body := call(t, http.MethodPut, cart+"/pickup", token,
+		fmt.Sprintf(`{"collectionPointId": %q, "startsAt": %q}`, counter, slots.Data[0].StartsAt)); status != http.StatusOK {
+		t.Fatalf("choose a pickup slot: %d %s", status, body)
+	}
+
+	// shop-orders: staff start the checkout, which holds two teas and the
+	// slot, all or none; another cart of two finds one free and holds
+	// nothing.
 	orders, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	order, err := orders.OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
-		Lines:           []orderstypes.PlaceOrderLine{{ProductId: product.Id, Quantity: 2}},
-		ShippingAddress: address,
-	})
+	checkoutID := opened.Data.ID
+	started, err := orders.CheckoutsNamespace.StartCheckout(ctx, checkoutID, orderstypes.StartCheckoutInput{ShippingAddress: address})
 	if err != nil {
-		t.Fatalf("PlaceOrder: %v", err)
+		t.Fatalf("StartCheckout: %v", err)
 	}
-	if order.Status != orderstypes.OrderStatus_Placed || order.TotalCents != 900 || len(order.Lines) != 1 {
-		t.Fatalf("PlaceOrder returned %+v", order)
+	if started.Status != orderstypes.CheckoutStatus_Held || started.DueCents != 900 || started.Currency != "GBP" {
+		t.Fatalf("StartCheckout returned %+v", started)
 	}
-	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 1 {
-		t.Fatalf("after the order, GetStock = %+v, %v; want one left", level, err)
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Held != 2 || level.Available != 1 {
+		t.Fatalf("after the checkout, GetStock = %+v, %v; want two held", level, err)
 	}
-	// shop-stock logged the reservation, for shop-orders' server and the
-	// shopper it forwarded.
-	for _, want := range []string{"[shop-stock] ", `"msg":"reserved stock"`, `"caller":"shop-orders"`, `"api":"shop-stock"`} {
+	status, body = call(t, http.MethodPost, carts+"/api/carts", token, "")
+	var second struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &second) != nil {
+		t.Fatalf("open a second cart: %d %s", status, body)
+	}
+	if status, body := call(t, http.MethodPost, carts+"/api/carts/"+second.Data.ID+"/lines", token, fmt.Sprintf(`{"productId": %q, "quantity": 2}`, product.Id)); status != http.StatusOK {
+		t.Fatalf("add a line to the second cart: %d %s", status, body)
+	}
+	_, err = orders.CheckoutsNamespace.StartCheckout(ctx, second.Data.ID, orderstypes.StartCheckoutInput{ShippingAddress: address})
+	var refused *orderssdk.APIError
+	if !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict || !strings.Contains(string(refused.Body), "unavailable") {
+		t.Fatalf("StartCheckout beyond the stock: %v, want 409 unavailable", err)
+	}
+
+	// acmepay, the fake provider, at the address shop-orders' ACMEPAY_URL
+	// defaults to, with the environment's keys: staff pay on its page with
+	// a test token, it posts the capture to shop-orders' webhook, signed,
+	// and the runner's Reactions rule places the checkout, whose order
+	// shop-orders writes and FulfilOrders fulfils.
+	payment, err := orders.CheckoutsNamespace.PayCheckout(ctx, checkoutID)
+	if err != nil {
+		t.Fatalf("PayCheckout: %v", err)
+	}
+	if payment.AmountCents != 900 || payment.Currency != "GBP" {
+		t.Fatalf("PayCheckout returned %+v", payment)
+	}
+	if _, err := pay.client.ConfirmIntent(ctx, payment.IntentId, payment.ClientSecret, acmepay.TokenSucceeds); err != nil {
+		t.Fatalf("pay at acmepay: %v", err)
+	}
+	if events := pay.provider.Events(); !pay.provider.Delivered(events[len(events)-1].ID) {
+		t.Fatalf("acmepay could not deliver %+v to shop-orders", events[len(events)-1])
+	}
+	placedCheckout := waitForCheckout(ctx, t, orders, checkoutID, time.Minute)
+	if placedCheckout.Payment != "paid" || placedCheckout.OrderId == nil {
+		t.Fatalf("the paid checkout is %+v", placedCheckout)
+	}
+	order, err := orders.OrderNamespace.GetOrder(ctx, placedCheckout.OrderId.String())
+	if err != nil || order.TotalCents != 900 || len(order.Lines) != 1 || order.Lines[0].UnitPriceCents != 450 {
+		t.Fatalf("the checkout's order is %+v, %v", order, err)
+	}
+	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.OnHand != 1 || level.Held != 0 || !level.Low {
+		t.Fatalf("after the sale, GetStock = %+v, %v; want one left, low", level, err)
+	}
+	// shop-orders told shop-stock what the checkout sold, through its Go
+	// SDK with its service credential (D37, D57), and shop-stock enqueued
+	// StockLow for the product the sale left low.
+	for _, want := range []string{"[shop-stock] ", `"msg":"took a sale"`, `"caller":"shop-orders"`, `"api":"shop-stock"`} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("stack dev printed no %q", want)
 		}
 	}
-	// The order is one trace across two languages' runtimes (D67):
-	// shop-orders' Go server made a span of the request and a client span
-	// of its call to shop-stock, whose Rust server made a span of the
-	// reservation, the call's child, named by its route.
-	reserved := traces.Wait(t, 30*time.Second, "of shop-stock's reservation for shop-orders", func(s otlptest.Span) bool {
-		return s.Service() == "shop-stock" && s.Kind == otlptest.KindServer && s.Name == "POST /api/stock/reservations" && s.ParentSpanID != ""
+	// The sale is one trace across two languages' runtimes (D67): a span of
+	// shop-orders' call to shop-stock, in Go, whose child is shop-stock's
+	// Rust span of stockSold, named by its route.
+	sold := traces.Wait(t, 30*time.Second, "of shop-stock's stockSold for shop-orders", func(s otlptest.Span) bool {
+		return s.Service() == "shop-stock" && s.Kind == otlptest.KindServer && s.Name == "POST /api/stock/sold" && s.ParentSpanID != ""
 	})
-	reserving := traces.Wait(t, 30*time.Second, "of shop-orders' call to shop-stock", func(s otlptest.Span) bool {
-		return s.SpanID == reserved.ParentSpanID
+	telling := traces.Wait(t, 30*time.Second, "of shop-orders' call to shop-stock", func(s otlptest.Span) bool {
+		return s.SpanID == sold.ParentSpanID
 	})
-	placed := traces.Wait(t, 30*time.Second, "of shop-orders' request", func(s otlptest.Span) bool {
-		return s.SpanID == reserving.ParentSpanID
-	})
-	if reserving.Service() != "shop-orders" || reserving.Kind != otlptest.KindClient || reserving.Name != "POST" ||
-		placed.Service() != "shop-orders" || placed.Kind != otlptest.KindServer || !strings.HasPrefix(placed.Name, "POST /api/") ||
-		reserving.TraceID != reserved.TraceID || placed.TraceID != reserved.TraceID {
-		t.Fatalf("the order's spans are %v, %v and %v; want shop-orders' request, its call and shop-stock's reservation, in one trace", placed, reserving, reserved)
+	if telling.Service() != "shop-orders" || telling.Kind != otlptest.KindClient || telling.TraceID != sold.TraceID {
+		t.Fatalf("the sale's spans are %v and %v; want shop-orders' call and shop-stock's stockSold, in one trace", telling, sold)
 	}
-	t.Logf("the order's trace:\n  %v\n  %v\n  %v", placed, reserving, reserved)
-
-	// An order beyond the stock is refused with shop-stock's reason, and
-	// reserves nothing.
-	_, err = orders.OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
-		Lines:           []orderstypes.PlaceOrderLine{{ProductId: product.Id, Quantity: 2}},
-		ShippingAddress: address,
-	})
-	var refused *orderssdk.APIError
-	if !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict || !strings.Contains(refused.Message, "the warehouse holds 1 of product") {
-		t.Fatalf("PlaceOrder beyond the stock: %v, want 409", err)
-	}
-	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 1 {
-		t.Fatalf("after the refused order, GetStock = %+v, %v; want one left", level, err)
-	}
-	// Only shop-orders' server reserves: the shopper's session alone, with
+	// Only shop-orders tells shop-stock of a sale: the session alone, with
 	// no service credential, is refused.
-	reservation := fmt.Sprintf(`{"lines": [{"productId": %q, "quantity": 1}]}`, product.Id.String())
-	if status, body := call(t, http.MethodPost, env.servers["shop-stock"]+"/api/stock/reservations", token, reservation); status != http.StatusUnauthorized || !strings.Contains(string(body), "service_unauthorized") {
-		t.Fatalf("a reservation without a service credential: %d %s, want 401", status, body)
+	if status, body := call(t, http.MethodPost, env.servers["shop-stock"]+"/api/stock/sold", token,
+		fmt.Sprintf(`{"lines": [{"productId": %q, "quantity": 1}]}`, product.Id)); status != http.StatusUnauthorized || !strings.Contains(string(body), "service_unauthorized") {
+		t.Fatalf("a sale without a service credential: %d %s, want 401", status, body)
+	}
+
+	// A refund of one tea, which two members of staff who hold
+	// refunds.approve sign off through the engine's routes; SettlePayments,
+	// run with stack run, makes it at acmepay, and the runner issues it.
+	refund, err := orders.CheckoutsNamespace.RequestRefund(ctx, checkoutID, orderstypes.RequestRefundInput{AmountCents: 450, Reason: "one arrived crushed"})
+	if err != nil || refund.Status != "requested" {
+		t.Fatalf("RequestRefund = %+v, %v", refund, err)
+	}
+	refundRoute := engineRoutes + "/Refund/instances/" + refund.Id.String()
+	for _, name := range []string{"Barbara Liskov", "Katherine Johnson"} {
+		approver := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "refunds.approve")
+		if status, body := call(t, http.MethodPost, refundRoute+"/operations/signOff", approver, `{"state": "approved"}`); status != http.StatusOK {
+			t.Fatalf("%s's sign-off: %d %s", name, status, body)
+		}
+		if name == "Katherine Johnson" {
+			if status, body := call(t, http.MethodPost, refundRoute+"/operations/transition", approver, `{"to": "approved"}`); status != http.StatusOK {
+				t.Fatalf("approve the refund: %d %s", status, body)
+			}
+		}
+	}
+	run := runJob(t, binary, settlePayments)
+	if !strings.Contains(run, "job "+settlePayments+": the run stack run asked for, try 1 of 2 succeeded") {
+		t.Fatalf("stack run printed:\n%s", run)
+	}
+	waitForRefund(ctx, t, orders, checkoutID, time.Minute)
+	if intent, _ := pay.provider.Intent(payment.IntentId); intent.Refunded != 450 {
+		t.Fatalf("acmepay refunded %d of the payment, want 450", intent.Refunded)
+	}
+	if !strings.Contains(output.String(), "job "+settlePayments+" runs on * * * * * (UTC)") {
+		t.Fatalf("stack dev did not schedule %s", settlePayments)
 	}
 
 	// shop-orders' worker FulfilOrders claims the OrderPlaced message
@@ -308,9 +422,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	})
 
 	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
-	// StockLow message the reservation enqueued, and files the product's
-	// one open restock request, for enough units to bring its level of one
-	// back to twice its threshold of two.
+	// StockLow message the sale enqueued, and files the product's one open
+	// restock request, for enough units to bring its level of one back to
+	// twice its reorder level of two.
 	if !strings.Contains(output.String(), "worker   "+reorderStock+" handles StockLow of shop-db, 2 at a time") {
 		t.Fatalf("stack dev did not run %s", reorderStock)
 	}
@@ -331,11 +445,11 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// and a viewer reads the cart back. Its implementation keeps carts in
 	// memory and knows its callers by static tokens.
 	storefront := env.servers["shop-storefront"]
-	cart := fmt.Sprintf("%s/api/carts/00000000-0000-4000-8000-%012d", storefront, n%1_000_000_000_000)
+	cart = fmt.Sprintf("%s/api/carts/00000000-0000-4000-8000-%012d", storefront, n%1_000_000_000_000)
 	if status, body := call(t, http.MethodPost, cart+"/lines", "shopper-token", `{"sku": "green-tea", "quantity": 2}`); status != http.StatusCreated {
 		t.Fatalf("add a cart line: %d %s", status, body)
 	}
-	status, body := call(t, http.MethodGet, cart, "viewer-token", "")
+	status, body = call(t, http.MethodGet, cart, "viewer-token", "")
 	var read struct {
 		Data struct {
 			Lines []struct {
@@ -405,7 +519,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// shop-orders' job ShipOrders ships every fulfilled order (D52).
 	// `superschematic stack run` runs it once, from another terminal,
 	// against the environment stack dev runs.
-	run := runJob(t, binary, shipOrders)
+	run = runJob(t, binary, shipOrders)
 	for _, want := range []string{
 		"job " + shipOrders + ": start the run stack run asked for, try 1 of 2",
 		"job " + shipOrders + ": the run stack run asked for, try 1 of 2 succeeded",
@@ -448,7 +562,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	})
 
 	// Dev's settings run the job every minute, so stack dev ships an order
-	// placed now within about one, once the worker fulfils it.
+	// placed now within about one, once the worker fulfils it. PlaceOrder
+	// takes an order in one step, holding no stock and taking no payment.
 	if !strings.Contains(output.String(), "job "+shipOrders+" runs on * * * * * (UTC)") {
 		t.Fatalf("stack dev did not schedule %s", shipOrders)
 	}
@@ -460,9 +575,6 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("PlaceOrder: %v", err)
 	}
 	waitForStatus(ctx, t, orders, next.Id, orderstypes.OrderStatus_Shipped, 3*time.Minute)
-	if level, err := anyone.StockNamespace.GetStock(ctx, product.Id.String()); err != nil || level.Quantity != 0 {
-		t.Fatalf("after the last order, GetStock = %+v, %v; want none left", level, err)
-	}
 	for _, want := range []string{"job " + shipOrders + ": start the run due at ", "[" + shipOrders + "] "} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("stack dev printed no %q", want)
@@ -766,7 +878,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	links := projectLinks(t, outputRoot)
 	otherRoot := otherOutputRoot(t, outputRoot)
 	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
-	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
+	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
 	for mirror, implementation := range map[string]string{
 		filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"):      filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs"),
 		filepath.Join(otherRoot, "impl", "shop-storefront", "index.ts"):      filepath.Join("..", "typescript", "shop-storefront", "index.ts"),
@@ -809,9 +921,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	again.stop(t)
 }
 
-// shipOrders is the deployable of shop-orders' job ShipOrders: the API's
-// name, then the job's class in kebab case.
-const shipOrders = "shop-orders-ship-orders"
+// shipOrders and settlePayments are the deployables of shop-orders' jobs
+// ShipOrders and SettlePayments: the API's name, then the job's class in
+// kebab case.
+const (
+	shipOrders     = "shop-orders-ship-orders"
+	settlePayments = "shop-orders-settle-payments"
+)
 
 // fulfilOrders is the deployable of shop-orders' worker FulfilOrders,
 // named as a job's is (D53).
@@ -1234,12 +1350,12 @@ func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI, n
 	return result.Token
 }
 
-// stockOf is how many units of the product stock lists, or -1 when it
-// lists none.
+// stockOf is how many units of the product stock lists on hand, or -1
+// when it lists none.
 func stockOf(stock []stocktypes.StockView, id apitypes.IdentityUUID) stocktypes.GenericInt64 {
 	for _, level := range stock {
 		if level.ProductId == id {
-			return level.Quantity
+			return level.OnHand
 		}
 	}
 	return -1
@@ -1330,4 +1446,97 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// acmepayRun is acmepay, the fake provider, run by the test where
+// shop-orders' ACMEPAY_URL defaults to, and a client of it.
+type acmepayRun struct {
+	provider *acmepay.Provider
+	client   *acmepay.Client
+}
+
+// acmepayAddress is where shop-orders' ACMEPAY_URL points unless set.
+const acmepayAddress = "127.0.0.1:4250"
+
+// startAcmepay starts acmepay with the keys of shop-stack's Dev
+// environment, PaymentsSecrets', from its secrets file, which stack dev
+// reads (docs/stack-model.md, section 4.2): a developer's own, when they
+// set them with `superschematic stack secrets set Dev`, or test ones this
+// writes into the file when it holds none.
+func startAcmepay(t *testing.T) *acmepayRun {
+	t.Helper()
+	path := filepath.Join("..", "schemas", ".superschematic", "local", "shop-stack", "Dev", "secrets.env")
+	keys := map[string]string{"PaymentsSecrets.ACMEPAY_API_KEY": "", "PaymentsSecrets.ACMEPAY_WEBHOOK_SECRET": ""}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		id, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if _, wanted := keys[id]; ok && wanted {
+			keys[id] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	missing := ""
+	for id, value := range map[string]string{"PaymentsSecrets.ACMEPAY_API_KEY": "ak_dev_shop", "PaymentsSecrets.ACMEPAY_WEBHOOK_SECRET": "whsec_dev_shop"} {
+		if keys[id] == "" {
+			keys[id] = value
+			missing += id + "=" + value + "\n"
+		}
+	}
+	if missing != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
+			missing = "\n" + missing
+		}
+		if err := os.WriteFile(path, append(data, missing...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listener, err := net.Listen("tcp", acmepayAddress)
+	if err != nil {
+		t.Fatalf("acmepay listens where shop-orders' ACMEPAY_URL points, %s: %v", acmepayAddress, err)
+	}
+	provider := acmepay.New(acmepay.Config{APIKey: keys["PaymentsSecrets.ACMEPAY_API_KEY"], SigningSecret: keys["PaymentsSecrets.ACMEPAY_WEBHOOK_SECRET"]})
+	server := &http.Server{Handler: provider, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+	return &acmepayRun{provider: provider, client: &acmepay.Client{BaseURL: "http://" + acmepayAddress, APIKey: keys["PaymentsSecrets.ACMEPAY_API_KEY"]}}
+}
+
+// waitForCheckout waits until the checkout is placed and its order
+// written, as the runner's Reactions rule places it after the capture,
+// and returns it, or fails the test after within.
+func waitForCheckout(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrdersSDK, id string, within time.Duration) orderstypes.CheckoutView {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		checkout, err := orders.CheckoutsNamespace.GetCheckout(ctx, id)
+		if err == nil && checkout.Status == orderstypes.CheckoutStatus_Placed && checkout.OrderId != nil {
+			return checkout
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("checkout %s is %+v, %v after %s, want placed with its order", id, checkout, err, within)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// waitForRefund waits until the checkout's payment is partly refunded, or
+// fails the test after within.
+func waitForRefund(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrdersSDK, id string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		checkout, err := orders.CheckoutsNamespace.GetCheckout(ctx, id)
+		if err == nil && checkout.Payment == "partiallyRefunded" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("checkout %s is %+v, %v after %s, want its payment partly refunded", id, checkout, err, within)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }

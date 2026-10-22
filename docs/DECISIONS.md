@@ -9106,7 +9106,8 @@ behaviors. The client parity corpus carries the commerce schemas, and
 the release publishes `@superschematic/engine-commerce` (D70, amended
 below).
 
-acme-shop and the cross-language proof follow.
+acme-shop is built (D70, amended below: acme-shop sells, books and
+refunds through the engine); the cross-language proof follows.
 
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 
@@ -9518,3 +9519,41 @@ spans reach a collector from `waitUntil`; and a presigned PUT and GET for
 an EU bucket, with the edge's token scoped to it.
 
 The rule is reversible until the first release.
+
+### D70, amended: acme-shop sells, books and refunds through the engine
+
+D70 moved acme-shop's stock and checkout onto the engine: `Inventory`
+(`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`,
+`Payments`) and `Refund`, with the `Order` table and its queues staying.
+Building it settled where each piece runs and what the old shop keeps.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cart is a TypeScript API of its own, `shop-cart`: a shopper's cart is a `Checkout` in `cart`, and the pickup slots are `CollectionPoint`'s `findAvailability`. `shop-storefront` keeps its carts in memory, since `storefront-stack` runs it as a Cloudflare Worker, which cannot load the engine (D64). | Moving the storefront's carts onto the engine, which ends `storefront-stack`'s `Staging`; the storefront calling `shop-orders`, whose `calls` edge brings `shop-orders` and `shop-db` into that stack |
+| `shop-stock`'s `reserveStock` goes. `shop-orders` tells `shop-stock` what a placed checkout sold through a `@requireService` operation with no user clause, `stockSold`, since a payment's webhook brings no shopper, and `shop-stock` enqueues `StockLow` for each product the sale left low (`Stock.low`). `StockLow` and `ReorderStock` stay, so the Go to Rust service call (D37, D57) and the Rust worker and job (D65) keep their proofs; `OrderRestocks` also files a request for each `Inventory` the engine lists low with none open, which a count or an adjustment leaves, and then orders the open ones. | Retiring `StockLow` and `ReorderStock` for `OrderRestocks` over `Stock.low` alone, which drops the queue's proof; a `Reactions` rule, which moves statuses and runs no project code |
+| `placeOrder` stays, an order taken in one step that holds no stock and takes no payment, which the Rust server, the Topcoat app and the SDKs' tests place. The Rust server answers the checkouts 501, and the Topcoat app mounts the engine at `/engine` on a SQLite file of its own and sells nothing through it yet. | Retiring `placeOrder`, which takes the D60–D62 and Topcoat proofs with it |
+| The runner's `Reactions` rule places a paid checkout after the webhook that recorded the capture answered, so the `Order` row (unique `checkoutId`) is written when `shop-orders` next looks: the webhook, if the checkout is placed already, `getCheckout`, or `SettlePayments`, which reads every placed checkout. The row's lines are the prices `Holds` held. | The webhook moving the checkout to `placed` itself, which races the rule |
+| `go/acmepay` is the provider: intents, cancellations, refunds and webhooks signed `t=…,v1=` (HMAC-SHA256 of `t.body`, five minutes' tolerance, two secrets during a rotation), with idempotency keys. Every change is an event with an id, which its API's answer names, so the adapter records the answer under the event's id and the webhook that brings the same event applies once. It takes a payer's test token and refuses any other field, a card number among them. `stack dev` runs no process of a project's own, so acmepay runs beside it at `ACMEPAY_URL`'s default address, `127.0.0.1:4250`, with `Dev`'s secrets, and the tests run it in-process. | A real provider's test mode, which needs its keys; an API of the stack's that serves the fake in `Dev` alone, which a stack cannot declare per environment |
+| An engine id that a type's `Identity.UUID` field names is that UUID's canonical text, as the scalar writes it (base62): a line's `inventoryId` names an `Inventory` whose id is its product's, and a checkout's `customerId` is the shopper's id as the engine stores it. | The UUID's hyphenated form, which the engine's `Identity.UUID` fields would hold in the other form, so no hold found its supply |
+| `shop-db`'s policy is rules, the first that matches deciding: `shop-orders` reads and writes, `shop-cart` writes checkouts and reads the stock and the counters, `shop-stock` the stock, any other service nothing, the runner (`shop-db-engine-runner`) each type by its name, then staff by their roles (`refunds.approve`, `orders.any`, `stock.write`, `calendar.manage`). Every `Payments` operation asks; `receiveStock` is `auto`, a warehouse's routine its ledger records with a reason; `adjustStock` and `countStock` ask, since each takes units out of sale. | `allowAll`, which a deployment should not copy; the runner's rule after the staff's, which a read of a checkout by the runner met first |
+
+A build of one stack, `superschematic build`, read its engine database's
+config only where build-all hands it over, so its servers opened the
+engine with the default `permission` policy rather than the database's;
+the engine's settings now come from the config either way (D58).
+
+Status: built. `examples/acme-shop/go/commerce_test.go` opens `shop-db`'s
+engine on SQLite with the project's engine archive and the policy
+`shop-stack`'s servers open it with, and serves `shop-orders` over it:
+a checkout holds two units and a pickup slot, another finds one free
+(`unavailable`), acmepay's signed capture places it through the runner, a
+webhook signed with another secret, with none or long ago is refused, a
+resent one changes nothing, the order is written once and `shop-stock`
+told of the sale, the slot is committed, and a refund two members of
+staff sign off is made by `SettlePayments` and issued, once. acmepay has
+tests of its own. `TestStackDevRunsTheShop` runs the same sale on
+`stack dev` over Postgres, `shop-cart` on Bun included, with the sale one
+trace from `shop-orders` into `shop-stock`, and
+`TestStackInitOverAcmeShop` resolves the stack on gcp.
+`internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
+holds the policy fix. The rule is reversible until the first release.
