@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/enginedoc"
 	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -206,15 +207,27 @@ func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, err
 	if len(types) == 0 {
 		return nil, nil
 	}
-	var outputs *registry.Outputs
+	// The database's config, as build-all holds it, or as a build of one
+	// service reads it: without it the servers would open the engine with
+	// the default policy and namespace, not the ones outputs.engine sets.
+	var cfg *schemaconfig.SchemaConfig
 	if r.Options.DependencyConfig != nil {
-		if cfg, ok := r.Options.DependencyConfig(db); ok {
-			parsed, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
-			if err != nil {
-				return nil, fmt.Errorf("generator: schema config for %s: %w", db, err)
-			}
-			outputs = parsed
+		cfg, _ = r.Options.DependencyConfig(db)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		loaded, err := r.Options.LoadDependencyConfig(db)
+		if err != nil {
+			return nil, fmt.Errorf("generator: read the config of %s, the engine database of %s: %w", db, r.Config.Name, err)
 		}
+		cfg = loaded
+	}
+	var outputs *registry.Outputs
+	if cfg != nil {
+		parsed, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+		if err != nil {
+			return nil, fmt.Errorf("generator: schema config for %s: %w", db, err)
+		}
+		outputs = parsed
 	}
 	namespace, err := enginedoc.Namespace(db, outputs.EngineNamespace())
 	if err != nil {
