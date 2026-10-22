@@ -58,8 +58,9 @@ Check it:
 bin/superschematic --help
 ```
 
-It lists the core's six commands: `build`, `build-all`, `migrate`,
-`format`, `json-schema` and `behaviors`.
+It lists the core's ten commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
+`stack` and `identity` groups.
 
 ## Compile generated Go code
 

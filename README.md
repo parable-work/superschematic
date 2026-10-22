@@ -240,6 +240,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [Prerequisites](docs/src/content/docs/start/prerequisites.md): the toolchain, and setting up a checkout.
 - [Getting started](docs/src/content/docs/start/getting-started.mdx): build one schema and use its Go, TypeScript, Python and Rust types.
 - [How it works](docs/src/content/docs/start/how-it-works.mdx): services, kinds, outputs, the naming file and the IR.
+- [Capability map](docs/src/content/docs/start/capabilities.md): each thing a backend needs, the declaration that gives it, what is generated and what you still write.
 
 **Tutorial: your first project**
 
@@ -271,6 +272,7 @@ tag. To browse it locally with working navigation and code samples, run
 **Reference**
 
 - [Decorators and wrappers](docs/src/content/docs/reference/decorators.md): every core decorator and type wrapper, and the page that covers it.
+- [Scalars](docs/src/content/docs/reference/scalars.md): every builtin scalar, what it checks, and its type in SQL and each language.
 - [Naming file](docs/src/content/docs/reference/naming.md): every `superschematic.toml` key and its default.
 - [CLI](docs/src/content/docs/reference/cli.md): every command and flag.
 - [Documentation decorators](docs/src/content/docs/reference/documentation.md): `@docs`, `@purpose` and `@icon`.
@@ -299,6 +301,13 @@ HTTP runtime for [Go](runtime/http/go/README.md),
 [TypeScript](runtime/versiongraph/typescript/README.md),
 [Rust engine](runtime/versiongraph/rust-engine/README.md) and
 [Python](runtime/versiongraph/python/README.md) packages).
+
+**For coding agents.** [`skills/superschematic/`](skills/superschematic/SKILL.md)
+is an agent skill for building with superschematic: what to declare
+instead of write, the build loop, and catalogs of the scalars, decorators
+and engine behaviors generated from the compiler itself
+(`go run ./internal/tools/agentcatalog`). Copy the directory into an
+agent's skills directory, such as `.claude/skills/` in a project.
 
 **Design.** [`docs/extension-model.md`](docs/extension-model.md) is the
 design of the extension seam, [`docs/stack-model.md`](docs/stack-model.md)
@@ -351,7 +360,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `format`, `json-schema`, `behaviors` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `stack`, `identity` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
@@ -365,6 +374,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
+| [`skills/`](skills/) | The agent skill for building with superschematic, with its generated catalogs |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
 The repository has twelve Go modules: the root (the compiler), `ir`,

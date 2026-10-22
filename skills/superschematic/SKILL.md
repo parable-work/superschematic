@@ -1,0 +1,199 @@
+---
+name: superschematic
+description: Build backends with superschematic by declaring them in schema files (.schema.ts), not by writing SQL, migrations, validation, DTOs, routes, auth checks, OpenAPI or clients. The compiler generates Postgres and SQLite DDL, migration plans, a Go ORM, validated servers in Go, TypeScript or Rust, OpenAPI, SDKs in four languages, MCP tools and deploys. Use whenever a project has a superschematic.toml or schema.config.ts, or the task is to add or change a type, table, field, route, permission, user model, job, queue, bucket, site or environment in such a project, or to start a new one.
+---
+
+# superschematic
+
+superschematic is a schema compiler. You describe a service once, in a
+schema, and `superschematic build` generates every layer that would
+otherwise restate it. Your job in a superschematic project is to **say
+what you want in the schema and write only the code the schema cannot
+say**.
+
+## The rule
+
+Before you write code, ask whether a declaration says it. It usually
+does. You never write, edit or duplicate:
+
+- SQL DDL or migrations: the DB schema is the table; `migrate plan` diffs
+  two versions of it.
+- Validation: a field's scalar type and `Validate<T, {...}>` are checked
+  by every generated decoder, server and SDK alike. Never re-check in a
+  handler what a constraint can say.
+- Request and response types, DTOs or mappers between layers: the types
+  are generated in Go, TypeScript, Python and Rust.
+- Routing, argument decoding, 400s, auth and permission checks, rate,
+  body and time limits, pagination plumbing, webhook signature checks.
+- OpenAPI, SDKs, MCP tool documents, env-var loaders, server entrypoints,
+  Dockerfiles, deploy scripts, CI.
+- Anything under the output root, `<schemas-root>/dist/`: it is rewritten
+  on every build.
+
+You do write:
+
+- each operation's body, against the generated interface (`Constructor`,
+  `Implementations`, `Deps` in Go; the same names in TypeScript and Rust);
+- ownership checks behind `@requireOwnership`;
+- `@virtual` fields of a view, job bodies, worker handlers, and the
+  handler of a `@manualRouteRegistration` operation;
+- tests.
+
+[references/capabilities.md](references/capabilities.md) maps each thing a
+backend needs to its declaration, what is generated and what is left for
+you. Read it when you are not sure how to say something.
+
+## The model
+
+A **schemas root** holds `superschematic.toml` (the naming file),
+`tsconfig.base.json` and `services/`. Each service is a directory:
+`schema.config.ts` (its name, kind and `outputs`) and `src/*.schema.ts`.
+Output goes to `<schemas-root>/dist`.
+
+The **kind** decides what a class means:
+
+| Kind | A class is | Imports | Generates |
+| --- | --- | --- | --- |
+| `General` | a plain type shared by services; with `@envVars`, a service's settings | `@superschematic/schema`, `superscalar` | types, env loader |
+| `DB` | a table (`@key` required) | `+ @superschematic/db` | SQL, Go ORM, types |
+| `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
+| `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
+| `Bucket`, `Site` | config only: a file bucket, a static front end | | |
+
+Schema classes are `abstract`. An operation's body is
+`throw new Error("schema declaration only")`: nothing runs it, the
+compiler reads the declaration. An API reaches a DB through `authDb`, a
+DB `dependencies` entry or `@source`; another API through `calls`.
+
+## The loop
+
+1. **Pick the service and kind.** A new table goes in a DB schema, a new
+   route in an API schema, a type several services share in a General one.
+2. **Edit the schema.** Choose a scalar for every field first
+   ([references/scalars.md](references/scalars.md)): `Contact.Email`, not
+   `string` plus a pattern. Then wrappers and decorators
+   ([references/decorators.md](references/decorators.md)).
+3. **Build.** From the directory holding `schemas/`:
+   ```sh
+   superschematic build-all schemas/services          # every service, in dependency order
+   superschematic build --with-deps schemas/services/shop-api  # one service and what it needs
+   ```
+4. **Read the error.** Build errors name the field and say the fix, often
+   with the decision record behind it (`(D34)`). Change the schema as the
+   message says; don't work around it in code. When output surprises you,
+   `superschematic build <dir> --emit-ir | jq` shows what the generators were
+   given.
+5. **Implement what was generated.** `build --scaffold` (or a stack's
+   build) writes a missing implementation: Go at `go/<service>`,
+   TypeScript at `typescript/<service>`, Rust at `rust/<service>`, beside
+   the schemas root. Each method answers 501 until you fill it. Compile
+   errors after a schema change point at exactly the code to follow.
+6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
+   whole stack locally, with Postgres in Docker and migrations applied. Run
+   the language's own tests against the generated SDKs.
+7. **Changing a table that holds data?** `superschematic migrate plan
+   schemas/services/<db> --from-ref origin/main` plans expand and contract
+   steps with their hazards. Show the hazards to the user.
+
+## Choices that matter
+
+- **Scalars before constraints, constraints before code.** A superscalar
+  type brings parsing, normalizing (an email is trimmed and lowercased),
+  the check and the SQL type everywhere. `Validate` adds ranges, lengths
+  and patterns. Handler code is for rules that span fields or rows.
+- **Views, not tables, in responses.** An API returns `@source(Table)`
+  classes listing the fields it shows; the loader checks each against the
+  table, and `@sourceMustProject` warns when a view drops a field it must
+  carry.
+- **Permissions on the operation.** `extends Authenticated`, `@auth`,
+  `@requirePermission([...])`, `@publicRoute`. For users and sign-in, turn
+  on the user model (`implements User<{ login }>` on a DB table,
+  `@userSessions` on an API class) instead of writing auth.
+- **Background work is declared.** `@job` for schedules, `@queue` on a DB
+  class plus `@worker` on an API class for messages written in the same
+  transaction as the change that causes them.
+- **No server at all?** If the data's shape is defined at run time, or
+  the need is workflow, comments, revisions, approvals and the like, the
+  engine runs a schema with no generated code: types compose behaviors
+  with `@behavior("Workflow", {...})`
+  ([references/behaviors.md](references/behaviors.md)).
+- **Outputs must line up.** A server or SDK in a language needs
+  `outputs.types` in that language, and a DB always needs Go types; the
+  config fails to load and says so otherwise.
+
+## Rules worth knowing
+
+Most are load errors; knowing them saves a build round-trip:
+
+- `schema.config.ts` imports only `@superschematic/schema-config` and other
+  services' **sentinels** (`import { ShopDb } from "@acme/shop-db"`), never
+  a class or a type. A service's first build writes its sentinel to
+  `src/service.generated.ts` and exports it from `src/index.ts`; commit
+  both.
+- A schema file imports only the authoring packages its kind allows (the
+  table above), `superscalar` and other services' packages.
+- A DB schema cannot import `@superschematic/api`, and an API schema
+  cannot import `@superschematic/db`.
+- Every plain class in a DB schema is a table; give each one a `@key`.
+  A `@jsonField` class, a `@queue` message, a `@projection` and a type
+  that composes a behavior are not tables.
+
+## Starting a project
+
+There is no `init` command for a schemas root yet; create these files
+yourself, modeled on `examples/acme-shop/schemas` in the superschematic
+repository:
+
+```text
+schemas/
+  superschematic.toml        # go_module_root, npm_scope, ...; every key optional
+  tsconfig.base.json         # experimentalDecorators, strict, paths to the authoring packages
+  .gitignore                 # dist/* but !dist/bun.lock and !dist/Cargo.lock
+  services/<name>/
+    schema.config.ts         # defineConfig({ name, kind, outputs, ... })
+    package.json             # { "name": "<npm_scope>/<name>", "private": true }
+    tsconfig.json            # extends ../../tsconfig.base.json; include schema.config.ts, src/**/*.ts
+    src/index.ts             # re-exports the schema files and ./service.generated
+    src/<topic>.schema.ts
+```
+
+superschematic is pre-release: nothing is published yet. The
+`tsconfig.base.json` `paths` map `@superschematic/*` and `superscalar` to
+a superschematic checkout's `packages/*/src/index.ts` and
+`third_party/superscalar/bindings/typescript/src/index.ts`, plus
+`"<npm_scope>/*": ["./services/*/src/index.ts"]` so services import each
+other's sentinels and types, and the naming
+file's `[paths]` table points the generated packages' dependencies at its
+runtimes. Once APIs exist, `superschematic stack init` writes the Stack
+service.
+
+## Before you deploy
+
+`stack dev` runs on your machine only. `stack bootstrap`, `stack secrets
+set`, `stack deploy` and `stack destroy` act on cloud accounts and cost
+money. Run `stack plan <environment>` and show it to the user, and run
+those commands only when the user asks for that environment.
+
+## Reference
+
+- [references/capabilities.md](references/capabilities.md): need →
+  declaration → what is generated → what you write.
+- [references/scalars.md](references/scalars.md): every builtin scalar,
+  its checks, its SQL type and its types in each language.
+- [references/decorators.md](references/decorators.md): every core
+  decorator and wrapper, with its TypeScript declaration, where it may
+  sit and which kinds may use it. It is long: search it for `` `@name` ``.
+- [references/behaviors.md](references/behaviors.md): every engine
+  behavior, its config, and the fields and operations it adds.
+- `superschematic json-schema` prints the schema the JSON and YAML forms
+  of a schema file are checked against, an extension's decorators
+  included, and `superschematic --help` lists the commands of the binary
+  you run.
+- The docs: <https://parable-work.github.io/superschematic/>. The guides
+  under `guides/` cover each area; `reference/cli/` lists every command
+  and flag.
+
+The references are generated from the compiler's registry, its authoring
+packages and the pinned superscalar
+(`go run ./internal/tools/agentcatalog` in the superschematic
+repository), so they match the compiler they were built with.
