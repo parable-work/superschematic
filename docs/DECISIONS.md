@@ -9045,10 +9045,11 @@ refunds, a refund instance's issues and the provider events it recorded,
 the same SQL on both databases. A literal currency, and the code an
 instance pays in, is checked against `Finance.Currency`'s table through
 the crate's `currency` module, which Stock's builder added. The
-testkit's `commerce_payments` (12 cases) and `commerce_payments_refunds`
-(4) pass on SQLite and Postgres:
-idempotent and reordered events, `amount_locked` from a field and from a
-stand-in `Holds.total`, `require`, `voidOn` and `payment_in_progress`,
+testkit's `commerce_payments` and `commerce_payments_refunds` pass on
+SQLite and Postgres:
+idempotent and reordered events, `amount_locked` from a field, a real
+`Holds.total` (the stand-in is gone, D70 amended below), `require`,
+`voidOn` and `payment_in_progress`,
 `afterRelease`, manual capture and over-capture, direct refunds, a
 currency mismatch, and a Refund issued after two Approvals sign-offs,
 numbered by Numbering and moved to issued by Reactions. Where the table
@@ -9091,8 +9092,9 @@ Go, Rust and TypeScript, builds and serves offline in all three
 (`TestCommerceEngineEntrypointServes`, `…Rust`, `…TypeScript`); on
 Postgres each deploys the document and answers one script, the MCP
 tools' policies included, now that the crate registers all four
-behaviors. The client parity corpus and the
-`@superschematic/engine-commerce` npm package wait for the behaviors.
+behaviors. The client parity corpus carries the commerce schemas, and
+the release publishes `@superschematic/engine-commerce` (D70, amended
+below).
 
 acme-shop and the cross-language proof follow.
 
@@ -9139,3 +9141,56 @@ no commerce server became ready.
 deploys Checkout before Counter and Inventory on SQLite and Postgres,
 deploys again writing nothing, and has a config naming a schema that is
 never live refused after the rest deployed.
+
+### D70, amended: Payments fails closed, pays one refund per approval, asks back a double charge, and a deployment names every money-moving operation's policy
+
+A review of Payments and its plumbing found that:
+- one approved Refund could drain its order through `refundFor`, which
+  took a refund per caller key;
+- `amount: { holds: true }` read a null `Holds.total` as 0, so `require:
+  paid` passed with nothing paid;
+- a late capture of an attempt that had failed charged the payer twice,
+  with no signal;
+- the operations that move money or stock were `auto` MCP tools unless
+  the deployment said otherwise, and the adapter's own operations were
+  offered to end users;
+- `settleRefundFor` trusted its caller's status and amount.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One live refund per refund instance: while one it asked is `requested`, `sent` or `succeeded`, `refundFor` returns it under its key and refuses any other (`key_reused`). After one failed it takes only the key the refund instance derives from itself and the failures before (`<schema>:<id>.<n>`), which `issue` already sends. | Trusting the caller's key, which the review's drain used; refusing every direct call, which nested invokes cannot tell from a forged one |
+| With `amount: { holds: true }` what is owed is unknown while an item is `pending` (its price comes when it is held), or while `Holds.total` is null over priced items (two currencies, or a sum past what an integer holds). `due` reads 0 then, and `openPayment` and a move into a `require` state veto with the new code `total_unknown`. A claim whose items carry no price owes 0, so a free booking moves. `Holds.total` sums the priced items only (cm-fix-supply's Holds change); Payments reads `Holds.items` too, so it holds to this before and after that change. | `due` 0 for a null total, the review's finding; a nullable `due`, which every client and SDK would carry |
+| `openPayment` gives each earlier `failed` attempt a `void` action, and a capture that pays what is due voids the other attempts still open. A capture that arrives anyway is counted; what it brings past what is due is the new field `Payments.overpaid`, and Payments asks it back with a refund keyed `overpaid:<eventId>`. That refund leaves `state` `paid`. `refundPayment` refuses the `overpaid:` and `release:` keys, which are Payments' own. | A new `overpaid` state, which a rule listening for `paid` would miss; refusing the capture, which leaves money taken and unrecorded |
+| `settleRefundFor` reads the refunded instance's refund row (Payments' tables are namespace-wide) and refuses a status or an amount other than what that instance recorded (`not_linked`). Defining a refund's schema refuses a `record.permission` other than its target's, since the adapter settles both in one call. The module's documentation says the engine policy must let the adapter write `settleRefundFor`, and the issuing principal write `refundFor`. | A config-time check of the engine policy, which the schema registry cannot see |
+| A build whose engine types compose the core's `Payments` or `Stock` is refused unless `outputs.engine.tools.invocation` names a policy for each operation that moves money or stock, naming each it lacks: `Payments.openPayment`, `capturePayment`, `voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`, `adjustStock` and `countStock` (`enginedoc.MoneyOperations`). | Filling in `ask` silently, which a distribution with other values could not take; a warning, which a build log hides |
+| A new engine tool option, `tools.hidden`, lists behavior operations the tools leave out. Such a tool reads `hidden: true` with its reason, and its call by MCP handle is `UnknownToolError`; the operation still runs through the engine's API. `outputs.engine.tools.hidden` sets it, which the build checks. The engine document adds Payments' service operations wherever Payments is composed: `listPaymentActions` and `recordPaymentEvent`, which the adapter calls, and `settleRefundFor`, which a refunded instance calls (`enginedoc.ServiceOperations`). An engine opened by hand hides only what it is given. | A value of `invocation`, which is the binary's policy's to define; a `service` flag in the declarations, which every distribution's registry and the engine's declaration reader would have to learn; the access policy alone, which hides a tool from a caller only per deployment |
+| `ToolOptions::from_json` and `resolveToolOptions` refuse a non-string `invocation` value, a non-object `invocation` and a `hidden` that is not a list of strings, naming each, rather than dropping them to the default. | |
+
+`@superschematic/engine-commerce` names all four behaviors and types
+Payments' config and record. The release packs and publishes it after
+the engine, beside the work queue's package, so a TypeScript deployment
+can name and type the commerce behaviors from it.
+
+This amends D11, whose engine tool options gain `hidden`.
+
+Status: built. The new behavior is tested in four places:
+- the testkit's `commerce_payments` and `commerce_payments_refunds`, on
+  SQLite and Postgres: made-up keys after approval, a forged settlement,
+  the record permission, a late capture voided and asked back, and
+  `total_unknown` for pending lines, two currencies and an overflow over
+  real Stock and Holds, with a free claim placed;
+- `tools.rs` and the TypeScript `tools.test.ts`, for `hidden` and the
+  refused option shapes;
+- `enginedoc`'s and servergen's build tests, for the refusal and the
+  hidden list;
+- the commerce package's `payments`, `payments-refunds` and
+  `payments-holds` suites, recorded as `commerce-payments*.json`, which
+  the testkit replays.
+
+servergen's commerce entrypoint tests lost the `NAMES` gate. Without a
+Postgres they skip after the offline half, or fail under
+`SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1`. On Postgres, Go, Rust and
+TypeScript each hold a pickup slot through Calendar and Holds, meet
+`total_unknown` and `nothing_due`, place the free checkout and read its
+booking, and show the MCP tools' policies and hidden operations. The
+client parity corpus carries the commerce schemas.

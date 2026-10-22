@@ -8,8 +8,11 @@
 //! `Payments.state` turns `refunded`, and a Reactions rule moves it to
 //! `issued`. A refund the checkout cannot pay is refused at the move; a
 //! failed one turns the Refund `failed`, and approving it again asks
-//! again. Nobody asks or settles a refund by calling the pair directly. On
-//! SQLite and, with the variable set, on Postgres.
+//! again. Nobody asks or settles a refund by calling the pair directly:
+//! one approval pays one refund whatever key a caller makes up, and a
+//! settlement must be the outcome the checkout recorded. A refund records
+//! with the permission of what it refunds. On SQLite and, with the
+//! variable set, on Postgres.
 
 mod payments_support;
 mod support;
@@ -392,5 +395,129 @@ fn a_refund_config_names_a_required_link_to_what_it_refunds() {
             json!({"provider": PROVIDER, "idempotencyKey": "k"}),
         );
         assert_eq!(vetoed(opened).as_deref(), Some("not_configured"));
+    }
+}
+
+// refund_for calls the checkout's refundFor directly, as whoever reaches
+// it may: the principal that approved the Refund.
+fn refund_for(
+    engine: &Engine,
+    id: &str,
+    amount: i64,
+    key: &str,
+) -> Result<Value, superschematic_engine::Error> {
+    invoke(
+        engine,
+        &alice(),
+        "Checkout",
+        "c-1",
+        "refundFor",
+        json!({"refund": {"schema": "Refund", "id": id}, "amount": amount, "idempotencyKey": key}),
+    )
+}
+
+#[test]
+fn one_approval_pays_one_refund_whatever_key_a_caller_makes_up() {
+    for target in targets("one_approval_pays_one_refund") {
+        let (engine, _) = shop(&target);
+        ask(&engine, "rf-1", 1000);
+        sign(&engine, "rf-1", &bob());
+        sign(&engine, "rf-1", &carol());
+        transition(&engine, &alice(), "Refund", "rf-1", "approved").expect("approved");
+        let waiting = refund_actions(&engine);
+        assert_eq!(waiting.len(), 1);
+        let refund_id = waiting[0]["refund"].clone();
+
+        // While rf-1's refund is asked, a caller who reaches refundFor gets
+        // no second one, under any key.
+        for key in ["x1", "x2", "Refund:rf-1.1"] {
+            let (_, _, _, code, details) = veto(refund_for(&engine, "rf-1", 1000, key));
+            assert_eq!(code.as_deref(), Some("key_reused"), "{key}");
+            assert_eq!(details.unwrap()["refund"], refund_id, "{key}");
+        }
+        // The key rf-1's Payments derives returns the refund it asked, and
+        // writes nothing.
+        let seq = read(&engine, "Checkout", "c-1").seq;
+        let again = refund_for(&engine, "rf-1", 1000, "Refund:rf-1.0").expect("the same refund");
+        assert_eq!(again["refund"], refund_id);
+        assert_eq!(read(&engine, "Checkout", "c-1").seq, seq);
+        // Another amount than rf-1's is refused as before.
+        assert_eq!(
+            vetoed(refund_for(&engine, "rf-1", 900, "Refund:rf-1.0")).as_deref(),
+            Some("not_linked")
+        );
+        assert_eq!(refund_actions(&engine).len(), 1);
+
+        // A settlement the checkout did not record is refused: the refund
+        // is still asked at the provider.
+        let settle = |status: &str, amount: i64| {
+            invoke(
+                &engine,
+                &adapter(),
+                "Refund",
+                "rf-1",
+                "settleRefundFor",
+                json!({"of": {"schema": "Checkout", "id": "c-1"}, "refund": refund_id, "status": status, "amount": amount}),
+            )
+        };
+        assert_eq!(
+            vetoed(settle("succeeded", 1000)).as_deref(),
+            Some("not_linked")
+        );
+        assert_eq!(
+            payments(&engine, "Refund", "rf-1")["state"],
+            json!("pending")
+        );
+
+        // Once the provider refunds it, rf-1's refund is paid: still no
+        // second one.
+        record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event("e-rf", "refunded", 1000, json!({"refund": refund_id})),
+        )
+        .expect("refunded");
+        for key in ["x3", "Refund:rf-1.1"] {
+            assert_eq!(
+                vetoed(refund_for(&engine, "rf-1", 1000, key)).as_deref(),
+                Some("key_reused"),
+                "{key}"
+            );
+        }
+        // A settlement that differs from what the checkout recorded is
+        // refused; the one it recorded changes nothing again.
+        assert_eq!(
+            vetoed(settle("succeeded", 900)).as_deref(),
+            Some("not_linked")
+        );
+        assert_eq!(vetoed(settle("failed", 0)).as_deref(), Some("not_linked"));
+        settle("succeeded", 1000).expect("what the checkout recorded");
+
+        let fields = payments(&engine, "Checkout", "c-1");
+        assert_eq!(fields["refunded"], json!(1000));
+        assert_eq!(refund_actions(&engine), Vec::<Value>::new());
+        assert_ledger(&engine, "Checkout", "c-1");
+    }
+}
+
+#[test]
+fn a_refund_records_with_the_permission_of_what_it_refunds() {
+    for target in targets("a_refund_records_with_the_permission") {
+        let engine = open(&target, BehaviorSet::new());
+        publish_checkout(&engine, payments_config(json!({})));
+        let refused = engine.schemas().define(
+            &alice(),
+            refund_document(refund_payments(
+                json!({"record": {"permission": "refunds.record"}}),
+            )),
+            DefineOptions::default(),
+        );
+        let refused = refusal(refused).to_string();
+        assert!(
+            refused.contains("record.permission is refunds.record"),
+            "{refused}"
+        );
+        assert!(refused.contains(RECORD), "{refused}");
     }
 }

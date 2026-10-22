@@ -152,6 +152,12 @@ type EngineToolsConfig struct {
 	// the engine with it, so an agent's MCP client asks before it runs the
 	// operations the deployment marks.
 	Invocation map[string]string `json:"invocation,omitempty"`
+
+	// Hidden are behavior operations, by <Behavior>.<operation>, that the
+	// engine's tools leave out: a service calls them through the API or
+	// in-process, and no agent is offered them. The engine document adds
+	// the core commerce behaviors' service operations (D70).
+	Hidden []string `json:"hidden,omitempty"`
 }
 
 // DefaultEnginePolicy is the access policy a server opens the engine with
@@ -441,6 +447,14 @@ func (o *Outputs) EngineInvocation() map[string]string {
 		return nil
 	}
 	return o.Engine.Tools.Invocation
+}
+
+// EngineHidden returns outputs.engine.tools.hidden, nil when unset.
+func (o *Outputs) EngineHidden() []string {
+	if o == nil || o.Engine == nil || o.Engine.Tools == nil {
+		return nil
+	}
+	return o.Engine.Tools.Hidden
 }
 
 // SQLViewOwner returns outputs.sql.viewOwner ("" when unset).

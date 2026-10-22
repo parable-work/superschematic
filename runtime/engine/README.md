@@ -4910,7 +4910,18 @@ openEngine({
   none, so they register under any policy; a deployment marks the ones
   it wants confirmed, such as the commerce operations that move money or
   stock (D70), through `invocation`. A generated server takes it from
-  the engine database's `outputs.engine.tools.invocation`.
+  the engine database's `outputs.engine.tools.invocation`, which the
+  build requires to name each commerce operation that moves money or
+  stock wherever `Payments` or `Stock` is composed (D70, amended).
+- `hidden` lists behavior operations, by `<Behavior>.<operation>`, that
+  the tools leave out: a service calls them through the API or
+  in-process, and no agent is offered them. Such a tool reads `hidden:
+  true` with its reason, and a call by its MCP handle is
+  `UnknownToolError`; the operation still runs through `instances`. A
+  generated server's engine document hides Payments' service operations
+  (`listPaymentActions`, `recordPaymentEvent`, `settleRefundFor`) beside
+  the database's `outputs.engine.tools.hidden`; an engine opened by hand
+  hides only what it is given.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.
@@ -4920,11 +4931,14 @@ registry refuses: a key `@mcp` already uses or not a letter followed by
 letters, digits or underscores, no values, a value that is not lowercase
 letters, digits, `_` and `-` starting with a letter, a value listed twice,
 a default or an `invocation` value outside the values, an `invocation`
-name that is neither a built-in tool nor `<Behavior>.<operation>`, and a
-parameter key that is empty, repeated, the scalar key or one the core
-writes. Once its behaviors are registered it refuses, as a usage error,
-an `invocation` name for a behavior it does not run or an operation the
-behavior does not declare.
+value that is not a string or an `invocation` that is not an object, an
+`invocation` name that is neither a built-in tool nor
+`<Behavior>.<operation>`, a `hidden` that is not a list of
+`<Behavior>.<operation>` strings, and a parameter key that is empty,
+repeated, the scalar key or one the core writes. Once its behaviors are
+registered it refuses, as a usage error, an `invocation` or `hidden`
+name for a behavior it does not run or an operation the behavior does
+not declare.
 
 ## MCP
 

@@ -28,6 +28,15 @@ export type {
   InstanceRef,
   OpeningHours,
   OpeningRanges,
+  PaymentAction,
+  PaymentActionKind,
+  PaymentAttempt,
+  PaymentAttemptStatus,
+  PaymentEventKind,
+  PaymentRequirement,
+  PaymentsConfig,
+  PaymentsRecord,
+  PaymentsState,
   StockChange,
   StockConfig,
   StockMovement,
@@ -35,12 +44,12 @@ export type {
   StockRecord,
 } from './types.js';
 
-/** The name of each behavior this package ships so far. */
-export type CommerceBehavior = 'Stock' | 'Calendar' | 'Holds';
+/** The name of each behavior this package ships. */
+export type CommerceBehavior = 'Stock' | 'Calendar' | 'Holds' | 'Payments';
 
 /**
  * Every behavior this package ships, by name, in the order a deployment
  * registers them: the engine's behaviors option takes them as they are
  * (`openEngine({ ..., behaviors: commerceBehaviors })`).
  */
-export const commerceBehaviors: readonly CommerceBehavior[] = Object.freeze(['Stock', 'Calendar', 'Holds']);
+export const commerceBehaviors: readonly CommerceBehavior[] = Object.freeze(['Stock', 'Calendar', 'Holds', 'Payments']);

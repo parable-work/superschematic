@@ -506,6 +506,26 @@ describe('invocation policies', () => {
     assert.match(refused.message, /invocation names test\.Counter\.decrement, which is no operation of test\.Counter/);
   });
 
+  test('a behavior operation the tool options hide is offered to no agent, and options it cannot hold are refused (D70)', () => {
+    const engine = openBehaviorEngine({ tools: { hidden: ['test.Counter.increment'] } });
+    publishItem(engine, [{ name: 'test.Counter' }]);
+    const increment = engine.tools.manifest(alice).tools.find((each) => each.name === 'item.increment');
+    assert.equal(increment?.mcp.hidden, true);
+    assert.match(String(increment?.mcp.hiddenReason), /tools\.hidden/);
+    engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
+    assert.ok(thrown(() => engine.tools.call(alice, 'item_increment', { id: 'i1' }), UnknownToolError));
+    engine.instances.invoke(alice, 'Item', 'i1', 'increment', {});
+
+    const refused = thrown(() => openBehaviorEngine({ tools: { hidden: ['Payments.recordPaymentEvent', 'create' as never] } }), TypeError);
+    assert.match(refused.message, /hidden names "create", which is no behavior's operation/);
+    const engineRefused = thrown(() => openBehaviorEngine({ tools: { hidden: ['test.Counter.decrement'] } }), TypeError);
+    assert.match(engineRefused.message, /hidden names test\.Counter\.decrement, which is no operation of test\.Counter/);
+    const notString = thrown(() => openBehaviorEngine({ tools: { invocation: { 'test.Counter.increment': true as never } } }), TypeError);
+    assert.match(notString.message, /the invocation policy of test\.Counter\.increment is true, not a string/);
+    const notObject = thrown(() => openBehaviorEngine({ tools: { invocation: 'ask' as never } }), TypeError);
+    assert.match(notObject.message, /invocation is an object of policies by name/);
+  });
+
   test("a distribution's policy: its key everywhere, its default, its values", () => {
     const review = { key: 'review', values: ['never', 'on-write', 'always'], default: 'on-write' };
     const flagUnderReview = defineBehavior({

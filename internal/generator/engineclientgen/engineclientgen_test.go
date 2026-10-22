@@ -151,14 +151,15 @@ type parityField struct {
 
 // TestClientCodegenParity keeps runtime/engine/testdata/
 // client_codegen_parity.json equal to the generator's narrowings for the
-// fixture and notes schemas. The engine's suite holds its describe
+// fixture, notes and commerce schemas (D70), whose engines register the
+// commerce behaviors. The engine's suite holds its describe
 // document's create parameters to createParams, and the behaviors' fields
 // its reads return to fields.
 func TestClientCodegenParity(t *testing.T) {
 	reg := coreRegistry(t)
 	root := testpaths.RepoRoot(t)
 	corpus := parityCorpus{Comment: parityComment, Schemas: map[string]paritySchema{}}
-	paths := append(append([]string(nil), fixtureSchemas...), notesSchemas...)
+	paths := append(append(append([]string(nil), fixtureSchemas...), notesSchemas...), commerceSchemas...)
 	for _, path := range paths {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 		if err != nil {

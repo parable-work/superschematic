@@ -9,7 +9,7 @@ use superschematic_engine::behaviors::{
 use super::codes::*;
 use super::{AmountSource, CurrencySource, PaymentsConfig};
 
-const CORRECTIONS: [(&str, &str); 13] = [
+const CORRECTIONS: [(&str, &str); 14] = [
     (NOTHING_DUE, "None: nothing is outstanding, or the instance is in a state that voids its payments; read Payments.outstanding."),
     (AMOUNT_LOCKED, "Void the attempt in flight, or let it finish, then change what is due."),
     (CURRENCY_MISMATCH, "Report the amount in the instance's currency (Payments.currency); a payment in another is the provider's to refund."),
@@ -20,9 +20,10 @@ const CORRECTIONS: [(&str, &str); 13] = [
     (PAYMENT_IN_PROGRESS, "Wait for the provider to settle the processing attempt."),
     (NO_ATTEMPT, "Name an attempt, provider reference or refund the instance has, at its provider."),
     (NOT_LINKED, "None: only the refund instance this one's link names, in a state that issues it, asks or settles a refund."),
-    (KEY_REUSED, "Use a new idempotencyKey for a different request, or repeat the first one's parameters."),
+    (KEY_REUSED, "Use a new idempotencyKey for a different request, or repeat the first one's parameters; refundFor takes only the key its refund instance derives, once per refund asked."),
     (ATTEMPT_CLOSED, "Read Payments.attempts: capture an authorized attempt, void an open or authorized one."),
     (NOT_CONFIGURED, "None: the config does not allow it here."),
+    (TOTAL_UNKNOWN, "Move the claim into the state that holds its items, so each is priced; a claim whose priced items are in two currencies, or past what an integer holds, is split or changed before it is paid."),
 ];
 
 fn errors(codes: &[&str]) -> Vec<GuidanceError> {
@@ -76,6 +77,12 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
         config.record_permission
     )
     .replace("  ", " ")];
+    if config.amount == AmountSource::Holds {
+        summary.push(
+            "What is owed is not known while a held line is pending, or its priced lines are in two currencies: openPayment and a move that waits for payment refuse with total_unknown. A claim with nothing priced owes 0."
+                .to_owned(),
+        );
+    }
     if !config.require.is_empty() {
         summary.push(format!(
             "A move waits for payment: {}.",
@@ -125,8 +132,8 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
             said(
                 "Use to start paying what is outstanding at a provider; give the same idempotencyKey to retry.",
                 Some("Do not use to pay part of it, or a second time while an attempt is in flight: void that one first."),
-                "Returns the attempt, its amount and currency; the adapter creates it at the provider.",
-                &[NOTHING_DUE, CURRENCY_MISMATCH, KEY_REUSED],
+                "Returns the attempt, its amount and currency; the adapter creates it at the provider, and voids an earlier attempt that failed.",
+                &[NOTHING_DUE, TOTAL_UNKNOWN, CURRENCY_MISMATCH, KEY_REUSED],
             ),
         ));
         operations.push((
@@ -184,8 +191,8 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
             said(
                 "Do not call it yourself: a refund instance's Payments calls it as the instance enters an issueOn state.",
                 None,
-                "Returns the refund.",
-                &[NOT_LINKED, EXCEEDS_REFUNDABLE, CURRENCY_MISMATCH],
+                "Returns the refund: one per refund instance while it is asked or paid, under the key that instance derives.",
+                &[NOT_LINKED, KEY_REUSED, EXCEEDS_REFUNDABLE, CURRENCY_MISMATCH],
             ),
         ));
     } else {

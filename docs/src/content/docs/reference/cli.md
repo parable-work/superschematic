@@ -78,7 +78,10 @@ policy it opens the engine with, `permission` unless set; and
 database's runner prunes, every event unless set; and
 `outputs.engine.tools.invocation` the MCP invocation policy of an engine
 tool or a behavior operation (`Payments.capturePayment: ask`), which the
-build checks against the behaviors the engine types compose
+build checks against the behaviors the engine types compose and requires
+for each commerce operation that moves money or stock, and
+`outputs.engine.tools.hidden` the behavior operations the engine's MCP
+tools leave out
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
 When a type of a DB or General schema
 composes an extension's behavior whose registration names a Rust crate,

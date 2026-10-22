@@ -258,10 +258,18 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 	s.Types["Account"].Behaviors = append(s.Types["Account"].Behaviors,
 		ir.BehaviorRef{Name: "Payments", Config: json.RawMessage(`{"amount":{"field":"due"},"currency":"GBP","record":{"permission":"payments.record"}}`)},
 		ir.BehaviorRef{Name: "Stock", Config: json.RawMessage(`{"permission":"stock.manage"}`)})
-	invocation := map[string]string{"Payments.capturePayment": "ask", "Payments.refundPayment": "ask", "Stock.adjustStock": "ask", "delete": "ask"}
-	doc := build(t, s, enginedoc.Options{Invocation: invocation})
+	invocation := map[string]string{
+		"Payments.openPayment": "ask", "Payments.capturePayment": "ask", "Payments.voidPayment": "ask", "Payments.refundPayment": "ask", "Payments.refundFor": "auto",
+		"Stock.receiveStock": "ask", "Stock.adjustStock": "ask", "Stock.countStock": "ask", "delete": "ask",
+	}
+	doc := build(t, s, enginedoc.Options{Invocation: invocation, Hidden: []string{"Stock.listStockMovements", "Payments.recordPaymentEvent"}})
 	if !reflect.DeepEqual(doc.Tools.Invocation, invocation) {
 		t.Errorf("Tools.Invocation = %v, want %v", doc.Tools.Invocation, invocation)
+	}
+	// Payments' service operations are hidden with what the deployment
+	// hides, once each, sorted.
+	if want := []string{"Payments.listPaymentActions", "Payments.recordPaymentEvent", "Payments.settleRefundFor", "Stock.listStockMovements"}; !reflect.DeepEqual(doc.Tools.Hidden, want) {
+		t.Errorf("Tools.Hidden = %v, want %v", doc.Tools.Hidden, want)
 	}
 	data, err := doc.JSON()
 	if err != nil {
@@ -294,6 +302,36 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 	}
 	if err != nil && strings.Contains(err.Error(), "Comments.comment") {
 		t.Errorf("Build refused Comments.comment, an operation of a composed behavior: %v", err)
+	}
+
+	// A schema that composes Payments or Stock names a policy for each of
+	// their operations that move money or stock; the build names each one
+	// the map lacks.
+	partial := maps.Clone(invocation)
+	delete(partial, "Payments.refundFor")
+	delete(partial, "Stock.countStock")
+	_, err = enginedoc.Build(s, enginedoc.Options{SchemaName: "desk-db", Registry: coreRegistry(t), MetaSchema: stubMetaSchema, Invocation: partial})
+	if want := "enginedoc: outputs.engine.tools.invocation names no invocationPolicy for Payments.refundFor, Stock.countStock: the engine types compose commerce behaviors"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Build = %v, want it refused saying %q", err, want)
+	}
+	_, err = enginedoc.Build(s, enginedoc.Options{SchemaName: "desk-db", Registry: coreRegistry(t), MetaSchema: stubMetaSchema})
+	if err == nil || !strings.Contains(err.Error(), "names no invocationPolicy for Payments.openPayment, Payments.capturePayment") {
+		t.Errorf("Build with no invocation = %v, want it refused", err)
+	}
+	// A schema that composes neither needs none.
+	build(t, desk(), enginedoc.Options{})
+
+	// A hidden name is a composed behavior's operation.
+	_, err = enginedoc.Build(s, enginedoc.Options{SchemaName: "desk-db", Registry: coreRegistry(t), MetaSchema: stubMetaSchema, Invocation: invocation, Hidden: []string{"Payments.payTwice", "Holds.listHolds", "delete"}})
+	for _, want := range []string{
+		"outputs.engine.tools.hidden: ",
+		"Payments.payTwice names no operation of Payments",
+		"Holds.listHolds names behavior Holds, which no engine type composes",
+		"delete is not a behavior's operation",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Build = %v, want it refused saying %q", err, want)
+		}
 	}
 }
 

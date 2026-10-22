@@ -1,8 +1,8 @@
 /*
 The commerce behaviors' configs, records and constants (D70): what a
-schema gives Stock, Calendar and Holds, what their fields hold, and what
-their operations return. The behaviors are Rust (runtime/engine-commerce/rust,
-D58), in the engine's addon.
+schema gives Stock, Calendar, Holds and Payments, what their fields hold,
+and what their operations return. The behaviors are Rust
+(runtime/engine-commerce/rust, D58), in the engine's addon.
 */
 
 /** The most items a claim's holds ask together when Holds' config gives no maxItems. */
@@ -214,3 +214,91 @@ export interface CalendarAvailability {
   /** Whether more slots fit than limit returned, more instances matched than were read, or the search stopped at its bound of work. */
   readonly truncated: boolean;
 }
+
+/** What a move into a state waits for under Payments' require. */
+export type PaymentRequirement = 'authorized' | 'paid';
+
+/** Payments' config. */
+export interface PaymentsConfig {
+  /** What the instance owes: an own integer field, or the claim's Holds.total, which carries its currency. */
+  readonly amount: FieldRef | { readonly holds: true };
+  /** The currency of an amount from a field: an ISO 4217 code, or an own Finance.Currency field. */
+  readonly currency?: CurrencySource;
+  /** automatic when absent: a provider captures what it authorizes; manual: captureOn states capture it. */
+  readonly capture?: 'automatic' | 'manual';
+  readonly captureOn?: readonly string[];
+  /** A move into each state waits until what is due is authorized, or paid. */
+  readonly require?: Readonly<Record<string, PaymentRequirement>>;
+  /** States whose entry voids the attempts still open. */
+  readonly voidOn?: readonly string[];
+  /** Money captured in a voidOn state: kept for an operator (keep, the default), or refunded. */
+  readonly afterRelease?: 'keep' | 'refund';
+  /** What refundPayment needs; refundPayment is refused without it. */
+  readonly refunds?: { readonly permission: string };
+  /** What recordPaymentEvent, listPaymentActions and settleRefundFor need: the provider's adapter's. */
+  readonly record: { readonly permission: string };
+  /** On a refund instance: the link to the instance it refunds. */
+  readonly refundOf?: { readonly link: string };
+  /** On a refund instance: the states whose entry asks the refund. */
+  readonly issueOn?: readonly string[];
+}
+
+/** An attempt's status at its provider; it only moves forward. */
+export type PaymentAttemptStatus = 'open' | 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled';
+
+/** Payments.state. */
+export type PaymentsState = 'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded';
+
+/** One element of Payments.attempts, newest first. */
+export interface PaymentAttempt {
+  readonly attempt: string;
+  readonly provider: string;
+  readonly providerRef?: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly status: PaymentAttemptStatus;
+  readonly authorized?: number;
+  readonly captured?: number;
+  readonly brand?: string;
+  readonly last4?: string;
+  readonly openedAt: number;
+  readonly updatedAt: number;
+}
+
+/** Payments' fields, as a read returns them under behaviors.Payments; amounts in the currency's minor units. */
+export interface PaymentsRecord {
+  /** What is owed; 0 while a Holds.total cannot be read, when openPayment and require refuse with total_unknown. */
+  readonly due: number;
+  readonly authorized: number;
+  readonly captured: number;
+  readonly refunded: number;
+  /** due less captured, never below 0. */
+  readonly outstanding: number;
+  /** What captures brought past what was due, which Payments asked back with a refund. */
+  readonly overpaid: number;
+  readonly currency?: string;
+  readonly state: PaymentsState;
+  /** The last twenty attempts, newest first. */
+  readonly attempts: readonly PaymentAttempt[];
+}
+
+/** What an action asks a provider's adapter to do. */
+export type PaymentActionKind = 'create' | 'capture' | 'void' | 'refund';
+
+/** One action listPaymentActions returns: its id is the idempotency key the adapter sends the provider. */
+export interface PaymentAction {
+  readonly action: string;
+  readonly kind: PaymentActionKind;
+  readonly attempt: string;
+  readonly amount: number;
+  readonly currency: string;
+  /** The instance whose action it is. */
+  readonly id: string;
+  readonly at: number;
+  readonly providerRef?: string;
+  readonly refund?: string;
+  readonly returnUrl?: string;
+}
+
+/** What a provider event reports, as recordPaymentEvent takes it. */
+export type PaymentEventKind = 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled' | 'refunded' | 'refundFailed';

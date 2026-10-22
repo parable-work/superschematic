@@ -41,7 +41,6 @@ pub mod behaviors;
 pub mod commerce_fixtures;
 pub mod core_fixtures;
 mod http;
-pub mod payments_fixtures;
 pub mod workqueue_fixtures;
 
 #[cfg(feature = "axum")]
@@ -1497,11 +1496,14 @@ impl AccessPolicy for AnswerPolicy {
 /// behaviors' files, the work queue's (`workqueue-*`) and the commerce
 /// package's (`commerce-*`), whose engines register the package's
 /// behaviors by name after the core's ([`behaviors::package_behavior`]).
-pub const ENGINE_FILES: [&str; 49] = [
+pub const ENGINE_FILES: [&str; 52] = [
     "access",
     "commerce-calendar",
     "commerce-holds",
     "commerce-holds-timers",
+    "commerce-payments",
+    "commerce-payments-holds",
+    "commerce-payments-refunds",
     "commerce-stock",
     "compat",
     "core-approvals",

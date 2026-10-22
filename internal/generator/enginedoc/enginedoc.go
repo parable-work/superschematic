@@ -64,7 +64,34 @@ type Tools struct {
 	// behavior operation, by <Behavior>.<operation>: the engine's
 	// tools.invocation. Absent when the deployment marks none.
 	Invocation map[string]string `json:"invocation,omitempty"`
-	Keys       ToolKeys          `json:"keys"`
+	// Hidden are the behavior operations the tools leave out, by
+	// <Behavior>.<operation>: the deployment's outputs.engine.tools.hidden
+	// and the service operations of the behaviors the engine types compose
+	// (ServiceOperations), sorted. A service calls them through the API or
+	// in-process; no agent is offered them. Absent when there are none.
+	Hidden []string `json:"hidden,omitempty"`
+	Keys   ToolKeys `json:"keys"`
+}
+
+// MoneyOperations are the operations of the core's commerce behaviors
+// (D70, registry.CommercePackage) that move money or stock, by behavior.
+// A build whose engine types compose one of the behaviors is refused
+// unless outputs.engine.tools.invocation names a policy for each of its
+// operations here (RequireMoneyInvocation): the declarations name none,
+// and the default, auto, would let an agent run them unconfirmed.
+var MoneyOperations = map[string][]string{
+	"Payments": {"openPayment", "capturePayment", "voidPayment", "refundPayment", "refundFor"},
+	"Stock":    {"receiveStock", "adjustStock", "countStock"},
+}
+
+// ServiceOperations are the operations of the core's commerce behaviors
+// that a service calls, never an agent, by behavior: what a payment
+// provider's adapter reads and reports (listPaymentActions,
+// recordPaymentEvent), and the outcome a refunded instance settles on its
+// refund (settleRefundFor). The engine document hides them from the tools
+// wherever the behavior is composed.
+var ServiceOperations = map[string][]string{
+	"Payments": {"listPaymentActions", "recordPaymentEvent", "settleRefundFor"},
 }
 
 // BuiltinTools are the engine's own tools and the operations every schema
@@ -132,8 +159,13 @@ type Options struct {
 	// by name, which a type the schema imports is read from.
 	Dependencies map[string]*ir.Schema
 	// Invocation is outputs.engine.tools.invocation, which Build checks
-	// (CheckInvocation) and the document's tools carry.
+	// (CheckInvocation, RequireMoneyInvocation) and the document's tools
+	// carry.
 	Invocation map[string]string
+	// Hidden is outputs.engine.tools.hidden, which Build checks
+	// (CheckHidden) and the document's tools carry with the composed
+	// behaviors' ServiceOperations.
+	Hidden []string
 }
 
 // Build returns the engine document of a DB schema, or nil when no type of
@@ -165,9 +197,16 @@ func Build(schema *ir.Schema, opts Options) (*Document, error) {
 	if err := CheckInvocation(opts.Invocation, engineTypes, reg); err != nil {
 		return nil, err
 	}
+	if err := RequireMoneyInvocation(opts.Invocation, engineTypes, reg); err != nil {
+		return nil, err
+	}
+	if err := CheckHidden(opts.Hidden, engineTypes, reg); err != nil {
+		return nil, err
+	}
 	if len(opts.Invocation) > 0 {
 		doc.Tools.Invocation = maps.Clone(opts.Invocation)
 	}
+	doc.Tools.Hidden = HiddenFor(opts.Hidden, engineTypes, reg)
 
 	doc.Behaviors = Behaviors(engineTypes, reg)
 
@@ -262,6 +301,97 @@ func CheckInvocation(invocation map[string]string, engineTypes []*ir.TypeDef, re
 		return fmt.Errorf("enginedoc: outputs.engine.tools.invocation: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// commerceComposed lists the core's commerce behaviors the engine types
+// compose, sorted by name.
+func commerceComposed(engineTypes []*ir.TypeDef, reg *registry.Registry) []string {
+	var names []string
+	for _, b := range Behaviors(engineTypes, reg) {
+		if b.Package == registry.CommercePackage && b.Extension == "" {
+			names = append(names, b.Name)
+		}
+	}
+	return names
+}
+
+// RequireMoneyInvocation refuses outputs.engine.tools.invocation when the
+// engine types compose a core commerce behavior and it names no policy for
+// one of the behavior's MoneyOperations, naming each it lacks: whether an
+// agent's MCP client asks before an operation moves money or stock is the
+// deployment's to say, and the declarations' default would say auto.
+func RequireMoneyInvocation(invocation map[string]string, engineTypes []*ir.TypeDef, reg *registry.Registry) error {
+	var missing []string
+	for _, behavior := range commerceComposed(engineTypes, reg) {
+		for _, operation := range MoneyOperations[behavior] {
+			name := behavior + "." + operation
+			if _, ok := invocation[name]; !ok {
+				missing = append(missing, name)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	policy := reg.ToolInvocationPolicy()
+	return fmt.Errorf("enginedoc: outputs.engine.tools.invocation names no %s for %s: the engine types compose commerce behaviors, whose operations that move money or stock run unconfirmed under the default (%s) unless the deployment names each one's policy, one of %s",
+		policy.Key, strings.Join(missing, ", "), policy.Default, strings.Join(policy.Values, ", "))
+}
+
+// CheckHidden checks outputs.engine.tools.hidden as an engine that opens
+// with it would: each name is <Behavior>.<operation>, an operation the
+// declaration of a behavior the engine types compose declares. It names
+// every problem.
+func CheckHidden(hidden []string, engineTypes []*ir.TypeDef, reg *registry.Registry) error {
+	if len(hidden) == 0 {
+		return nil
+	}
+	composed := map[string]bool{}
+	for _, b := range Behaviors(engineTypes, reg) {
+		composed[b.Name] = true
+	}
+	var problems []string
+	for _, name := range hidden {
+		dot := strings.LastIndex(name, ".")
+		if dot < 0 {
+			problems = append(problems, fmt.Sprintf("%s is not a behavior's operation (<Behavior>.<operation>)", name))
+			continue
+		}
+		behavior, operation := name[:dot], name[dot+1:]
+		declared, found := reg.Behavior(behavior)
+		switch {
+		case !found || !composed[behavior]:
+			problems = append(problems, fmt.Sprintf("%s names behavior %s, which no engine type composes", name, behavior))
+		case !slices.ContainsFunc(declared.Operations, func(op registry.BehaviorOperation) bool { return op.Name == operation }):
+			names := make([]string, len(declared.Operations))
+			for i, op := range declared.Operations {
+				names[i] = op.Name
+			}
+			problems = append(problems, fmt.Sprintf("%s names no operation of %s (%s)", name, behavior, strings.Join(names, ", ")))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("enginedoc: outputs.engine.tools.hidden: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// HiddenFor returns what the engine document's tools hide: the
+// deployment's hidden operations and the ServiceOperations of the core's
+// commerce behaviors the engine types compose, once each, sorted; nil for
+// none.
+func HiddenFor(hidden []string, engineTypes []*ir.TypeDef, reg *registry.Registry) []string {
+	all := slices.Clone(hidden)
+	for _, behavior := range commerceComposed(engineTypes, reg) {
+		for _, operation := range ServiceOperations[behavior] {
+			all = append(all, behavior+"."+operation)
+		}
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	slices.Sort(all)
+	return slices.Compact(all)
 }
 
 // Namespace returns the engine namespace of a DB service: configured, the

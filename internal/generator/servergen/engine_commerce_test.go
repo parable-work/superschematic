@@ -11,10 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+	// The pickup slot is London's wall time wherever the test runs.
+	_ "time/tzdata"
 
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -32,7 +34,8 @@ import (
 // Inventory, CollectionPoint, Checkout and Refund compose Stock, Calendar,
 // Holds and Payments beside the core's behaviors, under the allowAll
 // policy, with outputs.engine.tools.invocation marking the operations that
-// move money or stock ask; and an API over it in each language whose one
+// move money or stock ask and tools.hidden hiding Stock's movement list;
+// and an API over it in each language whose one
 // operation only a calling service may call, each served on the local
 // target by a stack of its own beside shop-commerce-db's runner.
 const (
@@ -87,29 +90,6 @@ func commercePaths(repoRoot string) naming.LocalPaths {
 	return paths
 }
 
-// commerceRuns reports whether the commerce crate registers all four
-// behaviors (runtime/engine-commerce/rust/src/lib.rs, NAMES), and which it
-// lacks: an engine refuses a document that composes one it does not run,
-// so the servers deploy shop-commerce-db only once it does.
-func commerceRuns(t *testing.T) (bool, []string) {
-	t.Helper()
-	lib, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "runtime", "engine-commerce", "rust", "src", "lib.rs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := regexp.MustCompile(`pub const NAMES: \[&str; \d+\] = \[([^\]]*)\];`).FindSubmatch(lib)
-	if names == nil {
-		t.Fatal("runtime/engine-commerce/rust/src/lib.rs declares no NAMES")
-	}
-	var missing []string
-	for _, name := range commerceBehaviors {
-		if !strings.Contains(string(names[1]), `"`+name+`"`) {
-			missing = append(missing, name)
-		}
-	}
-	return len(missing) == 0, missing
-}
-
 // TestCommerceEngineFixtureBuilds: shop-commerce-db's build writes the
 // project's engine crate with the commerce crate and no work queue's, and
 // an engine document whose behaviors name @superschematic/engine-commerce
@@ -144,6 +124,7 @@ func TestCommerceEngineFixtureBuilds(t *testing.T) {
 	var doc struct {
 		Tools struct {
 			Invocation map[string]string `json:"invocation"`
+			Hidden     []string          `json:"hidden"`
 		} `json:"tools"`
 		Behaviors []struct {
 			Name    string `json:"name"`
@@ -153,9 +134,17 @@ func TestCommerceEngineFixtureBuilds(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"Payments.openPayment": "ask", "Payments.capturePayment": "ask", "Payments.voidPayment": "ask", "Payments.refundPayment": "ask", "Stock.adjustStock": "ask"}
+	want := map[string]string{
+		"Payments.openPayment": "ask", "Payments.capturePayment": "ask", "Payments.voidPayment": "ask", "Payments.refundPayment": "ask", "Payments.refundFor": "ask",
+		"Stock.receiveStock": "ask", "Stock.adjustStock": "ask", "Stock.countStock": "ask",
+	}
 	if !maps.Equal(doc.Tools.Invocation, want) {
 		t.Errorf("the document's tools.invocation = %v, want %v", doc.Tools.Invocation, want)
+	}
+	// Payments' service operations are hidden wherever it is composed,
+	// beside what the deployment hides.
+	if hidden := []string{"Payments.listPaymentActions", "Payments.recordPaymentEvent", "Payments.settleRefundFor", "Stock.listStockMovements"}; !slices.Equal(doc.Tools.Hidden, hidden) {
+		t.Errorf("the document's tools.hidden = %v, want %v", doc.Tools.Hidden, hidden)
 	}
 	var commerce []string
 	for _, b := range doc.Behaviors {
@@ -226,18 +215,38 @@ func TestCommerceEngineInvocationIsChecked(t *testing.T) {
 			t.Errorf("the build of %s = %v, want it refused saying %q", commerceDB, err, want)
 		}
 	}
+
+	// Every operation that moves money or stock must be named: here none
+	// of Payments' and only Stock's adjust are.
+	cfg.Outputs["engine"] = map[string]any{"policy": "allowAll", "tools": map[string]any{"invocation": map[string]any{"Stock.adjustStock": "auto"}}}
+	_, err = generator.Run(f.schemas[commerceDB], &cfg, f.options(repoRoot, commercePaths(repoRoot)))
+	if want := "outputs.engine.tools.invocation names no invocationPolicy for Payments.openPayment, Payments.capturePayment, Payments.voidPayment, Payments.refundPayment, Payments.refundFor, Stock.receiveStock, Stock.countStock"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("the build of %s with no money operations named = %v, want it refused saying %q", commerceDB, err, want)
+	}
+	// And a hidden name no composed behavior declares is refused.
+	invocation := maps.Clone(f.configs[commerceDB].Outputs["engine"].(map[string]any)["tools"].(map[string]any)["invocation"].(map[string]any))
+	cfg.Outputs["engine"] = map[string]any{"policy": "allowAll", "tools": map[string]any{"invocation": invocation, "hidden": []any{"Stock.sellStock", "Queue.claim"}}}
+	_, err = generator.Run(f.schemas[commerceDB], &cfg, f.options(repoRoot, commercePaths(repoRoot)))
+	for _, want := range []string{"outputs.engine.tools.hidden: Stock.sellStock names no operation of Stock", "Queue.claim names behavior Queue, which no engine type composes"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("the build of %s = %v, want it refused saying %q", commerceDB, err, want)
+		}
+	}
 }
 
 // commerceScript runs what each language's server must answer alike on
 // shop-commerce-db, with a service credential standing in for an end user
-// under the allowAll policy (D70). It needs the behaviors to be registered
-// and their logic to hold no more than the declarations say: the engine
-// lists the four schemas; its MCP tools carry the invocation policy the
-// deployment marks, ask for the operations that move money or stock and
-// the default for the rest; an Inventory is created and read back with
-// Stock's entry; each behavior's operations are routed, a call whose
-// parameters the declaration refuses answering 400 before the behavior
-// runs; and an operation no behavior declares is 404.
+// under the allowAll policy (D70). The engine lists the four schemas. Its
+// MCP tools carry the invocation policy the deployment names, ask for each
+// operation that moves money or stock and the default for the rest, and
+// leave out Payments' service operations and what the deployment hides.
+// An Inventory is created and read back with Stock's entry. A Checkout
+// whose pickup slot at a CollectionPoint is still pending owes what is not
+// known (total_unknown); it holds the slot through Calendar as it enters
+// held, owes nothing for a slot with no price (nothing_due), and is placed
+// with no payment, committing the slot, which the CollectionPoint's
+// bookings show. A call whose parameters the declaration refuses is 400
+// before the behavior runs, and an operation no behavior declares is 404.
 func commerceScript(t *testing.T, s *started, credential string) {
 	t.Helper()
 	s.serviceSend(t, credential, http.MethodGet, commerceMount+"/schemas", "", http.StatusOK, `"Checkout"`, `"CollectionPoint"`, `"Inventory"`, `"Refund"`)
@@ -259,25 +268,63 @@ func commerceScript(t *testing.T, s *started, credential string) {
 		policies[tool.Name], _ = tool.Meta["invocationPolicy"].(string)
 	}
 	for tool, want := range map[string]string{
-		"checkout_open_payment":         "ask",
-		"checkout_capture_payment":      "ask",
-		"checkout_void_payment":         "ask",
-		"checkout_refund_payment":       "ask",
-		"checkout_record_payment_event": "auto",
-		"checkout_retake_holds":         "auto",
-		"refund_refund_payment":         "ask",
-		"inventory_adjust_stock":        "ask",
-		"inventory_receive_stock":       "auto",
-		"collection_point_add_closure":  "auto",
+		"checkout_open_payment":          "ask",
+		"checkout_capture_payment":       "ask",
+		"checkout_void_payment":          "ask",
+		"checkout_refund_payment":        "ask",
+		"checkout_refund_for":            "ask",
+		"checkout_retake_holds":          "auto",
+		"refund_refund_payment":          "ask",
+		"inventory_adjust_stock":         "ask",
+		"inventory_receive_stock":        "ask",
+		"inventory_count_stock":          "ask",
+		"collection_point_add_closure":   "auto",
+		"collection_point_list_bookings": "auto",
 	} {
 		if got, ok := policies[tool]; !ok || got != want {
 			t.Errorf("tools/list: %s's invocationPolicy = %q (listed %t), want %q; tools: %v", tool, got, ok, want, policies)
+		}
+	}
+	for _, tool := range []string{"checkout_record_payment_event", "checkout_settle_refund_for", "checkout_list_payment_actions", "refund_record_payment_event", "refund_settle_refund_for", "inventory_list_stock_movements"} {
+		if _, ok := policies[tool]; ok {
+			t.Errorf("tools/list offers %s, which the engine document hides", tool)
 		}
 	}
 
 	const inventory = commerceMount + "/schemas/Inventory/instances"
 	s.serviceSend(t, credential, http.MethodPost, inventory, `{"id": "tea", "data": {"sku": "TEA-1", "priceCents": 450}}`, http.StatusCreated, `"id":"tea"`)
 	s.serviceSend(t, credential, http.MethodGet, inventory+"/tea", "", http.StatusOK, `"sku":"TEA-1"`, `"Stock":{`)
+
+	// A pickup slot: a day ahead or more, past the CollectionPoint's lead
+	// time and inside its horizon, at 10:00 on a weekday it opens 09:00 to
+	// 17:30, which its fifteen-minute grid from 09:00 holds.
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := time.Now().In(london).AddDate(0, 0, 2)
+	for day.Weekday() < time.Tuesday || day.Weekday() > time.Friday {
+		day = day.AddDate(0, 0, 1)
+	}
+	slot := time.Date(day.Year(), day.Month(), day.Day(), 10, 0, 0, 0, london).UTC().Format(time.RFC3339)
+	const points = commerceMount + "/schemas/CollectionPoint/instances"
+	const checkouts = commerceMount + "/schemas/Checkout/instances"
+	s.serviceSend(t, credential, http.MethodPost, points, `{"id": "front", "data": {"name": "Front counter"}}`, http.StatusCreated, `"id":"front"`)
+	s.serviceSend(t, credential, http.MethodPost, checkouts,
+		fmt.Sprintf(`{"id": "c1", "data": {"lines": [], "pickupAt": %q}, "behaviors": {"Links": {"counter": "front"}}}`, slot),
+		http.StatusCreated, `"id":"c1"`, `"state":"pending"`)
+	// The slot is pending, its price known only once it is held.
+	s.serviceSend(t, credential, http.MethodPost, checkouts+"/c1/operations/openPayment", `{"provider": "acmepay", "idempotencyKey": "c1-pay"}`, http.StatusConflict, `"total_unknown"`)
+	s.serviceSend(t, credential, http.MethodPost, checkouts+"/c1/operations/transition", `{"to": "held"}`, http.StatusOK)
+	s.serviceSend(t, credential, http.MethodGet, checkouts+"/c1", "", http.StatusOK, `"status":"held"`, `"state":"held"`, `"due":0`)
+	// A slot with no price owes nothing: no payment, and placed needs none.
+	s.serviceSend(t, credential, http.MethodPost, checkouts+"/c1/operations/openPayment", `{"provider": "acmepay", "idempotencyKey": "c1-pay"}`, http.StatusConflict, `"nothing_due"`)
+	s.serviceSend(t, credential, http.MethodPost, checkouts+"/c1/operations/transition", `{"to": "placed"}`, http.StatusOK)
+	s.serviceSend(t, credential, http.MethodGet, checkouts+"/c1", "", http.StatusOK, `"status":"placed"`, `"state":"committed"`)
+	s.serviceSend(t, credential, http.MethodPost, points+"/front/operations/listBookings",
+		fmt.Sprintf(`{"startMs": %d, "endMs": %d}`, day.Add(-48*time.Hour).UnixMilli(), day.Add(48*time.Hour).UnixMilli()),
+		http.StatusOK, `"id":"c1"`)
+
 	for _, call := range []struct{ path, body string }{
 		{inventory + "/tea/operations/receiveStock", `{"quantity": "ten"}`},
 		{inventory + "/tea/operations/adjustStock", `{"delta": 1, "reason": "count", "bogus": true}`},
@@ -294,10 +341,11 @@ func commerceScript(t *testing.T, s *started, credential string) {
 // which holds the commerce crate, and shop-commerce-api's Go server and
 // shop-commerce-db's runner link it in the core's place (D70, D58). The
 // server starts with no database up, names the engine in /readyz and
-// answers its routes 503. With the Postgres engineDatabaseEnv names, and
-// once the commerce crate registers all four behaviors, it deploys
-// shop-commerce-db's document, which only an engine that runs them
-// accepts, and answers commerceScript; the runner starts beside it.
+// answers its routes 503. With the Postgres engineDatabaseEnv names it
+// deploys shop-commerce-db's document, which only an engine that runs the
+// four commerce behaviors accepts, and answers commerceScript; the runner
+// starts beside it. Without one it skips (fails under
+// SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1) after the offline half.
 func TestCommerceEngineEntrypointServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the archive's build in -short mode")
@@ -334,12 +382,7 @@ func TestCommerceEngineEntrypointServes(t *testing.T) {
 
 	postgres := engineDatabase(t)
 	if postgres == "" {
-		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
-		return
-	}
-	if runs, missing := commerceRuns(t); !runs {
-		t.Logf("the commerce crate does not register %s yet, and an engine refuses a document that composes a behavior it does not run: the entrypoint deploys nothing", strings.Join(missing, ", "))
-		return
+		skipEngineServers(t, "%s is unset: the entrypoint served offline only, and deploys and answers commerceScript on Postgres alone", engineDatabaseEnv)
 	}
 	tool := engineDatabaseTool(t, dir)
 	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, commerceDB), "create.sql"))
@@ -358,9 +401,9 @@ func TestCommerceEngineEntrypointServes(t *testing.T) {
 // server depends on shop-commerce-db's engine crate, whose behaviors() it
 // opens the engine with, the commerce ones among them (D70, D58). It
 // passes clippy, starts with no database up, names the engine in /readyz
-// and answers its routes 503; with the Postgres engineDatabaseEnv names,
-// and once the commerce crate registers all four behaviors, it deploys
-// shop-commerce-db's document and answers commerceScript.
+// and answers its routes 503; with the Postgres engineDatabaseEnv names it
+// deploys shop-commerce-db's document and answers commerceScript, and
+// without one it skips after the offline half.
 func TestCommerceEngineEntrypointServesRust(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -391,12 +434,7 @@ func TestCommerceEngineEntrypointServesRust(t *testing.T) {
 
 	postgres := engineDatabase(t)
 	if postgres == "" {
-		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
-		return
-	}
-	if runs, missing := commerceRuns(t); !runs {
-		t.Logf("the commerce crate does not register %s yet, and an engine refuses a document that composes a behavior it does not run: the entrypoint deploys nothing", strings.Join(missing, ", "))
-		return
+		skipEngineServers(t, "%s is unset: the entrypoint served offline only, and deploys and answers commerceScript on Postgres alone", engineDatabaseEnv)
 	}
 	tool := engineDatabaseTool(t, pgxModule(t))
 	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, commerceDB), "create.sql"))
@@ -414,9 +452,9 @@ func TestCommerceEngineEntrypointServesRust(t *testing.T) {
 // they open the engine on the core's Node-API addon, which carries the
 // commerce behaviors, naming the four (D70, D58). The server starts with
 // no database up, names the engine in /readyz and answers its routes 503;
-// with the Postgres engineDatabaseEnv names, and once the commerce crate
-// registers all four behaviors, it deploys shop-commerce-db's document and
-// answers commerceScript.
+// with the Postgres engineDatabaseEnv names it deploys shop-commerce-db's
+// document and answers commerceScript, and without one it skips after the
+// offline half.
 func TestCommerceEngineEntrypointServesTypeScript(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -463,12 +501,7 @@ func TestCommerceEngineEntrypointServesTypeScript(t *testing.T) {
 
 	postgres := engineDatabase(t)
 	if postgres == "" {
-		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
-		return
-	}
-	if runs, missing := commerceRuns(t); !runs {
-		t.Logf("the commerce crate does not register %s yet, and an engine refuses a document that composes a behavior it does not run: the entrypoint deploys nothing", strings.Join(missing, ", "))
-		return
+		skipEngineServers(t, "%s is unset: the entrypoint served offline only, and deploys and answers commerceScript on Postgres alone", engineDatabaseEnv)
 	}
 	tool := engineDatabaseToolTS(t, bun, dir)
 	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, commerceDB), "create.sql"))

@@ -7,7 +7,11 @@
 # and a TypeScript one names the four in its engine options on the core's
 # addon. Its engine opens with the allowAll policy, so a verified service
 # may write, and outputs.engine.tools.invocation marks the operations that
-# move money or stock ask, which the core's declarations leave unmarked.
+# move money or stock ask, which the core's declarations leave unmarked
+# and the build requires the deployment to name (D70, amended); the engine
+# document hides Payments' service operations (listPaymentActions,
+# recordPaymentEvent, settleRefundFor) itself, and tools.hidden adds
+# Stock's movement list.
 name: shop-commerce-db
 kind: DB
 outputs:
@@ -23,4 +27,9 @@ outputs:
         Payments.capturePayment: ask
         Payments.voidPayment: ask
         Payments.refundPayment: ask
+        Payments.refundFor: ask
+        Stock.receiveStock: ask
         Stock.adjustStock: ask
+        Stock.countStock: ask
+      hidden:
+        - Stock.listStockMovements

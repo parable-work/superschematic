@@ -1094,6 +1094,89 @@ fn a_behavior_operation_takes_the_invocation_policy_the_tool_options_give_it() {
     }
 }
 
+// A behavior operation the tool options hide is no agent's tool: the
+// tools document reads it hidden with its reason, and a call by its handle
+// is a tool the namespace does not have, while the operation itself still
+// runs through the API. An engine refuses to hide an operation it does not
+// run.
+#[test]
+fn a_behavior_operation_the_tool_options_hide_is_offered_to_no_agent() {
+    for target in targets("operation_hidden") {
+        let engine = target.open_with(fixtures(), |options| {
+            options.tools = ToolOptions {
+                hidden: vec!["test.Counter.increment".into()],
+                ..ToolOptions::default()
+            };
+        });
+        publish_item(&engine, json!([{"name": "test.Counter"}]));
+        let hidden = tool(&engine, "item.increment", &alice());
+        assert_eq!(hidden["mcp"]["hidden"], json!(true));
+        assert!(hidden["mcp"]["hiddenReason"]
+            .as_str()
+            .unwrap()
+            .contains("tools.hidden"));
+        assert_eq!(
+            tool(&engine, "item.history", &alice())["mcp"]["hidden"],
+            json!(false)
+        );
+        engine
+            .instances()
+            .create(
+                &alice(),
+                "Item",
+                &json!({"title": "Lamp"}),
+                CreateOptions {
+                    id: Some("i1"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(unknown_tool(call(
+            &engine,
+            &alice(),
+            "item_increment",
+            json!({"id": "i1"})
+        )));
+        engine
+            .instances()
+            .invoke(
+                &alice(),
+                "Item",
+                "i1",
+                "increment",
+                &json!({}),
+                superschematic_engine::WriteOptions::default(),
+            )
+            .expect("the API still runs it");
+        drop(engine);
+
+        let refused = Engine::open({
+            let mut options = target.options(fixtures());
+            options.tools = ToolOptions {
+                hidden: vec![
+                    "Payments.recordPaymentEvent".into(),
+                    "test.Counter.decrement".into(),
+                ],
+                ..ToolOptions::default()
+            };
+            options
+        });
+        let message = usage(refused);
+        assert!(
+            message.contains(
+                "hidden names Payments.recordPaymentEvent, and this engine runs no behavior Payments"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "hidden names test.Counter.decrement, which is no operation of test.Counter"
+            ),
+            "{message}"
+        );
+    }
+}
+
 #[test]
 fn the_tool_options_are_checked_as_the_compilers_registry_checks_them() {
     let refusal_of = |options: ToolOptions| match options.check() {

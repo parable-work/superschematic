@@ -5,8 +5,9 @@
 //! describe document's, descriptions aside, and its behavior fields must
 //! be the ones the describe document names, by behavior — the first two
 //! cases of `test/client-codegen.test.ts`, on an engine with the core's
-//! behaviors, as `openTestEngine` opens one, which runs every behavior the
-//! vectors' documents compose. The test fails if the vectors stop covering
+//! behaviors and the commerce package's, as `openTestEngine` opens one
+//! with them named, which runs every behavior the vectors' documents
+//! compose. The test fails if the vectors stop covering
 //! the shapes it checks.
 
 mod support;
@@ -85,7 +86,12 @@ fn the_engines_describe_document_narrows_create_parameters_and_names_fields_as_t
         );
     }
     for target in targets("client_codegen_parity") {
-        let engine = target.open_core();
+        // The core's behaviors and the commerce package's, which the
+        // commerce documents compose (D70).
+        let engine = target.open_core_with(|options| {
+            options.behaviors = std::mem::take(&mut options.behaviors)
+                .extend(superschematic_engine_commerce::commerce());
+        });
         // The documents in order: the engine runs every behavior they
         // compose.
         for document in documents {
