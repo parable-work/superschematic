@@ -797,12 +797,10 @@ fn a_config_is_held_to_the_type_and_a_currency_to_iso_4217() {
             refused(json!({"permission": "p", "lowAt": {"field": "title"}}))
                 .contains("lowAt.field \"title\" is not an integer field of Inventory")
         );
-        if superschematic_engine_commerce::currency::CHECKS_TABLE {
-            assert!(refused(
-                json!({"permission": "p", "price": {"field": "priceCents", "currency": "ABC"}})
-            )
-            .contains("price.currency \"ABC\" is not an active ISO 4217 currency code"));
-        }
+        assert!(refused(
+            json!({"permission": "p", "price": {"field": "priceCents", "currency": "ABC"}})
+        )
+        .contains("price.currency \"ABC\" is not an active ISO 4217 currency code"));
         publish(
             &engine,
             &inventory(json!({"permission": "p", "price": {"field": "priceCents", "currency": {"field": "currency"}}})),

@@ -20,7 +20,6 @@ use serde_json::{json, Value};
 
 use payments_support::*;
 use superschematic_engine::{BehaviorSet, DefineOptions, EngineErrorCode};
-use superschematic_engine_commerce::currency;
 use superschematic_engine_testkit::payments_fixtures::HoldsTotal;
 use support::{alice, code, refusal, targets, veto};
 
@@ -944,26 +943,24 @@ fn an_amount_in_another_currency_is_refused() {
         )
         .unwrap();
         assert_eq!(opened["currency"], json!("JPY"));
-        if currency::CHECKS_TABLE {
-            // A field that holds no active code is refused at openPayment.
-            create(
-                &engine,
-                "Open",
-                "o-3",
-                json!({"totalCents": 100, "currency": "XYZ"}),
-                None,
-            )
-            .unwrap();
-            let (_, _, _, vetoed, _) = veto(invoke(
-                &engine,
-                &alice(),
-                "Open",
-                "o-3",
-                "openPayment",
-                json!({"provider": PROVIDER, "idempotencyKey": "k"}),
-            ));
-            assert_eq!(vetoed.as_deref(), Some("currency_mismatch"));
-        }
+        // A field that holds no active code is refused at openPayment.
+        create(
+            &engine,
+            "Open",
+            "o-3",
+            json!({"totalCents": 100, "currency": "XYZ"}),
+            None,
+        )
+        .unwrap();
+        let (_, _, _, vetoed, _) = veto(invoke(
+            &engine,
+            &alice(),
+            "Open",
+            "o-3",
+            "openPayment",
+            json!({"provider": PROVIDER, "idempotencyKey": "k"}),
+        ));
+        assert_eq!(vetoed.as_deref(), Some("currency_mismatch"));
     }
 }
 
@@ -984,12 +981,14 @@ fn a_literal_currency_is_checked_against_iso_4217_when_the_schema_is_defined() {
         define(payments_config(json!({"currency": "JPY"}))).expect("an active code");
         // The configSchema's pattern refuses what is not three capitals.
         assert!(define(payments_config(json!({"currency": "gbp"}))).is_err());
-        if currency::CHECKS_TABLE {
-            let refused = refusal(define(payments_config(json!({"currency": "XYZ"}))));
-            assert!(refused.to_string().contains("XYZ"), "{refused}");
-        } else {
-            eprintln!("the linked superscalar has no Finance.Currency; XYZ passes its shape until the pin moves");
-            define(payments_config(json!({"currency": "XYZ"}))).expect("XYZ has the shape");
+        for code in ["XYZ", "ABC"] {
+            let refused = refusal(define(payments_config(json!({ "currency": code }))));
+            assert!(
+                refused.to_string().contains(&format!(
+                    "\"{code}\" is not an active ISO 4217 currency code"
+                )),
+                "{refused}"
+            );
         }
         // A config the type does not fit.
         for (config, says) in [

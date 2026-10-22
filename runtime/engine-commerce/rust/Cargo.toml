@@ -37,8 +37,7 @@ superschematic-engine = { path = "../../engine/rust/engine", default-features = 
 superschematic-engine-behaviors = { path = "../../engine/rust/behaviors", default-features = false }
 # superscalar's core, by path from the checkout superscalar.pin names, as
 # the engine's schema reader links it: Finance.Currency's ISO 4217 table,
-# which `currency` checks a config's code against once the pin carries it
-# (build.rs).
+# which `currency` checks a config's code against.
 superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
 
 [lints]
