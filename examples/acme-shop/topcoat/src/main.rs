@@ -26,9 +26,7 @@ use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
 use acme_shop_orders_server::{users_at, users_in_memory};
-use acme_shop_topcoat::{
-    IDENTITY_CONFIG, Person, add_people, app, open_engine, shop_in_memory, stock_sqlite,
-};
+use acme_shop_topcoat::{IDENTITY_CONFIG, Person, add_people, app, open_engine, shop_in_memory, stock_sqlite};
 use topcoat::asset::{AssetBundle, AssetConfig};
 
 /// The demo shopper's email, name and password.
@@ -56,8 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = match std::env::var("DATABASE_URL") {
         Ok(url) => {
             let shop = SqliteShop::open(&url).map_err(|err| format!("DATABASE_URL: {err}"))?;
-            let users =
-                users_at(&url, IDENTITY_CONFIG).map_err(|err| format!("DATABASE_URL: {err}"))?;
+            let users = users_at(&url, IDENTITY_CONFIG).map_err(|err| format!("DATABASE_URL: {err}"))?;
             // The demo's shopper and staff and the catalog's products,
             // which a real shop's own flows add, unless an earlier run
             // added them. A file an earlier version made keeps its
