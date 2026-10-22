@@ -743,6 +743,10 @@ func listAll(t *testing.T, server *scriptServer, authorization, path string) []a
 	}
 }
 
+// commerceListCarts is how many one-item carts TestCommerceHoldsLoad
+// lists through each server.
+const commerceListCarts = 1000
+
 // commerceOversellMoves is how many claims race for the oversell test's
 // last units and its one slot.
 const commerceOversellMoves = 1000
@@ -865,7 +869,8 @@ func mapsEqual(a, b map[string]int) bool {
 // second three servers, Go, Rust and TypeScript, over one Postgres take:
 // for claims of 1, 10 and 50 items, it moves checkouts cart→held, each
 // item a unit of its own Inventory, from 24 clients at once across the
-// three servers, and logs the claims and the items held a second. It runs
+// three servers, and logs the claims and the items held a second; then it
+// lists 1,000 carts, each with one pending item, through each server. It runs
 // only when SUPERSCHEMATIC_COMMERCE_LOAD=1, beside the Postgres
 // engineDatabaseEnv names:
 //
@@ -941,6 +946,19 @@ func TestCommerceHoldsLoad(t *testing.T) {
 		}
 		line := fmt.Sprintf("%2d items a claim: %d claims held in %s, %.1f claims/s, %.0f holds/s (created in %s, %.1f a second)", size, claims, elapsed.Round(time.Millisecond),
 			float64(claims)/elapsed.Seconds(), float64(claims*size)/elapsed.Seconds(), creating.Round(time.Millisecond), float64(claims)/creating.Seconds())
+		t.Log(line)
+		report = append(report, line)
+	}
+	// The read path: carts whose one pending item each reads its supply,
+	// listed by status in pages of 100 through each server in turn.
+	createAll(t, servers, staff, commerceListCarts, checkouts, func(i int) string {
+		return fmt.Sprintf(`{"id": "list-%04d", "data": {"lines": [{"inventoryId": "p-%02d", "quantity": 1}]}}`, i, i%products)
+	})
+	carts := checkouts + "?where=" + url.QueryEscape(`{"Workflow.status":"cart"}`)
+	for _, server := range servers {
+		listed := time.Now()
+		items := listAll(t, server, staff, carts)
+		line := fmt.Sprintf("%d carts listed through %s in %s", len(items), server.language, time.Since(listed).Round(time.Millisecond))
 		t.Log(line)
 		report = append(report, line)
 	}
