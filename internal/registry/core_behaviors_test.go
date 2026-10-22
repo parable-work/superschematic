@@ -638,7 +638,8 @@ func TestCommerceBehaviors(t *testing.T) {
 	}
 
 	// The contract: what each supply's operation takes and returns is the
-	// same, but for the member that says what an item asks.
+	// same, but for the member that says what an item asks, which
+	// checkHold's also lists for the claim's other items.
 	operation := func(b Behavior, name string) BehaviorOperation {
 		for _, op := range b.Operations {
 			if op.Name == name {
@@ -654,6 +655,16 @@ func TestCommerceBehaviors(t *testing.T) {
 			t.Fatal(err)
 		}
 		if properties, ok := schema["properties"].(map[string]any); ok && drop != "" {
+			if also, ok := properties["also"].(map[string]any); ok {
+				items := also["items"].(map[string]any)
+				listed, _ := json.Marshal(items["properties"].(map[string]any)[drop])
+				asked, _ := json.Marshal(properties[drop])
+				if string(listed) != string(asked) {
+					t.Errorf("also lists %s as %s, not as the call asks it, %s", drop, listed, asked)
+				}
+				delete(items["properties"].(map[string]any), drop)
+				items["required"] = []any{}
+			}
 			delete(properties, drop)
 			var required []any
 			for _, name := range schema["required"].([]any) {
@@ -686,6 +697,14 @@ func TestCommerceBehaviors(t *testing.T) {
 	}
 	if string(operation(stock, "returnFor").ParamsSchema) != string(operation(stock, "holdFor").ParamsSchema) {
 		t.Errorf("Stock's returnFor takes other parameters than holdFor")
+	}
+	for _, supply := range []Behavior{stock, calendar} {
+		if !strings.Contains(string(operation(supply, "checkHold").ParamsSchema), `"also"`) {
+			t.Errorf("%s's checkHold takes no also", supply.Name)
+		}
+		if strings.Contains(string(operation(supply, "holdFor").ParamsSchema), `"also"`) {
+			t.Errorf("%s's holdFor takes also, which only checkHold reads", supply.Name)
+		}
 	}
 	for _, code := range []string{"not_requested", "unavailable", "held"} {
 		var inStock, inCalendar string

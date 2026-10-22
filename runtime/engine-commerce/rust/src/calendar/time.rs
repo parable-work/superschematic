@@ -33,11 +33,10 @@ pub const DAY_MS: i64 = 24 * HOUR_MS;
 /// The days of the week as the config names them, Monday first.
 pub const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-/// The earliest instant Calendar opens: 1900-01-01T00:00Z.
-pub const EARLIEST_MS: i64 = -2_208_988_800_000;
-/// The instant after the latest Calendar opens: 9000-01-01T00:00Z, well
-/// inside what the time zone database answers.
-pub const LATEST_MS: i64 = 221_845_392_000_000;
+/// The earliest instant Calendar opens, 1900-01-01T00:00Z, and the
+/// instant after the latest, 9000-01-01T00:00Z, well inside what the time
+/// zone database answers: the contract's bounds on an interval.
+pub use crate::supply::{EARLIEST_MS, LATEST_MS};
 
 /// How far past a window the zone's offsets are read, so that every wall
 /// date the window reaches, at any offset, is covered.
@@ -358,8 +357,8 @@ pub fn grid(hours: &WeekHours, offsets: &Offsets, start: i64, end: i64, slot_ms:
 }
 
 /// The most of `taken` that overlap at any instant of `window`, and, when
-/// any do, the index of the first by start among those at the peak.
-pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
+/// any do, the first instant they do.
+pub fn peak_at(taken: &[Interval], window: &Interval) -> (i64, Option<i64>) {
     let mut events: Vec<(i64, i64)> = Vec::new();
     for interval in taken.iter().filter(|interval| interval.overlaps(window)) {
         events.push((interval.start_ms.max(window.start_ms), 1));
@@ -375,6 +374,13 @@ pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
             at = Some(instant);
         }
     }
+    (most, at)
+}
+
+/// The most of `taken` that overlap at any instant of `window`, and, when
+/// any do, the index of the first by start among those at the peak.
+pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
+    let (most, at) = peak_at(taken, window);
     let first = at.and_then(|instant| {
         taken
             .iter()

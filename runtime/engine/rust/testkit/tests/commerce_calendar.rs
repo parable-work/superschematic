@@ -1268,6 +1268,23 @@ fn an_instance_sets_its_own_hours_and_zone() {
             EngineErrorCode::Forbidden
         );
         let wednesday = json!({"wed": [["08:00", "12:00"]]});
+        // The zone changes only while no hold has time to come, as a new
+        // version's does: b1's wall times would move under it.
+        let seq = read(&engine, "Chair", "c1").seq;
+        let (_, action, code, details) = vetoed(set(
+            &manager(),
+            json!({"hours": wednesday, "timeZone": "America/New_York"}),
+        ));
+        assert_eq!(
+            (action.as_str(), code.as_str()),
+            ("setOpeningHours", "has_bookings")
+        );
+        assert_eq!(details["holds"][0]["holder"]["id"], json!("b1"));
+        assert_eq!(read(&engine, "Chair", "c1").seq, seq);
+        // Hours alone change under it, and apply to holds made after.
+        set(&manager(), json!({"hours": wednesday})).expect("hours");
+        set(&manager(), json!({"hours": null})).expect("hours back");
+        advance(&engine, "b1", "released").expect("b1 lets go");
         assert_eq!(
             set(
                 &manager(),
@@ -1282,7 +1299,7 @@ fn an_instance_sets_its_own_hours_and_zone() {
             json!("America/New_York")
         );
         // Wednesday 08:00 in New York (UTC-4) fits; Tuesday in London no
-        // longer opens; b1 keeps its time.
+        // longer opens.
         book(
             &engine,
             "b2",
@@ -1296,7 +1313,7 @@ fn an_instance_sets_its_own_hours_and_zone() {
             code_of(book(&engine, "b3", "Chair", "c1", tue(13, 0), tue(14, 0))),
             "outside_hours"
         );
-        assert_eq!(bookings(&engine, "Chair", "c1", t0()).len(), 2);
+        assert_eq!(bookings(&engine, "Chair", "c1", t0()).len(), 1);
 
         // The same again changes nothing.
         let seq = read(&engine, "Chair", "c1").seq;
@@ -1322,7 +1339,12 @@ fn an_instance_sets_its_own_hours_and_zone() {
         assert_eq!(zone.code(), EngineErrorCode::InvalidArgument);
         assert!(zone.message().contains("/timeZone"), "{}", zone.message());
 
-        // null goes back to the config's.
+        // null goes back to the config's, once b2 has let go.
+        assert_eq!(
+            code_of(set(&manager(), json!({"hours": null, "timeZone": null}))),
+            "has_bookings"
+        );
+        advance(&engine, "b2", "released").expect("b2 lets go");
         assert_eq!(
             set(&manager(), json!({"hours": null, "timeZone": null})).expect("reset"),
             json!({"hours": chair_config()["hours"], "timeZone": "Europe/London"})

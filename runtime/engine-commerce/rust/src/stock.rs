@@ -24,18 +24,22 @@
 //! what is available) and is within `maxPerHold` (`over_max`), and returns
 //! the unit price from the config's price field, with its currency;
 //! `commitFor` takes the item's units out of what is on hand and what is
-//! held (they are sold), a `commit` movement; `releaseFor` frees them;
-//! `returnFor` puts what the item committed back on hand, a `return`
-//! movement; `checkHold` answers whether `holdFor` would fit now. Each
-//! takes a call only for an item its claim's `Holds.items` already shows
-//! in the state the call moves the supply's record to, and a call made
-//! again changes nothing (`not_requested` otherwise). With `backorder` a
-//! hold may take more than is available.
+//! held (they are sold), a `commit` movement, and without `backorder` is
+//! `unavailable` while that would leave fewer than 0 on hand, as a count
+//! with the override can; `releaseFor` frees them; `returnFor` puts what
+//! the item committed back on hand, a `return` movement; `checkHold`
+//! answers whether `holdFor` would fit now, beside the quantities its
+//! `also` lists. Each takes a call only for an item its claim's
+//! `Holds.items` already shows in the state the call moves the supply's
+//! record to, and a call made again changes nothing (`not_requested`
+//! otherwise). With `backorder` a hold may take more than is available;
+//! no count passes what a JSON number holds exactly.
 //!
 //! `receiveStock`, `adjustStock` and `countStock` need the config's
-//! permission (forbidden without it). An adjustment that leaves fewer on
-//! hand than claims hold is `below_held` unless the config allows
-//! backorder, and one below 0 always; a count below what claims hold is
+//! permission (forbidden without it). An adjustment down that leaves fewer
+//! on hand than claims hold is `below_held` unless the config allows
+//! backorder, and one below 0 always; one up is taken even while it
+//! leaves too few. A count below what claims hold is
 //! `below_held` unless the caller holds the permission's `.override`. An
 //! adjustment of 0 and a count of what is on hand change nothing and
 //! record no movement. `listStockMovements` pages the movements newest
@@ -44,12 +48,13 @@
 //! its diff.
 //!
 //! An instance is not deleted while it holds units for a claim (`held`);
-//! what claims committed is sold, and its records go with the instance.
+//! what claims committed is sold, a deleted claim's included, and its
+//! records go with the instance.
 //!
 //! configChange: the price field, `lowAt`, `maxPerHold` and the permission
-//! may change; `backorder` may turn off only while no instance holds more
-//! than it has on hand, which afterConfigChange checks from Stock's own
-//! tables. Stock joins a schema that has instances, each at zero, and
+//! may change; `backorder` may turn off only while no instance is below
+//! zero or holds more than it has on hand, which afterConfigChange checks
+//! from Stock's own tables. Stock joins a schema that has instances, each at zero, and
 //! leaves only one that has none, since its movements would be lost.
 //!
 //! Storage (D58): two columns and a filter column on the instance, the
@@ -73,8 +78,8 @@ use superschematic_engine::{
 
 use crate::currency;
 use crate::supply::{
-    self, Begun, CheckAnswer, Free, ItemState, Price, Refusal, SupplyCall, SupplyKind,
-    SupplyOperation, Unavailable,
+    self, Ask, Begun, CheckAnswer, Free, Price, Refusal, SupplyCall, SupplyKind, SupplyOperation,
+    Unavailable,
 };
 
 pub(crate) const NAME: &str = "Stock";
@@ -140,10 +145,17 @@ struct Counts {
 }
 
 impl Counts {
+    // free is on hand less held, within what JavaScript holds exactly.
+    fn free(&self) -> i64 {
+        self.on_hand
+            .saturating_sub(self.held)
+            .clamp(-MAX_SAFE_INTEGER, MAX_SAFE_INTEGER)
+    }
+
     // available is what a new hold can take: never below 0 unless the
     // config allows backorder.
     fn available(&self, config: &StockConfig) -> i64 {
-        let free = self.on_hand - self.held;
+        let free = self.free();
         if config.backorder {
             free
         } else {
@@ -343,14 +355,21 @@ fn permitted(cx: &OperationCx<'_, StockConfig>, what: &str) -> Result<()> {
 // on_hand_after is what is on hand after a change, refused as the
 // operation's parameters past what JavaScript holds exactly.
 fn on_hand_after(operation: &str, path: &str, on_hand: i64, delta: i64) -> Result<i64> {
-    on_hand
+    count_after(operation, path, "on hand", on_hand, delta)
+}
+
+// count_after is a count after a change, refused as the operation's
+// parameters past what JavaScript holds exactly: on hand, or held, which
+// a backorder hold may raise past what is on hand.
+fn count_after(operation: &str, path: &str, what: &str, count: i64, delta: i64) -> Result<i64> {
+    count
         .checked_add(delta)
         .filter(|after| after.abs() <= MAX_SAFE_INTEGER)
         .ok_or_else(|| {
             params_error(
                 operation,
                 path,
-                "would leave more on hand than a JSON number holds exactly",
+                &format!("would leave more {what} than a JSON number holds exactly"),
             )
         })
 }
@@ -388,7 +407,10 @@ fn adjust_stock(_: &Stock, cx: &OperationCx<'_, StockConfig>, params: &Value) ->
         return Ok(result(cx.config(), &counts, None));
     }
     let after = on_hand_after("adjustStock", "/delta", counts.on_hand, delta)?;
-    if after < 0 || (after < counts.held && !cx.config().backorder) {
+    // An adjustment down may not leave fewer than 0, or than claims hold
+    // without backorder; one up is taken even while it leaves too few, as
+    // a commit after a count with the override, or under backorder, can.
+    if delta < 0 && (after < 0 || (after < counts.held && !cx.config().backorder)) {
         return Err(vetoed(
             cx,
             "adjustStock",
@@ -461,8 +483,13 @@ fn count_stock(_: &Stock, cx: &OperationCx<'_, StockConfig>, params: &Value) -> 
 }
 
 // fit is what does not fit of a call's quantity now: over maxPerHold, or
-// beyond what is available unless the config allows backorder.
-fn fit(view: &InstanceView<'_, StockConfig>, call: &SupplyCall) -> Result<Option<Refusal>> {
+// beyond what is available beside the quantities `also` the claim's other
+// items ask, unless the config allows backorder.
+fn fit(
+    view: &InstanceView<'_, StockConfig>,
+    call: &SupplyCall,
+    also: i64,
+) -> Result<Option<Refusal>> {
     let quantity = call.ask.quantity().unwrap_or(0);
     let config = view.config();
     if let Some(max) = config.max_per_hold.filter(|max| quantity > *max) {
@@ -480,17 +507,25 @@ fn fit(view: &InstanceView<'_, StockConfig>, call: &SupplyCall) -> Result<Option
         }));
     }
     let counts = counts(view)?;
-    let free = counts.on_hand - counts.held;
+    let free = counts.free().saturating_sub(also);
     if config.backorder || quantity <= free {
         return Ok(None);
     }
     let available = free.max(0);
     Ok(Some(
-        Unavailable::of(view, call, Free::Available(available)).refusal(format!(
-            "{quantity} asked of {} {}, which has {available} available",
-            view.schema(),
-            view.id()
-        )),
+        Unavailable::of(view, call, Free::Available(available)).refusal(if also > 0 {
+            format!(
+                "{quantity} asked of {} {}, which has {available} available beside the {also} the claim's other items ask",
+                view.schema(),
+                view.id()
+            )
+        } else {
+            format!(
+                "{quantity} asked of {} {}, which has {available} available",
+                view.schema(),
+                view.id()
+            )
+        }),
     ))
 }
 
@@ -538,18 +573,36 @@ fn contract(
     let mut price = None;
     match operation {
         SupplyOperation::Hold => {
-            if let Some(refusal) = fit(cx, &call)? {
+            if let Some(refusal) = fit(cx, &call, 0)? {
                 return Err(refusal.veto(cx, operation));
             }
-            counts.held += quantity;
+            counts.held = count_after("holdFor", "/quantity", "held", counts.held, quantity)?;
             price = price_of(cx)?;
         }
         SupplyOperation::Commit => {
-            counts.held -= quantity;
-            counts.on_hand -= quantity;
+            let on_hand = on_hand_after("commitFor", "/quantity", counts.on_hand, -quantity)?;
+            // Without backorder nothing is sold that is not on hand: after
+            // a count with the override below what claims hold, a commit
+            // waits for stock to be received or counted.
+            if on_hand < 0 && !cx.config().backorder {
+                return Err(
+                    Unavailable::of(cx, &call, Free::Available(counts.on_hand.max(0)))
+                        .refusal(format!(
+                            "{quantity} committed of {} {}, which has {} on hand",
+                            cx.schema(),
+                            cx.id(),
+                            counts.on_hand
+                        ))
+                        .veto(cx, operation),
+                );
+            }
+            counts.held = count_after("commitFor", "/quantity", "held", counts.held, -quantity)?;
+            counts.on_hand = on_hand;
             record_claim(cx, "commit", -quantity, counts.on_hand, &call)?;
         }
-        SupplyOperation::Release => counts.held -= quantity,
+        SupplyOperation::Release => {
+            counts.held = count_after("releaseFor", "/quantity", "held", counts.held, -quantity)?;
+        }
         SupplyOperation::Return => {
             counts.on_hand = on_hand_after("returnFor", "/quantity", counts.on_hand, quantity)?;
             record_claim(cx, "return", quantity, counts.on_hand, &call)?;
@@ -584,31 +637,18 @@ fn record_claim(
 
 // check_hold answers whether holdFor would hold the item now: an item the
 // supply holds already fits, one its record has moved past does not
-// (not_requested), and any other fits what is available.
+// (not_requested), and any other fits what is available beside the
+// quantities `also` the claim's other items ask.
 fn check_hold(_: &Stock, cx: &OperationCx<'_, StockConfig>, params: &Value) -> Result<Value> {
     let call = SupplyCall::parse(NAME, SupplyOperation::Check, SupplyKind::Counted, params)?;
-    let answer = match supply::recorded(cx, HOLDS_TABLE, &call)? {
-        Some(found) if found.state == ItemState::Held && found.ask == call.ask => CheckAnswer::Fits,
-        Some(found) => {
-            let mut details = Map::new();
-            details.insert("holder".into(), call.holder.to_json());
-            details.insert("hold".into(), Value::from(call.hold.as_str()));
-            details.insert("item".into(), Value::from(call.item));
-            details.insert("supplyState".into(), Value::from(found.state.as_str()));
-            CheckAnswer::Refused(Refusal {
-                code: supply::NOT_REQUESTED.to_owned(),
-                reason: format!(
-                    "this supply records item {} of hold {} of {} {} as {}, which holdFor does not move",
-                    call.item,
-                    call.hold,
-                    call.holder.schema,
-                    call.holder.id,
-                    found.state.as_str()
-                ),
-                details,
-            })
-        }
-        None => match fit(cx, &call)? {
+    let also = supply::also(NAME, SupplyKind::Counted, params)?
+        .iter()
+        .filter_map(Ask::quantity)
+        .fold(0_i64, i64::saturating_add);
+    let recorded = supply::recorded(cx, HOLDS_TABLE, &call)?;
+    let answer = match supply::check_record(&call, recorded.as_ref()) {
+        Some(answer) => answer,
+        None => match fit(cx, &call, also)? {
             Some(refusal) => CheckAnswer::Refused(refusal),
             None => CheckAnswer::Fits,
         },
@@ -894,9 +934,9 @@ impl Behavior for Stock {
 }
 
 // after_config_change refuses a version that turns backorder off while an
-// instance of the namespace holds more than it has on hand, read from
-// Stock's own tables: on hand is the sum of the movements, held the sum of
-// the held records.
+// instance of the namespace is below zero, or holds more than it has on
+// hand, read from Stock's own tables: on hand is the sum of the movements,
+// held the sum of the held records.
 fn after_config_change(_: &Stock, cx: &PublishCx<'_, StockConfig>) -> Result<()> {
     let (Some(before), Some(after)) = (cx.before(), cx.config()) else {
         return Ok(());
@@ -912,6 +952,20 @@ fn after_config_change(_: &Stock, cx: &PublishCx<'_, StockConfig>) -> Result<()>
         SqlValue::from(cx.namespace()),
         SqlValue::from(cx.schema()),
     ];
+    let below = cx.sql().get(
+        format!(
+            "SELECT id, CAST(SUM(delta) AS BIGINT) AS on_hand FROM {movements} WHERE namespace = ? AND schema = ? GROUP BY id HAVING SUM(delta) < 0 ORDER BY id LIMIT 1"
+        ),
+        &key[..2],
+    )?;
+    if let Some(row) = below {
+        return Err(Error::config(format!(
+            "backorder cannot turn off while {} {} has {} on hand, below zero",
+            cx.schema(),
+            row.text("id")?,
+            row.i64("on_hand")?
+        )));
+    }
     let over = cx.sql().get(
         format!(
             "SELECT h.id AS id, h.held AS held, COALESCE(m.on_hand, 0) AS on_hand

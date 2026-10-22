@@ -8,8 +8,9 @@
 //!   held`, never below 0 unless backorder.
 //! - Claims and supplies match: every held or committed item of a claim's
 //!   `Holds.items` has its supply's record in the same state, asking the
-//!   same; every record that holds or committed has a live claim whose item
-//!   is in the same state.
+//!   same; every live record that holds or committed has a live claim whose
+//!   item is in the same state. A retired record is a deleted claim's,
+//!   which keeps what it committed.
 
 #![allow(dead_code)]
 
@@ -182,7 +183,7 @@ fn stock_records(engine: &Engine, schema: &str) -> Vec<(String, Value)> {
     let holds = behavior_table(engine, "Stock", "holds");
     rows(
         engine,
-        &format!("SELECT id, holder_schema, holder_id, hold, item, quantity, state FROM {holds} WHERE schema = ?"),
+        &format!("SELECT id, holder_schema, holder_id, hold, item, quantity, state FROM {holds} WHERE schema = ? AND retired = 0"),
         &[SqlValue::from(schema)],
     )
     .into_iter()
@@ -211,7 +212,9 @@ fn field_records(engine: &Engine, schema: &str, behavior: &str) -> Vec<(String, 
             .cloned()
             .unwrap_or_default()
         {
-            out.push((id.clone(), row));
+            if row.get("retired") != Some(&Value::Bool(true)) {
+                out.push((id.clone(), row));
+            }
         }
     }
     out

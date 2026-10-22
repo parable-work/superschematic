@@ -20,9 +20,13 @@
 //! Taking. A create into a `takeOn` state (any create when the config
 //! names none), a transition into one, and an update in one that changes
 //! what the items ask while the claim holds nothing take the holds. The
-//! guard asks each supply's `checkHold` about each item still to hold and
+//! guard asks each supply's `checkHold` about each item still to hold,
+//! with what the claim's other items still to hold ask of the same
+//! instance (`also`), so two lines of one supply are checked together, and
 //! vetoes with `unavailable`, its details listing every item that does not
-//! fit; afterChange then writes the items, pending, and holds each through
+//! fit; an interval outside 1900 to 9000, which a claim's own date-time
+//! fields may hold, is listed without asking the supply. afterChange then
+//! writes the items, pending, and holds each through
 //! `holdFor`, each call a savepoint of the call's transaction, so the
 //! claim holds every item or none. The unit price and currency `holdFor`
 //! returns are kept on the item. `retakeHolds` takes again, refused as an
@@ -47,13 +51,18 @@
 //! of a claim once, so a claim that let go of an item never holds it
 //! again: `parse_config` refuses a transition from a `releaseOn` or
 //! `returnOn` state into a `takeOn` state, and an item let go of stays so.
+//! It refuses a transition from a `takeOn` state to itself too, which
+//! would start the hold's expiry again on each entry.
 //!
 //! While the claim holds (an item held or committed) an update that
 //! changes a field a hold reads (an `each` list, a `link` hold's quantity
 //! or interval fields) and a Links move of a `link` hold's link are
-//! `held_fields`. A delete releases what the claim holds and returns what
-//! it committed of counted supply; it is `committed` while it holds a
-//! committed item it cannot return (no `returnOn`, or timed supply). The
+//! `held_fields`. A delete releases what the claim holds; what it committed
+//! stays committed, units sold and time booked, since a return is a move
+//! into a `returnOn` state and never a delete. Each supply retires its
+//! records of the claim's items, so a claim created again with the id
+//! holds afresh. A delete is `committed` while the claim holds committed
+//! time that has not ended. The
 //! claim records a reference to each supply while an item holds from it,
 //! which hears the supply's delete; the supply refuses that delete itself
 //! (`held`). More items than `maxItems` (100 when absent) is
@@ -66,8 +75,11 @@
 //! and every item its fields and links ask that it has not, pending, so a
 //! cart shows what it would hold; `Holds.state`, the least advanced item's
 //! state, `none` before any is asked; and `Holds.total`, `{ amount,
-//! currency }` when every item has a price in one currency, null
-//! otherwise. Holds stores an item once it takes it. None is volatile: each
+//! currency }`, the sum of the priced items ([`total_of`]): an item with no
+//! price adds nothing, none priced is `{ amount: 0, currency: null }`, and
+//! it is null only when the priced items' currencies differ or the sum
+//! passes what a JSON number holds exactly. Holds stores an item once it
+//! takes it. None is volatile: each
 //! moves only with the claim's own events (its fields, its links, its
 //! moves), so a Reactions rule hears `Holds.state` turn `committed`. A
 //! move into a `commitOn` state checks the items as the field reads them.
@@ -96,8 +108,8 @@ use superschematic_engine::{
 use superschematic_engine_behaviors::{link_many, parse_date_time};
 
 use crate::supply::{
-    self, Ask, CheckAnswer, HolderItem, InstanceRef, Interval, ItemState, Price, Refusal,
-    SupplyCall, SupplyOperation,
+    self, Ask, CheckAnswer, Free, HolderItem, InstanceRef, Interval, ItemState, Price, Refusal,
+    SupplyCall, SupplyOperation, Unavailable, EARLIEST_MS, LATEST_MS, MAX_SAFE_INTEGER,
 };
 
 const NAME: &str = supply::HOLDS;
@@ -378,31 +390,36 @@ pub fn state_of(items: &[HolderItem]) -> &'static str {
         .map_or("none", ItemState::as_str)
 }
 
-/// The sum of the items' prices times their quantities, as `{ amount,
-/// currency }`, when every item has a price in one currency; null
-/// otherwise.
+/// The sum of the priced items' unit prices times their quantities (1
+/// for time), as `{ amount, currency }`. An item without a price, such as
+/// a pending one, time a supply gives no price, or units of a Stock with
+/// no `price`, adds nothing. With no priced item it is `{ amount: 0,
+/// currency: null }`. It is null only when the priced items' currencies
+/// differ (a price without a currency differs from every one), or the sum
+/// passes what a JSON number holds exactly, so a reader that needs money
+/// fails closed on null.
 pub fn total_of(items: &[HolderItem]) -> Value {
     let mut amount: i64 = 0;
     let mut currency: Option<&str> = None;
-    if items.is_empty() {
-        return Value::Null;
-    }
+    let mut priced = false;
     for item in items {
         let Some(price) = &item.price else {
-            return Value::Null;
+            continue;
         };
         let Some(code) = price.currency.as_deref() else {
             return Value::Null;
         };
-        if currency.is_some_and(|known| known != code) {
+        if priced && currency != Some(code) {
             return Value::Null;
         }
+        priced = true;
         currency = Some(code);
         let units = item.ask.quantity().unwrap_or(1);
         let Some(next) = price
             .unit_price
             .checked_mul(units)
             .and_then(|line| amount.checked_add(line))
+            .filter(|sum| sum.abs() <= MAX_SAFE_INTEGER)
         else {
             return Value::Null;
         };
@@ -625,7 +642,77 @@ fn absent(error: &Error) -> bool {
     )
 }
 
-// check asks each pending item's supply whether it fits, and vetoes with
+// out_of_range is the refusal of an item whose interval lies outside what
+// the contract holds, 1900 to 9000, which no supply is asked about: a
+// claim's own date-time fields may hold any year.
+fn out_of_range(item: &HolderItem) -> Option<Refusal> {
+    let interval = item.ask.interval()?;
+    if interval.start_ms >= EARLIEST_MS && interval.end_ms <= LATEST_MS {
+        return None;
+    }
+    Some(
+        Unavailable {
+            supply: item.supply.clone(),
+            hold: item.hold.clone(),
+            item: item.item,
+            asked: item.ask,
+            free: Free::Available(0),
+        }
+        .refusal(format!(
+            "item {} of hold {} asks time outside 1900 to 9000, which no supply holds",
+            item.item, item.hold
+        )),
+    )
+}
+
+// alongside is what each pending item's checkHold counts beside it: the
+// asks of the claim's other pending items of the same supply, so two lines
+// of one supply are checked together, as afterChange then holds them.
+fn alongside(items: &[HolderItem]) -> Vec<Vec<Ask>> {
+    let pending: Vec<&HolderItem> = items
+        .iter()
+        .filter(|item| item.state == ItemState::Pending && out_of_range(item).is_none())
+        .collect();
+    items
+        .iter()
+        .map(|item| {
+            pending
+                .iter()
+                .filter(|other| {
+                    other.supply == item.supply
+                        && !(other.hold == item.hold && other.item == item.item)
+                })
+                .map(|other| other.ask)
+                .collect()
+        })
+        .collect()
+}
+
+// check_one asks a pending item's supply whether it fits beside `also`:
+// its answer, or `Err(None)` when the supply is absent, with the error.
+fn check_one(
+    view: &InstanceView<'_, HoldsConfig>,
+    item: &HolderItem,
+    also: &[Ask],
+) -> Result<std::result::Result<Value, Error>> {
+    if let Some(refusal) = out_of_range(item) {
+        return Ok(Ok(CheckAnswer::Refused(refusal).to_json()));
+    }
+    match view.instances().invoke(
+        &item.supply.schema,
+        &item.supply.id,
+        SupplyOperation::Check.name(),
+        &call_of(view, item).to_check_params(also),
+        None,
+    ) {
+        Ok(answer) => Ok(Ok(answer)),
+        Err(error) if absent(&error) => Ok(Err(error)),
+        Err(error) => Err(error),
+    }
+}
+
+// check asks each pending item's supply whether it fits beside the
+// claim's other pending items of the same supply, and vetoes with
 // too_many_items, no_supply, or unavailable listing every item that does
 // not fit.
 fn check(view: &InstanceView<'_, HoldsConfig>, items: &[HolderItem]) -> Result<Option<Veto>> {
@@ -644,17 +731,14 @@ fn check(view: &InstanceView<'_, HoldsConfig>, items: &[HolderItem]) -> Result<O
         )));
     }
     let mut refusals: Vec<Refusal> = Vec::new();
-    for item in items.iter().filter(|item| item.state == ItemState::Pending) {
-        let call = call_of(view, item);
-        let answer = match view.instances().invoke(
-            &item.supply.schema,
-            &item.supply.id,
-            SupplyOperation::Check.name(),
-            &call.to_params(),
-            None,
-        ) {
+    let also = alongside(items);
+    for (item, also) in items.iter().zip(&also) {
+        if item.state != ItemState::Pending {
+            continue;
+        }
+        let answer = match check_one(view, item, also)? {
             Ok(answer) => answer,
-            Err(error) if absent(&error) => {
+            Err(error) => {
                 let mut details = Map::new();
                 details.insert("supply".into(), item.supply.to_json());
                 details.insert("hold".into(), Value::from(item.hold.as_str()));
@@ -668,7 +752,6 @@ fn check(view: &InstanceView<'_, HoldsConfig>, items: &[HolderItem]) -> Result<O
                     Some(details),
                 )));
             }
-            Err(error) => return Err(error),
         };
         match CheckAnswer::from_json(&answer) {
             Some(CheckAnswer::Fits) => {}
@@ -914,16 +997,17 @@ fn after_change(
     refer(cx, &items)
 }
 
-// let_go releases what a deleted claim held and returns what it committed
-// of counted supply, through the supply, which reads the claim as gone,
-// then deletes its rows.
+// let_go lets go of what a deleted claim took, through each supply's
+// releaseFor, which reads the claim as gone: what it held is released,
+// what it committed stays committed (units sold, time booked; a return is
+// a move into a returnOn state, never a delete), and the supply retires
+// its record of each item, so a claim created again with the id holds
+// afresh. Then it deletes its rows.
 fn let_go(cx: &InstanceCx<'_, HoldsConfig>) -> Result<()> {
     for item in stored(cx)? {
-        let operation = match item.state {
-            ItemState::Held => SupplyOperation::Release,
-            ItemState::Committed if item.ask.quantity().is_some() => SupplyOperation::Return,
-            _ => continue,
-        };
+        if item.state == ItemState::Pending {
+            continue;
+        }
         let exists = cx
             .instances()
             .get(&item.supply.schema, &item.supply.id, Some(&[]))?
@@ -931,13 +1015,17 @@ fn let_go(cx: &InstanceCx<'_, HoldsConfig>) -> Result<()> {
         if !exists {
             continue;
         }
-        cx.instances().invoke(
+        match cx.instances().invoke(
             &item.supply.schema,
             &item.supply.id,
-            operation.name(),
+            SupplyOperation::Release.name(),
             &call_of(cx, &item).to_params(),
             None,
-        )?;
+        ) {
+            Ok(_) => {}
+            Err(error) if absent(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
     let table = cx.sql().table(ITEMS_TABLE)?;
     cx.sql().run(
@@ -1074,11 +1162,18 @@ fn guard(
             check(view, &merge(&items, &plan(config, after, &targets)))
         }
         GuardRequest::Delete { .. } => {
+            // Committed time to come is the claim's booking, which no
+            // move gives back: it waits until the time has passed.
+            // Committed units are sold, and stay so after the delete.
+            let now = view.now();
             let stuck: Vec<HolderItem> = stored(view)?
                 .into_iter()
                 .filter(|item| {
                     item.state == ItemState::Committed
-                        && (config.return_on.is_empty() || item.ask.quantity().is_none())
+                        && item
+                            .ask
+                            .interval()
+                            .is_some_and(|interval| interval.end_ms > now)
                 })
                 .collect();
             if stuck.is_empty() {
@@ -1096,10 +1191,9 @@ fn guard(
             );
             Ok(Some(veto(
                 format!(
-                    "the claim holds {} committed {}, which {} not returned",
+                    "the claim holds {} committed {} of time that has not ended",
                     stuck.len(),
-                    if stuck.len() == 1 { "item" } else { "items" },
-                    if stuck.len() == 1 { "is" } else { "are" }
+                    if stuck.len() == 1 { "item" } else { "items" }
                 ),
                 COMMITTED,
                 Some(details),
@@ -1154,24 +1248,18 @@ fn retake_holds(_: &Holds, cx: &OperationCx<'_, HoldsConfig>, _: &Value) -> Resu
 
 fn list_holds(_: &Holds, cx: &OperationCx<'_, HoldsConfig>, _: &Value) -> Result<Value> {
     let items = items_now(cx)?;
+    let also = alongside(&items);
     let mut listed = Vec::with_capacity(items.len());
-    for item in &items {
+    for (item, also) in items.iter().zip(&also) {
         let mut entry = item.to_json();
         if item.state == ItemState::Pending {
-            let answer = match cx.instances().invoke(
-                &item.supply.schema,
-                &item.supply.id,
-                SupplyOperation::Check.name(),
-                &call_of(cx, item).to_params(),
-                None,
-            ) {
+            let answer = match check_one(cx, item, also)? {
                 Ok(answer) => answer,
-                Err(error) if absent(&error) => json!({
+                Err(error) => json!({
                     "fits": false,
                     "code": NO_SUPPLY,
                     "reason": format!("{} {} holds nothing for a claim: {error}", item.supply.schema, item.supply.id),
                 }),
-                Err(error) => return Err(error),
             };
             if let Value::Object(entry) = &mut entry {
                 entry.insert("check".into(), answer);
@@ -1480,6 +1568,13 @@ impl Behavior for Holds {
                             "the Workflow moves from {from}, where the claim lets go of what it holds, to {to}, where it takes it; a supply holds each item of a claim once"
                         )));
                     }
+                    // Entering a takeOn state again starts its expiry
+                    // again: a claim could keep what it holds for good.
+                    if from == to && take_on.contains(to) {
+                        return Err(Error::config(format!(
+                            "the Workflow moves from {from} to itself, and {from} takes holds: entering it again would start a deadline that expires the hold again, so the claim could hold for good"
+                        )));
+                    }
                 }
             }
         }
@@ -1579,7 +1674,7 @@ mod tests {
     }
 
     #[test]
-    fn a_total_needs_every_price_in_one_currency() {
+    fn a_total_sums_the_priced_items_in_one_currency() {
         let priced = |unit_price: i64, currency: &str, ask: Ask| HolderItem {
             price: Some(Price {
                 unit_price,
@@ -1591,7 +1686,12 @@ mod tests {
             start_ms: 0,
             end_ms: 10,
         });
-        assert_eq!(total_of(&[]), Value::Null);
+        // Nothing priced: nothing owed, in no currency.
+        assert_eq!(total_of(&[]), json!({"amount": 0, "currency": null}));
+        assert_eq!(
+            total_of(&[item("slot", 0, ItemState::Held, slot)]),
+            json!({"amount": 0, "currency": null})
+        );
         assert_eq!(
             total_of(&[
                 priced(1250, "GBP", Ask::Quantity(2)),
@@ -1599,6 +1699,16 @@ mod tests {
             ]),
             json!({"amount": 3000, "currency": "GBP"})
         );
+        // An item with no price adds nothing.
+        assert_eq!(
+            total_of(&[
+                priced(1250, "GBP", Ask::Quantity(2)),
+                item("lines", 1, ItemState::Held, Ask::Quantity(1)),
+                item("slot", 0, ItemState::Held, slot)
+            ]),
+            json!({"amount": 2500, "currency": "GBP"})
+        );
+        // Two currencies, a price in none, or past what JSON holds: null.
         assert_eq!(
             total_of(&[
                 priced(1250, "GBP", Ask::Quantity(2)),
@@ -1606,17 +1716,59 @@ mod tests {
             ]),
             Value::Null
         );
-        assert_eq!(
-            total_of(&[
-                priced(1250, "GBP", Ask::Quantity(2)),
-                item("lines", 1, ItemState::Held, Ask::Quantity(1))
-            ]),
-            Value::Null
-        );
+        let mut bare = priced(100, "GBP", Ask::Quantity(1));
+        bare.price.as_mut().expect("a price").currency = None;
+        assert_eq!(total_of(&[bare]), Value::Null);
         assert_eq!(
             total_of(&[priced(i64::MAX, "GBP", Ask::Quantity(2))]),
             Value::Null
         );
+        assert_eq!(
+            total_of(&[
+                priced(MAX_SAFE_INTEGER, "GBP", Ask::Quantity(1)),
+                priced(1, "GBP", Ask::Quantity(1))
+            ]),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn two_pending_items_of_one_supply_are_checked_together() {
+        use ItemState::*;
+        let other = |index: i64, state, ask| HolderItem {
+            supply: InstanceRef::new("Inventory", "rope"),
+            ..item("lines", index, state, ask)
+        };
+        let items = [
+            item("lines", 0, Pending, Ask::Quantity(3)),
+            item("lines", 1, Pending, Ask::Quantity(3)),
+            item("lines", 2, Held, Ask::Quantity(1)),
+            other(3, Pending, Ask::Quantity(2)),
+            item("wrap", 0, Pending, Ask::Quantity(1)),
+        ];
+        assert_eq!(
+            alongside(&items),
+            [
+                vec![Ask::Quantity(3), Ask::Quantity(1)],
+                vec![Ask::Quantity(3), Ask::Quantity(1)],
+                vec![Ask::Quantity(3), Ask::Quantity(3), Ask::Quantity(1)],
+                vec![],
+                vec![Ask::Quantity(3), Ask::Quantity(3)],
+            ]
+        );
+        let far = item(
+            "slot",
+            0,
+            Pending,
+            Ask::Interval(Interval {
+                start_ms: EARLIEST_MS - 1,
+                end_ms: 0,
+            }),
+        );
+        let refused = out_of_range(&far).expect("refused");
+        assert_eq!(refused.code, supply::UNAVAILABLE);
+        assert_eq!(refused.details["available"], json!(0));
+        assert!(out_of_range(&items[0]).is_none());
     }
 
     #[test]

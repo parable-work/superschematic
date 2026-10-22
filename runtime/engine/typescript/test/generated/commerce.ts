@@ -67,8 +67,8 @@ export type CheckoutBehaviors = {
     }>;
     /** The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed. */
     readonly state: 'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned';
-    /** The sum of the items' unit prices times their quantities, as { amount, currency }, when every item has a price in one currency; null otherwise. */
-    readonly total: { amount: number; currency: string } | null;
+    /** The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly. */
+    readonly total: { amount: number; currency: string | null } | null;
   };
   readonly Timers: {
     /** Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed. */
@@ -265,11 +265,11 @@ export type CheckoutRetakeHoldsResult = {
     unitPrice?: number;
   }>;
   state: 'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned';
-  /** The sum of the items' prices, when every item has one in one currency; null otherwise. */
-  total: { amount: number; currency: string } | null;
+  /** The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly. */
+  total: { amount: number; currency: string | null } | null;
 };
 
-/** The parameters of Holds' listHolds: Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending. */
+/** The parameters of Holds' listHolds: Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply. */
 export type CheckoutListHoldsParams = Record<string, never>;
 
 /** What Holds' listHolds returns. */
@@ -306,8 +306,8 @@ export type CheckoutListHoldsResult = {
     unitPrice?: number;
   }>;
   state: 'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned';
-  /** The sum of the items' prices, when every item has one in one currency; null otherwise. */
-  total: { amount: number; currency: string } | null;
+  /** The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly. */
+  total: { amount: number; currency: string | null } | null;
 };
 
 /** The parameters of Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
@@ -613,7 +613,7 @@ export interface CheckoutClient {
   listLinked(params: CheckoutListLinkedParams, options?: CallOptions): Promise<CheckoutListLinkedResult>;
   /** Holds' retakeHolds: Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none. */
   retakeHolds(id: string, params?: CheckoutRetakeHoldsParams, options?: CheckoutWriteOptions): Promise<CheckoutRetakeHoldsResult>;
-  /** Holds' listHolds: Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending. */
+  /** Holds' listHolds: Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply. */
   listHolds(id: string, params?: CheckoutListHoldsParams, options?: CheckoutWriteOptions): Promise<CheckoutListHoldsResult>;
   /** Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
   fireTimer(id: string, params: CheckoutFireTimerParams, options?: CheckoutWriteOptions): Promise<CheckoutFireTimerResult>;
@@ -762,7 +762,7 @@ export type CollectionPointPatch = {
   name?: string;
 };
 
-/** The parameters of Calendar's setOpeningHours: Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay. Needs the config's permission. */
+/** The parameters of Calendar's setOpeningHours: Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission. */
 export type CollectionPointSetOpeningHoursParams = {
   /** The instance's hours, or null for the config's. */
   hours?: {
@@ -839,9 +839,9 @@ export type CollectionPointHoldForParams = {
   };
   /** The time the item asks, from startMs to endMs, in epoch milliseconds. */
   interval: {
-    /** When it ends, after startMs. */
+    /** When it ends, after startMs and no later than 9000-01-01T00:00Z. */
     endMs: number;
-    /** When it starts. */
+    /** When it starts, no earlier than 1900-01-01T00:00Z. */
     startMs: number;
   };
   /** The item's index in its hold: its element's in an each hold's list, 0 for a link hold. */
@@ -873,9 +873,9 @@ export type CollectionPointCommitForParams = {
   };
   /** The time the item asks, from startMs to endMs, in epoch milliseconds. */
   interval: {
-    /** When it ends, after startMs. */
+    /** When it ends, after startMs and no later than 9000-01-01T00:00Z. */
     endMs: number;
-    /** When it starts. */
+    /** When it starts, no earlier than 1900-01-01T00:00Z. */
     startMs: number;
   };
   /** The item's index in its hold: its element's in an each hold's list, 0 for a link hold. */
@@ -907,9 +907,9 @@ export type CollectionPointReleaseForParams = {
   };
   /** The time the item asks, from startMs to endMs, in epoch milliseconds. */
   interval: {
-    /** When it ends, after startMs. */
+    /** When it ends, after startMs and no later than 9000-01-01T00:00Z. */
     endMs: number;
-    /** When it starts. */
+    /** When it starts, no earlier than 1900-01-01T00:00Z. */
     startMs: number;
   };
   /** The item's index in its hold: its element's in an each hold's list, 0 for a link hold. */
@@ -930,6 +930,16 @@ export type CollectionPointReleaseForResult = {
 
 /** The parameters of Calendar's checkHold: Answers whether holdFor would hold what an item asks now, and when not, why. */
 export type CollectionPointCheckHoldParams = {
+  /** What the claim's other items still to hold ask of this instance, which the answer counts as taken. */
+  also?: Array<{
+    /** The time the item asks, from startMs to endMs, in epoch milliseconds. */
+    interval: {
+      /** When it ends, after startMs and no later than 9000-01-01T00:00Z. */
+      endMs: number;
+      /** When it starts, no earlier than 1900-01-01T00:00Z. */
+      startMs: number;
+    };
+  }>;
   /** The hold's name in the claim's Holds config. */
   hold: string;
   /** The claim the call is for: its schema and id. */
@@ -941,9 +951,9 @@ export type CollectionPointCheckHoldParams = {
   };
   /** The time the item asks, from startMs to endMs, in epoch milliseconds. */
   interval: {
-    /** When it ends, after startMs. */
+    /** When it ends, after startMs and no later than 9000-01-01T00:00Z. */
     endMs: number;
-    /** When it starts. */
+    /** When it starts, no earlier than 1900-01-01T00:00Z. */
     startMs: number;
   };
   /** The item's index in its hold: its element's in an each hold's list, 0 for a link hold. */
@@ -1017,7 +1027,7 @@ export type CollectionPointFindAvailabilityResult = {
     remaining: number;
     startMs: number;
   }>;
-  /** Whether more slots fit than limit returned. */
+  /** Whether more slots fit than limit returned, more instances matched than were read, or the search stopped at its bound of work. */
   truncated: boolean;
 };
 
@@ -1067,7 +1077,7 @@ export interface CollectionPointClient {
   delete(id: string, options?: CollectionPointWriteOptions): Promise<void>;
   /** operate calls an instance operation and returns its result with the instance's sequence after it. */
   operate<K extends CollectionPointInstanceOperation>(id: string, operation: K, params: CollectionPointOperations[K]['params'], options?: CollectionPointWriteOptions): Promise<OperationOutcome<CollectionPointOperations[K]['result']>>;
-  /** Calendar's setOpeningHours: Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay. Needs the config's permission. */
+  /** Calendar's setOpeningHours: Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission. */
   setOpeningHours(id: string, params?: CollectionPointSetOpeningHoursParams, options?: CollectionPointWriteOptions): Promise<CollectionPointSetOpeningHoursResult>;
   /** Calendar's addClosure: Closes the instance from startMs to endMs, with a reason. Needs the config's permission; refused over time a claim holds unless force is set, which needs the permission's .override. Forcing keeps the holds: the claims are moved by their own Workflow, by a rule or by hand. */
   addClosure(id: string, params: CollectionPointAddClosureParams, options?: CollectionPointWriteOptions): Promise<CollectionPointAddClosureResult>;
@@ -1351,6 +1361,11 @@ export type InventoryReturnForResult = {
 
 /** The parameters of Stock's checkHold: Answers whether holdFor would hold what an item asks now, and when not, why. */
 export type InventoryCheckHoldParams = {
+  /** What the claim's other items still to hold ask of this instance, which the answer counts as taken. */
+  also?: Array<{
+    /** How many units the item asks. */
+    quantity: number;
+  }>;
   /** The hold's name in the claim's Holds config. */
   hold: string;
   /** The claim the call is for: its schema and id. */
