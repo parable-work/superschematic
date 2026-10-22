@@ -377,6 +377,30 @@ pub fn peak_at(taken: &[Interval], window: &Interval) -> (i64, Option<i64>) {
     (most, at)
 }
 
+/// The first instant from `at` on at which fewer than `capacity` of
+/// `taken` overlap: `at` itself when fewer do there already.
+pub fn full_until(taken: &[Interval], at: i64, capacity: i64) -> i64 {
+    let mut events: Vec<(i64, i64)> = taken
+        .iter()
+        .flat_map(|interval| [(interval.start_ms, 1), (interval.end_ms, -1)])
+        .collect();
+    events.sort_unstable();
+    let (mut count, mut index) = (0, 0);
+    while index < events.len() && events[index].0 <= at {
+        count += events[index].1;
+        index += 1;
+    }
+    let mut until = at;
+    while count >= capacity && index < events.len() {
+        until = events[index].0;
+        while index < events.len() && events[index].0 == until {
+            count += events[index].1;
+            index += 1;
+        }
+    }
+    until
+}
+
 /// The most of `taken` that overlap at any instant of `window`, and, when
 /// any do, the index of the first by start among those at the peak.
 pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
@@ -533,6 +557,11 @@ mod tests {
         assert!(inside(&[i(9, 12), i(13, 17)], &i(13, 17)));
         assert!(!inside(&[i(9, 12), i(13, 17)], &i(11, 14)));
         assert!(!inside(&[], &i(11, 14)));
+        // Full from 9 until 10 with two places; with one, until 17.
+        assert_eq!(full_until(&taken, hour(9), 2), hour(10));
+        assert_eq!(full_until(&taken, hour(9), 1), hour(17));
+        assert_eq!(full_until(&[i(9, 10), i(10, 11)], hour(9), 1), hour(11));
+        assert_eq!(full_until(&taken, hour(18), 1), hour(18));
     }
 
     #[test]

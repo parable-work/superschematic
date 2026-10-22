@@ -83,8 +83,8 @@ use crate::supply::{
     SupplyKind, SupplyOperation,
 };
 use time::{
-    grid, inside, on_grid, opening, peak, peak_at, wall_text, zone, Offsets, WeekHours, DAY_MS,
-    EARLIEST_MS, LATEST_MS, MINUTE_MS,
+    full_until, grid, inside, on_grid, opening, peak, peak_at, wall_text, zone, Offsets, WeekHours,
+    DAY_MS, EARLIEST_MS, LATEST_MS, MINUTE_MS,
 };
 
 /// The behavior's name.
@@ -245,15 +245,21 @@ struct Taken {
 }
 
 impl Taken {
+    /// `{ holder, hold, item, startMs, endMs, state, retired? }`,
+    /// `retired` only for a deleted claim's committed time.
     fn to_json(&self) -> Value {
-        json!({
+        let mut out = json!({
             "holder": self.holder.to_json(),
             "hold": self.hold,
             "item": self.item,
             "startMs": self.interval.start_ms,
             "endMs": self.interval.end_ms,
             "state": self.state.as_str(),
-        })
+        });
+        if self.retired {
+            out["retired"] = Value::Bool(true);
+        }
+        out
     }
 
     /// Whether the record is the live one of the item a call names.
@@ -1377,9 +1383,11 @@ fn find_availability(
                 slots.push((start, id.to_owned(), left));
                 found += 1;
             } else if let Some(at) = at {
-                // Every start whose time with buffers takes in the full
-                // instant is full too.
-                skip_to = at.saturating_add(config.buffer_before).saturating_add(1);
+                // Every start whose time with buffers reaches back into
+                // the full stretch from that instant is full too.
+                let until = full_until(&active, at, capacity);
+                work += active.len();
+                skip_to = until.saturating_add(config.buffer_before);
             }
         }
     }

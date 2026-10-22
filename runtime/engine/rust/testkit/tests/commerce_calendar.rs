@@ -1803,3 +1803,196 @@ fn holds_racing_for_the_last_places_never_pass_capacity() {
         assert!(states.iter().all(|state| *state == ItemState::Held));
     }
 }
+
+/// A pod open all week in UTC, any whole minute, holds of a minute to 31
+/// days.
+fn pod_config() -> Value {
+    let day = json!([["00:00", "24:00"]]);
+    json!({"timeZone": "UTC", "maxMs": 31 * DAY, "hours": {
+        "mon": day, "tue": day, "wed": day, "thu": day, "fri": day, "sat": day, "sun": day}})
+}
+
+#[test]
+fn find_availability_on_a_full_calendar_answers_within_its_budget() {
+    for target in targets("calendar_find_full") {
+        let engine = open(&target);
+        publish(&engine, &resource_document("Pod", pod_config()), None);
+        // 100 pods, every minute of the 31 days taken: 99 by one hold
+        // each, pod-000 by four hours' hold after four hours'.
+        let start = t0();
+        let mut items = Vec::new();
+        for n in 0..100 {
+            let id = format!("pod-{n:03}");
+            create(&engine, "Pod", &id, json!({}));
+            if n > 0 {
+                items.push(slot("Pod", &id, n, start, start + 31 * DAY));
+            }
+        }
+        const BLOCK: i64 = 4 * HOUR;
+        for block in 0..31 * 6 {
+            items.push(slot(
+                "Pod",
+                "pod-000",
+                100 + block,
+                start + block * BLOCK,
+                start + (block + 1) * BLOCK,
+            ));
+        }
+        create(&engine, "Booking", "full", json!({}));
+        invoke(
+            &engine,
+            "Booking",
+            "full",
+            "stage",
+            json!({ "items": items }),
+        )
+        .expect("stage");
+        invoke(&engine, "Booking", "full", "move", json!({"to": "held"})).expect("hold all");
+
+        // A minute's slot over the whole window, on a one-minute grid:
+        // nothing fits, and the answer comes at once.
+        let window = json!({"startMs": start, "endMs": start + 31 * DAY, "durationMs": MINUTE, "limit": 500});
+        let started = std::time::Instant::now();
+        let found = find(&engine, "Pod", window.clone()).expect("find");
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        assert_eq!(found, json!({"slots": [], "truncated": false}));
+
+        // Four hours of pod-000 let go: their 240 minutes, and no more.
+        let freed = 100 + 6 * 10 + 3;
+        invoke(
+            &engine,
+            "Booking",
+            "full",
+            "move",
+            json!({"to": "released", "hold": "slot", "item": freed}),
+        )
+        .expect("release an hour");
+        let started = std::time::Instant::now();
+        let found = find(&engine, "Pod", window).expect("find");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        let slots = found["slots"].as_array().expect("slots");
+        assert_eq!(slots.len(), 240);
+        let from = start + (freed - 100) * BLOCK;
+        assert_eq!(
+            (slots[0]["startMs"].clone(), slots[239]["startMs"].clone()),
+            (json!(from), json!(from + 239 * MINUTE))
+        );
+        assert!(slots.iter().all(|slot| slot["id"] == "pod-000"));
+        assert_eq!(found["truncated"], json!(false));
+    }
+}
+
+#[test]
+fn check_hold_answers_as_the_record_allows_and_spent_time_lets_a_resource_go() {
+    for target in targets("calendar_records") {
+        let engine = open(&target);
+        create(&engine, "Chair", "c1", json!({"title": "By the window"}));
+        book(&engine, "b1", "Chair", "c1", tue(10, 0), tue(11, 0)).expect("b1");
+        book(&engine, "b2", "Chair", "c1", tue(12, 0), tue(13, 0)).expect("b2");
+        let check = |booking: &str, start: i64, end: i64| {
+            invoke(
+                &engine,
+                "Chair",
+                "c1",
+                "checkHold",
+                json!({"holder": {"schema": "Booking", "id": booking}, "hold": "slot", "item": 0,
+                       "interval": {"startMs": start, "endMs": end}}),
+            )
+            .expect("checkHold")
+        };
+        // Held, asking the same: fits, as holdFor made again would.
+        assert_eq!(check("b1", tue(10, 0), tue(11, 0)), json!({"fits": true}));
+        advance(&engine, "b1", "committed").expect("commit");
+        advance(&engine, "b2", "released").expect("release");
+        // Committed or released, holdFor would refuse it: so does
+        // checkHold, though the time is free for b2.
+        for (booking, start, end, state) in [
+            ("b1", tue(10, 0), tue(11, 0), "committed"),
+            ("b2", tue(12, 0), tue(13, 0), "released"),
+        ] {
+            let answer = check(booking, start, end);
+            assert_eq!(
+                (
+                    &answer["fits"],
+                    &answer["code"],
+                    &answer["details"]["supplyState"]
+                ),
+                (&json!(false), &json!("not_requested"), &json!(state)),
+                "{booking}: {answer}"
+            );
+            assert_eq!(
+                code_of(invoke(
+                    &engine,
+                    "Booking",
+                    booking,
+                    "mark",
+                    json!({"hold": "slot", "item": 0, "state": "held"}),
+                ).and_then(|_| invoke(
+                    &engine,
+                    "Chair",
+                    "c1",
+                    "holdFor",
+                    json!({"holder": {"schema": "Booking", "id": booking}, "hold": "slot", "item": 0,
+                           "interval": {"startMs": start, "endMs": end}}),
+                ))),
+                "not_requested",
+                "{booking}"
+            );
+        }
+
+        // Committed time to come keeps the chair; spent, it lets it go.
+        let (_, action, code, _) = vetoed(
+            engine
+                .instances()
+                .delete(&alice(), "Chair", "c1", WriteOptions::default())
+                .map(Value::Bool),
+        );
+        assert_eq!((action.as_str(), code.as_str()), ("delete", "held"));
+        engine.clock().set(tue(11, 0)).expect("set the clock");
+        assert!(engine
+            .instances()
+            .delete(&alice(), "Chair", "c1", WriteOptions::default())
+            .expect("delete"));
+    }
+}
+
+#[test]
+fn the_closures_field_reads_the_first_hundred_to_come() {
+    for target in targets("calendar_closures_field") {
+        let engine = open(&target);
+        create(&engine, "Chair", "c1", json!({}));
+        let close = |start: i64, end: i64, reason: &str| {
+            invoke_as(
+                &engine,
+                &manager(),
+                "Chair",
+                "c1",
+                "addClosure",
+                json!({"startMs": start, "endMs": end, "reason": reason}),
+            )
+            .expect("addClosure")
+        };
+        close(t0() - 2 * DAY, t0() - DAY, "gone");
+        for n in (0..105).rev() {
+            close(
+                t0() + DAY + n * HOUR,
+                t0() + DAY + n * HOUR + MINUTE,
+                &format!("n{n}"),
+            );
+        }
+        let shown = field(&engine, "Chair", "c1", "closures");
+        let reasons: Vec<&str> = shown
+            .as_array()
+            .expect("closures")
+            .iter()
+            .map(|closure| closure["reason"].as_str().expect("a reason"))
+            .collect();
+        assert_eq!(reasons.len(), 100);
+        assert_eq!((reasons[0], reasons[99]), ("n0", "n99"));
+    }
+}

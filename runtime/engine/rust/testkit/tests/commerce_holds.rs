@@ -1069,6 +1069,17 @@ fn a_config_is_held_to_the_types_workflow_links_and_fields() {
         let mut back = holds_config(json!({"lines": lines_hold()}));
         back["releaseOn"] = json!(["cart"]);
         assert!(refused(back).contains("a supply holds each item of a claim once"));
+        // A takeOn state's move to itself would start its expiry again.
+        let mut again = checkout(holds_config(json!({"lines": lines_hold()})));
+        again["types"]["Checkout"]["behaviors"][0]["config"]["transitions"]
+            .as_array_mut()
+            .expect("transitions")
+            .push(json!({"from": "held", "to": "held"}));
+        let message = publish(&engine, &again).expect_err("refused").to_string();
+        assert!(
+            message.contains("the Workflow moves from held to itself, and held takes holds"),
+            "{message}"
+        );
         assert!(refused(holds_config(
             json!({"lines": {"link": "nowhere", "quantity": 1}})
         ))

@@ -854,3 +854,91 @@ fn the_default_matcher_grants_the_override_with_the_permission() {
         holds(&engine, false);
     }
 }
+
+#[test]
+fn counts_stay_whole_under_backorder_and_after_a_count_with_the_override() {
+    for target in targets("stock_whole") {
+        let engine = open_with(
+            &target,
+            json!({"permission": "stock.adjust", "backorder": true}),
+        );
+        create(&engine, "Inventory", "rope", json!({"title": "Rope"}));
+        let call = |operation: &str, params: Value| {
+            invoke(&engine, &stocker(), "Inventory", "rope", operation, params)
+        };
+        call("receiveStock", json!({"quantity": 1, "reason": "delivery"})).expect("receive");
+        // Backorder sells three of one: rope is two below zero, holding
+        // nothing.
+        cart(&engine, "c1", json!([line("rope", 0, 3)]));
+        advance(&engine, "c1", "held").expect("hold");
+        advance(&engine, "c1", "committed").expect("commit");
+        assert_eq!(
+            stock(&engine, "rope"),
+            json!({"onHand": -2, "held": 0, "available": -2, "low": false})
+        );
+        holds(&engine, true);
+        // backorder turns off only once no instance is below zero.
+        let refused = publish(&engine, &inventory(json!({"permission": "stock.adjust"})))
+            .expect_err("backorder off while rope is below zero");
+        assert!(
+            refused.to_string().contains(
+                "backorder cannot turn off while Inventory rope has -2 on hand, below zero"
+            ),
+            "{refused}"
+        );
+        // An adjustment up is taken though it leaves rope below zero; one
+        // down is not.
+        call("adjustStock", json!({"delta": 1, "reason": "found one"})).expect("adjust up");
+        let (_, _, _, code, _) = veto(call("adjustStock", json!({"delta": -1, "reason": "lost"})));
+        assert_eq!(code.as_deref(), Some("below_held"));
+        // Held never passes what a JSON number holds exactly.
+        cart(
+            &engine,
+            "c2",
+            json!([line("rope", 0, 9_007_199_254_740_991_i64)]),
+        );
+        advance(&engine, "c2", "held").expect("the most one item asks");
+        assert_eq!(
+            stock(&engine, "rope")["held"],
+            json!(9_007_199_254_740_991_i64)
+        );
+        assert_eq!(
+            stock(&engine, "rope")["available"],
+            json!(-9_007_199_254_740_991_i64)
+        );
+        cart(&engine, "c3", json!([line("rope", 0, 1)]));
+        let past = refusal(advance(&engine, "c3", "held"));
+        assert_eq!(past.code(), EngineErrorCode::InvalidArgument);
+        assert!(past.message().contains("more held"), "{}", past.message());
+        advance(&engine, "c2", "released").expect("release");
+        call("receiveStock", json!({"quantity": 1, "reason": "delivery"})).expect("receive");
+        publish(&engine, &inventory(json!({"permission": "stock.adjust"}))).expect("backorder off");
+        holds(&engine, false);
+
+        // Without backorder, a count with the override below what claims
+        // hold leaves too few to sell: the commit waits for stock.
+        create(&engine, "Inventory", "anvil", json!({"title": "Anvil"}));
+        let anvil = |operation: &str, params: Value| {
+            invoke(&engine, &stocker(), "Inventory", "anvil", operation, params)
+        };
+        anvil("receiveStock", json!({"quantity": 3, "reason": "delivery"})).expect("receive");
+        cart(&engine, "c4", json!([line("anvil", 0, 3)]));
+        advance(&engine, "c4", "held").expect("hold");
+        anvil("countStock", json!({"onHand": 1, "reason": "two broken"})).expect("count");
+        let (behavior, action, _, code, details) = veto(advance(&engine, "c4", "committed"));
+        assert_eq!(
+            (behavior.as_str(), action.as_str(), code.as_deref()),
+            ("Stock", "commitFor", Some("unavailable"))
+        );
+        assert_eq!(details.expect("details")["available"], json!(1));
+        assert_eq!(states(&engine, "c4"), ["held"]);
+        anvil("adjustStock", json!({"delta": 1, "reason": "one mended"})).expect("adjust up");
+        anvil("receiveStock", json!({"quantity": 1, "reason": "delivery"})).expect("receive");
+        advance(&engine, "c4", "committed").expect("commit");
+        assert_eq!(
+            stock(&engine, "anvil"),
+            json!({"onHand": 0, "held": 0, "available": 0, "low": false})
+        );
+        holds(&engine, false);
+    }
+}

@@ -972,7 +972,7 @@ export type CollectionPointCheckHoldResult = {
   reason?: string;
 };
 
-/** The parameters of Calendar's listBookings: Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed. */
+/** The parameters of Calendar's listBookings: Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time. */
 export type CollectionPointListBookingsParams = {
   /** The next of the previous page. */
   cursor?: string;
@@ -994,6 +994,8 @@ export type CollectionPointListBookingsResult = {
     holder: { id: string; schema: string };
     /** The item's index in its hold. */
     item: number;
+    /** True for a deleted claim's committed time, which stays booked; absent otherwise. */
+    retired?: boolean;
     startMs: number;
     state: 'held' | 'committed';
   }>;
@@ -1091,7 +1093,7 @@ export interface CollectionPointClient {
   releaseFor(id: string, params: CollectionPointReleaseForParams, options?: CollectionPointWriteOptions): Promise<CollectionPointReleaseForResult>;
   /** Calendar's checkHold: Answers whether holdFor would hold what an item asks now, and when not, why. */
   checkHold(id: string, params: CollectionPointCheckHoldParams, options?: CollectionPointWriteOptions): Promise<CollectionPointCheckHoldResult>;
-  /** Calendar's listBookings: Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed. */
+  /** Calendar's listBookings: Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time. */
   listBookings(id: string, params: CollectionPointListBookingsParams, options?: CollectionPointWriteOptions): Promise<CollectionPointListBookingsResult>;
   /** Calendar's findAvailability: Finds free slots of a duration across the schema's instances over a window of at most 31 days, by holdFor's rules at the engine's clock: at most limit slots, soonest first, each with the instance and how many more holds it can take then. ids or where narrow the instances, as a list does. */
   findAvailability(params: CollectionPointFindAvailabilityParams, options?: CallOptions): Promise<CollectionPointFindAvailabilityResult>;

@@ -1028,7 +1028,7 @@
     },
     {
       "name": "listBookings",
-      "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed.",
+      "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1093,6 +1093,10 @@
                 "item": {
                   "description": "The item's index in its hold.",
                   "type": "integer"
+                },
+                "retired": {
+                  "description": "True for a deleted claim's committed time, which stays booked; absent otherwise.",
+                  "type": "boolean"
                 },
                 "startMs": {
                   "type": "integer"
