@@ -18,7 +18,6 @@ use superschematic_engine_storage::{Sql, SqlValue, Tx};
 use super::references::{IncomingReference, Move, Reference, ReferenceSource, ReferenceTable};
 use super::{
     check_id, existing, insert, live, read_record, row, run_operation, write_own, InstanceRecord,
-    COLUMNS,
 };
 use crate::access::SchemaAction;
 use crate::behaviors::behavior::{GuardRequest, InstanceChange, InstanceFields};
@@ -30,6 +29,7 @@ use crate::engine::Engine;
 use crate::errors::{EngineError, EngineErrorCode, Error, Result};
 use crate::events::{log_floor, log_head, EngineEvent};
 use crate::namespaces::NamespaceView;
+use crate::reads::Reads;
 use crate::registry::document::check_schema_name;
 use crate::registry::{SchemaRecord, VersionRuntime, Which};
 use crate::values::refs_of;
@@ -48,7 +48,7 @@ pub(crate) struct Reach<'t, 'db> {
 /// An operation of a schema's live version, found: the version, its
 /// runtime, and the operation's position on the type.
 pub(crate) struct FoundOperation {
-    pub record: SchemaRecord,
+    pub record: Arc<SchemaRecord>,
     pub runtime: Arc<VersionRuntime>,
     /// The behavior's position on the type.
     pub index: usize,
@@ -72,7 +72,7 @@ impl<'t, 'db> Reach<'t, 'db> {
     }
 
     /// The live version of a schema the namespace reaches, or `not_found`.
-    pub fn live(&self, schema: &str) -> Result<SchemaRecord> {
+    pub fn live(&self, schema: &str) -> Result<Arc<SchemaRecord>> {
         live(
             &self.engine.catalog,
             self.tx,
@@ -192,15 +192,7 @@ impl<'t, 'db> Reach<'t, 'db> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let mut params = vec![SqlValue::from(self.namespace()), SqlValue::from(schema)];
-        params.extend(ids.iter().map(|id| SqlValue::from(*id)));
-        let rows = self.tx.all(
-            format!(
-                "SELECT {COLUMNS} FROM engine_instances WHERE namespace = ? AND schema = ? AND id IN ({})",
-                vec!["?"; ids.len()].join(", ")
-            ),
-            &params,
-        )?;
+        let rows = Reads::instances(self.tx, self.namespace(), schema, ids, &runtime)?;
         let mut found = Vec::new();
         for id in ids {
             for row in &rows {
@@ -734,7 +726,7 @@ impl<'t, 'db> Reach<'t, 'db> {
     /// The composition of a schema's live version.
     #[allow(dead_code)] // the runner (milestone 6) reads it
     pub fn composition(&self, schema: &str) -> Result<Composition> {
-        Ok(self.runtime(&self.live(schema)?)?.composition.clone())
+        Ok(self.runtime(&*self.live(schema)?)?.composition.clone())
     }
 }
 

@@ -63,6 +63,7 @@ mod namespaces;
 mod options;
 mod paging;
 mod principal;
+mod reads;
 mod registry;
 mod retention;
 mod runner;

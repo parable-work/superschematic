@@ -41,7 +41,15 @@
 //! transaction fails the call as [`Error::Connection`], the server having
 //! rolled it back, and one lost at COMMIT as [`Error::CommitUnknown`]. A
 //! connection that failed so never goes back to the pool.
+//!
+//! A transaction keeps one value for its caller ([`Tx::memo`]): the
+//! engine's cache of what the transaction has read. It is dropped when a
+//! savepoint rolls back, when the transaction ends, and as an engine call
+//! begins and ends inside a host's transaction, whose own statements may
+//! run between the calls. [`Tx::stable`] says whether what the transaction
+//! reads of a namespace can change while it runs.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
@@ -419,8 +427,13 @@ impl Db {
     {
         if let Some(tx) = self.held() {
             // Inside a host's transaction: a savepoint of it. A read sees
-            // what the host's transaction has written so far.
-            return tx.savepoint(f);
+            // what the host's transaction has written so far, and what the
+            // host's own statements wrote between calls, so nothing a call
+            // kept is kept past it.
+            tx.forget();
+            let result = tx.savepoint(f);
+            tx.forget();
+            return result;
         }
         let _opened = Opened::enter(Arc::as_ptr(&self.inner) as usize)?;
         let mut stale = 0;
@@ -540,8 +553,12 @@ pub struct Tx<'db> {
     ended: RefCell<Vec<Box<dyn FnOnce() + 'db>>>,
     /// Whether it holds the catalog's lock exclusively (Postgres).
     catalog: bool,
-    /// The namespaces whose locks it holds (Postgres).
+    /// The namespaces whose locks it holds (Postgres): a writer's
+    /// exclusively, a settled read's shared.
     namespaces: RefCell<Vec<String>>,
+    /// Whether it reads one snapshot (Postgres's REPEATABLE READ).
+    snapshot: bool,
+    memo: RefCell<Option<Arc<dyn Any + Send + Sync>>>,
     done: Cell<bool>,
 }
 
@@ -564,7 +581,15 @@ impl<'db> Tx<'db> {
                 let schema = backend.postgres_schema().unwrap_or_default();
                 let (timeout, locks) = match kind {
                     TxKind::Read => (inner.busy_timeout, String::new()),
-                    TxKind::Settled(lock) => (inner.busy_timeout, settled_locks(schema, lock)),
+                    TxKind::Settled(lock) => {
+                        match lock {
+                            Lock::Catalog => {}
+                            Lock::Namespace(namespace) => namespaces.push(namespace.to_owned()),
+                            Lock::Namespaces(list) => namespaces
+                                .extend(list.iter().map(|&namespace| namespace.to_owned())),
+                        }
+                        (inner.busy_timeout, settled_locks(schema, lock))
+                    }
                     TxKind::Write(Lock::Catalog) => (
                         inner.busy_timeout,
                         format!("pg_advisory_xact_lock({})", catalog_lock_key(schema)),
@@ -617,6 +642,8 @@ impl<'db> Tx<'db> {
             ended: RefCell::new(Vec::new()),
             catalog: matches!(kind, TxKind::Write(Lock::Catalog) | TxKind::Migrate { .. }),
             namespaces: RefCell::new(namespaces),
+            snapshot: matches!(kind, TxKind::Read),
+            memo: RefCell::new(None),
             done: Cell::new(false),
         })
     }
@@ -657,6 +684,47 @@ impl<'db> Tx<'db> {
     /// no row. Statements run with [`Tx::exec`] are not counted.
     pub fn changes(&self) -> u64 {
         self.changes.get()
+    }
+
+    /// The value of type `T` the transaction keeps for its caller, made
+    /// with `T::default()` when it keeps none, or one of another type. It
+    /// is dropped when a savepoint of the transaction rolls back, so what
+    /// it holds never outlives the writes it saw; when the transaction
+    /// ends; and by [`Tx::forget`].
+    pub fn memo<T: Any + Send + Sync + Default>(&self) -> Arc<T> {
+        if let Some(kept) = self.memo.borrow().as_ref() {
+            if let Ok(memo) = Arc::clone(kept).downcast::<T>() {
+                return memo;
+            }
+        }
+        let memo = Arc::new(T::default());
+        *self.memo.borrow_mut() = Some(Arc::clone(&memo) as Arc<dyn Any + Send + Sync>);
+        memo
+    }
+
+    /// Drops the value [`Tx::memo`] keeps.
+    pub fn forget(&self) {
+        self.memo.borrow_mut().take();
+    }
+
+    /// Whether no other transaction can change, while this one runs, what
+    /// it reads of the namespace's rows and of the catalog: on SQLite,
+    /// whose one writer excludes every other and whose reads see one
+    /// snapshot, always; on Postgres, in a read of one snapshot, in a
+    /// transaction that holds the catalog's lock, and in one that holds
+    /// the namespace's lock (a writer's exclusively, a settled read's
+    /// shared), each of which also holds the catalog's at least shared. A
+    /// settled read of the catalog alone reads at READ COMMITTED and sees
+    /// what writers commit as it runs.
+    pub fn stable(&self, namespace: &str) -> bool {
+        self.dialect() != Dialect::Postgres
+            || self.snapshot
+            || self.catalog
+            || self
+                .namespaces
+                .borrow()
+                .iter()
+                .any(|held| held == namespace)
     }
 
     /// Runs one statement that writes, and says how many rows it wrote.
@@ -984,6 +1052,7 @@ impl Savepoint<'_, '_> {
     // queued inside it, and clears the failure that happened inside it.
     fn roll_back(&self) {
         let tx = self.tx;
+        tx.forget();
         tx.committed.borrow_mut().truncate(self.queued);
         tx.aborted.borrow_mut().take();
         let sql = format!("ROLLBACK TO {name}; RELEASE {name}", name = self.name);

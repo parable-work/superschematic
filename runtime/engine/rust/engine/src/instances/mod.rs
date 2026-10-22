@@ -75,6 +75,7 @@ use crate::json::{self, js_equal};
 use crate::namespaces::{NamespaceView, DEFAULT_NAMESPACE};
 use crate::paging::page_size;
 use crate::principal::{actor_of, check_principal, Principal};
+use crate::reads::Reads;
 use crate::registry::document::check_schema_name;
 use crate::registry::{Catalog, NormalizeMode, SchemaRecord, VersionRuntime, Which};
 use crate::values::{refs_of, refs_text, Stowed, ValueHolder};
@@ -345,9 +346,10 @@ impl Instances<'_> {
             let (rows, next) = if terms.is_empty() {
                 let mut rows = tx.all(
                     format!(
-                        "SELECT {COLUMNS} FROM engine_instances
+                        "SELECT {} FROM engine_instances
          WHERE namespace = ? AND schema = ? AND position > ?
-         ORDER BY position LIMIT ?"
+         ORDER BY position LIMIT ?",
+                        Reads::select(&runtime)
                     ),
                     &[
                         SqlValue::from(namespace.as_str()),
@@ -388,9 +390,10 @@ impl Instances<'_> {
                     );
                     tx.all(
                         format!(
-                            "SELECT {COLUMNS} FROM engine_instances
+                            "SELECT {} FROM engine_instances
                WHERE namespace = ? AND schema = ? AND position IN ({})
                ORDER BY position",
+                            Reads::select(&runtime),
                             vec!["?"; positions.len()].join(", ")
                         ),
                         &params,
@@ -398,6 +401,9 @@ impl Instances<'_> {
                 };
                 (rows, next.map(encode_cursor))
             };
+            // The page's rows hold every behavior's columns: its readers
+            // read them from memory, not one instance at a time.
+            Reads::keep(tx, &namespace, schema, &rows, &runtime)?;
             let items = rows
                 .iter()
                 .map(|row| read_record(&reach, &runtime, &record, row, None, options.value_refs))
@@ -842,6 +848,7 @@ pub(crate) fn run_operation(
         execution.after_change(&change)?;
         let after = execution.fields(None)?;
         let seq = row.i64("seq")? + 1;
+        Reads::forget_instance(reach.tx, namespace, schema, id);
         reach.tx.run(
             "UPDATE engine_instances SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
          WHERE namespace = ? AND schema = ? AND id = ?",
@@ -1005,6 +1012,7 @@ fn update(
         &merged,
         &given.keys().cloned().collect(),
     )?;
+    Reads::forget_instance(tx, namespace, schema, id);
     tx.run(
         "UPDATE engine_instances
            SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
@@ -1101,6 +1109,7 @@ fn delete(
         preconditions.as_ref(),
     )?;
     execution.deleting()?;
+    Reads::forget_instance(tx, namespace, schema, id);
     tx.run(
         "DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?",
         &[
@@ -1167,7 +1176,7 @@ pub(crate) fn live(
     view: &NamespaceView<'_>,
     namespace: &str,
     schema: &str,
-) -> Result<SchemaRecord> {
+) -> Result<Arc<SchemaRecord>> {
     catalog
         .find(tx, view, schema, namespace, Which::Live)?
         .ok_or_else(|| {
@@ -1222,6 +1231,8 @@ pub(crate) fn insert(
         let stowed = engine
             .values
             .stow(tx, &own, "", &BTreeSet::new(), &runtime.inline)?;
+        // A read before the create kept that there was none.
+        Reads::forget_instance(tx, namespace, schema, id);
         let inserted = unique(namespace, schema, &runtime, &own, tx.run(
             "INSERT INTO engine_instances
            (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs)
@@ -1443,6 +1454,7 @@ pub(crate) fn write_own(
     let stowed = engine
         .values
         .stow(tx, &object, "", &known, &runtime.inline)?;
+    Reads::forget_instance(tx, namespace, schema, id);
     unique(
         namespace,
         schema,
@@ -1498,17 +1510,10 @@ fn unique(
     }
 }
 
+/// An instance's own columns, as the call's transaction last read or wrote
+/// them ([`Reads`]).
 pub(crate) fn row(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Option<Row>> {
-    Ok(tx.get(
-        format!(
-            "SELECT {COLUMNS} FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?"
-        ),
-        &[
-            SqlValue::from(namespace),
-            SqlValue::from(schema),
-            SqlValue::from(id),
-        ],
-    )?)
+    Reads::own(tx, namespace, schema, id)
 }
 
 pub(crate) fn existing(tx: &Tx<'_>, namespace: &str, schema: &str, id: &str) -> Result<Row> {

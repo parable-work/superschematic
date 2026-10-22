@@ -26,6 +26,7 @@
 //! them, before any guard.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
@@ -50,6 +51,7 @@ use crate::instances::references::{Hears, Reference, ReferenceSource, ReferenceT
 use crate::instances::InstanceRecord;
 use crate::json;
 use crate::principal::Principal;
+use crate::reads::Reads;
 use crate::registry::{NormalizeMode, VersionRuntime};
 use crate::values::{refs_of, refs_text, ValueHolder};
 
@@ -65,7 +67,14 @@ pub(crate) struct Chain {
     pub cause: Option<EventCause>,
     depth: Cell<usize>,
     writes: RefCell<Vec<(String, String)>>,
+    /// The behavior fields a read-only call has read, by schema, id,
+    /// behavior and field (`Execution::fields`).
+    read: RefCell<HashMap<FieldKey, Option<Value>>>,
 }
+
+/// A behavior field of an instance of the chain's namespace: its schema,
+/// id, behavior and field.
+type FieldKey = (String, String, String, String);
 
 impl Chain {
     pub fn new(principal: &Principal, namespace: &str, now: i64) -> Self {
@@ -76,6 +85,7 @@ impl Chain {
             cause: None,
             depth: Cell::new(0),
             writes: RefCell::new(Vec::new()),
+            read: RefCell::new(HashMap::new()),
         }
     }
 
@@ -365,7 +375,17 @@ impl<'t, 'db> Execution<'t, 'db> {
     /// qualified name: by behavior name, in the type's behavior order, an
     /// object of the fields that have a value, in declaration order. A
     /// behavior that declares none of the fields asked has no entry.
+    ///
+    /// In a read-only transaction that holds its namespace still
+    /// ([`superschematic_engine_storage::Tx::stable`]) nothing a reader
+    /// reads can change, and the call's principal and time are its chain's,
+    /// so each field is read once a call: a reader that reads its own
+    /// instance's other behaviors, or a list whose instances share one,
+    /// reads each field once.
     pub fn fields(&self, only: Option<&[&str]>) -> Result<Map<String, Value>> {
+        let tx = self.reach.tx;
+        let chain = self.reach.chain;
+        let still = !self.writable && tx.read_only() && tx.stable(&chain.namespace);
         let mut out = Map::new();
         for (index, bound) in self.behaviors().iter().enumerate() {
             let name = &bound.behavior.name;
@@ -390,11 +410,31 @@ impl<'t, 'db> Execution<'t, 'db> {
             );
             let mut entry = Map::new();
             for field in wanted {
-                let value = bound
-                    .behavior
-                    .implementation
-                    .field(field, &ctx, &bound.config)
-                    .unwrap_or(Ok(None))?;
+                let key = still.then(|| {
+                    (
+                        self.schema.clone(),
+                        self.id.clone(),
+                        name.clone(),
+                        field.clone(),
+                    )
+                });
+                let kept = key
+                    .as_ref()
+                    .and_then(|key| chain.read.borrow().get(key).cloned());
+                let value = match kept {
+                    Some(value) => value,
+                    None => {
+                        let value = bound
+                            .behavior
+                            .implementation
+                            .field(field, &ctx, &bound.config)
+                            .unwrap_or(Ok(None))?;
+                        if let Some(key) = key {
+                            chain.read.borrow_mut().insert(key, value.clone());
+                        }
+                        value
+                    }
+                };
                 match value {
                     None | Some(Value::Null) => {}
                     Some(value) => {
@@ -1265,6 +1305,12 @@ impl Core for Ctx<'_, '_, '_> {
             SqlValue::from(self.exec.schema.as_str()),
             SqlValue::from(self.exec.id.as_str()),
         ]);
+        Reads::forget_instance(
+            self.exec.reach.tx,
+            &self.exec.reach.chain.namespace,
+            &self.exec.schema,
+            &self.exec.id,
+        );
         self.exec.reach.tx.run(
             format!(
                 "UPDATE engine_instances SET {} WHERE namespace = ? AND schema = ? AND id = ?",
@@ -1439,6 +1485,25 @@ fn instance_columns(ctx: &Ctx<'_, '_, '_>) -> Result<Row> {
     }
     let dialect = ctx.exec.reach.tx.dialect();
     let prefix = ctx.prefix()?;
+    let tx = ctx.exec.reach.tx;
+    let namespace = ctx.exec.reach.chain.namespace.as_str();
+    // One statement reads every behavior's columns of the instance, once a
+    // call and again only after a write of it.
+    if let Some(row) = Reads::columns(
+        tx,
+        namespace,
+        &ctx.exec.schema,
+        &ctx.exec.id,
+        &ctx.exec.runtime,
+    )? {
+        let values: Option<Vec<SqlValue>> = columns
+            .iter()
+            .map(|column| row.get(&instance_column(dialect, prefix, column)).cloned())
+            .collect();
+        if let Some(values) = values {
+            return Ok(Row::new(Arc::from(columns.as_slice()), values));
+        }
+    }
     let listed: Vec<String> = columns
         .iter()
         .map(|column| {
