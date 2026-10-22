@@ -9,9 +9,13 @@
 //! open and no move leaves a state while a payment is processing; manual
 //! capture captures in `captureOn` states and never past what is
 //! authorized; refunds draw on what is captured; an amount in another
-//! currency is refused; and a claim's `Holds.total` is what it owes. On
-//! SQLite and, with the variable set, on Postgres, with the ledger's
-//! invariants checked after every step.
+//! currency is refused; a new attempt voids one that failed, a capture
+//! that pays what is due voids the others, and what a late capture brings
+//! past what is due is `overpaid` and asked back; and a claim's real
+//! `Holds.total` is what it owes, failing closed (`total_unknown`) while it
+//! cannot be read, and 0 for a claim with nothing priced. On SQLite and,
+//! with the variable set, on Postgres, with the ledger's invariants checked
+//! after every step.
 
 mod payments_support;
 mod support;
@@ -20,7 +24,6 @@ use serde_json::{json, Value};
 
 use payments_support::*;
 use superschematic_engine::{BehaviorSet, DefineOptions, EngineErrorCode};
-use superschematic_engine_testkit::payments_fixtures::HoldsTotal;
 use support::{alice, code, refusal, targets, veto};
 
 fn code_of<T: std::fmt::Debug>(result: Result<T, superschematic_engine::Error>) -> Option<String> {
@@ -1065,115 +1068,458 @@ fn a_literal_currency_is_checked_against_iso_4217_when_the_schema_is_defined() {
     }
 }
 
+// claim_documents are an Item, which Stock counts at its priceCents in
+// its currency, or at no price when priceCents is absent, and a Basket of
+// lines of Items, which Holds takes in held and commits in placed, and
+// which owes its Holds.total through Payments (`payments` replaces
+// members of the config, as payments_config does).
+fn claim_documents(payments: Value) -> (Value, Value) {
+    let mut item = support::schema_document(
+        "Item",
+        json!([
+            {"name": "title", "typeRef": {"name": "string"}},
+            {"name": "priceCents", "typeRef": {"name": "Generic.Int64"}},
+            {"name": "currency", "typeRef": {"name": "string"}}
+        ]),
+        json!({}),
+    );
+    item["types"]["Item"]["behaviors"] = json!([{"name": "Stock", "config": {
+        "permission": "stock.adjust",
+        "price": {"field": "priceCents", "currency": {"field": "currency"}}
+    }}]);
+    let mut basket = support::schema_document(
+        "Basket",
+        json!([
+            {"name": "title", "typeRef": {"name": "string"}},
+            {"name": "lines", "typeRef": {"name": "Line", "isArray": true}}
+        ]),
+        json!({"types": {"Line": {"name": "Line", "role": "EmbeddedStruct", "fields": [
+            {"name": "itemId", "typeRef": {"name": "string"}, "required": true},
+            {"name": "quantity", "typeRef": {"name": "Generic.Int64"}}
+        ]}}}),
+    );
+    let mut config = json!({
+        "amount": {"holds": true},
+        "require": {"placed": "paid"},
+        "voidOn": ["expired", "cancelled"],
+        "record": {"permission": RECORD}
+    });
+    if let (Some(config), Value::Object(more)) = (config.as_object_mut(), payments) {
+        config.extend(more);
+    }
+    basket["types"]["Basket"]["behaviors"] = json!([
+        checkout_flow(),
+        {"name": "Holds", "config": {
+            "holds": {"lines": {"each": {"field": "lines", "target": "itemId"}, "schema": "Item", "quantity": {"field": "quantity"}}},
+            "takeOn": ["held"],
+            "commitOn": ["placed"],
+            "releaseOn": ["expired", "cancelled"]
+        }},
+        {"name": "Payments", "config": config}
+    ]);
+    (item, basket)
+}
+
+// claims opens an engine with Stock and Holds beside Payments, the Item
+// and Basket schemas, and items: two in GBP, one in EUR, one at the
+// largest price an integer field holds, and one with no price.
+fn claims(target: &support::Target) -> superschematic_engine::Engine {
+    let engine = open(
+        target,
+        BehaviorSet::new()
+            .with(superschematic_engine_commerce::Stock)
+            .with(superschematic_engine_commerce::Holds),
+    );
+    let (item, basket) = claim_documents(json!({}));
+    support::publish(&engine, &item, None);
+    support::publish(&engine, &basket, None);
+    let stocker = principal("sam", &["stock.adjust"]);
+    for (id, price, currency, units) in [
+        ("anvil", Some(1250), "GBP", 10),
+        ("rope", Some(300), "GBP", 10),
+        ("lamp", Some(900), "EUR", 10),
+        ("gold", Some(9_007_199_254_740_991_i64), "GBP", 2000),
+        ("leaflet", None, "GBP", 10),
+    ] {
+        let mut data = json!({"title": id, "currency": currency});
+        if let Some(price) = price {
+            data["priceCents"] = json!(price);
+        }
+        create(&engine, "Item", id, data, None).expect("create the item");
+        invoke(
+            &engine,
+            &stocker,
+            "Item",
+            id,
+            "receiveStock",
+            json!({"quantity": units, "reason": "delivery"}),
+        )
+        .expect("receive");
+    }
+    engine
+}
+
+fn basket(engine: &superschematic_engine::Engine, id: &str, lines: Value) {
+    create(
+        engine,
+        "Basket",
+        id,
+        json!({"title": id, "lines": lines}),
+        None,
+    )
+    .expect("create the basket");
+}
+
+fn pay_basket(
+    engine: &superschematic_engine::Engine,
+    id: &str,
+    key: &str,
+) -> Result<Value, superschematic_engine::Error> {
+    invoke(
+        engine,
+        &alice(),
+        "Basket",
+        id,
+        "openPayment",
+        json!({"provider": PROVIDER, "idempotencyKey": key}),
+    )
+}
+
 #[test]
 fn a_claims_holds_total_is_what_it_owes() {
     for target in targets("a_claims_holds_total") {
-        let engine = open(&target, BehaviorSet::new().with(HoldsTotal));
-        let config = payments_config(json!({"amount": {"holds": true}, "currency": null}));
-        support::publish(
+        let engine = claims(&target);
+        basket(
             &engine,
-            &checkout_document(
-                "Checkout",
-                json!([checkout_flow(), {"name": "Holds"}, {"name": "Payments", "config": config}]),
-            ),
-            None,
+            "b-1",
+            json!([{"itemId": "anvil", "quantity": 2}, {"itemId": "rope", "quantity": 1}]),
         );
-        checkout(&engine, "c-1", 0);
-        let set_total = |total: Value| {
-            invoke(
-                &engine,
-                &alice(),
-                "Checkout",
-                "c-1",
-                "setTotal",
-                json!({"total": total}),
-            )
-        };
-        assert_eq!(payments(&engine, "Checkout", "c-1")["due"], json!(0));
-        assert_eq!(
-            code_of(open_payment(&engine, "c-1", "k0")).as_deref(),
-            Some("nothing_due")
-        );
-        set_total(json!({"amount": 4200, "currency": "EUR"})).unwrap();
-        let fields = payments(&engine, "Checkout", "c-1");
+        // In the cart its lines are pending, whose prices come when they
+        // are held: what it owes is not known yet.
+        let (_, _, _, vetoed, _) = veto(pay_basket(&engine, "b-1", "k0"));
+        assert_eq!(vetoed.as_deref(), Some("total_unknown"));
+
+        transition(&engine, &alice(), "Basket", "b-1", "held").expect("held");
+        let fields = payments(&engine, "Basket", "b-1");
         assert_eq!(
             (fields["due"].clone(), fields["currency"].clone()),
-            (json!(4200), json!("EUR"))
+            (json!(2800), json!("GBP"))
         );
-        let opened = open_payment(&engine, "c-1", "k1").unwrap();
+        let opened = pay_basket(&engine, "b-1", "k1").expect("openPayment");
         assert_eq!(
             (opened["amount"].clone(), opened["currency"].clone()),
-            (json!(4200), json!("EUR"))
+            (json!(2800), json!("GBP"))
         );
-        // The total does not move while the attempt is in flight.
-        let (behavior, action, _, vetoed, _) =
-            veto(set_total(json!({"amount": 5000, "currency": "EUR"})));
-        assert_eq!(
-            (behavior.as_str(), action.as_str()),
-            ("Payments", "setTotal")
+        // Placed waits for the money.
+        let (_, _, _, vetoed, _) = veto(transition(&engine, &alice(), "Basket", "b-1", "placed"));
+        assert_eq!(vetoed.as_deref(), Some("unpaid"));
+        record(
+            &engine,
+            "Basket",
+            "b-1",
+            event(
+                "e1",
+                "captured",
+                2800,
+                json!({"attempt": opened["attempt"]}),
+            ),
+        )
+        .unwrap();
+        transition(&engine, &alice(), "Basket", "b-1", "placed").expect("paid, placed");
+        assert_ledger(&engine, "Basket", "b-1");
+
+        // A Payments listed before Holds would read a total not yet written.
+        let (_, early) = claim_documents(json!({}));
+        let mut early = early;
+        early["name"] = json!("Early");
+        let behaviors = early["types"]["Basket"]["behaviors"].clone();
+        early["types"]["Early"] = early["types"]["Basket"].take();
+        early["types"]["Early"]["name"] = json!("Early");
+        early["types"].as_object_mut().unwrap().remove("Basket");
+        early["types"]["Early"]["behaviors"] = json!([behaviors[0], behaviors[2], behaviors[1]]);
+        let refused = engine
+            .schemas()
+            .define(&alice(), early, DefineOptions::default());
+        assert!(refusal(refused).to_string().contains("after Holds"));
+    }
+}
+
+#[test]
+fn a_holds_total_that_cannot_be_read_owes_nothing_known_and_a_free_claim_owes_nothing() {
+    for target in targets("a_holds_total_that_cannot_be_read") {
+        let engine = claims(&target);
+        // Two currencies are never added: nothing can be paid, and placed
+        // waits as it would for the money.
+        basket(
+            &engine,
+            "mixed",
+            json!([{"itemId": "anvil", "quantity": 1}, {"itemId": "lamp", "quantity": 1}]),
         );
-        assert_eq!(vetoed.as_deref(), Some("amount_locked"));
-        assert_eq!(payments(&engine, "Checkout", "c-1")["due"], json!(4200));
+        // A sum past what an integer holds.
+        basket(
+            &engine,
+            "huge",
+            json!([{"itemId": "gold", "quantity": 1025}]),
+        );
+        for id in ["mixed", "huge"] {
+            transition(&engine, &alice(), "Basket", id, "held").expect("held");
+            let fields = payments(&engine, "Basket", id);
+            assert_eq!(fields["due"], json!(0), "{id}");
+            let (behavior, _, _, vetoed, _) = veto(pay_basket(&engine, id, "k"));
+            assert_eq!(
+                (behavior.as_str(), vetoed.as_deref()),
+                ("Payments", Some("total_unknown")),
+                "{id}"
+            );
+            let (behavior, _, _, vetoed, details) =
+                veto(transition(&engine, &alice(), "Basket", id, "placed"));
+            assert_eq!(
+                (behavior.as_str(), vetoed.as_deref()),
+                ("Payments", Some("total_unknown")),
+                "{id}"
+            );
+            assert_eq!(details.unwrap()["requires"], json!("paid"), "{id}");
+            assert_eq!(status(&engine, "Basket", id), "held", "{id}");
+            // Letting it go needs no payment.
+            transition(&engine, &alice(), "Basket", id, "cancelled").expect("cancelled");
+        }
+
+        // A claim whose items carry no price owes 0: it needs no payment,
+        // and moves where require waits for one.
+        basket(
+            &engine,
+            "free",
+            json!([{"itemId": "leaflet", "quantity": 2}]),
+        );
+        transition(&engine, &alice(), "Basket", "free", "held").expect("held");
+        let fields = payments(&engine, "Basket", "free");
+        assert_eq!(fields["due"], json!(0));
+        let (_, _, _, vetoed, _) = veto(pay_basket(&engine, "free", "k"));
+        assert_eq!(vetoed.as_deref(), Some("nothing_due"));
+        transition(&engine, &alice(), "Basket", "free", "placed").expect("a free claim is placed");
+        assert_ledger(&engine, "Basket", "free");
+
+        // A config's currency must be the total's.
+        let (_, mut pounds) = claim_documents(json!({"currency": "EUR"}));
+        pounds["name"] = json!("Euros");
+        pounds["types"]["Euros"] = pounds["types"]["Basket"].take();
+        pounds["types"]["Euros"]["name"] = json!("Euros");
+        pounds["types"].as_object_mut().unwrap().remove("Basket");
+        support::publish(&engine, &pounds, None);
+        create(
+            &engine,
+            "Euros",
+            "e-1",
+            json!({"title": "e-1", "lines": [{"itemId": "rope", "quantity": 1}]}),
+            None,
+        )
+        .unwrap();
+        transition(&engine, &alice(), "Euros", "e-1", "held").expect("held");
+        let (_, _, _, vetoed, _) = veto(invoke(
+            &engine,
+            &alice(),
+            "Euros",
+            "e-1",
+            "openPayment",
+            json!({"provider": PROVIDER, "idempotencyKey": "k"}),
+        ));
+        assert_eq!(vetoed.as_deref(), Some("currency_mismatch"));
+    }
+}
+
+#[test]
+fn a_late_capture_of_an_earlier_attempt_is_voided_and_what_it_overpays_is_asked_back() {
+    for target in targets("a_late_capture_of_an_earlier_attempt") {
+        let engine = open(&target, BehaviorSet::new());
+        publish_checkout(&engine, payments_config(json!({})));
+        checkout(&engine, "c-1", 2500);
+        let first = open_payment(&engine, "c-1", "k1").unwrap()["attempt"].clone();
         record(
             &engine,
             "Checkout",
             "c-1",
             event(
                 "e1",
-                "captured",
-                4200,
-                json!({"attempt": opened["attempt"], "currency": "EUR"}),
+                "failed",
+                2500,
+                json!({"attempt": first, "providerRef": "pi_1"}),
             ),
         )
         .unwrap();
-        // Paid: the total moves again, and what it adds is outstanding.
-        set_total(json!({"amount": 5000, "currency": "EUR"})).expect("after it is paid");
+        assert_eq!(kinds(&engine, "Checkout", "c-1"), Vec::<String>::new());
+
+        // The payer tries again: the new attempt's create, and a void of
+        // the one that failed, whose payment the provider may still finish.
+        let second = open_payment(&engine, "c-1", "k2").unwrap()["attempt"].clone();
+        let waiting = actions(&engine, "Checkout");
+        let by_kind: Vec<(String, Value, Value)> = waiting
+            .iter()
+            .map(|action| {
+                (
+                    action["kind"].as_str().unwrap().to_owned(),
+                    action["attempt"].clone(),
+                    action["amount"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_kind,
+            vec![
+                ("create".to_owned(), second.clone(), json!(2500)),
+                ("void".to_owned(), first.clone(), json!(2500)),
+            ]
+        );
+        // The second is processing at the provider.
+        record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event(
+                "e2",
+                "processing",
+                2500,
+                json!({"attempt": second, "providerRef": "pi_2"}),
+            ),
+        )
+        .unwrap();
+
+        // The provider finishes the first payment anyway: it is counted,
+        // and pays what is due.
+        let late = record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event("e3", "captured", 2500, json!({"attempt": first})),
+        )
+        .unwrap();
+        assert_eq!(late["applied"], json!(true));
+        assert_eq!(late["state"], json!("paid"));
         let fields = payments(&engine, "Checkout", "c-1");
         assert_eq!(
-            (fields["outstanding"].clone(), fields["state"].clone()),
-            (json!(800), json!("pending"))
+            (fields["captured"].clone(), fields["overpaid"].clone()),
+            (json!(2500), json!(0))
         );
-        let more = open_payment(&engine, "c-1", "k2").unwrap();
-        assert_eq!(more["amount"], json!(800));
         assert_ledger(&engine, "Checkout", "c-1");
 
-        // A Payments listed before Holds would read a total not yet written.
-        let refused = engine.schemas().define(
-            &alice(),
-            checkout_document(
-                "Early",
-                json!([checkout_flow(), {"name": "Payments", "config": payments_config(json!({"amount": {"holds": true}, "currency": null}))}, {"name": "Holds"}]),
-            ),
-            DefineOptions::default(),
-        );
-        assert!(refusal(refused).to_string().contains("after Holds"));
-        // A config's currency must be the total's.
-        support::publish(
+        // The second, processing when the first captured, captures too:
+        // what it brings past what is due is overpaid, asked back with a
+        // refund, and the checkout stays paid.
+        let twice = record(
             &engine,
-            &checkout_document(
-                "Pounds",
-                json!([checkout_flow(), {"name": "Holds"}, {"name": "Payments", "config": payments_config(json!({"amount": {"holds": true}}))}]),
-            ),
-            None,
-        );
-        create(&engine, "Pounds", "p-1", json!({}), None).unwrap();
-        invoke(
-            &engine,
-            &alice(),
-            "Pounds",
-            "p-1",
-            "setTotal",
-            json!({"total": {"amount": 10, "currency": "EUR"}}),
+            "Checkout",
+            "c-1",
+            event("e4", "captured", 2500, json!({"attempt": second})),
         )
         .unwrap();
-        let (_, _, _, vetoed, _) = veto(invoke(
+        assert_eq!(twice["state"], json!("paid"));
+        let fields = payments(&engine, "Checkout", "c-1");
+        assert_eq!(fields["captured"], json!(5000));
+        assert_eq!(fields["overpaid"], json!(2500));
+        assert_eq!(fields["outstanding"], json!(0));
+        let refunds: Vec<Value> = actions(&engine, "Checkout")
+            .into_iter()
+            .filter(|action| action["kind"] == json!("refund"))
+            .collect();
+        assert_eq!(refunds.len(), 1);
+        assert_eq!(refunds[0]["amount"], json!(2500));
+        assert_ledger(&engine, "Checkout", "c-1");
+        // A repeat of the event asks nothing again.
+        record(
             &engine,
-            &alice(),
-            "Pounds",
-            "p-1",
-            "openPayment",
-            json!({"provider": PROVIDER, "idempotencyKey": "k"}),
-        ));
-        assert_eq!(vetoed.as_deref(), Some("currency_mismatch"));
+            "Checkout",
+            "c-1",
+            event("e4", "captured", 2500, json!({"attempt": second})),
+        )
+        .unwrap();
+        assert_eq!(
+            kinds(&engine, "Checkout", "c-1")
+                .iter()
+                .filter(|kind| *kind == "refund")
+                .count(),
+            1
+        );
+
+        // The provider refunds the excess: the checkout is still paid.
+        let done = record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event(
+                "e5",
+                "refunded",
+                2500,
+                json!({"refund": refunds[0]["refund"]}),
+            ),
+        )
+        .unwrap();
+        assert_eq!(done["state"], json!("paid"));
+        let fields = payments(&engine, "Checkout", "c-1");
+        assert_eq!(
+            (
+                fields["refunded"].clone(),
+                fields["overpaid"].clone(),
+                fields["state"].clone()
+            ),
+            (json!(2500), json!(2500), json!("paid"))
+        );
+        assert_ledger(&engine, "Checkout", "c-1");
+
+        // A staff refund cannot take the keys Payments asks itself under.
+        let forged = invoke(
+            &engine,
+            &refunder(),
+            "Checkout",
+            "c-1",
+            "refundPayment",
+            json!({"amount": 1, "reason": "x", "idempotencyKey": "overpaid:e9"}),
+        );
+        assert_eq!(code(forged), EngineErrorCode::InvalidArgument);
+    }
+}
+
+#[test]
+fn a_capture_that_pays_what_is_due_voids_the_other_open_attempts() {
+    for target in targets("a_capture_that_pays_what_is_due_voids") {
+        let engine = open(&target, BehaviorSet::new());
+        publish_checkout(&engine, payments_config(json!({})));
+        checkout(&engine, "c-1", 2500);
+        let first = open_payment(&engine, "c-1", "k1").unwrap()["attempt"].clone();
+        record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event("e1", "failed", 2500, json!({"attempt": first})),
+        )
+        .unwrap();
+        let second = open_payment(&engine, "c-1", "k2").unwrap()["attempt"].clone();
+        // The first captures late while the second is still open: the
+        // second is voided, and nothing is overpaid.
+        record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event("e2", "captured", 2500, json!({"attempt": first})),
+        )
+        .unwrap();
+        let voids: Vec<Value> = actions(&engine, "Checkout")
+            .into_iter()
+            .filter(|action| action["kind"] == json!("void"))
+            .map(|action| action["attempt"].clone())
+            .collect();
+        assert_eq!(voids, vec![second.clone()]);
+        record(
+            &engine,
+            "Checkout",
+            "c-1",
+            event("e3", "cancelled", 2500, json!({"attempt": second})),
+        )
+        .unwrap();
+        let fields = payments(&engine, "Checkout", "c-1");
+        assert_eq!(
+            (fields["state"].clone(), fields["overpaid"].clone()),
+            (json!("paid"), json!(0))
+        );
+        assert_eq!(kinds(&engine, "Checkout", "c-1"), Vec::<String>::new());
+        assert_ledger(&engine, "Checkout", "c-1");
     }
 }

@@ -235,7 +235,7 @@ func TestCoreBehaviors(t *testing.T) {
 			"has_bookings", "window_too_long", "no_closure"}},
 		{holds, []string{"unavailable", "holds_missing", "held_fields", "committed", "too_many_items", "not_taking", "no_supply"}},
 		{payments, []string{"nothing_due", "amount_locked", "currency_mismatch", "over_capture", "exceeds_refundable", "unpaid", "unauthorized",
-			"payment_in_progress", "no_attempt", "not_linked", "key_reused", "attempt_closed", "not_configured"}},
+			"payment_in_progress", "no_attempt", "not_linked", "key_reused", "attempt_closed", "not_configured", "total_unknown"}},
 	} {
 		if got := codes(want.behavior); !slices.Equal(got, want.codes) {
 			t.Errorf("%s veto codes = %v, want %v", want.behavior.Name, got, want.codes)
@@ -619,7 +619,7 @@ func TestCommerceBehaviors(t *testing.T) {
 		{calendar, []string{"timeZone", "hours", "closures"}, []string{"setOpeningHours::true", "addClosure::true", "removeClosure::true", "holdFor::true", "commitFor::true",
 			"releaseFor::true", "checkHold::false", "listBookings::false", "findAvailability:schema:false"}},
 		{holds, []string{"items", "state", "total"}, []string{"retakeHolds::true", "listHolds::false"}},
-		{payments, []string{"due", "authorized", "captured", "refunded", "outstanding", "currency", "state", "attempts"}, []string{"openPayment::true", "recordPaymentEvent::true",
+		{payments, []string{"due", "authorized", "captured", "refunded", "outstanding", "overpaid", "currency", "state", "attempts"}, []string{"openPayment::true", "recordPaymentEvent::true",
 			"capturePayment::true", "voidPayment::true", "refundPayment::true", "listPaymentActions:schema:false", "refundFor::true", "settleRefundFor::true"}},
 	} {
 		var ops []string

@@ -897,6 +897,7 @@ func narrowPayments(n *Narrowing, _ map[string]any, _ Target) error {
 		typedField{"captured", integer(), true},
 		typedField{"refunded", integer(), true},
 		typedField{"outstanding", integer(), true},
+		typedField{"overpaid", integer(), true},
 		typedField{"currency", str(), false},
 		typedField{"state", EnumOf(paymentsStates), true},
 		typedField{"attempts", map[string]any{"type": "array", "items": attempt}, true},

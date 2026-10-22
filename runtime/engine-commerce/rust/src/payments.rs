@@ -13,6 +13,13 @@
 //! provider reports must be in the instance's currency
 //! (`currency_mismatch`).
 //!
+//! What is owed from holds fails closed. While an item of the claim is
+//! pending its price is not known, and a null `Holds.total` over priced
+//! items (two currencies, or a sum past what an integer holds) is not 0:
+//! `due` reads 0, and `openPayment` and a `require` move refuse with
+//! `total_unknown`. A claim whose held items carry no price owes 0, so a
+//! free booking moves where `require` waits for money.
+//!
 //! What is recorded, all in Payments' own tables, the same SQL on SQLite
 //! and Postgres:
 //! - an attempt per payment opened (`openPayment`), with its provider, the
@@ -50,6 +57,15 @@
 //! authorized (or, with nothing authorized, past the attempt's amount) is
 //! `over_capture`.
 //!
+//! Paying twice. A provider may still finish a payment it reported failed,
+//! so `openPayment` gives each earlier failed attempt a `void` action as it
+//! opens a new one, and a capture that pays what is due voids the other
+//! attempts still open. A capture that arrives anyway is counted: what it
+//! brings past what is due is `Payments.overpaid`, and Payments asks it
+//! back with a refund keyed `overpaid:<eventId>`, which leaves the state
+//! `paid` (`release:` and `overpaid:` keys are Payments' own, which
+//! `refundPayment` refuses).
+//!
 //! The Workflow. `require` holds a move into a state until every amount
 //! due is authorized or captured (`unauthorized`) or captured (`unpaid`).
 //! No move leaves a state while an attempt is `processing`
@@ -83,9 +99,26 @@
 //! whose Payments `refundOf` link points here, in an `issueOn` state, for
 //! its own amount and currency (`not_linked`), as a supply's holder check
 //! accepts only a claim's own items, so a caller cannot ask a refund by
-//! calling it directly. `settleRefundFor` needs the refund instance's
-//! `record.permission`, the adapter's, and takes only the instance its link
-//! points at and a refund it asked.
+//! calling it directly. One approval pays one refund: while a refund the
+//! instance asked is pending or paid, refundFor returns it under its key
+//! and refuses any other (`key_reused`), and after one failed it takes only
+//! the key the refund instance derives from itself and the failures before
+//! (`<schema>:<id>.<n>`), so a caller who reaches refundFor cannot ask a
+//! second refund by making up keys. `settleRefundFor` needs the refund
+//! instance's `record.permission`, the adapter's, takes only the instance
+//! its link points at and a refund it asked, and refuses a status or an
+//! amount other than the outcome that instance recorded (`not_linked`).
+//!
+//! What the pair needs of a deployment. The adapter records a refund's
+//! outcome on the instance refunded, which invokes `settleRefundFor` on
+//! the refund instance in the same call, as the adapter: the two schemas'
+//! `record.permission` must be the same, which defining the refund's
+//! schema checks, and the engine's policy must let the adapter write the
+//! refund schema's `settleRefundFor`, else every refund outcome is refused
+//! and rolls back. The move into an `issueOn` state invokes `refundFor` as
+//! the principal that moved it (an approver, or the runner for a Reactions
+//! or Timers move), which the policy must let write the refunded schema's
+//! `refundFor`.
 //!
 //! A refund draws on one captured attempt; one larger than any attempt has
 //! left to refund is `exceeds_refundable`, its details naming what is.
@@ -130,6 +163,7 @@ const WORKFLOW_STATUS: &str = "Workflow.status";
 const WORKFLOW_ENTERED_AT: &str = "Workflow.enteredAt";
 const LINKS_TARGETS: &str = "Links.targets";
 const HOLDS_TOTAL: &str = "Holds.total";
+const HOLDS_ITEMS: &str = "Holds.items";
 const PAYMENTS_DUE: &str = "Payments.due";
 const PAYMENTS_CURRENCY: &str = "Payments.currency";
 
@@ -148,6 +182,7 @@ pub mod codes {
     pub const KEY_REUSED: &str = "key_reused";
     pub const ATTEMPT_CLOSED: &str = "attempt_closed";
     pub const NOT_CONFIGURED: &str = "not_configured";
+    pub const TOTAL_UNKNOWN: &str = "total_unknown";
 }
 
 use codes::*;
@@ -352,8 +387,11 @@ fn check_states<'s>(
 
 // check_refund_of holds refundOf's link to a required, single-valued link
 // of the type's Links config and, when the schema is defined or
-// published, its target schema to one that composes Payments.
-fn check_refund_of(target: &ConfigTarget<'_>, link: &str) -> Result<()> {
+// published, its target schema to one that composes Payments with the
+// same record.permission: the adapter that records the refund's outcome on
+// the target settles it on the refund in the same call, as itself, so one
+// permission must cover both.
+fn check_refund_of(target: &ConfigTarget<'_>, link: &str, record: &str) -> Result<()> {
     let at = format!("refundOf.link {link}");
     if !target.behaviors().iter().any(|name| name == "Links") {
         return Err(Error::config(format!(
@@ -399,13 +437,17 @@ fn check_refund_of(target: &ConfigTarget<'_>, link: &str) -> Result<()> {
             "{at}: {schema}, which the link points at, does not compose Payments"
         )));
     }
-    if refunded
-        .configs
-        .get(NAME)
-        .is_some_and(|config| config.get("refundOf").is_some())
-    {
+    let theirs = refunded.configs.get(NAME);
+    if theirs.is_some_and(|config| config.get("refundOf").is_some()) {
         return Err(Error::config(format!(
             "{at}: {schema}, which the link points at, is a refund itself"
+        )));
+    }
+    let their_record = theirs.and_then(|config| text_at(config, &["record", "permission"]));
+    if their_record.is_some_and(|theirs| theirs != record) {
+        return Err(Error::config(format!(
+            "{at}: record.permission is {record}, and {schema}'s Payments, whose adapter settles this refund's outcome here, records with {}; give both the same",
+            their_record.unwrap_or_default()
         )));
     }
     Ok(())
@@ -509,7 +551,11 @@ fn parse_config(raw: &Value, target: &ConfigTarget<'_>) -> Result<PaymentsConfig
                 "a refund's amount is an own field: amount { field } with refundOf",
             ));
         }
-        check_refund_of(target, link)?;
+        check_refund_of(
+            target,
+            link,
+            text_at(raw, &["record", "permission"]).unwrap_or_default(),
+        )?;
         for (key, what) in [
             ("refunds", "refunds"),
             ("require", "require"),
@@ -1042,6 +1088,9 @@ pub struct Summary {
     pub captured: i64,
     pub refunded: i64,
     pub outstanding: i64,
+    /// What captures brought past what was due, which Payments asked back
+    /// with refunds of it (`overpaid:<eventId>`).
+    pub overpaid: i64,
     pub currency: Option<String>,
     pub state: PaymentsState,
 }
@@ -1050,6 +1099,13 @@ pub struct Summary {
 struct Source {
     due: i64,
     currency: Option<String>,
+    /// Why what is due cannot be known, when it cannot: the claim's
+    /// `Holds.total` is null over priced items (mixed currencies, or a sum
+    /// past what an integer holds), or an item is still pending, whose
+    /// price comes when it is held. `due` reads 0 then, and openPayment and
+    /// a `require` move refuse with `total_unknown`, so a total that cannot
+    /// be read never passes for one that is 0.
+    unknown: Option<String>,
 }
 
 // integer reads a JSON integer within JavaScript's safe range.
@@ -1075,18 +1131,78 @@ fn own_record(
     view.instances().get(view.schema(), view.id(), Some(fields))
 }
 
-// holds_total reads the claim's Holds.total: `{ amount, currency }`, or
-// none.
-fn holds_total(view: &InstanceView<'_, PaymentsConfig>) -> Result<Option<(i64, String)>> {
-    let record = own_record(view, &[HOLDS_TOTAL])?;
-    let total = record
-        .as_ref()
-        .and_then(|record| record.behavior_field("Holds", "total"));
-    Ok(total.and_then(|total| {
-        Some((
-            total.get("amount").and_then(integer)?,
-            total.get("currency")?.as_str()?.to_owned(),
-        ))
+/// What a claim's Holds says it owes.
+#[derive(Debug, PartialEq, Eq)]
+enum HoldsOwed {
+    /// `Holds.total`'s amount, and its currency when it names one (a claim
+    /// whose items carry no price owes 0 in none).
+    Total(i64, Option<String>),
+    /// Nothing can be read: why.
+    Unknown(String),
+}
+
+// holds_owed reads what the claim's Holds says it owes, failing closed:
+// - an item still pending has no price yet, which comes when it is held,
+//   so nothing is known while one is;
+// - `Holds.total`, `{ amount, currency }`, is what is owed when it is
+//   there;
+// - a null total is 0 when no item carries a price (a free booking), and
+//   unknown when one does: the priced items' currencies differ, or their
+//   sum is past what an integer holds.
+fn holds_owed(view: &InstanceView<'_, PaymentsConfig>) -> Result<HoldsOwed> {
+    let record = own_record(view, &[HOLDS_TOTAL, HOLDS_ITEMS])?;
+    let field = |name: &str| {
+        record
+            .as_ref()
+            .and_then(|record| record.behavior_field("Holds", name))
+    };
+    let items = field("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let pending = items
+        .iter()
+        .filter(|item| item.get("state").and_then(Value::as_str) == Some("pending"))
+        .count();
+    if pending > 0 {
+        return Ok(HoldsOwed::Unknown(format!(
+            "{pending} of its {} items are pending, whose prices come when they are held",
+            items.len()
+        )));
+    }
+    if let Some(total) = field("total").filter(|total| !total.is_null()) {
+        let amount = total.get("amount").and_then(integer);
+        let currency = total.get("currency").and_then(Value::as_str);
+        return Ok(match amount {
+            Some(amount) => HoldsOwed::Total(amount, currency.map(str::to_owned)),
+            None => HoldsOwed::Unknown(format!(
+                "Holds.total is {}, which names no integer amount",
+                stringify(total)
+            )),
+        });
+    }
+    let priced = items
+        .iter()
+        .filter(|item| item.get("unitPrice").is_some_and(|price| !price.is_null()))
+        .count();
+    if priced == 0 {
+        return Ok(HoldsOwed::Total(0, None));
+    }
+    let mut currencies: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item.get("currency").and_then(Value::as_str))
+        .collect();
+    currencies.sort_unstable();
+    currencies.dedup();
+    Ok(HoldsOwed::Unknown(if currencies.len() > 1 {
+        format!(
+            "Holds.total is null: its priced items are in {}, which are never added",
+            currencies.join(" and ")
+        )
+    } else {
+        format!(
+            "Holds.total is null over {priced} priced items: their sum is past what an integer holds"
+        )
     }))
 }
 
@@ -1108,18 +1224,35 @@ fn source_with(
         AmountSource::Field(field) => Ok(Source {
             due: data.get(field).and_then(integer).unwrap_or(0).max(0),
             currency: named,
+            unknown: None,
         }),
-        AmountSource::Holds => Ok(match holds_total(view)? {
-            Some((amount, currency)) => Source {
+        AmountSource::Holds => Ok(match holds_owed(view)? {
+            HoldsOwed::Total(amount, currency) => Source {
                 due: amount.max(0),
-                currency: Some(currency),
+                currency: currency.or(named),
+                unknown: None,
             },
-            None => Source {
+            HoldsOwed::Unknown(why) => Source {
                 due: 0,
                 currency: named,
+                unknown: Some(why),
             },
         }),
     }
+}
+
+// total_unknown is the refusal of a payment, or of a move a payment
+// gates, while what is due cannot be read from the claim's holds.
+fn total_unknown(view: &InstanceView<'_, PaymentsConfig>, why: &str, more: Value) -> Veto {
+    veto(
+        format!(
+            "{} {} owes what its holds total, and that is not known: {why}",
+            view.schema(),
+            view.id()
+        ),
+        TOTAL_UNKNOWN,
+        Some(more),
+    )
 }
 
 fn source(view: &InstanceView<'_, PaymentsConfig>) -> Result<Source> {
@@ -1154,14 +1287,27 @@ fn summary(view: &InstanceView<'_, PaymentsConfig>) -> Result<Summary> {
         .filter(|refund| refund.status == RefundStatus::Succeeded)
         .map(|refund| refund.refunded)
         .sum();
+    // Money captured past what was due, and its refunds, leave the state
+    // alone: an order paid twice and refunded the second time is paid.
+    let excess: Vec<&Refund> = refunds
+        .iter()
+        .filter(|refund| is_overpaid(refund))
+        .collect();
+    let overpaid: i64 = excess.iter().map(|refund| refund.amount).sum();
+    let returned: i64 = excess
+        .iter()
+        .filter(|refund| refund.status == RefundStatus::Succeeded)
+        .map(|refund| refund.refunded)
+        .sum();
+    let (kept, given_back) = (captured - returned, refunded - returned);
     let pending = attempts.iter().any(|attempt| attempt.status.in_flight());
-    let state = if refunded > 0 {
-        if refunded >= captured {
+    let state = if given_back > 0 {
+        if given_back >= kept {
             PaymentsState::Refunded
         } else {
             PaymentsState::PartiallyRefunded
         }
-    } else if captured > 0 && captured >= due {
+    } else if kept > 0 && kept >= due {
         PaymentsState::Paid
     } else if authorized > 0 && captured + authorized >= due {
         PaymentsState::Authorized
@@ -1176,9 +1322,20 @@ fn summary(view: &InstanceView<'_, PaymentsConfig>) -> Result<Summary> {
         captured,
         refunded,
         outstanding: (due - captured).max(0),
+        overpaid,
         currency,
         state,
     })
+}
+
+// is_overpaid is whether a refund is one Payments asked of money captured
+// past what was due.
+fn is_overpaid(refund: &Refund) -> bool {
+    refund.origin.is_none()
+        && refund
+            .idempotency_key
+            .strip_prefix(OVERPAID)
+            .is_some_and(|rest| rest.starts_with(':'))
 }
 
 // refund_summary reads a refund instance: what it refunds, and how far its
@@ -1204,6 +1361,7 @@ fn refund_summary(view: &InstanceView<'_, PaymentsConfig>) -> Result<Summary> {
         captured: 0,
         refunded,
         outstanding: due,
+        overpaid: 0,
         currency: latest.map(|issue| issue.currency).or(live.currency),
         state,
     })
@@ -1733,6 +1891,15 @@ fn open_payment(
         }
     }
     let live = source(cx)?;
+    if let Some(why) = &live.unknown {
+        return Err(Error::veto(
+            NAME,
+            OP,
+            cx.schema(),
+            cx.id(),
+            total_unknown(cx, why, json!({"source": "Holds.total"})),
+        ));
+    }
     let flight = in_flight(&attempts);
     let due = flight.map_or(live.due, |attempt| attempt.due);
     let captured: i64 = attempts.iter().map(|attempt| attempt.captured).sum();
@@ -1849,7 +2016,34 @@ fn open_payment(
             amount: attempt.amount,
         },
     )?;
+    void_abandoned(cx, &attempts)?;
     Ok(opened(&attempt))
+}
+
+// void_abandoned gives each earlier attempt that failed one void action as
+// a new attempt opens: a provider may still complete a payment it reported
+// failed (a card retried on the same payment), and the payer is now paying
+// through the new one, so the adapter cancels the old one at the provider.
+// A capture that still arrives is counted, and what it brings past what is
+// due is asked back (`overpaid`).
+fn void_abandoned(cx: &InstanceCx<'_, PaymentsConfig>, earlier: &[Attempt]) -> Result<()> {
+    for attempt in earlier {
+        if attempt.status != AttemptStatus::Failed
+            || find_action(cx, &attempt.attempt, ActionKind::Void, false)?.is_some()
+        {
+            continue;
+        }
+        queue(
+            cx,
+            &ActionFor {
+                kind: ActionKind::Void,
+                attempt,
+                refund: None,
+                amount: attempt.amount,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn opened(attempt: &Attempt) -> Value {
@@ -2208,16 +2402,15 @@ fn attempt_event(cx: &OperationCx<'_, PaymentsConfig>, event: &Event<'_>) -> Res
     }
     finish(cx, &attempt.attempt, &done, None)?;
     record_event_row(cx, event, Some(&attempt.attempt), applied)?;
-    // Money captured after the instance let go of what it paid for.
-    if applied
-        && to == AttemptStatus::Captured
-        && event.amount > 0
-        && cx.config().refund_after_release
-    {
-        if let Some(status) = status_of(cx)? {
-            if cx.config().void_on.contains(&status) {
-                let key = format!("release:{}", event.event_id);
-                let key: String = key.chars().take(255).collect();
+    if applied && to == AttemptStatus::Captured && event.amount > 0 {
+        // Money captured after the instance let go of what it paid for.
+        let released = match status_of(cx)? {
+            Some(status) if cx.config().void_on.contains(&status) => Some(status),
+            _ => None,
+        };
+        match released {
+            Some(status) if cx.config().refund_after_release => {
+                let key = event_key(RELEASE, event.event_id);
                 let reason = format!("captured after {} {} was {status}", cx.schema(), cx.id());
                 let attempts = attempts(cx)?;
                 let refunds = refunds(cx)?;
@@ -2234,9 +2427,106 @@ fn attempt_event(cx: &OperationCx<'_, PaymentsConfig>, event: &Event<'_>) -> Res
                     &refunds,
                 )?;
             }
+            Some(_) => {}
+            None => settle_capture(cx, &attempt, event)?,
         }
     }
     event_result(cx, applied, Some(&attempt.attempt))
+}
+
+// event_key is an idempotency key of a refund or an action Payments asks
+// itself, after a provider event: `<prefix>:<eventId>`, within the 255
+// characters a key holds.
+fn event_key(prefix: &str, event_id: &str) -> String {
+    format!("{prefix}:{event_id}").chars().take(255).collect()
+}
+
+/// The prefix of the key of a refund Payments asks of money captured past
+/// what is due.
+const OVERPAID: &str = "overpaid";
+
+/// The prefix of the key of a refund Payments asks of money captured after
+/// the instance let go (`afterRelease: refund`).
+const RELEASE: &str = "release";
+
+// settle_capture follows a capture on an instance that has not let go:
+// once what is captured covers what is due, the other attempts still open
+// are voided, so a second payment the payer started does not complete;
+// and what this capture brought past what is due (a late capture of an
+// attempt that failed while a newer one paid) is recorded as overpaid and
+// asked back with a refund of it, keyed `overpaid:<eventId>`.
+fn settle_capture(
+    cx: &InstanceCx<'_, PaymentsConfig>,
+    captured: &Attempt,
+    event: &Event<'_>,
+) -> Result<()> {
+    let all = attempts(cx)?;
+    let due = match in_flight(&all) {
+        Some(attempt) => attempt.due,
+        None => {
+            let live = source(cx)?;
+            // What is due cannot be read: nothing is judged past it.
+            if live.unknown.is_some() {
+                return Ok(());
+            }
+            live.due
+        }
+    };
+    let total: i64 = all.iter().map(|attempt| attempt.captured).sum();
+    if total < due {
+        return Ok(());
+    }
+    for attempt in &all {
+        if attempt.attempt == captured.attempt
+            || !attempt.status.voidable()
+            || find_action(cx, &attempt.attempt, ActionKind::Void, false)?.is_some()
+        {
+            continue;
+        }
+        queue(
+            cx,
+            &ActionFor {
+                kind: ActionKind::Void,
+                attempt,
+                refund: None,
+                amount: void_amount(attempt),
+            },
+        )?;
+    }
+    let before = total - event.amount;
+    let refunds = refunds(cx)?;
+    let excess = (total - before.max(due)).clamp(0, event.amount);
+    // What a refund can draw on: a refund draws on one attempt.
+    let most = refundable(&all, &refunds)
+        .iter()
+        .map(|(_, left)| *left)
+        .max()
+        .unwrap_or(0);
+    let amount = excess.min(most);
+    if amount <= 0 {
+        return Ok(());
+    }
+    let key = event_key(OVERPAID, event.event_id);
+    let reason = format!(
+        "captured {} {} past the {due} {} {} owes",
+        amount,
+        captured.currency,
+        cx.schema(),
+        cx.id()
+    );
+    insert_refund(
+        cx,
+        &Asked {
+            operation: "recordPaymentEvent",
+            amount,
+            reason: &reason,
+            key: &key,
+            origin: None,
+        },
+        &all,
+        &refunds,
+    )?;
+    Ok(())
 }
 
 fn refund_event(cx: &OperationCx<'_, PaymentsConfig>, event: &Event<'_>) -> Result<Value> {
@@ -2479,6 +2769,17 @@ fn refund_payment(
     if !cx.can(permission)? {
         return Err(forbidden(cx, "refund", permission));
     }
+    let key = text_param(params, "idempotencyKey").unwrap_or_default();
+    if let Some(prefix) = [OVERPAID, RELEASE].into_iter().find(|prefix| {
+        key.strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with(':'))
+    }) {
+        return Err(params_error(
+            OP,
+            "/idempotencyKey",
+            format!("keys {prefix}:… are those of the refunds Payments asks itself"),
+        ));
+    }
     record_refund(
         cx,
         &Asked {
@@ -2601,6 +2902,57 @@ fn refund_for(_: &Payments, cx: &OperationCx<'_, PaymentsConfig>, params: &Value
             Some(json!({"currency": theirs_currency, "expected": mine})),
         ));
     }
+    // One live refund per refund instance, whatever the key: its approval
+    // pays it once. A failed one is asked again under the key the refund
+    // instance's Payments derives from it and the failures before, so a
+    // caller who reaches refundFor cannot ask a second refund of one
+    // approval by making up keys.
+    let given = text_param(params, "idempotencyKey").unwrap_or_default();
+    let theirs: Vec<Refund> = refunds(cx)?
+        .into_iter()
+        .filter(|row| row.origin.as_ref() == Some(&refund))
+        .collect();
+    if let Some(live) = theirs.iter().find(|row| row.status != RefundStatus::Failed) {
+        if live.idempotency_key != given || live.amount != amount {
+            return Err(vetoed(
+                cx,
+                OP,
+                format!(
+                    "{} {} asked refund {} of {} under idempotencyKey {}, which is {}; it asks one at a time",
+                    refund.schema,
+                    refund.id,
+                    live.refund,
+                    live.amount,
+                    live.idempotency_key,
+                    live.status.as_str()
+                ),
+                KEY_REUSED,
+                Some(json!({"refund": live.refund, "idempotencyKey": live.idempotency_key})),
+            ));
+        }
+        cx.unchanged();
+        let action = refund_action(cx, live)?;
+        let answer = refund_json(live, &action);
+        return Ok(json!({
+            "refund": answer["refund"],
+            "action": answer["action"],
+            "amount": answer["amount"],
+            "currency": answer["currency"],
+        }));
+    }
+    let expected = issue_key(&refund, theirs.len());
+    if given != expected {
+        return Err(vetoed(
+            cx,
+            OP,
+            format!(
+                "{} {} asks its refund under idempotencyKey {expected}, the one its Payments derives, not {given}",
+                refund.schema, refund.id
+            ),
+            KEY_REUSED,
+            Some(json!({"refund": refund.to_json(), "idempotencyKey": expected})),
+        ));
+    }
     let reason = format!("refund {} {}", refund.schema, refund.id);
     let answer = record_refund(
         cx,
@@ -2608,7 +2960,7 @@ fn refund_for(_: &Payments, cx: &OperationCx<'_, PaymentsConfig>, params: &Value
             operation: OP,
             amount,
             reason: &reason,
-            key: text_param(params, "idempotencyKey").unwrap_or_default(),
+            key: &expected,
             origin: Some(&refund),
         },
     )?;
@@ -2672,17 +3024,71 @@ fn settle_refund_for(
             Some(json!({"refund": named})),
         ));
     };
+    // The outcome is the refund's as the instance it refunds recorded it,
+    // which Payments' tables hold for the namespace: a caller's status and
+    // amount are checked against it, never taken on trust.
+    let table = cx.sql().table("refunds")?;
+    let row = cx.sql().get(
+        format!("SELECT {REFUND_COLUMNS} FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND refund = ?"),
+        &[
+            SqlValue::from(cx.namespace()),
+            SqlValue::from(of.schema.as_str()),
+            SqlValue::from(of.id.as_str()),
+            SqlValue::from(named),
+        ],
+    )?;
+    let me = InstanceRef::new(cx.schema(), cx.id());
+    let Some(recorded) = row
+        .as_ref()
+        .map(refund_of_row)
+        .transpose()?
+        .filter(|recorded| recorded.origin.as_ref() == Some(&me))
+    else {
+        return Err(vetoed(
+            cx,
+            OP,
+            format!(
+                "{} {} records no refund {named} that {} {} asked",
+                of.schema,
+                of.id,
+                cx.schema(),
+                cx.id()
+            ),
+            NO_ATTEMPT,
+            Some(json!({"refund": named})),
+        ));
+    };
     let to = match text_param(params, "status") {
         Some("succeeded") => RefundStatus::Succeeded,
         _ => RefundStatus::Failed,
     };
+    let amount = amount_param(params, "amount").unwrap_or(0);
+    let refunded = if to == RefundStatus::Succeeded {
+        recorded.refunded
+    } else {
+        0
+    };
+    if recorded.status != to || amount != refunded {
+        return Err(vetoed(
+            cx,
+            OP,
+            format!(
+                "{} {} records refund {named} {} with {} refunded, not {} with {amount}",
+                of.schema,
+                of.id,
+                recorded.status.as_str(),
+                recorded.refunded,
+                to.as_str()
+            ),
+            NOT_LINKED,
+            Some(
+                json!({"refund": named, "status": recorded.status.as_str(), "refunded": recorded.refunded}),
+            ),
+        ));
+    }
     if issue.status.pending() {
         issue.status = to;
-        issue.refunded = if to == RefundStatus::Succeeded {
-            amount_param(params, "amount").unwrap_or(0)
-        } else {
-            0
-        };
+        issue.refunded = refunded;
         let table = cx.sql().table("issues")?;
         cx.sql().run(
             format!("UPDATE {table} SET status = ?, refunded = ?, updated_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND refund = ?"),
@@ -3094,6 +3500,15 @@ fn guard_move(view: &InstanceView<'_, PaymentsConfig>, to: &str) -> Result<Optio
     let Some(requirement) = config.requirement(to) else {
         return Ok(None);
     };
+    if in_flight(&attempts).is_none() {
+        if let Some(why) = source(view)?.unknown {
+            return Ok(Some(total_unknown(
+                view,
+                &why,
+                json!({"state": to, "requires": requirement.as_str()}),
+            )));
+        }
+    }
     let now = summary(view)?;
     let (met, code, what) = match requirement {
         Requirement::Paid => (now.captured >= now.due, UNPAID, "captured"),
@@ -3426,6 +3841,9 @@ impl Behavior for Payments {
                 }),
                 ("outstanding", |_, view| {
                     summary_field(view, |s| Value::from(s.outstanding))
+                }),
+                ("overpaid", |_, view| {
+                    summary_field(view, |s| Value::from(s.overpaid))
                 }),
                 ("currency", |_, view| {
                     Ok(summary(view)?.currency.map(Value::from))

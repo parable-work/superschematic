@@ -310,8 +310,8 @@ pub fn kinds(engine: &Engine, schema: &str, id: &str) -> Vec<String> {
 
 /// The ledger's invariants, as a read shows them: the attempts' captures
 /// add up to `captured`, none is past what it may capture, nothing more is
-/// refunded than captured, and `outstanding` is `due − captured`, never
-/// below 0.
+/// refunded than captured, no more overpaid than captured, and
+/// `outstanding` is `due − captured`, never below 0.
 pub fn assert_ledger(engine: &Engine, schema: &str, id: &str) {
     let fields = payments(engine, schema, id);
     let number = |value: &Value| value.as_i64().unwrap_or(0);
@@ -332,6 +332,10 @@ pub fn assert_ledger(engine: &Engine, schema: &str, id: &str) {
     }
     assert!(
         number(&fields["refunded"]) <= number(&fields["captured"]),
+        "{fields}"
+    );
+    assert!(
+        (0..=number(&fields["captured"])).contains(&number(&fields["overpaid"])),
         "{fields}"
     );
     assert_eq!(

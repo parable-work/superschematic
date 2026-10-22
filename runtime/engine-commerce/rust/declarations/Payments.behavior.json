@@ -238,7 +238,7 @@
   "fields": [
     {
       "name": "due",
-      "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open."
+      "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then."
     },
     {
       "name": "authorized",
@@ -255,6 +255,10 @@
     {
       "name": "outstanding",
       "description": "due less captured, never below 0."
+    },
+    {
+      "name": "overpaid",
+      "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it."
     },
     {
       "name": "currency",
@@ -752,7 +756,7 @@
     },
     {
       "name": "refundFor",
-      "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund.",
+      "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -823,7 +827,7 @@
     },
     {
       "name": "settleRefundFor",
-      "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance.",
+      "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -929,11 +933,11 @@
     },
     {
       "code": "not_linked",
-      "description": "refundFor from an instance whose refundOf link does not point here, or settleRefundFor from one that is not the instance refunded."
+      "description": "refundFor from an instance whose refundOf link does not point here, or settleRefundFor from one that is not the instance refunded, or with an outcome that instance did not record."
     },
     {
       "code": "key_reused",
-      "description": "An idempotencyKey used before with other parameters."
+      "description": "An idempotencyKey used before with other parameters, or refundFor under a key other than the one the refund instance's Payments derives, or while its refund is asked or paid."
     },
     {
       "code": "attempt_closed",
@@ -942,6 +946,10 @@
     {
       "code": "not_configured",
       "description": "refundPayment on a type whose config names no refunds permission."
+    },
+    {
+      "code": "total_unknown",
+      "description": "openPayment, or a move into a state require holds, while the amount comes from Holds.total and the total cannot be read: an item is pending, the priced items are in two currencies, or their sum is past what an integer holds."
     }
   ]
 }

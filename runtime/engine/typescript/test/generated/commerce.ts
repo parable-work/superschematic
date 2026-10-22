@@ -88,7 +88,7 @@ export type CheckoutBehaviors = {
     };
   };
   readonly Payments: {
-    /** What the instance owes, in the currency's minor units. It does not change while an attempt is open. */
+    /** What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then. */
     readonly due: number;
     /** What the provider has authorized and not voided or captured. */
     readonly authorized: number;
@@ -98,6 +98,8 @@ export type CheckoutBehaviors = {
     readonly refunded: number;
     /** due less captured, never below 0. */
     readonly outstanding: number;
+    /** What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it. */
+    readonly overpaid: number;
     /** The ISO 4217 code of every amount. */
     readonly currency?: string;
     /** unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid. */
@@ -494,7 +496,7 @@ export type CheckoutListPaymentActionsResult = {
   next: string | null;
 };
 
-/** The parameters of Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund. */
+/** The parameters of Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
 export type CheckoutRefundForParams = {
   /** In the currency's minor units. */
   amount: number;
@@ -513,7 +515,7 @@ export type CheckoutRefundForResult = {
   refund: string;
 };
 
-/** The parameters of Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance. */
+/** The parameters of Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
 export type CheckoutSettleRefundForParams = {
   /** In the currency's minor units. */
   amount: number;
@@ -572,7 +574,7 @@ export type CheckoutVetoes = {
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Holds: 'unavailable' | 'holds_missing' | 'held_fields' | 'committed' | 'too_many_items' | 'not_taking' | 'no_supply';
   Timers: 'no_deadline' | 'not_armed';
-  Payments: 'nothing_due' | 'amount_locked' | 'currency_mismatch' | 'over_capture' | 'exceeds_refundable' | 'unpaid' | 'unauthorized' | 'payment_in_progress' | 'no_attempt' | 'not_linked' | 'key_reused' | 'attempt_closed' | 'not_configured';
+  Payments: 'nothing_due' | 'amount_locked' | 'currency_mismatch' | 'over_capture' | 'exceeds_refundable' | 'unpaid' | 'unauthorized' | 'payment_in_progress' | 'no_attempt' | 'not_linked' | 'key_reused' | 'attempt_closed' | 'not_configured' | 'total_unknown';
   Reactions: never;
   Numbering: never;
   StateRules: 'missing_fields' | 'frozen_fields' | 'required_fields';
@@ -633,9 +635,9 @@ export interface CheckoutClient {
   refundPayment(id: string, params: CheckoutRefundPaymentParams, options?: CheckoutWriteOptions): Promise<CheckoutRefundPaymentResult>;
   /** Payments' listPaymentActions: Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded. */
   listPaymentActions(params: CheckoutListPaymentActionsParams, options?: CallOptions): Promise<CheckoutListPaymentActionsResult>;
-  /** Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund. */
+  /** Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
   refundFor(id: string, params: CheckoutRefundForParams, options?: CheckoutWriteOptions): Promise<CheckoutRefundForResult>;
-  /** Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance. */
+  /** Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
   settleRefundFor(id: string, params: CheckoutSettleRefundForParams, options?: CheckoutWriteOptions): Promise<CheckoutSettleRefundForResult>;
   /** Numbering's assignNumber: Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
   assignNumber(id: string, params?: CheckoutAssignNumberParams, options?: CheckoutWriteOptions): Promise<CheckoutAssignNumberResult>;
@@ -1568,7 +1570,7 @@ export type RefundBehaviors = {
     readonly label?: string;
   };
   readonly Payments: {
-    /** What the instance owes, in the currency's minor units. It does not change while an attempt is open. */
+    /** What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then. */
     readonly due: number;
     /** What the provider has authorized and not voided or captured. */
     readonly authorized: number;
@@ -1578,6 +1580,8 @@ export type RefundBehaviors = {
     readonly refunded: number;
     /** due less captured, never below 0. */
     readonly outstanding: number;
+    /** What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it. */
+    readonly overpaid: number;
     /** The ISO 4217 code of every amount. */
     readonly currency?: string;
     /** unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid. */
@@ -1932,7 +1936,7 @@ export type RefundListPaymentActionsResult = {
   next: string | null;
 };
 
-/** The parameters of Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund. */
+/** The parameters of Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
 export type RefundRefundForParams = {
   /** In the currency's minor units. */
   amount: number;
@@ -1951,7 +1955,7 @@ export type RefundRefundForResult = {
   refund: string;
 };
 
-/** The parameters of Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance. */
+/** The parameters of Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
 export type RefundSettleRefundForParams = {
   /** In the currency's minor units. */
   amount: number;
@@ -1998,7 +2002,7 @@ export type RefundVetoes = {
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Numbering: never;
   StateRules: 'missing_fields' | 'frozen_fields' | 'required_fields';
-  Payments: 'nothing_due' | 'amount_locked' | 'currency_mismatch' | 'over_capture' | 'exceeds_refundable' | 'unpaid' | 'unauthorized' | 'payment_in_progress' | 'no_attempt' | 'not_linked' | 'key_reused' | 'attempt_closed' | 'not_configured';
+  Payments: 'nothing_due' | 'amount_locked' | 'currency_mismatch' | 'over_capture' | 'exceeds_refundable' | 'unpaid' | 'unauthorized' | 'payment_in_progress' | 'no_attempt' | 'not_linked' | 'key_reused' | 'attempt_closed' | 'not_configured' | 'total_unknown';
   Reactions: never;
 };
 
@@ -2055,9 +2059,9 @@ export interface RefundClient {
   refundPayment(id: string, params: RefundRefundPaymentParams, options?: RefundWriteOptions): Promise<RefundRefundPaymentResult>;
   /** Payments' listPaymentActions: Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded. */
   listPaymentActions(params: RefundListPaymentActionsParams, options?: CallOptions): Promise<RefundListPaymentActionsResult>;
-  /** Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund. */
+  /** Payments' refundFor: Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
   refundFor(id: string, params: RefundRefundForParams, options?: RefundWriteOptions): Promise<RefundRefundForResult>;
-  /** Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance. */
+  /** Payments' settleRefundFor: Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
   settleRefundFor(id: string, params: RefundSettleRefundForParams, options?: RefundWriteOptions): Promise<RefundSettleRefundForResult>;
 }
 
