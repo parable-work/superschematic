@@ -8940,5 +8940,43 @@ What the build settled:
   table once `superscalar.pin` carries `Finance.Currency`, and against its
   pattern until then.
 
-Calendar, Payments, the plumbing, acme-shop and the cross-language proof
-follow.
+M4, `Calendar`, is built in the commerce crate (`src/calendar`) and
+registered in `NAMES`, so the core's Node-API addon carries it. It links
+`jiff` 0.2.38 with only `std` and `tzdb-bundle-always`: the IANA database
+(2026e, from `jiff-tzdb` 0.1.9, Unlicense OR MIT) is in the binary and no
+host zone file is read. The release (`dist`) addon for darwin-arm64 grew
+from 14,705,536 to 15,532,288 bytes (+827 KB, 5.6%), and gzipped from
+6,398,402 to 6,700,423 (+302 KB); the database itself is 207 KB. The Go
+core archive does not link the crate. The start grid is in wall time, a
+whole number of `slotMs` after the opening time of the range a start lies
+in, so a grid time a change skips has no slot, and a hold's length is
+elapsed time. Where the build settled what this entry left open:
+- `findAvailability` reads at most 100 instances, by id, and answers
+  `truncated` when more match; its `where` takes the type's own fields
+  that hold a string, a number or a boolean, as a list's equality does,
+  not a behavior's; a duration outside `minMs` and `maxMs` is vetoed
+  `too_short` or `too_long`;
+- `outside_hours`, `closed`, `off_grid`, `too_short`, `too_long`,
+  `too_soon` and `too_far` carry `unavailable`'s details with what they
+  turn on (`timeZone`, `closure`, `slotMs`, `minMs`, `maxMs`,
+  `earliestMs`, `latestMs`), and `has_bookings` lists the holds;
+- under the default dotted permission matcher, the config's permission
+  covers its own `.override`, so `force` is a separate right only under a
+  deployment's matcher;
+- the peak a new version's capacity may not fall below, and a capacity
+  field's update (vetoed `has_bookings`), counts the holds that have not
+  ended, without buffers; a new version refused for capacity or zone is a
+  `BehaviorConfigError` of the publish; Calendar leaves only a schema with
+  no instances;
+- a resource with any held or committed record, past ones included, is
+  not deleted (`held`), as the contract's helper counts.
+
+`commerce_calendar.rs` in testkit, the core-calendar suite, runs it
+through the contract and testkit's Holds stand-in on SQLite and Postgres:
+thirteen cases, among them the daylight-saving Sundays of Europe/London,
+America/New_York and Australia/Lord_Howe held to Python's zoneinfo
+instants, a sweep held to a minute-scan model, and two engines racing
+eight threads for two places. The TypeScript suite and the recorded
+`commerce-calendar.json` wait for the commerce package's TypeScript side.
+
+Payments, the plumbing, acme-shop and the cross-language proof follow.
