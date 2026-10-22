@@ -154,6 +154,11 @@ pub(crate) struct Execution<'t, 'db> {
     loader: Option<Row>,
     // The own fields before the call's first update(), once one has run.
     initial: RefCell<Option<Arc<Map<String, Value>>>>,
+    // Where the own fields the call's update()s wrote came from, by field:
+    // the last write's attribution, `{ behavior, confidence?, source? }`
+    // (D16, amended). A write that names a field without attributing it
+    // removes its entry.
+    attribution: RefCell<Map<String, Value>>,
     // Each behavior's columns as the instance had them before its delete.
     deleted: RefCell<Option<Vec<Row>>>,
     /// False for a read and a read-only operation: nothing may write.
@@ -184,6 +189,7 @@ impl<'t, 'db> Execution<'t, 'db> {
             data: RefCell::new(data),
             loader,
             initial: RefCell::new(None),
+            attribution: RefCell::new(Map::new()),
             deleted: RefCell::new(None),
             writable,
         }
@@ -229,6 +235,20 @@ impl<'t, 'db> Execution<'t, 'db> {
             &Value::Object((*now).clone()),
         ))
         .then_some(initial))
+    }
+
+    /// The attribution of the fields `changed` names, the keys of the
+    /// call's net patch of the own fields; `None` when none of them is
+    /// attributed.
+    pub fn attribution(&self, changed: &Map<String, Value>) -> Option<Map<String, Value>> {
+        let attribution: Map<String, Value> = self
+            .attribution
+            .borrow()
+            .iter()
+            .filter(|(field, _)| changed.contains_key(*field))
+            .map(|(field, entry)| (field.clone(), entry.clone()))
+            .collect();
+        (!attribution.is_empty()).then_some(attribution)
     }
 
     fn ctx<'e>(&'e self, index: usize, mode: Mode<'e>) -> Ctx<'e, 't, 'db> {
@@ -637,6 +657,7 @@ impl<'t, 'db> Execution<'t, 'db> {
         // with the rest of it, so the fields the contexts see go back too.
         let data = self.data.borrow().clone();
         let initial = self.initial.borrow().clone();
+        let attribution = self.attribution.borrow().clone();
         let result = self
             .reach
             .tx
@@ -644,18 +665,22 @@ impl<'t, 'db> Execution<'t, 'db> {
         if result.is_err() {
             *self.data.borrow_mut() = data;
             *self.initial.borrow_mut() = initial;
+            *self.attribution.borrow_mut() = attribution;
         }
         result
     }
 
     // update applies a merge patch to the instance's own fields for an
     // operation of `from`: the checks and guards of an update, without the
-    // policy, which allowed the operation, and without an event.
+    // policy, which allowed the operation, and without an event. Once it
+    // writes, it records `attribution`'s entries for the fields the patch
+    // names, and drops the entries of the others it names.
     fn update(
         &self,
         from: &RegisteredBehavior,
         writable: bool,
         patch: &Value,
+        attribution: Option<&Value>,
     ) -> Result<Arc<Map<String, Value>>> {
         if self.deleted.borrow().is_some() {
             return Err(Error::behavior(
@@ -669,6 +694,10 @@ impl<'t, 'db> Execution<'t, 'db> {
                 "a read-only operation cannot update the instance",
             ));
         }
+        let attributed = match attribution {
+            Some(attribution) => checked_attribution(from, patch, attribution)?,
+            None => Map::new(),
+        };
         let (copy, merged, issues) = self.merge(from, patch)?;
         if !issues.is_empty() {
             return Err(EngineError::instance_validation(
@@ -704,6 +733,15 @@ impl<'t, 'db> Execution<'t, 'db> {
         )?;
         if self.initial.borrow().is_none() {
             *self.initial.borrow_mut() = Some(current);
+        }
+        {
+            let mut recorded = self.attribution.borrow_mut();
+            for field in copy.keys() {
+                match attributed.get(field) {
+                    Some(entry) => recorded.insert(field.clone(), entry.clone()),
+                    None => recorded.remove(field),
+                };
+            }
         }
         self.set_data(merged);
         self.data()
@@ -760,6 +798,69 @@ impl<'t, 'db> Execution<'t, 'db> {
         )?;
         Ok((value, merged, issues))
     }
+}
+
+// checked_attribution holds an update()'s attribution to its shape: an
+// object of entries by a top-level field the patch names, each with only
+// a confidence from 0 to 1 and a source of at most 200 characters. It
+// returns the entries with `from`'s name added, which the engine, not the
+// behavior, gives.
+fn checked_attribution(
+    from: &RegisteredBehavior,
+    patch: &Value,
+    attribution: &Value,
+) -> Result<Map<String, Value>> {
+    let refuse = |reason: String| Err(Error::behavior(&from.name, reason));
+    let Some(entries) = attribution.as_object() else {
+        return refuse("update()'s attribution is an object of entries by own field".to_owned());
+    };
+    let named = patch.as_object();
+    let mut checked = Map::new();
+    for (field, entry) in entries {
+        if !named.is_some_and(|patch| patch.contains_key(field)) {
+            return refuse(format!(
+                "update() attributes {field}, which its patch does not write"
+            ));
+        }
+        let Some(entry) = entry.as_object() else {
+            return refuse(format!(
+                "update()'s attribution of {field} is an object of confidence and source"
+            ));
+        };
+        let mut out = Map::new();
+        out.insert("behavior".into(), Value::from(from.name.as_str()));
+        for (member, value) in entry {
+            match member.as_str() {
+                "confidence" => match value.as_f64() {
+                    Some(confidence) if (0.0..=1.0).contains(&confidence) => {
+                        out.insert(member.clone(), value.clone());
+                    }
+                    _ => {
+                        return refuse(format!(
+                            "update()'s confidence for {field} is a number from 0 to 1"
+                        ))
+                    }
+                },
+                "source" => match value.as_str() {
+                    Some(source) if source.chars().count() <= 200 => {
+                        out.insert(member.clone(), value.clone());
+                    }
+                    _ => {
+                        return refuse(format!(
+                            "update()'s source for {field} is a string of at most 200 characters"
+                        ))
+                    }
+                },
+                _ => {
+                    return refuse(format!(
+                        "update()'s attribution of {field} has {member}; it takes confidence and source"
+                    ))
+                }
+            }
+        }
+        checked.insert(field.clone(), Value::Object(out));
+    }
+    Ok(checked)
 }
 
 /// What update() would store: the patch as the version stores it, the
@@ -1291,9 +1392,13 @@ impl Core for Ctx<'_, '_, '_> {
         }
     }
 
-    fn update(&self, patch: &Value) -> Result<Arc<Map<String, Value>>> {
+    fn update(
+        &self,
+        patch: &Value,
+        attribution: Option<&Value>,
+    ) -> Result<Arc<Map<String, Value>>> {
         self.exec
-            .update(&self.bound().behavior, self.writable(), patch)
+            .update(&self.bound().behavior, self.writable(), patch, attribution)
     }
 
     fn validate_update(&self, patch: &Value) -> Result<Vec<ValidationIssue>> {

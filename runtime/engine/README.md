@@ -922,10 +922,12 @@ the calling service (`service`, below), time and change: the instance
 for a create, as a read returns it, `{ data, behaviors }`; for an
 update, a merge patch of that, the caller's patch under `data` and any
 change the behaviors' fields took under `behaviors`; for an operation,
-`{ behavior, operation, params, patch }`, where `patch` is the same
+`{ behavior, operation, params, patch, attribution? }`, where `patch` is the same
 merge patch of the instance's own fields the operation changed (an
 operation's `update()`, under "Contexts") and of its behaviors' fields,
-a part absent when it changes nothing; nothing for a delete; the schema document for a publish; and `{ hash }`
+a part absent when it changes nothing, and `attribution`, by own field
+the operation changed, where its `update()`s said each value came from,
+absent when they said nothing; nothing for a delete; the schema document for a publish; and `{ hash }`
 for a define, the draft's hash and not its document, which the draft
 route serves. A define has no instance, no sequence and no version
 (`null`), since a draft has none; every define appends one, a draft that
@@ -1615,7 +1617,7 @@ function is synchronous (D16): one that returns a promise is a
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value`. A read returns them under the behavior's name, apart from the own fields ("Instances and events") |
 | `filters` | what a list filters on, `{ <name>: { column, type, description? } }`: a declared field, or `<field>.<member>`, a camelCase member of a declared field whose value is an object, whose value is one of its columns, by its own name; a list's `where` names it by its qualified name, the behavior's name and a dot before it (`Lease.holder`); `type` is its JSON type, `string`, `number`, `integer` or `boolean`, and `description` what the list tool's `where` says of it, the declared field's when absent. A list's `where` compares the column in SQL, a null column holding no value, so the field's reader must return what the column holds, and nothing (absent or null) for null; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
-| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
+| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them, and `attribution` when its `update()`s attributed the fields they changed ("Contexts") |
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"), as a guard does; the view is the referencing instance's, and the request carries no precondition |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference. Its context's `writing` says the referencing instance's own write made the change |
 | `reactions` | `{ react(context, event), watches?(config, schema) }`: reactions to committed events, which the runner runs after the commit ("Reactions and schedules") |
@@ -1967,6 +1969,23 @@ the call changed nothing:
   gets `before`. A read-only operation's `update` refuses, and a called
   operation's update rolls back with its savepoint. `data` reads the
   fields as the operation's updates leave them.
+- `update(patch, { attribution })` (in Rust, `update_attributed(patch,
+  attribution)`) also says where the values of the fields it writes came
+  from (D16, amended): an entry by top-level own field the patch names,
+  each `{ confidence?, source? }`, a confidence a finite number from 0 to
+  1 and a source a string of at most 200 characters. The engine adds the
+  behavior's name to each, `{ behavior, confidence?, source? }`, and
+  checks only the shape: what a confidence means is the writing
+  behavior's. The last `update()` of a field in the call decides its
+  entry, and one that writes it without attributing it removes the
+  entry; a called operation's `update()` attributes as its own behavior,
+  and its entries roll back with its savepoint. The operation's change
+  for `afterChange` and `afterReferenceChange` and its event carry
+  `attribution`, the entries of the own fields the call changed; a call
+  that attributes none has no `attribution`. An attribution of a field
+  the patch does not write, a confidence out of range, a longer source
+  or another member is a `BehaviorError`. A caller's own `update` takes
+  no attribution: a source that attributes is a behavior.
 - `validateUpdate(patch)` returns the issues `update(patch)` would refuse
   the patch for, the behaviors' `validate`'s included, without writing or
   asking a guard.
@@ -2484,10 +2503,12 @@ document marks it, and `Reactions`' `changes`, which hears a field
 through its instance's events, refuses it (D56).
 
 A writing operation appends an `operation` event, `{ behavior,
-operation, params, patch }`, its `patch` a merge patch of `{ data,
+operation, params, patch, attribution? }`, its `patch` a merge patch of `{ data,
 behaviors }`: under `data` the own fields its `update()` changed, under
 `behaviors` the behaviors' fields that moved, a part absent when it
-changes nothing; a read-only one appends none. A create's event carries
+changes nothing, and its `attribution` what its `update()`s attributed
+of the fields under `data` ("Contexts"); a read-only one appends none.
+Replay reads `patch` alone. A create's event carries
 the whole instance, `{ data, behaviors }`, and an update's its patch
 under `data` and any change the behaviors' fields took under
 `behaviors`, so the log replays to the instance a read returns, each

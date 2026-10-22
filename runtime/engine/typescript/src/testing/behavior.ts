@@ -665,8 +665,16 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
    * operation's event carries the change, and afterChange gets the fields
    * from before it (InstanceChange before). A read-only operation's
    * update() refuses.
+   *
+   * `options.attribution` says where the values of the fields the patch
+   * writes came from (D16, amended): an entry by top-level own field the
+   * patch names, each { confidence?, source? }. The engine adds this
+   * behavior's name, and the operation's change and event carry the
+   * entries of the fields the call changed (InstanceChange attribution). A
+   * later update() that names a field without attributing it removes its
+   * entry. A malformed attribution is a BehaviorError.
    */
-  update(patch: FrozenJSON): FrozenJSON;
+  update(patch: FrozenJSON, options?: UpdateOptions): FrozenJSON;
   /**
    * What update(patch) would refuse the patch for, without writing or
    * asking a guard: a behavior's field, then what the live version refuses
@@ -686,6 +694,26 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
    * operation, which appends nothing anyway, it does nothing.
    */
   unchanged(): void;
+}
+
+/** What an operation's update() takes beside its patch. */
+export interface UpdateOptions {
+  /** Where the values of the fields the patch writes came from, by field. */
+  readonly attribution?: Readonly<Record<string, FieldAttribution>>;
+}
+
+/** Where one field's value came from, as an update() attributes it. */
+export interface FieldAttribution {
+  /** How sure the writer is of the value: a finite number from 0 to 1. */
+  readonly confidence?: number;
+  /** A detail of the value's source, such as a record's version: at most 200 characters. */
+  readonly source?: string;
+}
+
+/** A field's attribution as a change and an event carry it: the writing behavior's name added. */
+export interface AttributionEntry extends FieldAttribution {
+  /** The behavior whose operation's update() wrote the field. */
+  readonly behavior: string;
 }
 
 /**
@@ -818,6 +846,12 @@ export type InstanceChange =
        * holds them after.
        */
       readonly before?: FrozenJSON;
+      /**
+       * Where the values of the own fields the operation changed came from,
+       * by field, as its update()s attributed them; absent when it
+       * attributed none (D16, amended).
+       */
+      readonly attribution?: Readonly<Record<string, AttributionEntry>>;
     };
 
 /** One stored instance, as afterConfigChange visits it. */
