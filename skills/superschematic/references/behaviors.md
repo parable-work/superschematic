@@ -123,6 +123,34 @@ Operations:
 
 Refusals carry the codes `over_limit`, `not_leased`, `scope_moved`, `scope_reserved`, `below_committed`, `exceeds_reservation`, `not_configured`.
 
+## `Calendar`
+
+Opens time on a resource a claim books: a stylist, a chair, a room, a collection counter, a pool of bikes. Weekly opening hours in an IANA time zone, which an instance may set for itself, less its closures, give the times a hold may take; capacity says how many holds may overlap. A claim takes time only through the supply contract's operations, which Holds invokes by name: holdFor holds an interval an item of the claim asks, commitFor books it for good and releaseFor frees it. Each checks the claim's own Holds.items, so no caller holds or frees time by calling one directly, and each is idempotent. holdFor refuses an interval outside the hours or in a closure, off the start grid, too short or too long, too soon or too far ahead by the engine's clock, or beyond capacity at any instant, buffers included. findAvailability answers free slots across the schema's instances by the same rules. Wall times become instants through a time zone database the engine carries, so every server built from one lock file computes the same slots; a wall time a daylight-saving change skips has no slot. An instance is not deleted while it holds time for a claim: time held, or committed and not yet ended. Calendar and Stock declare the same contract operations, so a type composes one of them.
+
+- Config: `CalendarConfig`, required.
+- Cannot be composed with `Stock`.
+- Implemented by `@superschematic/engine-commerce`.
+
+Fields:
+
+- `Calendar.timeZone` (volatile: computed when read): The time zone the instance's hours are in: its own when setOpeningHours set one, else the config's.
+- `Calendar.hours` (volatile: computed when read): The instance's weekly opening hours: its own when setOpeningHours set them, else the config's.
+- `Calendar.closures` (volatile: computed when read): The closures that have not ended, soonest first, at most 100: { closure, startMs, endMs, reason }.
+
+Operations:
+
+- `setOpeningHours` (writes, on an instance): Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission.
+- `addClosure` (writes, on an instance): Closes the instance from startMs to endMs, with a reason. Needs the config's permission; refused over time a claim holds unless force is set, which needs the permission's .override. Forcing keeps the holds: the claims are moved by their own Workflow, by a rule or by hand.
+- `removeClosure` (writes, on an instance): Removes a closure. Needs the config's permission.
+- `holdFor` (writes, on an instance): Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.
+- `commitFor` (writes, on an instance): Makes what an item of a claim holds the claim's for good, once the claim's item is committed.
+- `releaseFor` (writes, on an instance): Frees what an item of a claim holds, once the claim's item is released.
+- `checkHold` (reads, on an instance): Answers whether holdFor would hold what an item asks now, and when not, why.
+- `listBookings` (reads, on an instance): Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time.
+- `findAvailability` (reads, on the schema): Finds free slots of a duration across the schema's instances over a window of at most 31 days, by holdFor's rules at the engine's clock: at most limit slots, soonest first, each with the instance and how many more holds it can take then. ids or where narrow the instances, as a list does.
+
+Refusals carry the codes `not_requested`, `unavailable`, `held`, `outside_hours`, `closed`, `off_grid`, `too_short`, `too_long`, `too_soon`, `too_far`, `has_bookings`, `window_too_long`, `no_closure`.
+
 ## `Comments`
 
 Comments on the instance, each a reply to another or not. A caller who may write the instance adds one; a caller who may read it lists them. Deleting the instance deletes its comments.
@@ -166,6 +194,27 @@ Operations:
 - `listDependents` (reads, on an instance): Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time.
 
 Refusals carry the codes `blocked`, `already_blocking`, `cycle`, `gated`.
+
+## `Holds`
+
+Holds supply for a claim, such as a checkout, a booking or a rental, while its Workflow waits, and lets it go or keeps it as the claim moves. The config names the holds: a link to one supply, or an own list field whose elements each name one, with the units or the time each item asks. When the claim is created into, or moves into, a takeOn state, Holds asks each supply's checkHold, counting the claim's other items of the same supply, and refuses the move with unavailable, listing every item that does not fit; otherwise it holds every item in the same transaction, all or none, through the supply contract's holdFor. Entering a commitOn state commits what is held, a releaseOn state releases it, and a returnOn state returns committed units, whichever operation moved the status: a transition, a Timers deadline, a Lease expiry or a Reactions rule. A hold expires by a Timers deadline that moves the claim into a releaseOn state; Holds has no expiry and no release of its own. While the claim holds, the fields a hold reads do not change. The claim keeps the unit price each supply held an item at, and their total. Deleting the claim releases what it holds; what it committed stays sold or booked, and a claim with committed time to come is not deleted. Requires Workflow.
+
+- Config: `HoldsConfig`, required.
+- Requires `Workflow` on the same type.
+- Implemented by `@superschematic/engine-commerce`.
+
+Fields:
+
+- `Holds.items`: Each item the claim's holds ask, in hold and item order: { hold, item, schema, id, quantity or startMs and endMs, state, unitPrice?, currency? }, the supply it names, what it asks, its state (pending, held, committed, released, returned), and the unit price the supply held it at. An item's state only advances.
+- `Holds.state`: The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed.
+- `Holds.total`: The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.
+
+Operations:
+
+- `retakeHolds` (writes, on an instance): Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.
+- `listHolds` (reads, on an instance): Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.
+
+Refusals carry the codes `unavailable`, `holds_missing`, `held_fields`, `committed`, `too_many_items`, `not_taking`, `no_supply`.
 
 ## `Lease`
 
@@ -232,6 +281,38 @@ Fields:
 Operations:
 
 - `assignNumber` (writes, on an instance): Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.
+
+## `Payments`
+
+Keeps what the instance owes and how it is paid: a checkout, an order, a booking's deposit, an invoice, or a refund of one. The amount due comes from an own integer field or from Holds.total, in a currency. The engine never calls a payment provider: openPayment records an attempt and an action, an adapter outside the engine reads the actions waiting for its provider through listPaymentActions, calls the provider with each action's id as its idempotency key, and reports what happened, and every provider event, through recordPaymentEvent, which applies each event once and moves an attempt only forward. capturePayment, voidPayment and refundPayment record actions too. require holds a move into a state until the instance is authorized or paid, voidOn states void its open attempts, and no move leaves a state while an attempt is processing, so an expiry does not let go of what is being paid for. A refund that needs sign-off is an instance of its own, whose Payments names the instance it refunds (refundOf): entering an issueOn state asks that instance's refundFor, and the provider's answer comes back through settleRefundFor. Payments stores no card data and no raw provider event.
+
+- Config: `PaymentsConfig`, required.
+- Implemented by `@superschematic/engine-commerce`.
+
+Fields:
+
+- `Payments.due`: What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then.
+- `Payments.authorized`: What the provider has authorized and not voided or captured.
+- `Payments.captured`: What the provider has captured.
+- `Payments.refunded`: What the provider has refunded.
+- `Payments.outstanding`: due less captured, never below 0.
+- `Payments.overpaid`: What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it.
+- `Payments.currency`: The ISO 4217 code of every amount.
+- `Payments.state`: unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid.
+- `Payments.attempts`: The last twenty attempts, newest first: { attempt, provider, providerRef?, amount, currency, status, authorized?, captured?, brand?, last4?, openedAt, updatedAt }.
+
+Operations:
+
+- `openPayment` (writes, on an instance): Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.
+- `recordPaymentEvent` (writes, on an instance): Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.
+- `capturePayment` (writes, on an instance): Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.
+- `voidPayment` (writes, on an instance): Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.
+- `refundPayment` (writes, on an instance): Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.
+- `listPaymentActions` (reads, on the schema): Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.
+- `refundFor` (writes, on an instance): Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.
+- `settleRefundFor` (writes, on an instance): Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.
+
+Refusals carry the codes `nothing_due`, `amount_locked`, `currency_mismatch`, `over_capture`, `exceeds_refundable`, `unpaid`, `unauthorized`, `payment_in_progress`, `no_attempt`, `not_linked`, `key_reused`, `attempt_closed`, `not_configured`, `total_unknown`.
 
 ## `Presence`
 
@@ -361,6 +442,35 @@ Rules per state of the type's Workflow: the own fields an instance must hold to 
 
 Refusals carry the codes `missing_fields`, `frozen_fields`, `required_fields`.
 
+## `Stock`
+
+Counts units of what the instance stands for: a product's inventory, a ticket type, a coupon's redemptions. Stock keeps the units on hand and the units claims hold, and every change of the count on hand is a movement with a reason, the claim it was for and who made it. A claim takes units only through the supply contract's operations, which Holds invokes by name: holdFor holds what an item of the claim asks, commitFor takes held units out of what is on hand (they are sold), releaseFor frees them, and returnFor puts committed units back. Each checks the claim's own Holds.items, so no caller holds or frees units by calling one directly, and each is idempotent. A hold that does not fit what is available is refused, unless the config allows backorder; checkHold counts what the claim's other items of the instance ask. A deleted claim's committed units stay sold. A caller with the config's permission receives, adjusts and counts stock. With a price, holdFor returns the unit price and its currency, and the claim keeps the price each item was held at. An instance is not deleted while it holds units for a claim. Stock and Calendar declare the same contract operations, so a type composes one of them.
+
+- Config: `StockConfig`, required.
+- Cannot be composed with `Calendar`.
+- Implemented by `@superschematic/engine-commerce`.
+
+Fields:
+
+- `Stock.onHand`: The units on hand: received, adjusted and counted, less what claims committed, plus what they returned. Always the sum of the instance's movements.
+- `Stock.held`: The units claims hold and have neither committed nor released.
+- `Stock.available`: onHand less held: what a new hold can take. Never below 0 unless the config allows backorder.
+- `Stock.low` (volatile: computed when read): Whether available is at or below the config's lowAt; false without one. A list filters on it, so where Stock.low is true lists what to reorder.
+
+Operations:
+
+- `receiveStock` (writes, on an instance): Adds units that arrived to what is on hand, with a reason and an optional reference, such as a delivery note's. Needs the config's permission.
+- `adjustStock` (writes, on an instance): Adds a delta, positive or negative, to what is on hand, with a reason: damage, loss, a correction. Needs the config's permission. Refused when it leaves fewer on hand than claims hold, unless the config allows backorder.
+- `countStock` (writes, on an instance): Sets what is on hand to a count, with a reason, recording the difference as a movement; a count equal to what is on hand records nothing. Needs the config's permission, and its .override for a count below what claims hold.
+- `holdFor` (writes, on an instance): Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.
+- `commitFor` (writes, on an instance): Makes what an item of a claim holds the claim's for good, once the claim's item is committed.
+- `releaseFor` (writes, on an instance): Frees what an item of a claim holds, once the claim's item is released.
+- `returnFor` (writes, on an instance): Takes back units an item of a claim committed, once the claim's item is returned.
+- `checkHold` (reads, on an instance): Answers whether holdFor would hold what an item asks now, and when not, why.
+- `listStockMovements` (reads, on an instance): Lists the instance's movements, newest first, one page at a time: each change of what is on hand, by kind, with its delta, reason, the claim and item it was for, who made it and when.
+
+Refusals carry the codes `not_requested`, `unavailable`, `held`, `over_max`, `below_held`.
+
 ## `Timers`
 
 Named deadlines on the instance, each due a time after it starts: at the create, each time the status of the type's Workflow enters a state, or at the time a date-time field of the instance holds, before it with a negative offset. A due deadline fires once: it is marked fired and can move the status, from the state it starts in unless the config names others, whatever the move meets. A change of the status can cancel a pending deadline, and a field deadline moves with its field. The engine's runner fires the due deadlines every sweepMs; a caller with the config's permission resets or snoozes one. A deadline that names a state needs Workflow on the type.
@@ -453,14 +563,23 @@ interface BehaviorConfigs {
   Budget: BudgetConfig;
   /** Retries per failure class, with caps, kept results and stuck detection; it requires Workflow. */
   Retries: RetriesConfig;
+  /** Units a supply counts: on hand, held by claims, and every movement, held and committed through the supply contract; it conflicts with Calendar. */
+  Stock: StockConfig;
+  /** Time a supply opens: weekly hours in a time zone, closures and a capacity, held and booked through the supply contract; it conflicts with Stock. */
+  Calendar: CalendarConfig;
+  /** One claim's holds on any supply, taken, committed, released and returned as its Workflow moves; it requires Workflow. */
+  Holds: HoldsConfig;
+  /** What the instance owes and the payments and refunds that settle it, through a provider adapter outside the engine. */
+  Payments: PaymentsConfig;
 }
 ```
 
 The config each behavior takes, keyed by the behavior's registered name.
 It lists the behaviors the core declares (internal/registry/behaviors in
 the superschematic repository), which @superschematic/engine implements,
-and the work-queue behaviors, which @superschematic/engine-workqueue
-implements.
+the work-queue behaviors, which @superschematic/engine-workqueue
+implements, and the commerce behaviors (D70), which
+@superschematic/engine-commerce implements.
 An extension's authoring package adds its behaviors by module
 augmentation, as it adds an invocation policy key to MCPToolOptions:
 
@@ -1243,3 +1362,158 @@ interface RetriesConfig {
 ```
 
 Retries' config.
+
+```ts
+interface FieldSource {
+  readonly field: string;
+}
+```
+
+An own field of the type, by JSON key, that holds a value in place of a literal.
+
+```ts
+type CurrencyCode = string
+```
+
+An ISO 4217 currency code, three uppercase letters, as Finance.Currency holds one.
+
+```ts
+interface StockConfig {
+  /** The unit price holdFor returns and Holds keeps on each item: an own integer field in the currency's minor units, and its currency. */
+  readonly price?: StockPrice;
+  /** Stock.low is true while available is at or below this count, or the count an own integer field holds. */
+  readonly lowAt?: number | FieldSource;
+  /** The most units one item of a claim may hold. */
+  readonly maxPerHold?: number;
+  /** Whether a hold may take more than is available; false when absent. */
+  readonly backorder?: boolean;
+  /** The permission a caller needs to receive, adjust and count stock; its .override counts below what claims hold. */
+  readonly permission: string;
+}
+```
+
+Stock's config.
+
+```ts
+interface StockPrice {
+  /** An own integer field, such as a Finance.Money field, holding the unit price in the currency's minor units. */
+  readonly field: string;
+  /** An ISO 4217 code, or an own Finance.Currency field that holds one. */
+  readonly currency: CurrencyCode | FieldSource;
+}
+```
+
+The unit price of a Stock config.
+
+```ts
+type WallTime = string
+```
+
+A wall time, "HH:MM", from "00:00" to "24:00".
+
+```ts
+type CalendarWeek = {
+  readonly [day in "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"]?: readonly (readonly [WallTime, WallTime])[];
+}
+```
+
+Weekly opening hours: each day a list of [open, close] wall-time ranges; a day absent or empty is closed.
+
+```ts
+interface CalendarConfig {
+  /** The IANA time zone the hours are wall times in; an instance may set its own. */
+  readonly timeZone: string;
+  /** The weekly opening hours an instance has until it sets its own. */
+  readonly hours: CalendarWeek;
+  /** How many holds may overlap at any instant, or the count an own integer field holds; 1 when absent. */
+  readonly capacity?: number | FieldSource;
+  /** The start grid from each opening time; any whole minute when absent. */
+  readonly slotMs?: number;
+  /** The shortest hold; slotMs when absent. */
+  readonly minMs?: number;
+  /** The longest hold; a day when absent. */
+  readonly maxMs?: number;
+  /** Time kept free before and after each hold, which counts against capacity. */
+  readonly bufferMs?: { readonly before?: number; readonly after?: number };
+  /** How long ahead of its start a hold must be made; 0 when absent. */
+  readonly leadMs?: number;
+  /** How far ahead a hold may start; no limit when absent. */
+  readonly horizonMs?: number;
+  /** The permission a caller needs to set an instance's hours and closures; nobody may when absent. */
+  readonly permission?: string;
+}
+```
+
+Calendar's config. Durations are milliseconds.
+
+```ts
+interface HoldsConfig {
+  /** The holds, by name: camelCase. */
+  readonly holds: Readonly<Record<string, HoldsHold>>;
+  /** The states of the type's Workflow whose entry takes the holds, and the create into one; the create alone when absent. */
+  readonly takeOn?: readonly string[];
+  /** The states whose entry commits what is held. */
+  readonly commitOn?: readonly string[];
+  /** The states whose entry releases what is held, such as an expiry a Timers deadline moves the claim to. */
+  readonly releaseOn?: readonly string[];
+  /** The states whose entry returns the units of counted supply the claim committed. */
+  readonly returnOn?: readonly string[];
+  /** The most items the holds may ask together; 100 when absent. */
+  readonly maxItems?: number;
+}
+```
+
+Holds' config.
+
+```ts
+type HoldsHold = (
+  | { readonly link: string; readonly each?: never; readonly schema?: never }
+  | { readonly each: { readonly field: string; readonly target: string }; readonly schema: string; readonly link?: never }
+) &
+  (
+    | { readonly quantity: number | FieldSource; readonly interval?: never }
+    | { readonly interval: HoldsInterval; readonly quantity?: never }
+  )
+```
+
+One hold of a Holds config: a single-valued link to the supply, or an
+own list field whose elements each name a supply of schema; and the
+units each item asks of counted supply, or the time of timed supply. An
+each hold reads its fields from the list's element.
+
+```ts
+type HoldsInterval =
+  | { readonly start: string; readonly end: string; readonly durationMs?: never }
+  | { readonly start: string; readonly durationMs: number; readonly end?: never }
+```
+
+The time a timed hold's item asks: from a date-time field to another, or for durationMs.
+
+```ts
+interface PaymentsConfig {
+  /** What the instance owes: an own integer field in the currency's minor units, or the type's Holds.total. */
+  readonly amount: FieldSource | { readonly holds: true };
+  /** The currency of an amount from a field: an ISO 4217 code, or an own Finance.Currency field. */
+  readonly currency?: CurrencyCode | FieldSource;
+  /** automatic: the provider captures what it authorizes; manual: captureOn states capture it. */
+  readonly capture?: "automatic" | "manual";
+  /** With capture manual, the states whose entry captures what is authorized. */
+  readonly captureOn?: readonly string[];
+  /** Per state of the type's Workflow, what a move into it waits for. */
+  readonly require?: Readonly<Record<string, "authorized" | "paid">>;
+  /** The states whose entry cancels open attempts and voids authorized ones. */
+  readonly voidOn?: readonly string[];
+  /** What becomes of money captured while the instance is in a voidOn state; keep when absent. */
+  readonly afterRelease?: "refund" | "keep";
+  /** Who refunds directly with refundPayment. */
+  readonly refunds?: { readonly permission: string };
+  /** Who reports what providers did: the adapter's principal. */
+  readonly record: { readonly permission: string };
+  /** Makes the instance a refund of the instance a required link of the type's Links config names. */
+  readonly refundOf?: { readonly link: string };
+  /** With refundOf, the states whose entry asks the linked instance to refund the amount. */
+  readonly issueOn?: readonly string[];
+}
+```
+
+Payments' config.
