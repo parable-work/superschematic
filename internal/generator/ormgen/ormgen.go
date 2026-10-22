@@ -253,7 +253,7 @@ type Field struct {
 	IsScalarType       bool   // scalar or enum (value type in typegen output)
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
 	IsNullableEnum     bool   // optional enum: typegen emits *Enum
-	IsNullableScalar   bool   // optional non-integer (or DistinctNull) scalar: typegen emits *Scalar
+	IsNullableScalar   bool   // optional scalar typegen emits as *Scalar (an integer-like one only without a default, or DistinctNull)
 	IsNullableBool     bool   // optional boolean without a default: typegen emits *bool
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
@@ -1233,13 +1233,14 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 
 	// Arrays and maps are nilable in typegen output ([]T, map[string]T; an
 	// optional non-union map holds *T values), so neither is a *T even when
-	// the field itself is nullable. Optional integer-like scalars keep
-	// value-type parity with the legacy generator unless their null is
-	// distinct (ir.FieldDef.DistinctNull); other optional scalars and enums
-	// still use pointers.
+	// the field itself is nullable. An optional integer-like scalar with a
+	// declared default is a value type, as typegen declares it, unless its
+	// null is distinct (ir.FieldDef.DistinctNull); other optional scalars and
+	// enums use pointers.
 	isMap := fieldDef.TypeRef.IsMap
 	isNullableEnum := !isRequired && !isArray && !isMap && isEnum
-	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && (!traits.IsIntegerLike || fieldDef.DistinctNull)
+	isNullableScalar := !isRequired && !isArray && !isMap && isScalar &&
+		(!traits.IsIntegerLike || fieldDef.DistinctNull || codegen.GoOptionalIntegerScalarIsPointer(isRequired, isArray, isMap, fieldDef.Default))
 	isNullableBool := codegen.GoOptionalBoolIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
 	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
