@@ -9,8 +9,14 @@ the engine's addon is built with and registers by name. This package holds
 their names, their configs' and records' types and their constants.
 */
 
-export { DEFAULT_MAX_ITEMS } from './types.js';
+export { DEFAULT_MAX_ITEMS, MAX_WINDOW_MS } from './types.js';
 export type {
+  CalendarAvailability,
+  CalendarBooking,
+  CalendarClosure,
+  CalendarConfig,
+  CalendarRecord,
+  CalendarSlot,
   CurrencySource,
   FieldRef,
   HoldCheck,
@@ -20,6 +26,8 @@ export type {
   HoldsRecord,
   HoldState,
   InstanceRef,
+  OpeningHours,
+  OpeningRanges,
   StockChange,
   StockConfig,
   StockMovement,
@@ -28,11 +36,11 @@ export type {
 } from './types.js';
 
 /** The name of each behavior this package ships so far. */
-export type CommerceBehavior = 'Stock' | 'Holds';
+export type CommerceBehavior = 'Stock' | 'Calendar' | 'Holds';
 
 /**
  * Every behavior this package ships, by name, in the order a deployment
  * registers them: the engine's behaviors option takes them as they are
  * (`openEngine({ ..., behaviors: commerceBehaviors })`).
  */
-export const commerceBehaviors: readonly CommerceBehavior[] = Object.freeze(['Stock', 'Holds']);
+export const commerceBehaviors: readonly CommerceBehavior[] = Object.freeze(['Stock', 'Calendar', 'Holds']);

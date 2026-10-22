@@ -139,11 +139,13 @@ cd runtime/engine-commerce/typescript && bun run build   # after the engine's
 UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/commerce-*.json; review the diff
 ```
 
-`open`'s `behaviors` names the package's behaviors, `Stock` and `Holds`,
-which a replayer registers by name after the core's; the files define no
-test behaviors. Every scenario runs on a fixed clock, and
+`open`'s `behaviors` names the package's behaviors, `Stock`, `Calendar`
+and `Holds`, which a replayer registers by name after the core's; the
+files define no test behaviors. Every scenario runs on a fixed clock, and
 `commerce-holds-timers` runs the runner (`runner.runDue`), whose Timers
-deadline moves a checkout out of `held`.
+deadline moves a checkout out of `held`. `commerce-calendar` holds a
+desk's time in Europe/London, so a replayer's wall times come from the
+same IANA database (2026e, which the crate bundles).
 
 ## A file
 

@@ -3,7 +3,7 @@
 // releases as it is cancelled and returns as it is returned;
 // holds_missing, held_fields, committed, no_supply and not_taking; an
 // update in held that holds nothing takes what it now asks; listHolds;
-// and a delete lets go. Real SQLite, the engine's Rust behaviors, a clock
+// and a delete lets go of what is held and leaves what was sold. Real SQLite, the engine's Rust behaviors, a clock
 // the tests move.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -51,7 +51,7 @@ describe('Holds', () => {
       ['anvil', 2],
       ['rope', 1],
     ], 1);
-    assert.deepEqual([created.behaviors.Holds?.state, created.behaviors.Holds?.total], ['pending', undefined]);
+    assert.deepEqual([created.behaviors.Holds?.state, created.behaviors.Holds?.total], ['pending', { amount: 0, currency: null }]);
     move('c1', 'held');
     assert.deepEqual(holdsOf('c1'), {
       items: [
@@ -81,12 +81,14 @@ describe('Holds', () => {
       ['rope', 9],
     ]);
     const refused = thrown(() => move('c2', 'held'), BehaviorVetoError);
-    assert.deepEqual([refused.behavior, refused.vetoCode, refused.reason], ['Holds', 'unavailable', '2 items do not fit their supply']);
+    // The two rope lines ask 10 of 5 together: each is listed with what is left for it beside the other.
+    assert.deepEqual([refused.behavior, refused.vetoCode, refused.reason], ['Holds', 'unavailable', '3 items do not fit their supply']);
     assert.deepEqual(
       (refused.vetoDetails?.items as Array<Record<string, unknown>>).map((item) => [item.hold, item.item, item.available]),
       [
+        ['lines', 0, 0],
         ['lines', 1, 1],
-        ['lines', 2, 5],
+        ['lines', 2, 4],
       ]
     );
     assert.deepEqual(states('c2'), ['pending', 'pending', 'pending']);
@@ -94,7 +96,7 @@ describe('Holds', () => {
     const listed = engine.instances.invoke(alice, 'Checkout', 'c2', 'listHolds', {}) as { items: Array<{ check?: { fits: boolean } }> };
     assert.deepEqual(
       listed.items.map((item) => item.check?.fits),
-      [true, false, false]
+      [false, false, false]
     );
     move('c1', 'cancelled');
     assert.deepEqual(states('c1'), ['released']);
@@ -127,7 +129,7 @@ describe('Holds', () => {
     assert.equal(thrown(() => move('c2', 'held'), BehaviorVetoError).vetoCode, 'no_supply');
   });
 
-  test('an update in held that holds nothing takes what it now asks, and a delete lets go', () => {
+  test('an update in held that holds nothing takes what it now asks, and a delete lets go of what is held and leaves what was sold', () => {
     const { engine, move, holdsOf, stockOf, states, cart } = opened();
     cart('c1', []);
     move('c1', 'held');
@@ -144,6 +146,10 @@ describe('Holds', () => {
     move('c2', 'placed');
     assert.equal(stockOf('anvil').onHand, 1);
     assert.equal(engine.instances.delete(alice, 'Checkout', 'c2'), true);
-    assert.equal(stockOf('anvil').onHand, 3);
+    assert.deepEqual(stockOf('anvil'), { onHand: 1, held: 0, available: 1, low: false });
+    // A checkout made again with c2's id holds afresh.
+    cart('c2', [['anvil', 1]]);
+    move('c2', 'held');
+    assert.deepEqual(states('c2'), ['held']);
   });
 });
