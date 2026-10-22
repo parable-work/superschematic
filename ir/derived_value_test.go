@@ -117,6 +117,7 @@ func TestDerivedValuesThatBreakTheContract(t *testing.T) {
 		{"a service binding without its worker", EdgeHTTP, ServiceEndpoint{URL: "https://x", Binding: &ServiceBinding{Name: "X_SERVICE"}}, "binding.worker is null"},
 		{"an r2 credential without a binding", EdgeBucket, BucketConnection{Name: "m", R2: &R2Credential{Account: "a", AccessKeyID: "i", Token: Output{Resource: "t", Name: "value"}}}, "with r2 sets binding"},
 		{"an r2 credential without its token", EdgeBucket, BucketConnection{Name: "m", Binding: "B", R2: &R2Credential{Account: "a", AccessKeyID: "i"}}, "r2.token is null"},
+		{"an empty r2 jurisdiction", EdgeBucket, BucketConnection{Name: "m", Binding: "B", R2: &R2Credential{Account: "a", Jurisdiction: "", AccessKeyID: "i", Token: "t"}}, `r2.jurisdiction is ""`},
 		{"an r2 binding on an emulator", EdgeBucket, BucketConnection{Name: "m", Binding: "B", Endpoint: "http://127.0.0.1:24443"}, "endpoint or binding, not both"},
 	}
 	for _, tc := range cases {
@@ -247,6 +248,18 @@ func TestDerivedVariablesMarkSecretMembers(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("r2 variables:\n got %#v\nwant %#v", got, want)
 	}
+	// A jurisdiction is one more plain variable (D64, amended).
+	got, err = DerivedVariables("SHOP_MEDIA_BUCKET", BucketConnection{
+		Name: "shop-media", Binding: "SHOP_MEDIA_BUCKET",
+		R2: &R2Credential{Account: "acct", Jurisdiction: "eu", AccessKeyID: "id", Token: token},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = slices.Insert(want, 4, DerivedVariable{Name: "SHOP_MEDIA_BUCKET_R2_JURISDICTION", Value: "eu"})
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("r2 variables with a jurisdiction:\n got %#v\nwant %#v", got, want)
+	}
 	// A member of the same name deeper in another value is no secret.
 	got, err = DerivedVariables("F", map[string]any{"a": map[string]any{"credential": map[string]any{"key": "k"}}})
 	if err != nil || len(got) != 1 || got[0].Secret {
@@ -362,6 +375,7 @@ func TestDerivedMembersNameTheVariables(t *testing.T) {
 		EdgeBucket: {
 			BucketConnection{Name: "n", Endpoint: "e"},
 			BucketConnection{Name: "n", Binding: "b", R2: &R2Credential{Account: "a", AccessKeyID: "i", Token: "t"}},
+			BucketConnection{Name: "n", Binding: "b", R2: &R2Credential{Account: "a", Jurisdiction: "eu", AccessKeyID: "i", Token: "t"}},
 		},
 	}
 	for kind, list := range values {

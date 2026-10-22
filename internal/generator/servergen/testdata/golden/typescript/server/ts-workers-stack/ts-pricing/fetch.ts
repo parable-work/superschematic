@@ -4,7 +4,7 @@
 // ts-pricing (docs/stack-model.md, section 18.5). superschematic writes
 // it beside main.ts, which stack dev runs on Bun, because an environment of
 // the stack places the server on Cloudflare Workers; bundle.ts bundles it
-// for workerd, with no Node API and no nodejs_compat.
+// for workerd, with no Node API but AsyncLocalStorage, under nodejs_als.
 //
 // When Cloudflare loads the version, fetch.ts reads each API's config from
 // the Worker's string bindings, so a refused config fails the version's
@@ -15,6 +15,11 @@
 // every API's router on one Hono app beside /healthz and /readyz. Each
 // request goes to that app with the client's address, which Cloudflare
 // gives in CF-Connecting-IP.
+//
+// Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
+// when the Worker's OTEL_ bindings name an endpoint, it makes each request
+// a server span and each call a client span, and hands the spans a request
+// ended to its waitUntil.
 //
 // What the isolate builds lives as long as the isolate, and Cloudflare runs
 // many and drops them at will: an implementation keeps no request's I/O
@@ -30,6 +35,7 @@ import { Hono } from 'hono';
 import { createLogger, serviceAuthenticator } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import * as tsPricingApi from '@schemas/ts-pricing-api';
 import * as tsPricingImpl from '@schemas/ts-pricing-implementation';
 
@@ -37,6 +43,15 @@ import * as tsPricingImpl from '@schemas/ts-pricing-implementation';
 type Handle = (request: Request) => Response | Promise<Response>;
 
 const logger = createLogger({ stack: 'ts-workers-stack', server: 'ts-pricing' });
+
+// Trace export, from the Worker's OTEL_ bindings: a refused value throws
+// here, and Cloudflare refuses the version.
+const telemetry = startWorkersTelemetry(env, { service: 'ts-pricing', stack: 'ts-workers-stack', kind: 'server', logger });
+
+/** What Cloudflare hands a handler beside the request: waitUntil keeps the isolate for work after the response. */
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
 
 // Each API's config as Cloudflare loads the version, from the string
 // bindings: a refused config throws here, and Cloudflare refuses the version.
@@ -49,6 +64,7 @@ async function build(): Promise<Handle> {
   const tsPricingConfig = configure('ts-pricing', () => tsPricingApi.loadEnvConfig(values));
 
   const app = new Hono();
+  app.use(telemetry.middleware());
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/readyz', c => c.json({ status: 'ready' }));
 
@@ -71,7 +87,7 @@ async function build(): Promise<Handle> {
 const server = perIsolate(build);
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, _env: unknown, ctx: ExecutionContext): Promise<Response> {
     let handle: Handle;
     try {
       handle = await server();
@@ -79,7 +95,12 @@ export default {
       logger.error('server did not start', { error });
       return new Response(JSON.stringify({ status: 'unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } });
     }
-    return handle(request);
+    try {
+      return await handle(request);
+    } finally {
+      // The spans the request ended go out after its response.
+      ctx.waitUntil(telemetry.flush());
+    }
   },
 };
 

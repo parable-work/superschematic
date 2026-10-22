@@ -11,6 +11,15 @@
 # a fork runs check alone. On a push to main, each deploy job deploys a
 # cloud environment in the order the stack declares them, in the GitHub
 # environment of its name, whose required reviewers approve it.
+#
+# The prepare job runs, with no credentials, all the project code the cloud
+# jobs need: the build, the installs, the sites' and bundles' builds and the
+# sidecar documents (superschematic stack prepare). A cloud job takes what
+# it made: it runs no build, no package's script and no sidecar document,
+# and its only package manager run, the schemas root's install with
+# --ignore-scripts, which the loader reads the types of, is on a Bun or
+# Node.js downloaded from its release, never restored from a cache another
+# job could write.
 
 name: stock-stack
 
@@ -92,9 +101,43 @@ jobs:
         working-directory: schemas/dist/server/stock-stack/stock-db-engine-runner
         run: cargo check --locked
 
+  prepare:
+    name: prepare
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install superschematic 1.2.3
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/superschematic"
+          mkdir -p "$dir"
+          release=https://github.com/parable-work/superschematic/releases/download/v1.2.3
+          curl -fsSL -o "$dir/superschematic_1.2.3_linux-x64.tar.gz" "$release/superschematic_1.2.3_linux-x64.tar.gz"
+          curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
+          (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
+          tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+      - name: Build the services
+        run: superschematic build-all schemas/services
+      - name: Prepare Staging
+        run: superschematic stack prepare Staging --stack schemas/services/stock-stack --dir "$RUNNER_TEMP/prepared"
+      - name: Upload what prepare made
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prepared
+          path: ${{ runner.temp }}/prepared
+          if-no-files-found: error
+          retention-days: "1"
+
   plan-staging:
     name: plan Staging
-    needs: check
+    needs: [check, prepare]
     if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
@@ -117,17 +160,22 @@ jobs:
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
+      - name: Download what prepare made
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: prepared
+          path: ${{ runner.temp }}/prepared
       - name: Sign in to Google Cloud as planner
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/storefront-stack-ci/providers/ci
           service_account: storefront-stack-planner@acme-staging.fake.test
       - name: Plan Staging
-        run: superschematic stack plan Staging --stack schemas/services/stock-stack
+        run: superschematic stack plan Staging --stack schemas/services/stock-stack --prepared "$RUNNER_TEMP/prepared"
 
   deploy-staging:
     name: deploy Staging
-    needs: check
+    needs: [check, prepare]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: Staging
@@ -151,16 +199,15 @@ jobs:
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
-      - name: Set up Rust
-        run: |
-          rustup toolchain install 1.99.0 --profile minimal
-          rustup default 1.99.0
-      - name: Build the services
-        run: superschematic build-all schemas/services
+      - name: Download what prepare made
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: prepared
+          path: ${{ runner.temp }}/prepared
       - name: Sign in to Google Cloud as deployer
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/storefront-stack-ci/providers/ci
           service_account: storefront-stack-deployer@acme-staging.fake.test
       - name: Deploy Staging
-        run: superschematic stack deploy Staging --stack schemas/services/stock-stack
+        run: superschematic stack deploy Staging --stack schemas/services/stock-stack --prepared "$RUNNER_TEMP/prepared"

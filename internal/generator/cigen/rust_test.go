@@ -112,8 +112,11 @@ func TestRustServersInCheck(t *testing.T) {
 			t.Errorf("%s builds without setting up Rust first: %q", id, names)
 		}
 	}
-	if w.jobs["deploy-staging"].step("Set up Rust") == nil {
-		t.Error("deploy-staging builds the services without setting up Rust")
+	if w.jobs["prepare"].step("Set up Rust") == nil {
+		t.Error("prepare builds the services without setting up Rust")
+	}
+	if w.jobs["deploy-staging"].step("Build the services") != nil {
+		t.Error("deploy-staging builds the services, which prepare does (D47, amended)")
 	}
 }
 

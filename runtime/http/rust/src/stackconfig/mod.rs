@@ -36,7 +36,7 @@
 //! `<field>_D1_DATABASE`), a service's binding (`<field>_BINDING_NAME`,
 //! `<field>_BINDING_WORKER`), and a bucket's R2 binding and credential
 //! (`<field>_BINDING`, `<field>_R2_ACCOUNT`, `<field>_R2_ACCESS_KEY_ID`,
-//! `<field>_R2_TOKEN`). The TypeScript runtime reads them for its Workers
+//! `<field>_R2_TOKEN`, `<field>_R2_JURISDICTION`). The TypeScript runtime reads them for its Workers
 //! entry, as Go's refuses them.
 
 mod callers;
@@ -554,6 +554,7 @@ fn read_bucket(field: &str, vars: &impl Vars) -> Result<Bucket, StackConfigError
             format!("{field}_R2_ACCOUNT"),
             format!("{field}_R2_ACCESS_KEY_ID"),
             format!("{field}_R2_TOKEN"),
+            format!("{field}_R2_JURISDICTION"),
         ],
     )?;
     let name = vars.get(&format!("{field}_NAME"));

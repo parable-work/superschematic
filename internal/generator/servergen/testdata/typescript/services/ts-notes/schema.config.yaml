@@ -1,6 +1,7 @@
 # A TypeScript API on a sqlite-first database (D64): it takes ts-notes-db
 # from its one DB-kind dependency, so its Deps.db is a SqlDatabase and its
-# database field a DatabaseConnection, and its job builds the same Deps.
+# database field a DatabaseConnection, and its job and its worker build
+# the same Deps.
 name: ts-notes
 kind: API
 dependencies:

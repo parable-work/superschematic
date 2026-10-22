@@ -28,6 +28,8 @@ resources:
     properties:
       accountId: 0123456789abcdef0123456789abcdef
       compatibilityDate: "2026-09-15"
+      compatibilityFlags:
+        - nodejs_als
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/main.js

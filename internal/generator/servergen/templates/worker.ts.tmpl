@@ -10,7 +10,7 @@
 // does: the API's @envVars settings and the fields its edges derive, one
 // variable per member (section 3.4). It builds the API's Deps as the server
 // does, calls the implementation's createWorkers, and claims the messages of
-// the queue {{ .Worker.Queue }} of {{ $db.Service }}, handling each with the worker's method.
+// the queue {{ .Worker.Queue }} of {{ $db.Service }}{{ if $db.SQLite }}, on the SQLite file its URL names (D53, amended){{ end }}, handling each with the worker's method.
 // WORKER_CONCURRENCY, which the platform sets, says how many it handles at a
 // time: {{ .Worker.Concurrency }} unless it says otherwise. It extends each message's claim
 // while the method runs, completes the message when the method resolves,
@@ -26,13 +26,20 @@
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- if .PostgresDatabases }}
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres{{ if not $db.SQLite }}, postgresQueue{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- end }}
+{{- if .SQLiteDatabases }}
+import { openSqlite, sqliteFile{{ if $db.SQLite }}, sqliteQueue{{ end }}, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
+{{- end }}
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
 import { runWorker, workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
+{{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
+{{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
@@ -65,7 +72,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
   {{ template "ts-deps" $api }}
   const workers = await construct({{ tsQuote $api.Service }}, 'workers', () => {{ $api.Impl }}.createWorkers({{ $api.Deps }}));
   const concurrency = workerConcurrency({{ .Worker.Concurrency }});
-  const queue = postgresQueue({{ $db.Var }}, {{ .Worker.Definition }});
+  const queue = {{ if $db.SQLite }}sqliteQueue{{ else }}postgresQueue{{ end }}({{ $db.Var }}, {{ .Worker.Definition }});
   logger.info('worker started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Worker.Name }}, queue: queue.name, concurrency });
   await runWorker(
     {
@@ -92,8 +99,14 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-open-sqlite" . }}
+{{- end }}
 {{- if .Engines }}
 
 {{ template "ts-engine" . }}

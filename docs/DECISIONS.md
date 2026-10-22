@@ -3170,7 +3170,9 @@ unchanged.
 Status: built. A union field is no longer checked for presence alone: it
 is validated as the member the union picks, in Rust and TypeScript as in
 Go, and every language picks the member by one structural predicate (D31,
-amended: a union picks its member by one structural predicate).
+amended: a union picks its member by one structural predicate). A Go enum
+refuses a string it lacks and a Go duration reads its text as every
+validator does (D31, amended: a Go enum refuses a string it lacks).
 
 The rule is reversible until the first release.
 ## D32. The version graph on SQLite, and a behavior that hosts one
@@ -4372,10 +4374,11 @@ Status: built.
 The amendments below ship the archives the workflow's builds link and
 pin each generated module to the release. The workflow builds a stack's
 static sites (D55): `check` installs the output root's Bun workspace and
-builds each site, and the deploy and preview jobs of an environment with
-a site set up Bun, even in an npm project, and install the workspace,
-since `stack deploy` builds the site on the runner (`CIStack.Sites`,
-`TestSitesInTheWorkflow`). Jobs, workers and buckets need nothing of the
+builds each site, and a `prepare` job with no credentials sets up Bun,
+even in an npm project, installs the workspace and builds each site and
+bundle, which the deploy and preview jobs take with `stack deploy
+--prepared` and build nothing (`CIStack.Sites`, `TestSitesInTheWorkflow`;
+the amendment "no project code runs where deploy credentials are"). Jobs, workers and buckets need nothing of the
 workflow: the deploy builds their images on the target and applies the
 rest as graph resources. No generated workflow has run on GitHub
 Actions: a run needs a release, a project bootstrapped with a GitHub
@@ -5107,7 +5110,7 @@ Status: built, as narrowed below.
 
 The claims run on Postgres alone, since the Go ORM does: resolution
 refuses a worker whose queue's database an environment places on SQLite
-or D1.
+or D1. The last D53 amendment claims on SQLite too.
 
 acme-shop's `shop-db` declares `OrderPlaced`, which `PlaceOrder` enqueues
 in its transaction, and `shop-orders`' worker `FulfilOrders` fulfils the
@@ -5128,8 +5131,9 @@ D68 builds a backoff that grows with each attempt, the removal of done
 messages, and an operator's command to read, retry and drop dead ones.
 
 Not built:
-- claims on SQLite and D1, in a write transaction (the amendment below);
-- scaling a worker with its queue's depth.
+- claims on D1, which no platform of Workers runs a claim loop for;
+- scaling a worker with its queue's depth, which the last D53 amendment
+  designs.
 
 The rule is reversible until the first release.
 
@@ -6499,7 +6503,8 @@ SQLite gets a queue's table and its migrations, but no claim.
 |----------|------------------------|
 | A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
 
-Status: built in #336.
+Status: built in #336. The last D53 amendment lifts the refusal for a
+SQLite file, with statements the clients carry beside Postgres's.
 
 ### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
 
@@ -7868,8 +7873,8 @@ Status: built.
 Not built:
 - Export on gcp: built by the amendment at the end of this file that
   names it (`### D67, amended`).
-- The cloudflare target's Workers build, which does not import
-  `./telemetry`.
+- The cloudflare target's Workers build: built by the D64 amendment that
+  names `./workers-telemetry`, at the end of this file.
 - Metrics and logs, as above.
 - A message span that continues the trace that enqueued it.
 
@@ -8254,7 +8259,9 @@ gcp's `TestDeployRunsTheJobOnEveryDeploy` reads a failed execution's error,
 the gcp goldens hold a job that runs on deploy, the Pulumi render goldens
 are unchanged by it, and the local target's
 `TestJobRunsOnceTheEnvironmentIsUp` runs it under `stack dev`. No job has
-run on a deploy on Google Cloud.
+run on a deploy on Google Cloud. A job whose artifact is a bundle runs on
+a deploy on cloudflare through its Workflow (D64, amended, at the end of
+this file), so the deploy no longer refuses one.
 
 The rule is reversible until the first release.
 
@@ -8350,7 +8357,8 @@ command.
 Not built:
 - `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
-- Claims on SQLite and D1.
+- Claims on D1. Those on SQLite are D53's last amendment.
+- `stack queue` on SQLite, whose dead messages it refuses to read.
 
 The rule is reversible until the first release.
 
@@ -8413,9 +8421,10 @@ Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
 the builds; actionlint passes on them. No generated workflow has run on
 GitHub Actions.
 
-Not built: a deploy that runs the project's TypeScript with no
-credentials in its environment. The bindings scoped by claim, so a pull
-request's job cannot act as the deployer of an environment without
+Not built here: a deploy that runs the project's TypeScript with no
+credentials in its environment, which the amendment "no project code runs
+where deploy credentials are" builds. The bindings scoped by claim, so a
+pull request's job cannot act as the deployer of an environment without
 parameters, are D69's.
 
 ## D69. Each CI account admits only the runs of the jobs that sign in as it (D47 amended)
@@ -8494,7 +8503,8 @@ A decoder may still refuse, after the pick, a value the predicate reads:
 Go's decoder of `Temporal.Duration` reads Go's own duration text, which the
 scalar's validator does not. Such a value is a decoder's divergence, as
 D14's `decodeRejects` lists them, not a pick's. A Go enum takes any string
-outside a union, which no pick depends on. A map's key path is `field.key`
+outside a union, which no pick depends on. (Both closed below: a Go enum
+refuses a string it lacks.) A map's key path is `field.key`
 in the TypeScript and Rust validators and `field[key]` in Go's, as for an
 object in a map; the Python SDK names an argument by its Python name.
 
@@ -9199,3 +9209,312 @@ TypeScript each hold a pickup slot through Calendar and Holds, meet
 `total_unknown` and `nothing_due`, place the free checkout and read its
 booking, and show the MCP tools' policies and hidden operations. The
 client parity corpus carries the commerce schemas.
+
+### D31, amended: a Go enum refuses a string it lacks, and a Go duration reads its text as every validator does
+
+The amendment above left two Go decoders apart from every other language.
+A generated Go enum had no `UnmarshalJSON`, so a request body, a model
+field, a response an SDK read or a queue message decoded any string into
+it: only a caller that ran `Validate` learned it was no member, where
+serde refuses it at decode, TypeScript in validation and pydantic at
+parse. And a `Temporal.Duration` field, a `time.Duration`, decoded through
+superscalar's `UnmarshalJSON`, which reads the text with Go's own
+duration parser and never with the scalar's rules: it took `+1s`, `.5s`
+and `0`, which the scalar's pattern refuses, and refused ` 1s` and `1s `
+with a decode error, where every validator reports `pattern`; and since
+`Validate` could see only the decoded value, it checked the pattern and
+the length on Go's rendering of it (`1s` for `+1s`). Go's parser also
+reads a fraction of a nanosecond down (`1.5ns` is 1ns) where the core
+rounds it (2ns). No other scalar's Go decoder disagrees with its
+validator in the parity matrix: superscalar's other decoders read through
+the core.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated Go enum has `UnmarshalJSON`. A string the enum lacks, `""` and another case of a value included, and a value that is not a string, are refused with the `*json.UnmarshalTypeError` `encoding/json` gives a value of the wrong JSON type, its `Value` `string "purple"` or the JSON kind and its `Type` the enum, which `encoding/json` completes with the struct field's path. null leaves the value as it was, as for a string. A Go client or server that relied on an unknown value decoding, from a request, a stored JSON column, a queue message or a response, now gets the decode error. So an enum's members are part of the wire contract for Go, as they were for Rust and Python: a member a newer server adds fails an older Go client's decode of the whole response, a member removed or renamed makes JSON stored with it (a JSON column, a queue message, a version graph's history) unreadable to the new code, and a required enum a Go value left unset, which encodes as `""`, is refused by the reader. `install/go.md` says so; there is no compatibility check for it yet. | An error of a type of our own, which no caller of `encoding/json` expects and which `encoding/json` would not name the field in. A lenient decode and `Validate` alone, as before, which a caller that skips `Validate` (an SDK reading a response, the ORM reading a JSON column) never ran. `UnmarshalText`, which no generated route, query decoder or YAML reader calls on an enum: query and path values are cast and checked by `ValidateRequired`, and YAML goes through JSON. |
+| A Go route answers an input body whose decoder refused a string an enum lacks as the TypeScript and Rust servers answer it, which validate the body before they decode it: `validation failed`, with `enum` ("invalid enum value") at each such string's path, a list's element, a map's value, a nested object's field and an `InputField` included, beside the errors the input type's `Validate` finds in the rest. `bodyargs.DecodeRefusal` reads the body again with each such string replaced by the enum's first value, walking the JSON beside the Go type (a generated object type, which lists its keys; a list; a string-keyed map; an `InputField`), and does not walk a union, whose pick refuses such a member first. Any other body the decoder refuses, a value of the wrong JSON type among them, is `does not match the declared type`, as before. A body argument is read the same way: a string an enum lacks is `enum`, where its decoder's refusal would have made it `pattern`, and an object argument has `enum` at the string's path beside its other errors. A query value is cast and checked as before, `enum` at its name. | `does not match the declared type`, as the Go route answers a value of the wrong JSON type, which every server answered `validation failed` with `enum` before. The enum's errors alone, which drop the body's other broken rules that the TypeScript and Rust servers report beside them. |
+| A Go type's `UnmarshalJSON` reads each `Temporal.Duration` field's text itself, alone, in a list, a list of lists and a map (`decodeDurationField`): `check<Symbol>Text` checks the text by the scalar's own length and pattern, each one it breaks, and when they accept it by the scalar core, whose canonical text Go's parser then reads exactly. A text they refuse keeps the value Go's parser reads from it and is recorded, as a JSON-object scalar's core failures are, and `Validate` reports it at its path while the field still holds the value decoded; a text Go's parser refuses too (` 1s`, `1d`, an amount beyond the core) is a decode error naming the field, as it was. So a negative duration Go writes (`-1h2m0s`), which the ORM stores and reads, round-trips through every Go reader (an SDK's response, a queue message, a version graph's `HistoryRecord`), none of which runs `Validate`. The union pick checks a duration's text with the same function, and `Parse<Symbol>` parses the core's canonical text. A text the rules and the core accept whose amount a `time.Duration` cannot hold, beyond about 292 years (`2562047h1h`), is still refused at decode, the one value Go cannot hold. | superscalar's `UnmarshalJSON` running the scalar's rules and writing the core's canonical text, a change to the pinned superscalar for a check this repository's validators already make on the text. A string-backed Go type for a duration, which would break the alias every module shares with superscalar and the ORM's `INTERVAL` columns. Refusing every text the rules refuse at decode, which a Go route would answer `does not match the declared type` where every other server answers the rule. Decoding a refused text to 0s, which loses a value Go wrote, a negative one, silently for every reader that does not validate. |
+| Encoding is unchanged: Go writes a duration as Go renders it (`1.5ms`, `1µs`), which every validator accepts and which reads back as the same value, while TypeScript and Rust echo the text they were sent. | Writing the core's canonical text (`1500us`), which needs superscalar's `MarshalJSON`. |
+| A Python enum's reader refuses a string the enum lacks with a pydantic error of type `enum` where it raised the enum's `ValueError` (`value_error`), so the Python SDK names it `enum`, as every other SDK does, where it said `invalid`. | |
+
+The parity matrix holds `Temporal.Duration` alone and in a list: a text
+in each unit (`µs` included), a sign, a negative duration as Go writes
+it, a bare number and a fraction without its integer part (`pattern`),
+space around it and a unit the scalar lacks (`pattern`, which Go's
+decoder refuses), a text too long (`maxLength`), an amount the core
+refuses (core-only, `parse`, which Go's decoder refuses) and a number
+(`type`); the generated validators of every language and the three
+runtimes agree on each. The bad enum vectors
+list Go among the decoders that refuse them, as Python is listed, and a
+member's value in another case is one more. union-lists-api's `Probe`
+holds a `Status`, a list of them, a `Ticket` whose status is one, a
+duration and a list of them outside any union, and `union_requests.json`
+asks every server and SDK about them: a status the enum lacks, alone, in
+a list, in a nested object and beside a duration the pattern refuses, is
+`validation failed` with `enum` at its path from the Go, TypeScript and
+Rust servers, and the TypeScript and Python SDKs refuse it with the same
+errors; the Go and Rust SDKs cannot hold it and skip those requests
+(`typedSkips`). A duration with a sign, a negative one as Go writes it,
+a bare number or one too long is refused by its rule by every server and
+SDK. A duration text Go's parser refuses too, ` 1s` or `1d`, is still
+`does not match the declared type` from a Go route, as a value of the
+wrong JSON type is, where TypeScript and Rust answer `pattern`; no
+request asks it.
+
+A Go route's multipart input, whose `data` part holds the input's JSON,
+answered a part its decoder refused with a plain 400, "Invalid 'data'
+field: " and the decoder's message, which named Go's types. It answers
+it as a JSON body is answered, through `bodyargs.DecodeRefusal`, so a
+string an enum lacks there is `enum` at its path too. `DecodeRefusal`
+reads the body again only when the decoder's error is an enum's refusal.
+
+Open: the scalar's domain excludes a negative duration (its pattern has
+no sign, and every validator refuses `-1s`), while Go writes one
+(`-1h2m0s`), the ORM stores and reads one in an `INTERVAL`, and the queue
+and version graph carry one. A Go reader now keeps the value and
+`Validate` reports `pattern`, as TypeScript, Rust and Python report it;
+whether the scalar should take a sign is superscalar's to decide.
+
+Status: built. typegen's `TestGeneratedDurationsReadTheirText` holds the
+duration decode, the canonical value, a refused text keeping Go's value,
+a negative duration's round trip, a text Go cannot parse as a decode
+error naming the field, the report following the field, a later decode
+clearing an earlier one's report, and the enum's refusal and its
+`*json.UnmarshalTypeError`; ormgen's `TestDurationColumnsOnPostgres`
+sends every duration it reads, negatives included, through Go's JSON and
+back; the nested-arrays module tests decode an unknown enum element as a
+refusal, and apigen's `TestWriteAPIGoldenRawBodyChecks` pins the
+multipart part's refusal. bodyargs' `TestDecodeRefusal`,
+`TestAnEnumStringArgumentItsDecoderRefusesIsEnum` and
+`TestAnObjectArgumentWithAnUnknownEnum` hold the route's answers.
+`TestGeneratedValidatorParity`, the runtime suites,
+`TestUnionListsGoAPI`, `TestRustRouterAnswersUnionRequests`,
+`TestGeneratedRouterAnswersUnionRequests` and the four SDKs' union tests
+run the new vectors; the Rust SDK's harness names the rule its input
+schema check breaks by the message the check gives (`invalid format` is
+`pattern`). A Go body argument that is a duration is checked by the
+route's rules on its text, as before, but still decoded by Go's parser,
+so its value rounds a fraction of a nanosecond down; an object argument
+holding one reads it as its type's decoder does.
+
+The rule is reversible until the first release.
+
+### D53, amended: a queue's messages are claimed on SQLite too, each claim one statement under SQLite's single writer, and a worker's instance range is a setting no target scales yet
+
+D53 named SQLite and D1 as a queue's backings and claimed on Postgres
+alone, waiting for an ORM per dialect. The TypeScript server already runs
+over a SQLite file under `stack dev` (D64), so its worker could not, and
+the Go and Rust clients had no SQLite statements to share. And a worker
+pool on gcp runs a fixed instance count, whatever its queue's depth.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One function, `sqlutil.SQLiteQueueStatements`, writes a queue's statements on SQLite with Postgres's names, parameters (numbered `?1`, `?2`) and semantics: the lease, the attempts, the doubling backoff capped at `maxBackoff`, the dead messages and the retention. Each is one `UPDATE` or `DELETE`, which takes SQLite's write lock before it reads a row, so no `FOR UPDATE SKIP LOCKED` is needed: a claim is one `UPDATE ... WHERE id IN (the due messages, oldest first, LIMIT ?1) ... RETURNING`, and two workers that claim at once take different messages. A claim's token is the SQLite model's UUID expression, per row. Times are RFC 3339 in UTC to the millisecond, the form the SQLite model's `CURRENT_TIMESTAMP` writes, so they compare as text; the backoff doubles with a shift, since `power()` is an optional SQLite extension, a product past 2^63 becomes a REAL rather than an overflow, and the cap is `COALESCE(MIN(x, ?6), x)`, which ignores a NULL maximum as Postgres's `LEAST` does. A claim first runs `due`, a read of whether any message is due or claimed past its expiry, and takes the write lock only when one is, so an idle worker's polls only read. | `BEGIN IMMEDIATE` around a `SELECT` and an `UPDATE`, two round trips a D1-style `SqlDatabase` cannot hold in one transaction. `UPDATE ... LIMIT`, a compile option most builds lack. Times as Julian days or epoch numbers, which would differ from every other timestamp column of the SQLite model. |
+| A DB service that lists the sqlite dialect carries them beside Postgres's: `sqliteStatements` in `queues.ts` and in the descriptor `queues.rs` holds, and the Go ORM's `queues_sqlite.go`. A queue whose message holds a value SQLite has no storage for, a location, or a `BYTEA`, which the three clients' messages hold in no one form, has none, saying why. | Statements for every database, which would put SQLite in the output of a Postgres-only service. |
+| On SQLite a message crosses through its JSON form in every language, each field as its definition marks it: `uuid` its lowercase hyphenated text (a Rust type's base62 and Go's converted), `timestamp` RFC 3339 in UTC with its fraction kept, `boolean` 1 or 0 in a column and true or false in a list, a duration its canonical text, a JSON value or a list its JSON text. The marks are written for every queue, as `point` and `interval` are, and a test holds `queues.ts`'s to the Go ORM's. The Go ORM's SQLite queue marshals the message with the types' own JSON, so it needs no scan per field. | Converting by each column's declared type, which SQLite's `TEXT` and `INTEGER` do not tell apart for a UUID, a timestamp or a boolean. Generated code per field in Go, as on Postgres, a second classification of every field. |
+| The clients: the Go ORM's `Enqueue<Queue>SQLite(ctx, tx, msg)` over a `*sql.Tx` and `New<Queue>SQLiteQueue(db)` over a `*sql.DB` of any driver, the ORM importing none, whose caller opens the file with a busy timeout and in WAL; the TypeScript runtime's `enqueueStatement(db, queue, msg)`, the statement a caller adds to the batch whose writes caused the message, since a `SqlDatabase` has no interactive transaction, from `./sqlite` and from `./d1`, and `sqliteQueue(db, queue)` from `./sqlite` alone, since no worker claims on D1; the Rust runtime's `sqlite` feature, `enqueue_sqlite` through a rusqlite connection or transaction and `SqliteQueue`, on tokio's blocking pool, which the worker loop runs as a `PostgresQueue`. | A transaction callback in TypeScript, which D1 cannot run. A SQLite pool in the Go ORM's `Database`, which every Go server would then open. |
+| Several processes share one file, so `openSqlite` and `SqliteQueue::open` put it in write-ahead logging, where a reader never waits for a writer, and a write transaction begins IMMEDIATE: `openSqlite`'s `batch`, and a Rust caller's transaction (`TransactionBehavior::Immediate`). A deferred transaction that reads, then writes after another connection's commit, fails at once on its stale snapshot, which the busy timeout does not wait out. | Rollback journaling, where a server's reads and a worker's claims block each other. Retrying a busy transaction, which the IMMEDIATE lock makes unneeded. |
+| A claimed row that does not read into its message, say a JSON column holding no JSON, is failed alone, its cause `the message could not be read: <why>` in every language, and the claim returns the others: on SQLite and on Postgres alike, since `RETURNING` has already claimed every row. | Failing the whole claim, which left every message of the batch to wait out its lease and the poison row to come back with them, until the expiry marked good messages dead. |
+| A UUID crosses parsed, base62 or hyphenated, as superscalar's `ParseUUID` reads it, and is written hyphenated, by the TypeScript client too on either database; a value that is neither is refused. A `bigint` beyond ±(2^53 − 1) is refused rather than rounded. | Lowercasing the text, which corrupts a base62 UUID, whose case is its value. |
+| Resolution lets a worker claim on a SQLite file: the local target connects one through `local.worker-sqlite`, and a TypeScript worker's `main.ts` opens the file and runs `sqliteQueue`. Each process has a connection of its own, which waits five seconds for another's write lock. A Go or Rust worker there stays refused, with its server, since D64's rule keeps their `Deps` on Postgres. A database platform may say why no worker claims on it (`PlatformSpec.NoQueueClaims`), which resolution gives as an unrealizable worker's reason: `cloudflare.d1` does, since D1 is reached through a Worker's binding alone and Workers runs no claim loop. | Lifting the refusal for every SQLite-dialect platform, which would leave a D1 worker to fail at its first claim. A Go worker's `Deps` on SQLite, which needs the Go ORM's tables there too. |
+| A worker's settings take `maxInstances`, the most instances a target may run as its queue's depth grows, `instances` then the fewest, refused under it; `enabled: false` runs none. No target scales a worker yet: gcp refuses a range, local runs one process, and the fake target ignores it. | No setting until a scaler exists, which would leave the range undesigned. |
+
+A scaler, designed and not built. Cloud Run worker pools have no
+autoscaling: the Admin API's `WorkerPoolScaling` documents
+`manualInstanceCount` alone, and Google's answer is CREMA, a separate
+Cloud Run service running KEDA's scalers that sets the pool's count. So a
+scaler is ours to run:
+
+- *Where it runs.* A Cloud Scheduler job per environment, every minute,
+  runs an execution of the migration job (D68, amended) with a `scale`
+  command: it already reaches every database as the migrator, needs no
+  new image, and works for a pool at zero instances, which nothing inside
+  the pool could wake. A loop inside each worker, behind an advisory lock,
+  needs a running instance, so no minimum of zero, and gives the worker's
+  own account the right to change its pool.
+- *What it decides.* Per scaled worker: depth = ready and due messages
+  plus live claims; desired = ⌈depth ÷ concurrency⌉, clamped to
+  [`instances`, `maxInstances`]. It scales up at once, and down only after
+  desired stayed below the current count for a cool-down of five minutes,
+  one step at a time, so a burst does not flap the pool; the last change's
+  time lives in a row of a scaler table the migration plan keeps.
+- *IAM.* The migrator's account gets `run.workerPools.get` and
+  `run.workerPools.update` on each scaled pool alone (a
+  `WorkerPoolIamMember` with a custom role). `update` is the narrowest
+  permission that sets a count, and it also lets the holder change the
+  pool's image and environment: whoever holds the migrator's credentials
+  could then run code as the worker's account. That is the cost the
+  design must accept or narrow, by a scaler account of its own that holds
+  nothing else.
+- *Deploys.* The deploy writes `instances` as the count; Pulumi would put
+  back the scaler's count at each deploy unless the graph says to ignore
+  the field, and the IR has no `ignoreChanges` yet.
+- *Cost safety.* `maxInstances` is the hard ceiling, refused without
+  `instances` under it; the scheduler costs one job execution a minute per
+  environment.
+
+It is not built because three of its parts are not sound yet: the IAM
+grant, which would let the migrator's identity redeploy the worker; the
+Pulumi field that the next deploy would reset; and a minute's scheduled
+job per environment, a running cost for every stack with a range, where
+the fakes would prove only the arithmetic. The setting is built so a stack
+can state its range, and gcp says why it cannot run one.
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnSQLite` runs the
+parity cases on SQLite, each in a file of its own, the Go ORM through
+modernc.org/sqlite, TypeScript through bun:sqlite and Rust through
+rusqlite, each side a process: every case but `LocationsAndDurationsAgree`,
+which SQLite cannot hold. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+runs the same refactored cases on Postgres. Both hold two more:
+`UnreadableRowFailsAlone`, each side's claim of a good message beside a
+row whose JSON column holds no JSON, and `Base62UUIDsGoHyphenated`, each
+side's enqueue of a base62 UUID. tsgen's
+`TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts`'s SQLite statements
+and marks to the Go ORM's, and rustgen's
+`TestQueuesDescribeWhatTypeScriptWrites` `queues.rs`'s to `queues.ts`'s.
+The runtimes' `queue-sqlite.test.ts` and `tests/queue_sqlite.rs` run the
+clients on a file opened twice, the Rust worker loop among them; a batch
+that reads, then enqueues while another process holds the write lock with
+a write pending, waits rather than failing (it fails with `SQLITE_BUSY`
+under a deferred transaction), enqueues run beside a polling worker in
+another process, and an idle claim returns while another connection
+holds the write lock. servergen's
+`TestTypeScriptSQLiteEntrypointCompilesAndServes` gives ts-notes a queue
+and a worker: the server enqueues in the batch that writes a note, and the
+worker, under Bun on the same file, handles two messages, fails one until
+it is dead, and exits 0 on SIGTERM. Resolution's tests cover a TypeScript
+worker on a local SQLite file (`TestSQLiteWorkerGolden`), a Go one refused,
+a platform that says no worker claims, and `maxInstances`; gcp's
+`TestWorkerRefusals` refuses a range.
+
+Not built: claims on D1; `stack queue` on SQLite; the scaler above. No
+worker has claimed on SQLite outside the tests.
+
+The rule is reversible until the first release.
+
+### D47, amended: no project code runs where deploy credentials are: a `prepare` job builds what the cloud jobs deploy, the stack commands read it, and a child process for project code gets an environment without credentials
+
+D47's amendment signed each cloud job in after its installs and builds,
+and left two exposures. GitHub grants `id-token: write` to the whole job,
+so the build and the installs before the sign-in could still ask for an
+identity token; and `stack plan`, `deploy` and `destroy` ran the
+project's TypeScript after it: the loader's sidecar documents through
+Bun, and a deploy's frozen install of the output root's workspace, each
+site's build and each bundle's. Every such child process inherited
+`GOOGLE_APPLICATION_CREDENTIALS`, the gcloud override, the credentials
+file in the workspace, `CLOUDFLARE_API_TOKEN`,
+`PULUMI_CONFIG_PASSPHRASE` and GitHub's own
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN`, so a dependency's install script, a
+build plugin or a sidecar document could read them. A developer's own
+credentials were exposed the same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic stack prepare [environment...]` writes, with no credentials, everything a deploy of the environments runs project code to make, into a directory (`--dir`, `<output-root>/prepared/<stack>` unless set): each service's sidecar documents, evaluated; each server's, job's and worker's build context, as `contexts/<deployable>.tar.gz`; each site's files, built, as `sites/<site>.tar`; and each bundle, built, as `bundles/<deployable>.tar`; with `prepared.json`, which names each and its digest. A site's or a bundle's archive is the tar stream its digest is of (D55, D64), so an upload that drops file modes cannot change it, and a reader checks it against the digest before it extracts it. With no environment named it prepares every one off the local target, since a context, a site's files and a bundle do not depend on the environment. `--no-build` writes the documents alone. | `stack build`, which uploads through the target and needs its credentials. Uploading the output root and the repository, and building the contexts in the cloud job, which needs `build-all` there. The files of a site as a directory, whose executable bits an artifact upload drops, changing the digest. |
+| Every cloud stack command takes `--prepared <dir>`. With it the loader takes each sidecar document a module runs from `prepared.json` and never starts Bun: a document it lacks, or one whose file or imports changed since, is refused, naming `stack prepare`. `stack deploy` and `stack build` take each context, site and bundle from the directory and install and build nothing: a deployable it holds nothing for keeps the manifest's, or `--image`'s, `--site`'s or `--bundle`'s, as one with no Dockerfile does. | Refusing a TypeScript sidecar document in CI, which no target registers today but an extension may. Evaluating the documents in the cloud job before it signs in, which still holds the job's `id-token`. |
+| The generated workflow has a `prepare` job, with no `id-token` and no secret, on every event a cloud job runs on: a pull request from the repository, its closing too when the stack has a preview, and a push. It runs the build, the Rust setup and the workspace's install, as the cloud jobs did, then `stack prepare` into the runner's temporary directory, and uploads it as the artifact `prepared`. On a closing pull request it builds nothing and prepares the documents alone (`--no-build`), which the preview's destroy reads. Each cloud job needs `prepare`, downloads the artifact, installs the schemas root's packages with `--ignore-scripts`, which the loader reads the types of, signs in last and runs its stack commands with `--prepared`. It runs no build, no sidecar document and no script of the project's; its one package manager run, the scriptless install, is on a Bun or Node.js downloaded from its release, not restored from the Actions cache, which check's and prepare's dependencies can write (setup-bun's `no-cache`, setup-node's `package-manager-cache: false`), and only superschematic's release installs, checked against `SHA256SUMS`, write `$GITHUB_PATH` or `$GITHUB_ENV`, which reach the steps after them. `TestCloudJobsSignInLast` holds every golden's cloud jobs to the steps that may run there, and to no cached tool. A self-hosted runner that is not ephemeral keeps what a prepare job left for the jobs after it, so the split holds on GitHub's runners and other ephemeral ones. | The build in the cloud job before the sign-in, D47's last amendment, whose steps the job's `id-token` reached. `prepare` folded into `check`, which does not run when a pull request closes, when the destroy still needs the documents. One prepare job per environment, which builds the same contexts, sites and bundles again. |
+| Every child process the stack commands, the document harness and `stack prepare` start to run project code (the harness, the workspace's install, a site's build, a bundle's) gets an allowlisted environment (`internal/childenv`): the path, user, shell, temporary directories, locale, terminal, `CI`, the proxy and certificate variables, the cache directories, Bun's install directory, `NODE_ENV`, and Windows' system variables, matched in any case there. `SUPERSCHEMATIC_CHILD_ENV` names more, a registry token's for a private package, but never a credential's: a name beginning `GOOGLE_`, `CLOUDSDK_`, `GCLOUD_`, `GCP_`, `CLOUDFLARE_`, `CF_`, `WRANGLER_`, `PULUMI_`, `AWS_`, `AZURE_`, `ARM_` or `ACTIONS_`, `GITHUB_TOKEN`, `GH_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_AUTH_CONFIG`, `KUBECONFIG`, `VAULT_TOKEN`, a passphrase, or a superschematic token, secret or key. The child's home is a scratch directory of its own, and so are the configuration and data directories under it, while `XDG_CACHE_HOME` and Bun's install cache stay the user's, which an install needs to stay fast; naming `HOME` in `SUPERSCHEMATIC_CHILD_ENV` keeps the user's, for a registry configured only in `~/.npmrc`. | A denylist of known credentials, which misses the next one: `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and its URL mint identity tokens, and an install script reads whatever a shell exports. The shell's environment with a few names removed, for the same reason. The user's home, where gcloud, Pulumi, wrangler, npm, Docker, AWS and SSH keep their credentials. | A denylist of known credentials, which misses the next one: `ACTIONS_ID_TOKEN_REQUEST_TOKEN` and its URL mint identity tokens, and an install script reads whatever a shell exports. The shell's environment with a few names removed, for the same reason. |
+| What the environment and the scratch home protect is narrow, and the boundary is elsewhere. They keep a child from finding a credential in its environment or under the home it is given. They do not keep a credentials file from it: a child runs as the user, so gcloud's application default credentials, `~/.pulumi/credentials.json`, wrangler's configuration, `~/.npmrc`, `~/.docker/config.json`, `~/.aws/credentials` or a key file stay readable to a child that names the user's real path. In CI the boundary is the job: the file `google-github-actions/auth` writes lies in the workspace of a job that runs no project code, and the `prepare` job holds no credential. On a developer's machine the boundary is the same split: run `stack prepare` first, before signing in or in a shell that holds no credential, then `stack deploy --prepared`, which runs no project code. A `stack deploy` without `--prepared` still runs it, beside whatever the user's files hold. | Moving the file, or a copy deleted before the builds: superschematic does not own gcloud's file, and a deploy needs it after the builds. A sandbox per child, which no platform the CLI runs on gives without privileges. |
+| A prepared directory's digests are checked against its `prepared.json`, which the same prepare wrote: they catch a corrupted or half-uploaded directory, not a forged one. A dependency that runs in the prepare job can change the documents, contexts, sites and bundles it makes, and their digests with them, and so what the deployer applies, within what the IR allows; it cannot reach the deployer's token. That is what a deploy that built them did before, with the token beside it. The integrity of `--prepared` rests on the artifact's provenance, the prepare job of the same run, and the pull request's plan and the hazard gate are what review the result. `prepared.json` records the commit and the run (`GITHUB_SHA`, `GITHUB_RUN_ID`), and a stack command in CI refuses a directory of another commit or run, or one prepared outside CI; outside CI it checks nothing. The upload keeps the artifact one day, not GitHub's default of ninety, so a deploy whose reviewers approve it later than that fails to download and its run is started again. A documents-only directory or one prepared for other environments is refused by plan and destroy too. | Signing the directory, which needs a key the prepare job cannot hold and the cloud job can, a secret of its own for no more assurance than the run's provenance. Rebuilding in the cloud job to compare, which runs the code the split keeps out. |
+
+What stays out. `stack dev`'s local builds and servers keep the shell's
+environment: the local target holds no deploy credentials, and its
+servers read the developer's settings. Cloud Build runs a Dockerfile
+with its own account, on the target. The `prepare` job runs the pull
+request's code, which makes what deploys, as the cloud jobs' builds did.
+The artifact holds the repository's own sources and the files built from
+them, no secret, and anyone who can read the repository's Actions runs
+can download it.
+
+Status: built, proven offline. `internal/childenv` and its tests; the
+document harness and `stackdeploy`'s installs and builds run with it, and
+`TestRunDocument_SeesNoCredential` and `TestBuildsSeeNoCredential` set
+gcp's, Cloudflare's, Pulumi's and GitHub's identity-token variables and
+find none of them in the child. `stackdeploy.Prepare`, `ReadPrepared` and
+`Sources.Prepared`: `TestPrepareThenDeployASite`, `...Images` and
+`...ABundle` prepare with the fake builds, then deploy with a `Run` that
+fails the test if called, and get the digests a deploy that builds
+records; a changed archive, a stale document, a directory of other files
+and a documents-only directory for a build are refused. `stack prepare`
+and `--prepared` in the CLI: `TestStackPrepare` deploys from a prepared
+context with the output root removed. The generated workflow's `prepare`
+job and cloud jobs are in every cigen, gcp and cloudflare golden;
+`TestCloudJobsSignInLast` holds each cloud job to steps that run no
+project code and each stack command to `--prepared`, and prepare to no
+identity token or secret; actionlint passes on all of them. No generated
+workflow has run on GitHub Actions: an artifact's upload and download
+between jobs, `--ignore-scripts` with the loader's reading of the schemas
+root's packages, and a TypeScript sidecar document replayed in CI are
+proven by tests on this machine only.
+
+Not built: `stack dev`'s child processes keep the shell's environment. A
+sandbox that keeps a credentials file on disk from a child. A document
+evaluated in the prepare job sees the job's filtered environment and none
+of a GitHub environment's variables, and its result serves every
+environment: one that branches on `process.env` behaves as it did in that
+job.
+
+The review that followed added the scratch home, the wider deny list and
+Windows' case to `childenv`; the uncached Bun and Node.js, the guard on
+`$GITHUB_PATH` and `$GITHUB_ENV`, the provenance and the one-day
+retention to the workflow and `prepared.json`; and refused a backslash
+or a non-local path in a prepared archive, and hashed a workspace
+package a document imports through `node_modules` by its real path.
+`TestBuildsRunInAScratchHome` installs a workspace with Bun in a scratch
+home and finds no gcloud credentials under it; `TestPreparedProvenance`
+and `TestUntarRefusesPathsOutOfTheDirectory` hold the rest.
+
+### D64, amended: a job's Worker is a Workflow the job runner starts, Workers export traces under nodejs_als, a bucket names its jurisdiction, and a worker's refusal says where one runs
+
+The target left four gaps (#402's "Not built"): a job on every deploy
+and `stack run`, which `checkDeployJobs` and the missing `Jobs` seam
+refused; OpenTelemetry on Workers, whose bundles left `./telemetry` out
+for its `node:async_hooks` (D67); R2 jurisdictions, whose S3 host the R2
+credential did not name; and the refusal of a queue worker, which said to
+place it with a settings platform, advice no cloudflare environment can
+follow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every job's Worker is also a Workflow, `<job>.workflow` (pinned `cloudflare:index/workflow:Workflow`), named as the Worker, of the class `JobRun` (`ir.JobRunClass`) that `scheduled.ts` exports, after the deployment. The target's `Jobs` seam starts an instance through Cloudflare's API (`POST /accounts/<id>/workflows/<name>/instances`) with the run's token, which `Workers Scripts Write` and `Read` cover, and polls it every two seconds until it is `complete`, `errored` or `terminated`, returning the error its run threw. It waits at most every try's timeout, a minute for the step and five minutes queued, and gives up on an instance that stays `paused` or `unknown` for 30 reads or whose reads keep failing; then, and when its context is cancelled, it terminates the instance (`PATCH .../instances/<id>/status`, `terminate`) and says so, so neither a stuck instance holds a deploy's lock nor a cancelled run goes on unwatched. The Workflow's name is the Worker's, which holds the stack and the environment, since Cloudflare's PUT of a Workflow is an upsert that would repoint another's. `JobRun` runs the job's tries within one step that retries nothing and may take every try's timeout and a minute, as a firing runs them, so a run on demand behaves as a scheduled one. | A `fetch` entry on the job's Worker guarded by a deploy-scoped token: the Worker would need workers.dev or a route, public addresses `nothing-public-unless-exposed` refuses for a job, and a token per deploy in a graph that is a function of the schemas, which D52's amendment rejected for Cloud Run's execution token; a client that disconnects mid-run cancels the Worker. An API that fires a deployed Worker's scheduled handler: Cloudflare has none, only wrangler's local `/__scheduled`. The Workflow's own retries and timeout per try, which would log and fail unlike a firing and leave a try's timeout to Cloudflare's step semantics. A Workflow `schedules` in place of the Cron Trigger, which changes what a schedule is for no gain. |
+| The instance's payload is `{"bundle": "<hex>"}`, the digest the deploy manifest records or the rollout pinned (`JobRunRequest.Bundle`), and the job's version binds `SUPERSCHEMATIC_BUNDLE` (`ir.BundleDigestVariable`) to `{bundle-digest}`, which the deploy pins: `JobRun` requires the digest and checks it in a step of its own, `check the bundle`, throwing `NonRetryableError` on a payload with none or another one, so it fails for good, and Cloudflare keeps the step's result, so an instance a deploy interrupts is not checked again against the next bundle. A Workflow runs the Worker's current deployment, so this is gcp's refusal of an image the manifest does not record. The API takes `params` as JSON in a string, so `JobRun` parses a string payload too. | Trusting the deployment, which a deploy under way or a version made by hand would change unseen. Comparing the version's id from the graph's outputs, which `JobRunRequest` does not carry. |
+| `JobRunRequest` gains `Bundle`; `Check` asks for the artifact the job's platform runs; the deploy's jobs step and `stack run` fill it from the rollout and the manifest; `checkDeployJobs` refuses only a job with neither an image nor a bundle. | A second request type for bundles, which every runner would switch on anyway. |
+| The HTTP runtime's `./workers-telemetry`, beside `./telemetry` on a shared `telemetry-core`, reads OpenTelemetry's variables from the Worker's string bindings with `./telemetry`'s refusals, and refuses a member without `=` of `OTEL_RESOURCE_ATTRIBUTES` or of a headers variable. A span's context travels in `AsyncLocalStorage` from `node:async_hooks`. Ended spans wait in the isolate, at most 2048, until `flush()`, which `fetch.ts` hands to each request's `waitUntil` and a scheduled run and a Workflow step await: an isolate runs no I/O outside a request, so no timer exports. The entry posts the OTLP/HTTP protobuf body itself, built by `@opentelemetry/otlp-transformer`'s serializer, which a Workers package depends on. A client span's `url.full` holds no userinfo, query or fragment, in TypeScript and Rust alike, and the log line that export is on names the endpoint without them. | An explicit context with no `AsyncLocalStorage`: clients are built once per isolate and shared by concurrent requests, so a client span could not find its request's server span. OpenTelemetry's browser exporter, which sends `fetch` with `mode` and `keepalive` that workerd refuses. A `BatchSpanProcessor`, whose timer would export from one request's I/O context in another's. |
+| Every server's and job's version names `compatibilityFlags: ["nodejs_als"]` (`WorkersCompatibilityFlags`), workerd's `AsyncLocalStorage` without the rest of Node, whether or not its environment exports, since one bundle serves every environment. workerd gives `node:` modules with no flag from compatibility date 2026-08-04, the pinned 2026-09-15 among them, so the flag keeps a server whose `compatibilityDate` is earlier running. `bundle.ts`, `workers-check.mjs` and the workerd harness keep `node:*` external, since Bun's browser target swaps `node:async_hooks` named alone for an empty module, and refuse every `node:` import but `node:async_hooks`, and a Node builtin named without `node:`, a bare `async_hooks` among them, which Bun's browser build refuses or empties. | `nodejs_compat`, all of Node for one class. No flag, relying on the date, which breaks a server that pins an earlier one. Loading the telemetry only where an environment exports, which the bundle, one per deployable, cannot know. |
+| The environment's values take `telemetry: { endpoint, sampleRatio? }`, and a server's or a job's settings `telemetry: true\|false`, as gcp's (D67, amended); the endpoint is required, since Cloudflare has no OTLP endpoint of its own for a Worker's traces, and is an `https` URL with no userinfo, query or fragment, `http` to loopback alone: the bindings are plain text, which the dashboard and Workers Logs show. A Worker that exports gets `plain_text` bindings: the endpoint, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (the environment with a member's parameters, `cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`, `cloud.account.id`, and `service.version=sha256:{bundle-digest}`, which the deploy pins), and the sampler. A config field of one of those names is refused. | Bindings the engineer writes by hand, which no setting reaches. A collector header from a Secrets Store secret, which waits for a secret identity outside an API, as gcp's does. |
+| An `r2` bucket takes `jurisdiction`, `eu` or `fedramp`: the bucket and its lifecycle name it, the edge's token names the bucket's objects as `<account>_<jurisdiction>_<bucket>`, and the R2 credential gains an optional `jurisdiction` member (`<FIELD>_R2_JURISDICTION`), which the TypeScript runtime reads to presign URLs for `<account>.<jurisdiction>.r2.cloudflarestorage.com`, refusing a value that is no lowercase label or one with no credential, and the Go and Rust readers refuse with the other Worker-only R2 variables. `PreDestroy` empties a member's bucket at its jurisdiction's host through `JurisdictionCloud`. A jurisdiction beside `locationHint` is refused as unrealizable. This reverses the third amendment's row that left `jurisdiction` out. A bucket's jurisdiction cannot change in place: the provider replaces the bucket, and R2 deletes only an empty one, so the replace's delete of a bucket that holds objects fails and the deploy stops there, with the new bucket made and the old one kept; `stack plan` lists the bucket as `replace`. The deploy's hazard gate covers migration plans alone, so it does not stop on the replace before it starts. | A replace that empties the old bucket first, which would delete what the environment kept. A jurisdiction without the member, whose signed URLs would name the default host. A host in the credential, which a value could point anywhere. |
+| A target may say why it places no deployable of a kind (`TargetSpec.Unplaced`), and resolution gives that reason in place of "place it with a settings platform". The cloudflare target says a worker's claim loop needs a long-lived process and Postgres or a SQLite file, and that gcp's `gcp.cloudrunworker` or `stack dev` runs one. | Leaving the generic advice, which a cloudflare environment, mixing no other target, cannot follow. A cloudflare check of its own, which the core's placement runs before any platform sees the worker. |
+
+Status: built, proven offline. `extensions/cloudflare`'s `jobs_test.go`
+reads each job's Workflow and bundle binding, runs a fake Workflow through
+the runner, `stack run` after a deploy and a deploy's jobs step with
+`onDeploy`, and reports an errored, a terminated and a missing Workflow,
+and terminates one still queued at its deadline, one that stays paused
+and one whose run is cancelled; `TestCloudWorkflows` holds the create,
+read and terminate calls to a stand-in;
+`telemetry_test.go` reads the `OTEL_` bindings, the flag and the
+refusals; `TestR2BucketInAJurisdiction`,
+`TestPreDestroyEmptiesABucketInAJurisdiction` and
+`TestCloudS3InAJurisdiction`, which signs object calls for the EU host
+against a TLS stand-in that signs them again from the Host it received;
+and the worker's refusal in `TestWorkersRefusals`. servergen's
+`TestTypeScriptCronEntrypointCompilesAndBundles` runs `JobRun` under the
+runtime's pinned workerd through a binding to the entrypoint, as
+Cloudflare's engine calls it: the bundle checked in a step of its own,
+the tries in another, another bundle and none refused in the check's step
+with `NonRetryableError`, and the last try's error thrown. The HTTP
+runtime's `telemetry` workerd fixture exports to a receiver Worker: two
+concurrent requests land in their own traces with their callee's client
+spans, a job's span follows, and with no `OTEL_` binding nothing is sent;
+`telemetry-refused` is refused at module scope. The stackconfig parity
+vectors hold the jurisdiction in all three runtimes, and `r2.test.ts`
+signs for the EU host. Nothing has reached Cloudflare. A live run must
+check: that a Workflow of a Worker managed through versions and
+deployments runs the current deployment after each rollout, and that
+`params` reaches `run` as the object; that `Workers Scripts Write` starts
+and reads instances; an instance's error message for a thrown error;
+that Cloudflare accepts `nodejs_als` at a date that implies it; that
+spans reach a collector from `waitUntil`; and a presigned PUT and GET for
+an EU bucket, with the edge's token scoped to it.
+
+The rule is reversible until the first release.

@@ -31,6 +31,7 @@ const wishlist :Workerd.Worker = (
     (name = "SHOP_WISHLIST_DB_DATABASE", wrapped = (moduleName = "acme-wishlist:d1", entrypoint = "d1")),
   ],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
 );
 
 const tester :Workerd.Worker = (

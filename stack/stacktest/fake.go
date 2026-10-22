@@ -105,11 +105,14 @@ const (
 	// LitePlatform as a Worker reaches D1 (D64): through a binding named
 	// after the field, of the database's id. JobLiteConnector connects a job
 	// to one with a sqlite: URL, as the local target derives one for a
-	// SQLite file. CronD1Connector connects a job on CronPlatform as
-	// BundleD1Connector connects a server, as a job's Worker reaches D1.
-	BundleD1Connector = "fake.bundle-lite"
-	JobLiteConnector  = "fake.job-lite"
-	CronD1Connector   = "fake.cron-lite"
+	// SQLite file, and WorkerLiteConnector a worker, which claims its
+	// queue's messages on the file (D53, amended). CronD1Connector connects
+	// a job on CronPlatform as BundleD1Connector connects a server, as a
+	// job's Worker reaches D1.
+	BundleD1Connector   = "fake.bundle-lite"
+	JobLiteConnector    = "fake.job-lite"
+	WorkerLiteConnector = "fake.worker-lite"
+	CronD1Connector     = "fake.cron-lite"
 
 	// BundleHTTPConnector connects a server on BundlePlatform to an API it
 	// serves itself, as a call within one Worker stays in process (D64,
@@ -375,6 +378,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
+		{Name: WorkerLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},

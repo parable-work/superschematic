@@ -97,6 +97,12 @@ type R2Credential struct {
 	// `https://<account>.r2.cloudflarestorage.com`.
 	Account any `json:"account"`
 
+	// Jurisdiction is the bucket's jurisdiction, `eu` or `fedramp`, whose
+	// buckets R2's S3 API serves at
+	// `https://<account>.<jurisdiction>.r2.cloudflarestorage.com` (D64,
+	// amended). Unset is the default jurisdiction, at Account's host.
+	Jurisdiction any `json:"jurisdiction,omitempty"`
+
 	// AccessKeyID is the token's id.
 	AccessKeyID any `json:"accessKeyId"`
 
@@ -244,7 +250,19 @@ func checkBucketConnection(v any) error {
 	if !hasBinding {
 		return errors.New("a bucket connection with r2 sets binding: the credential signs URLs for the bucket the Worker's binding reaches")
 	}
-	return requiredStrings(r2, "r2", "account", "accessKeyId", "token")
+	m, err = members(r2, "r2", "account", "accessKeyId", "token", "jurisdiction")
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"account", "accessKeyId", "token"} {
+		if err := requiredString(m, "r2.", name); err != nil {
+			return err
+		}
+	}
+	if jurisdiction, ok := m["jurisdiction"]; ok {
+		return stringMember("r2.jurisdiction", jurisdiction)
+	}
+	return nil
 }
 
 // requiredStrings checks an object member at path whose members are each a
@@ -804,7 +822,7 @@ func DerivedMembers(kind EdgeKind) []string {
 	case EdgeSite:
 		return []string{"url"}
 	case EdgeBucket:
-		return []string{"name", "endpoint", "binding", "r2.account", "r2.accessKeyId", "r2.token"}
+		return []string{"name", "endpoint", "binding", "r2.account", "r2.accessKeyId", "r2.token", "r2.jurisdiction"}
 	}
 	return nil
 }

@@ -35,7 +35,10 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		SchemaName:  svc,
 		ModulePath:  "example.com/schemas/orm/" + svc,
 		TypesModule: "example.com/schemas/types/go/" + svc,
-		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		// fixture-queue-db lists the sqlite dialect, whose queues the ORM
+		// claims on SQLite too.
+		SQLite: svc == queueFixture,
+		Clock:  codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -73,7 +76,7 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_role.go", "repository_session.go", "repository_user.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
-		{"fixture-queue-db", []string{"repository_order.go", "queues.go"}},
+		{"fixture-queue-db", []string{"repository_order.go", "queues.go", "queues_sqlite.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

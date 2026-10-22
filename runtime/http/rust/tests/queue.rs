@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use superschematic_http_runtime::postgres::{connect, Pool};
 use superschematic_http_runtime::queue::{
-    enqueue, Claim, PostgresQueue, QueueDefinition, QueueError, CLAIM_LOST,
+    enqueue, Claim, PostgresQueue, QueueDefinition, QueueError, CLAIM_LOST, UNREADABLE,
 };
 use superschematic_http_runtime::stackconfig::Database;
 use superschematic_http_runtime::worker::{run_worker, Options};
@@ -670,17 +670,30 @@ async fn an_extension_holds_the_claim_for_the_lease_from_now() {
 }
 
 #[tokio::test]
-async fn a_message_that_does_not_read_as_its_type_fails_the_claim() {
+async fn a_message_that_does_not_read_as_its_type_fails_alone() {
     let Some(db) = Db::open().await else { return };
     db.enqueue(&ping(), &json!({ "sentAt": "2026-10-14T12:00:00Z" }))
         .await;
     let wrong = queue::<OrderPlaced>(&db, ping());
-    let err = wrong.claim(1, LEASE).await.unwrap_err();
-    assert!(matches!(err, QueueError::Failed(_)), "{err}");
+    // The claim took the message, so it fails that message alone, as a
+    // handler that failed would, and returns the others: none here.
+    let claims = wrong.claim(1, LEASE).await.unwrap();
+    assert!(claims.is_empty(), "{} claims", claims.len());
+    let id: String = db
+        .pool
+        .get()
+        .await
+        .unwrap()
+        .query_one("SELECT id::text FROM ping_queue", &[])
+        .await
+        .unwrap()
+        .get(0);
+    let (state, attempts, error) = db.row("ping_queue", &id).await;
+    assert_eq!((state.as_str(), attempts), ("ready", 1));
+    let error = error.unwrap_or_default();
     assert!(
-        err.to_string()
-            .contains("of ping_queue: missing field `orderId`"),
-        "{err}"
+        error.starts_with(&format!("{UNREADABLE}: ")) && error.contains("missing field `orderId`"),
+        "{error}"
     );
     let client = db.pool.get().await.unwrap();
     let err = enqueue(&client, &ping(), &json!([1])).await.unwrap_err();

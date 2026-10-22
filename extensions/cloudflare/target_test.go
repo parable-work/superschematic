@@ -36,7 +36,7 @@ func TestTarget(t *testing.T) {
 		t.Errorf("the target places %v, want %v", target.Platforms, want)
 	}
 	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil ||
-		target.PreDestroy == nil || target.Migrations == nil || target.Sites == nil {
+		target.PreDestroy == nil || target.Migrations == nil || target.Sites == nil || target.Jobs == nil {
 		t.Errorf("the target lacks a seam: %+v", target)
 	}
 	if _, ok := target.Bundles.(registry.ArtifactFetcher); !ok {
@@ -44,9 +44,6 @@ func TestTarget(t *testing.T) {
 	}
 	if _, ok := target.Sites.(registry.ArtifactFetcher); !ok {
 		t.Error("the site store fetches nothing back")
-	}
-	if target.Jobs != nil {
-		t.Error("the target runs a job on demand, which stack run would take")
 	}
 	var rules []string
 	for _, rule := range target.Policies {

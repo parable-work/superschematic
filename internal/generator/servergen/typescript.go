@@ -96,6 +96,14 @@ var TelemetryPackages = map[string]string{
 	"@opentelemetry/sdk-trace":                 "2.12.0",
 }
 
+// WorkersTelemetryPackages are the OpenTelemetry packages the HTTP
+// runtime's ./workers-telemetry entry imports beside TelemetryPackages,
+// which a server or a job on Workers depends on too (D64, amended): it
+// sends with OpenTelemetry's own protobuf serializer.
+var WorkersTelemetryPackages = map[string]string{
+	"@opentelemetry/otlp-transformer": "0.223.0",
+}
+
 // The GCS Node client the HTTP runtime's ./gcs entry imports, which only a
 // server whose APIs list a bucket depends on (D54): the release the
 // runtime is checked against.
@@ -639,8 +647,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	background := s.Background()
 	if in.Workers {
 		// A server's Workers entrypoint is fetch.ts and a job's
-		// scheduled.ts; a worker claims on Postgres, which no Worker
-		// reaches (D53, D64).
+		// scheduled.ts; a worker is a process that claims until it is
+		// stopped, which no Worker runs (D53, amended, D64).
 		if s.Worker != nil {
 			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server or a job alone (D64)", in.Stack, s.Kind, in.Server)
 		}
@@ -765,9 +773,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
-			if api.Database.SQLite {
-				return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s of %s, whose DB service lists sqlite first; a worker claims on Postgres, the one dialect the TypeScript queue client claims on (D53, D64)", in.Stack, in.Server, o.SchemaName, s.Worker.Queue, o.Deps.Database)
-			}
+			// A sqlite-first database's worker claims on its SQLite file
+			// with sqliteQueue (D53, amended).
 			s.Worker.Database = api.Database
 		}
 		if o.Identity != nil && !background {
@@ -1020,6 +1027,12 @@ func (s *TypeScriptServer) BundleEntry() string {
 	return TypeScriptFetchFile
 }
 
+// WorkflowClass is the class a job's scheduled.ts exports, which the
+// cloudflare target's job runner starts an instance of, and BundleBinding
+// the binding it reads its bundle's digest from (D64, amended).
+func (s *TypeScriptServer) WorkflowClass() string { return ir.JobRunClass }
+func (s *TypeScriptServer) BundleBinding() string { return ir.BundleDigestVariable }
+
 // APIsWithConfig reports whether an API of the server has an EnvConfig,
 // which fetch.ts reads from the Worker's bindings (D64).
 func (s *TypeScriptServer) APIsWithConfig() bool {
@@ -1107,6 +1120,10 @@ func (s *TypeScriptServer) planPackage() {
 		"hono":                         tsrestgen.HonoVersion,
 	}
 	maps.Copy(deps, TelemetryPackages)
+	if s.Workers {
+		// fetch.ts and scheduled.ts export through ./workers-telemetry.
+		maps.Copy(deps, WorkersTelemetryPackages)
+	}
 	for _, a := range s.APIs {
 		deps[a.Package] = "workspace:*"
 		deps[a.ImplPackage] = "workspace:*"

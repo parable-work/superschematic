@@ -109,21 +109,7 @@ impl fmt::Display for PostgresError {
 
 impl Error for PostgresError {}
 
-/// An error and its causes, each after a colon, leaving out a cause whose
-/// text the message already ends with.
-pub(crate) fn chain(err: &(dyn Error + 'static)) -> String {
-    let mut out = err.to_string();
-    let mut source = err.source();
-    while let Some(cause) = source {
-        let text = cause.to_string();
-        if !out.ends_with(&text) {
-            out.push_str(": ");
-            out.push_str(&text);
-        }
-        source = cause.source();
-    }
-    out
-}
+pub(crate) use crate::error::chain;
 
 /// What [`connect_with`] takes beside the database, each with its default.
 #[derive(Clone, Default)]

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/childenv"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -90,6 +91,13 @@ func DigestBundle(dir string) (*ArtifactFiles, error) { return digestFiles(dir, 
 
 // digestFiles digests the files of a site's or a bundle's build, what.
 func digestFiles(dir, what string) (*ArtifactFiles, error) {
+	return digestFilesTo(dir, what, io.Discard)
+}
+
+// digestFilesTo digests the files under dir as digestFiles does, and
+// writes to w the tar stream the digest is of: the archive `stack
+// prepare` keeps of a site or a bundle (D47, amended).
+func digestFilesTo(dir, what string, w io.Writer) (*ArtifactFiles, error) {
 	root, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -99,7 +107,7 @@ func digestFiles(dir, what string) (*ArtifactFiles, error) {
 	}
 	sum := sha256.New()
 	counter := &countWriter{}
-	tw := tar.NewWriter(io.MultiWriter(sum, counter))
+	tw := tar.NewWriter(io.MultiWriter(sum, counter, w))
 	out := &ArtifactFiles{Dir: root, Sums: map[string]string{}}
 	err = filepath.WalkDir(root, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil || p == root {
@@ -196,10 +204,18 @@ func (s *session) install(ctx context.Context, src *Sources, what string) error 
 	return nil
 }
 
-// execCommand is RunCommand with os/exec.
+// execCommand is RunCommand with os/exec. What it runs is the project's
+// code, an install's scripts or a build's plugins, so it runs with no
+// credential in its environment, and a scratch home (childenv, D47,
+// amended).
 func execCommand(ctx context.Context, dir string, log io.Writer, name string, args ...string) error {
+	env, cleanup, err := childenv.Environ()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, log, log
+	cmd.Dir, cmd.Stdout, cmd.Stderr, cmd.Env = dir, log, log, env
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s in %s: %w", name, strings.Join(args, " "), dir, err)
 	}
@@ -322,26 +338,39 @@ func (s *session) planSites(ctx context.Context, prev *Manifest, given map[strin
 		if _, ok := given[d.Name]; ok || (len(only) > 0 && !slices.Contains(only, d.Name)) {
 			continue
 		}
-		if d.Site == nil {
-			return nil, fmt.Errorf("site %s says nothing of how it builds", d.Name)
-		}
-		if src.ImplementationRoot == "" {
-			return nil, fmt.Errorf("site %s: the deploy names no repository root, under which its package lies", d.Name)
-		}
-		if err := s.install(ctx, src, "site"); err != nil {
-			return nil, err
-		}
-		dir, err := tsgen.SiteDir(src.OutputRoot, src.ImplementationRoot, d.Name, d.Site.Dir)
-		if err != nil {
-			return nil, err
-		}
-		s.logf("site %s: bun run %s in %s", d.Name, d.Site.Build, dir)
-		if err := src.run()(ctx, dir, s.log, "bun", "run", d.Site.Build); err != nil {
-			return nil, fmt.Errorf("build site %s: %w", d.Name, err)
-		}
-		files, err := DigestSite(filepath.Join(dir, filepath.FromSlash(d.Site.Output)))
-		if err != nil {
-			return nil, fmt.Errorf("site %s: %w", d.Name, err)
+		var files *ArtifactFiles
+		if src.Prepared != nil {
+			// The files `stack prepare` built, with no credentials: the
+			// deploy builds nothing (D47, amended).
+			a := src.Prepared.Sites[d.Name]
+			if a == nil {
+				if len(only) > 0 {
+					p.cleanup()
+					return nil, fmt.Errorf("site %s: %s holds no files of it; run `superschematic stack prepare` for its environment", d.Name, src.Prepared.Dir)
+				}
+				s.logf("site %s: %s holds no files of it, so they come from --site or the manifest", d.Name, src.Prepared.Dir)
+				continue
+			}
+			if p.dir == "" {
+				dir, err := os.MkdirTemp("", "superschematic-sites-")
+				if err != nil {
+					return nil, err
+				}
+				p.dir = dir
+			}
+			var err error
+			if files, err = src.Prepared.extract(a, "site", filepath.Join(p.dir, d.Name)); err != nil {
+				p.cleanup()
+				return nil, fmt.Errorf("site %s: %w", d.Name, err)
+			}
+		} else {
+			dir, err := s.buildSite(ctx, src, d)
+			if err != nil {
+				return nil, err
+			}
+			if files, err = DigestSite(dir); err != nil {
+				return nil, fmt.Errorf("site %s: %w", d.Name, err)
+			}
 		}
 		if p.digests[d.Name] == files.Digest {
 			s.logf("site %s: files %s, the ones it serves", d.Name, shortDigest(files.Digest))
@@ -354,6 +383,29 @@ func (s *session) planSites(ctx context.Context, prev *Manifest, given map[strin
 		p.files[d.Name] = files
 	}
 	return p, nil
+}
+
+// buildSite builds site d, after the frozen install of the workspace, in
+// its package, and returns the directory its build wrote its files to.
+func (s *session) buildSite(ctx context.Context, src *Sources, d *ir.ResolvedDeployable) (string, error) {
+	if d.Site == nil {
+		return "", fmt.Errorf("site %s says nothing of how it builds", d.Name)
+	}
+	if src.ImplementationRoot == "" {
+		return "", fmt.Errorf("site %s: the deploy names no repository root, under which its package lies", d.Name)
+	}
+	if err := s.install(ctx, src, "site"); err != nil {
+		return "", err
+	}
+	dir, err := tsgen.SiteDir(src.OutputRoot, src.ImplementationRoot, d.Name, d.Site.Dir)
+	if err != nil {
+		return "", err
+	}
+	s.logf("site %s: bun run %s in %s", d.Name, d.Site.Build, dir)
+	if err := src.run()(ctx, dir, s.log, "bun", "run", d.Site.Build); err != nil {
+		return "", fmt.Errorf("build site %s: %w", d.Name, err)
+	}
+	return filepath.Join(dir, filepath.FromSlash(d.Site.Output)), nil
 }
 
 // planSitesFor plans the sites of a deploy: it refuses an environment

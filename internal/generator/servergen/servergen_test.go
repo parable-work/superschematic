@@ -1405,7 +1405,8 @@ func TestToolchainPinsMatchToolsEnv(t *testing.T) {
 // TestTelemetryPackagesMatchTheRuntime: a Bun server, job and worker depend
 // on the OpenTelemetry packages the HTTP runtime's ./telemetry entry imports
 // at the versions the runtime pins as its optional peer dependencies and
-// tests with (D67), and on no other.
+// tests with (D67), and a server or a job on Workers on those its
+// ./workers-telemetry entry adds (D64, amended), and on no other.
 func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "runtime", "http", "typescript", "package.json"))
 	if err != nil {
@@ -1427,13 +1428,17 @@ func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
 			}
 		}
 	}
-	if !maps.Equal(peers, servergen.TelemetryPackages) {
-		t.Errorf("the runtime's OpenTelemetry peers are %v; servergen.TelemetryPackages is %v", peers, servergen.TelemetryPackages)
+	both := maps.Clone(servergen.TelemetryPackages)
+	maps.Copy(both, servergen.WorkersTelemetryPackages)
+	if !maps.Equal(peers, both) {
+		t.Errorf("the runtime's OpenTelemetry peers are %v; servergen's TelemetryPackages and WorkersTelemetryPackages are %v", peers, both)
 	}
 }
 
 // copyTree copies the directory src to dst, leaving out build products:
-// target and node_modules directories, and skip, a directory under src.
+// target and node_modules directories, a runtime build's staging
+// directories (.dist-build-*, scripts/build-dist.mjs), whose files move out
+// while another process builds, and skip, a directory under src.
 func copyTree(t *testing.T, src, dst string, skip ...string) {
 	t.Helper()
 	err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
@@ -1445,7 +1450,7 @@ func copyTree(t *testing.T, src, dst string, skip ...string) {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == "target" || d.Name() == "node_modules" || slices.Contains(skip, filepath.ToSlash(rel)) {
+			if d.Name() == "target" || d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".dist-build-") || slices.Contains(skip, filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(dst, rel), 0o755)

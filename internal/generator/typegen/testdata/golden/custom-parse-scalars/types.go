@@ -5,6 +5,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
@@ -391,6 +392,190 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// durationDecode is what a type's UnmarshalJSON found in the text of its
+// duration fields (Temporal.Duration) that their Go values cannot show, by
+// JSON key: a text the scalar's rules refuse keeps the value Go's own
+// duration parser reads from it, and Validate reports the rules it broke.
+// Validate reports an entry only while its field still holds the value
+// decoded, so a field set after decoding is checked as set.
+type durationDecode map[string]durationEntry
+
+type durationEntry struct {
+	decoded []byte
+	errors  []durationError
+}
+
+type durationError struct {
+	path   string
+	errors []ValidationError
+}
+
+// decodeDurationField decodes raw, the JSON of the duration field name,
+// into target, a pointer to the field; an absent key leaves it as it is.
+// Each duration text raw holds, alone, as a list's element or a map's
+// value, is read as every validator reads it. check, the scalar's own rules
+// and the scalar core's verdict on the text, accepts it and returns the
+// core's canonical text, which Go's duration parser reads exactly: on the
+// text itself, Go's parser reads "1.5ns" as 1ns, where the core rounds to
+// 2ns. A text check refuses is recorded in *decoded for Validate and keeps
+// the value Go's parser reads from it, so a negative duration Go wrote
+// ("-1h2m0s"), which the scalar's pattern refuses, reads back as itself; a
+// text Go's parser refuses too (" 1s", "1d") is a decode error, as it was.
+// Any other JSON value is encoding/json's to decode or refuse. An error
+// names the field.
+func decodeDurationField(decoded **durationDecode, name string, raw json.RawMessage, target any, check func(string) (string, []ValidationError)) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var failures []durationError
+	canonical, err := canonicalDurations(raw, name, check, &failures)
+	if err != nil {
+		return durationFieldError(name, err)
+	}
+	if err := json.Unmarshal(canonical, target); err != nil {
+		return durationFieldError(name, err)
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	snapshot, err := json.Marshal(target)
+	if err != nil {
+		return err
+	}
+	if *decoded == nil {
+		*decoded = &durationDecode{}
+	}
+	(**decoded)[name] = durationEntry{decoded: snapshot, errors: failures}
+	return nil
+}
+
+// durationFieldError names the field name in err: a
+// *json.UnmarshalTypeError's Field, which encoding/json completes with the
+// path of the struct holding it, and any other error's message.
+func durationFieldError(name string, err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		field := name
+		if typeErr.Field != "" {
+			field += "." + typeErr.Field
+		}
+		return &json.UnmarshalTypeError{Value: typeErr.Value, Type: typeErr.Type, Offset: typeErr.Offset, Field: field}
+	}
+	return fmt.Errorf("decode %s: %w", name, err)
+}
+
+// canonicalDurations returns raw with each duration text in it, at path,
+// replaced by the canonical text check returns. A text check refuses is
+// kept as it is, for Go's parser, and appended to failures. A list's elements are at
+// path[i] and a map's values at path[key]; null and values of other JSON
+// types are kept.
+func canonicalDurations(raw json.RawMessage, path string, check func(string) (string, []ValidationError), failures *[]durationError) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return raw, nil
+	}
+	switch trimmed[0] {
+	case '"':
+		var text string
+		if err := json.Unmarshal(trimmed, &text); err != nil {
+			return nil, err
+		}
+		canonical, broken := check(text)
+		if len(broken) > 0 {
+			*failures = append(*failures, durationError{path: path, errors: broken})
+			return trimmed, nil
+		}
+		return json.Marshal(canonical)
+	case '[':
+		var items []json.RawMessage
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return nil, err
+		}
+		for i, item := range items {
+			if item == nil {
+				continue
+			}
+			canonical, err := canonicalDurations(item, fmt.Sprintf("%s[%d]", path, i), check, failures)
+			if err != nil {
+				return nil, err
+			}
+			items[i] = canonical
+		}
+		return json.Marshal(items)
+	case '{':
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &entries); err != nil {
+			return nil, err
+		}
+		for key, entry := range entries {
+			if entry == nil {
+				continue
+			}
+			canonical, err := canonicalDurations(entry, fmt.Sprintf("%s[%s]", path, key), check, failures)
+			if err != nil {
+				return nil, err
+			}
+			entries[key] = canonical
+		}
+		return json.Marshal(entries)
+	}
+	return raw, nil
+}
+
+// durationCoreError names a failure of the scalar core's duration check as
+// the scalar's Validate names it: by the kind its message starts with.
+func durationCoreError(err error) ValidationError {
+	message := err.Error()
+	kind, _, _ := strings.Cut(message, ":")
+	switch kind {
+	case "pattern", "length", "range", "enum", "custom", "parse":
+		return ValidationError{Validator: kind, Message: message}
+	case "empty":
+		return ValidationError{Validator: "required", Message: message}
+	}
+	return ValidationError{Validator: "scalar", Message: message}
+}
+
+// report adds to errors what UnmarshalJSON found for the field name, unless
+// the field no longer holds the value it decoded.
+func (d *durationDecode) report(errors ValidationErrors, name string, current any) {
+	if d == nil {
+		return
+	}
+	entry, ok := (*d)[name]
+	if !ok {
+		return
+	}
+	if snapshot, err := json.Marshal(current); err != nil || !bytes.Equal(snapshot, entry.decoded) {
+		return
+	}
+	for _, failure := range entry.errors {
+		errors.SetFieldErrors(failure.path, failure.errors)
+	}
+}
+
+// checkTemporalDurationText checks a Temporal.Duration text as every
+// validator checks it: by the scalar's own length and pattern rules, each
+// one it breaks, and, when they accept it, by the scalar core, whose
+// canonical text it returns.
+func checkTemporalDurationText(text string) (string, []ValidationError) {
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(text) > 32 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 32 characters"})
+	}
+	if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", text); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return "", ruleErrs
+	}
+	canonical, err := scalars.Parse("Temporal.Duration", text)
+	if err != nil {
+		return "", []ValidationError{durationCoreError(err)}
+	}
+	return canonical, nil
+}
+
 // validateFinanceMoneyValue validates one Finance.Money value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -688,6 +873,11 @@ type CustomParseScalars struct {
 	// reports it. It is nil for a value that was not decoded or had nothing
 	// to report.
 	jsonObjects *jsonObjectDecode
+
+	// durations is what UnmarshalJSON found in the text of the duration
+	// fields that their Go values cannot show; Validate reports it. It is
+	// nil for a value that was not decoded or had nothing to report.
+	durations *durationDecode
 }
 
 // MaskSecrets returns a copy of CustomParseScalars with secret fields cleared.
@@ -820,6 +1010,9 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 	t.jsonObjects.report(errors, "genericStringMap", t.GenericStringMap)
 	t.jsonObjects.report(errors, "geoLocation", t.GeoLocation)
 
+	// Report the duration texts UnmarshalJSON found the scalar's rules refuse.
+	t.durations.report(errors, "temporalDuration", t.TemporalDuration)
+
 	return errors
 }
 
@@ -835,9 +1028,21 @@ func (t *CustomParseScalars) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals CustomParseScalars from JSON with validation
 func (t *CustomParseScalars) UnmarshalJSON(data []byte) error {
 	type Alias CustomParseScalars
-	aux := (*Alias)(t)
+	// Capture each duration field's text, which UnmarshalJSON reads itself.
+	aux := &struct {
+		*Alias
+		TemporalDuration json.RawMessage `json:"temporalDuration"`
+	}{
+		Alias: (*Alias)(t),
+	}
 
 	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Read each duration field's text as every validator reads it.
+	t.durations = nil
+	if err := decodeDurationField(&t.durations, "temporalDuration", aux.TemporalDuration, &t.TemporalDuration, checkTemporalDurationText); err != nil {
 		return err
 	}
 

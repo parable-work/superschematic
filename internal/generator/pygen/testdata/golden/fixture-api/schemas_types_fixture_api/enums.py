@@ -7,7 +7,8 @@ This module defines enumeration types using Python's Enum class.
 """
 
 from enum import Enum
-from pydantic_core import core_schema
+
+from pydantic_core import PydanticCustomError, core_schema
 
 class TenantListStatus(str, Enum):
     """
@@ -21,9 +22,21 @@ class TenantListStatus(str, Enum):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         return core_schema.no_info_before_validator_function(
-            cls,
+            cls._read,
             handler(source_type),
         )
+
+    @classmethod
+    def _read(cls, value):
+        """Read a string as the member it names. A string the enum lacks is
+        refused as "enum", as every other language's decoder refuses it;
+        any other value is left to the enum's schema."""
+        if isinstance(value, str) and not isinstance(value, cls):
+            try:
+                return cls(value)
+            except ValueError:
+                raise PydanticCustomError("enum", "'{value}' is not a valid TenantListStatus", {"value": value}) from None
+        return value
 
     def __str__(self) -> str:
         """Return the string value of the enum."""

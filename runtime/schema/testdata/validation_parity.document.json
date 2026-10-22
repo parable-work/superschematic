@@ -714,6 +714,15 @@
         "url": {
           "$ref": "#/definitions/scalars/Network_Url"
         },
+        "wait": {
+          "$ref": "#/definitions/scalars/Temporal_Duration"
+        },
+        "waits": {
+          "items": {
+            "$ref": "#/definitions/scalars/Temporal_Duration"
+          },
+          "type": "array"
+        },
         "when": {
           "$ref": "#/definitions/scalars/Temporal_DateTime"
         },
@@ -952,7 +961,6 @@
       "maxLength": 32,
       "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
       "type": "string",
-      "x-example": "30s",
       "x-hasCustomNormalize": true,
       "x-hasCustomParse": true,
       "x-hasCustomValidate": true,
@@ -960,7 +968,10 @@
       "x-typeMapping": {
         "go": "TemporalDuration",
         "json_schema": "string",
-        "sql": "INTERVAL"
+        "python": "str",
+        "rust": "String",
+        "sql": "INTERVAL",
+        "typescript": "string"
       }
     },
     "Temporal_Hours": {

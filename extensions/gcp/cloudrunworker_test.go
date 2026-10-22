@@ -152,6 +152,20 @@ func TestWorkerRefusals(t *testing.T) {
 	long := stacktest.FulfilOrders
 	long.Name = "ReconcileWarehouseStock"
 	refused(t, withWorker(long), "give the worker's class or its API a shorter name")
+
+	// A range of instances needs a scaler, which is not built (D53,
+	// amended); a maximum equal to the instances is a fixed count.
+	s := shop()
+	five := 5
+	workerSettings(s, "Staging").MaxInstances = &five
+	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"}); err == nil || !strings.Contains(err.Error(), "may run from 1 to 5 instances, and scaling a worker pool with its queue's depth is not built") {
+		t.Errorf("a range of instances: err = %v", err)
+	}
+	one := 1
+	workerSettings(s, "Staging").MaxInstances = &one
+	if _, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"}); err != nil {
+		t.Errorf("a maximum equal to the instances: %v", err)
+	}
 }
 
 // TestRunnerPlatform checks the Cloud Run worker pool an engine's runner

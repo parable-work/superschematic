@@ -418,6 +418,11 @@ type Options struct {
 	// Nil writes no engine.ts.
 	EngineDocument []byte
 
+	// SQLite is whether the DB service lists the sqlite dialect, whose
+	// statements each queue in queues.ts then carries beside Postgres's
+	// (D53, amended).
+	SQLite bool
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -516,7 +521,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if len(output.Behaviors) > 0 {
 		output.BehaviorsSource = renderBehaviors(output.Behaviors)
 	}
-	if output.Queues, err = TypeScriptQueues(schema); err != nil {
+	if output.Queues, err = TypeScriptQueues(schema, opts.SQLite); err != nil {
 		return nil, err
 	}
 

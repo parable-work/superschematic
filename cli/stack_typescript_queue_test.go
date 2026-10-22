@@ -177,13 +177,7 @@ func TestStackDevRunsTypeScriptJobsAndWorkers(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
 	}
 	paths := testpaths.Local(t)
-	for _, step := range [][]string{{"install", "--frozen-lockfile"}, {"run", "build"}} {
-		cmd := exec.Command(bun, step...)
-		cmd.Dir = paths.HTTPRuntimeTypeScript
-		if out, err := cmd.CombinedOutput(); err != nil {
-			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun %s in the HTTP runtime: %v\n%s", strings.Join(step, " "), err, out))
-		}
-	}
+	testpaths.BuildHTTPRuntime(t, bun, paths)
 	runner := filepath.Join(t.TempDir(), local.MigrateBinary)
 	build := exec.Command("go", "build", "-o", runner, "./cmd/superschematic-migrate")
 	build.Dir = filepath.Join("..", "runtime", "migrate", "go")

@@ -29,9 +29,10 @@
 // to close: in Go and Python the typed decoder is the first check, and the
 // payload never becomes a value to validate. Go's json.Unmarshal refuses a
 // non-list inner value and a value or element of the wrong JSON type (a
-// number where a string belongs), and the generated UnmarshalJSON refuses
-// a null list element, which json.Unmarshal alone would decode to the
-// element type's zero value; pydantic's strict parse refuses a value or
+// number where a string belongs), the generated UnmarshalJSON refuses a
+// null list element, which json.Unmarshal alone would decode to the
+// element type's zero value, and a generated enum's UnmarshalJSON refuses a
+// string the enum lacks (D31, amended); pydantic's strict parse refuses a value or
 // element of the wrong type, a bad enum element and a nested object
 // element with a bad field. The Rust validators run on the JSON value
 // before serde decodes it, as the TypeScript ones do, so Rust is listed
@@ -197,6 +198,10 @@ const parityMatrixSchemaJSON = `{
     "Geo.Location": {
       "name": "Geo.Location",
       "languagePrimitive": "string"
+    },
+    "Temporal.Duration": {
+      "name": "Temporal.Duration",
+      "languagePrimitive": "string"
     }
   },
   "enums": {
@@ -308,6 +313,14 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "whens",
           "typeRef": { "name": "Temporal.DateTime", "isArray": true }
+        },
+        {
+          "name": "wait",
+          "typeRef": { "name": "Temporal.Duration" }
+        },
+        {
+          "name": "waits",
+          "typeRef": { "name": "Temporal.Duration", "isArray": true }
         }
       ]
     },
@@ -912,10 +925,74 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go", "python"},
 	},
 	{
+		// Go's and pydantic's enum decoders refuse a string the enum lacks
+		// (D31, amended).
 		name:          "enum_bad_value",
 		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "shade": "purple"}`,
 		want:          map[string][]string{"shade": {"enum"}},
-		decodeRejects: []string{"python"},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An enum value is one of its values exactly: not its name, not
+		// another case, not empty.
+		name:          "enum_value_not_a_member",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "shade": "Dark"}`,
+		want:          map[string][]string{"shade": {"enum"}},
+		decodeRejects: []string{"go", "python"},
+	},
+
+	// Temporal.Duration's text (D31, amended): the scalar's pattern and
+	// maxLength, then the scalar core, check the text as sent. Go's value
+	// is a time.Duration: its decoder checks the text as the other
+	// validators do and reads the core's canonical value, or for a text they
+	// refuse the value Go's own parser reads, and a text that parser
+	// refuses too is a decode refusal.
+	{
+		name:    "duration_valid",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "1h30m", "waits": ["1.5s", "500ms", "1\u00b5s", "2562047h"]}`,
+		want:    map[string][]string{},
+	},
+	{
+		// A sign, a negative duration as Go writes one, a bare number and a
+		// fraction without its integer part break the pattern, which Go's
+		// parser alone would read.
+		name: "duration_bad_format",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "+1s",
+			"waits": ["-1h2m0s", "0", ".5s"]}`,
+		want: map[string][]string{
+			"wait":     {"pattern"},
+			"waits[0]": {"pattern"},
+			"waits[1]": {"pattern"},
+			"waits[2]": {"pattern"},
+		},
+	},
+	{
+		// Space around the text and a unit the scalar lacks break the
+		// pattern too, and Go's duration parser refuses them.
+		name:          "duration_bad_format_go_cannot_parse",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "waits": [" 1s", "1d", "1s "]}`,
+		want:          map[string][]string{"waits[0]": {"pattern"}, "waits[1]": {"pattern"}, "waits[2]": {"pattern"}},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:    "duration_too_long",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h"}`,
+		want:    map[string][]string{"wait": {"maxLength"}},
+	},
+	{
+		// A text the rules accept but whose amount the core refuses, and
+		// Go's parser too.
+		name:          "duration_beyond_the_core",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": "99999999999999999999h"}`,
+		want:          map[string][]string{"wait": {"parse"}},
+		core:          []string{"wait"},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:          "duration_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "wait": 5, "waits": ["1s", 2]}`,
+		want:          map[string][]string{"wait": {"type"}, "waits[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
 	},
 
 	// An object field holds a JSON object: any other value is "type".
@@ -1040,14 +1117,14 @@ var vectors = []parityVector{
 		typeName:      "ListMatrix",
 		payload:       listMatrix(`"reqShadeList": ["light", "purple"]`),
 		want:          map[string][]string{"reqShadeList[1]": {"enum"}},
-		decodeRejects: []string{"python"},
+		decodeRejects: []string{"go", "python"},
 	},
 	{
 		name:          "list_bad_object_element",
 		typeName:      "ListMatrix",
 		payload:       listMatrix(`"pointList": [{"shade": "dark"}, {"shade": "purple"}]`),
 		want:          map[string][]string{"pointList[1].shade": {"enum"}},
-		decodeRejects: []string{"python"},
+		decodeRejects: []string{"go", "python"},
 	},
 	{
 		// A list of every element kind given a value that is not a list is
@@ -1229,7 +1306,7 @@ var vectors = []parityVector{
 		typeName:      "ListMatrix",
 		payload:       listMatrix(`"reqShadeGrid": [["light"], ["dark", "purple"]]`),
 		want:          map[string][]string{"reqShadeGrid[1][1]": {"enum"}},
-		decodeRejects: []string{"python"},
+		decodeRejects: []string{"go", "python"},
 	},
 	{
 		name:          "grid_bad_scalar_element",
@@ -1257,7 +1334,7 @@ var vectors = []parityVector{
 		typeName:      "ListMatrix",
 		payload:       listMatrix(`"pointGrid": [[{"shade": "light"}, {"shade": "purple"}]]`),
 		want:          map[string][]string{"pointGrid[0][1].shade": {"enum"}},
-		decodeRejects: []string{"python"},
+		decodeRejects: []string{"go", "python"},
 	},
 	{
 		// Innermost string lengths count code points (D14, amended).

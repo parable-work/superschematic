@@ -208,7 +208,23 @@ TypeScript runtimes' (D51):
   UTC as superscalar's `DateTime` writes it, a `UUID` hyphenated, a list
   from its array, JSON as itself. A column of a type it does not read
   (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
-- The `postgres` feature's `worker` module, Go's `worker.Run` ported:
+- The `sqlite` feature's half of the `queue` module (D53, amended): a
+  descriptor of a database that lists the sqlite dialect also carries
+  `sqliteStatements`. `enqueue_sqlite(&tx, &queue, &message)` writes a
+  message through a rusqlite connection, in the caller's transaction when
+  it is a `Transaction`, and `SqliteQueue::<M>::open(path, queue)` claims
+  over a connection of its own, in write-ahead logging, each call on
+  tokio's blocking pool, with the same methods as `PostgresQueue`; the
+  worker loop runs either. A caller's transaction that enqueues begins
+  IMMEDIATE. A claim reads whether a message is due before it takes the
+  write lock, and on either database fails a row that does not read alone
+  (`UNREADABLE`). A
+  field crosses as the descriptor marks it (`uuid`, `timestamp`,
+  `boolean`): a UUID, base62 or hyphenated, as its lowercase hyphenated
+  text, a timestamp in RFC 3339 in UTC with its fraction kept, a boolean
+  as 1 or 0, a duration as its canonical text. `tests/queue_sqlite.rs`
+  runs it, and the worker loop over it, on a file of its own.
+- The `postgres` (or `sqlite`) feature's `worker` module, Go's `worker.Run` ported:
   `run_worker(queue, handler, Options { concurrency, grace, idle,
   prune_every }, shutdown)` claims for each free slot up to the concurrency
   (`concurrency_from_env(default)` reads `WORKER_CONCURRENCY`), waits the

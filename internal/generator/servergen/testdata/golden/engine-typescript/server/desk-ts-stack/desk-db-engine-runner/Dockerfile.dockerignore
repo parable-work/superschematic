@@ -32,3 +32,4 @@ runtime/engine/typescript/native
 **/node_modules
 **/target
 **/.git
+**/.dist-build-*

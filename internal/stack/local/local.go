@@ -91,11 +91,14 @@ const (
 	JobSQLConnector  = "local.job-postgres"
 	JobHTTPConnector = "local.job-process"
 
-	// SQLiteConnector and JobSQLiteConnector connect a process and a job
-	// to a SQLite file: its sqlite: URL (D64). A worker claims on Postgres
-	// alone, so none connects one.
-	SQLiteConnector    = "local.process-sqlite"
-	JobSQLiteConnector = "local.job-sqlite"
+	// SQLiteConnector, JobSQLiteConnector and WorkerSQLiteConnector
+	// connect a process, a job and a worker to a SQLite file: its sqlite:
+	// URL (D64). A worker claims its queue's messages on the file (D53,
+	// amended), beside the server that enqueues them, each with a
+	// connection of its own that waits for the other's write lock.
+	SQLiteConnector       = "local.process-sqlite"
+	JobSQLiteConnector    = "local.job-sqlite"
+	WorkerSQLiteConnector = "local.worker-sqlite"
 
 	// BucketConnector and JobBucketConnector connect a process and a job
 	// to a bucket on the storage emulator (D54).
@@ -291,6 +294,7 @@ func Register(r *registry.Registry) error {
 		{Name: BucketConnector, Edge: ir.EdgeBucket, From: ServerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: JobBucketConnector, Edge: ir.EdgeBucket, From: JobPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: WorkerSQLConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: WorkerSQLiteConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: RunnerSQLConnector, Edge: ir.EdgeSQL, From: RunnerPlatform, To: DatabasePlatform, Connect: connectSQL},

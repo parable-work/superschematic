@@ -317,13 +317,18 @@ type FakeJobs struct {
 
 var _ registry.JobRunner = (*FakeJobs)(nil)
 
-// RunJob records the run, `run job <job>: <image>`.
+// RunJob records the run, `run job <job>: <image>`, or for a job whose
+// artifact is a bundle, `run job <job>: bundle <digest>`.
 func (j *FakeJobs) RunJob(_ context.Context, req registry.JobRunRequest) error {
 	if err := req.Check(); err != nil {
 		return err
 	}
 	if j.log != nil {
-		j.log.Record("run job %s: %s", req.Job, req.Image)
+		if req.Bundle != "" {
+			j.log.Record("run job %s: bundle %s", req.Job, req.Bundle)
+		} else {
+			j.log.Record("run job %s: %s", req.Job, req.Image)
+		}
 	}
 	return j.Fail[req.Job]
 }

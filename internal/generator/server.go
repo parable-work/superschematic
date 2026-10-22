@@ -821,7 +821,7 @@ func (r run) checkRustQueue(stackName string, w *ir.ResolvedDeployable, services
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
-	queues, err := rustgen.RustQueues(schema)
+	queues, err := rustgen.RustQueues(schema, false)
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
@@ -846,13 +846,22 @@ func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, se
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
-	queues, err := tsgen.TypeScriptQueues(schema)
+	sqliteFirst := false
+	for _, svc := range services {
+		if svc.Name == db && len(svc.Dialects) > 0 && svc.Dialects[0] == registry.SQLDialectSQLite {
+			sqliteFirst = true
+		}
+	}
+	queues, err := tsgen.TypeScriptQueues(schema, sqliteFirst)
 	if err != nil {
 		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
 	}
 	for _, q := range queues {
 		if q.Name == w.Worker.Queue && q.Unsupported != "" {
 			return fmt.Errorf("stack %s: TypeScript worker %s claims queue %s of %s, which the TypeScript queue client cannot hold yet: its %s; hold the value in a @jsonField type, or write the worker in Go (D53)", stackName, w.Name, q.Name, db, q.Unsupported)
+		}
+		if q.Name == w.Worker.Queue && q.SQLiteUnsupported != "" {
+			return fmt.Errorf("stack %s: TypeScript worker %s claims queue %s of %s, whose DB service lists sqlite first, and the SQLite queue client cannot hold its %s; hold the value in a @jsonField type (D53, amended)", stackName, w.Name, q.Name, db, q.SQLiteUnsupported)
 		}
 	}
 	return nil

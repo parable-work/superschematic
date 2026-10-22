@@ -25,6 +25,9 @@ type UnionReadScalarCheck struct {
 	// Validate is the call that validates value, the decoded scalar, or ""
 	// when the Go type has no validator.
 	Validate string
+	// Text is the check<Symbol>Text function of a duration scalar, whose
+	// text, not its decoded value, the scalar's rules check; "" otherwise.
+	Text string
 }
 
 // buildUnionReads renders the read model for Go. A scalar field's check
@@ -56,6 +59,8 @@ func buildUnionReads(model *codegen.ReadModel, output *ModuleOutput) *UnionReads
 		symbol := scalarSymbol(field)
 		check := UnionReadScalarCheck{Func: "unionReadScalar" + symbol, Symbol: symbol}
 		switch {
+		case isDurationTextField(field):
+			check.Text = "check" + symbol + "Text"
 		case valueChecks[symbol]:
 			check.Validate = "validate" + symbol + "Value(value, false)"
 		case isValidatableScalarField(field):

@@ -6,6 +6,7 @@
 package loader
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +72,25 @@ type loadOptions struct {
 	// dependency whose type a RefersTo names, outermost first, so a cycle
 	// of such reads is refused instead of read again without end.
 	reading []string
+	// runModule runs a sidecar document's module (registry.LoadContext's
+	// RunModule); nil runs it with the document harness.
+	runModule ModuleRunner
+}
+
+// ModuleRunner runs the TypeScript module file of the service at
+// servicePath, a sidecar document's, and returns its default export as JSON
+// with the files it imported: executor.RunDocument, or what a caller
+// recorded of it (D47, amended).
+type ModuleRunner func(servicePath, file string) (json.RawMessage, []string, error)
+
+// WithModuleRunner runs each sidecar document's module with run in place
+// of the document harness: `stack prepare` records what the harness
+// returns, and a stack command given its directory replays it without
+// starting Bun.
+func WithModuleRunner(run ModuleRunner) Option {
+	return func(o *loadOptions) {
+		o.runModule = run
+	}
 }
 
 // WithNaming supplies the superschematic.toml naming; the verification pass
@@ -356,7 +376,7 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 		load = func(name string) (*ir.Schema, error) {
 			return LoadService(filepath.Join(servicePath, "..", name),
 				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
-				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache),
+				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache), WithModuleRunner(o.runModule),
 				func(nested *loadOptions) { nested.authDBRead = true })
 		}
 	}
@@ -429,7 +449,7 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 		load = func(name string) (*ir.Schema, error) {
 			return LoadService(filepath.Join(servicePath, "..", name),
 				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
-				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache),
+				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache), WithModuleRunner(o.runModule),
 				func(nested *loadOptions) {
 					nested.authDBRead = true
 					nested.reading = reading

@@ -64,21 +64,8 @@ func installRuntime(t *testing.T) (string, string, naming.LocalPaths) {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun not available: %v", err))
 	}
 	paths := testpaths.Local(t)
-	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist")); err != nil {
-		requireOrSkipTSTooling(t, fmt.Sprintf("superscalar TypeScript binding not built: %v", err))
-	}
-	runtimeDir := filepath.Join(testpaths.RepoRoot(t), "runtime", "http", "typescript")
-	install := exec.Command(bunPath, "install", "--frozen-lockfile")
-	install.Dir = runtimeDir
-	if out, err := install.CombinedOutput(); err != nil {
-		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the http runtime (likely offline): %v\n%s", err, out))
-	}
-	build := exec.Command(bunPath, "run", "build")
-	build.Dir = runtimeDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the http runtime: %v\n%s", err, out)
-	}
-	return bunPath, runtimeDir, paths
+	testpaths.BuildHTTPRuntime(t, bunPath, paths)
+	return bunPath, paths.HTTPRuntimeTypeScript, paths
 }
 
 // apiFixture is one API schema a compile gate materializes: its type

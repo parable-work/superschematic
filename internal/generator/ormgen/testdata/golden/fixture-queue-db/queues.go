@@ -38,6 +38,24 @@ import (
 // another worker may hold it.
 var ErrClaimLost = errors.New("the claim on the message is lost: it expired, and another worker may hold the message")
 
+// Unreadable is what a claim records, before the reason, on a message it
+// took but could not read into its type: it fails that message alone, as a
+// handler that failed would, and returns the others, so one undecodable row
+// neither strands its batch nor burns its neighbours' attempts. The
+// TypeScript and Rust clients record the same words.
+const Unreadable = "the message could not be read"
+
+// queueUnreadable is a claimed row whose message did not read: its ID, its
+// token and why.
+type queueUnreadable struct {
+	id, token string
+	err       error
+}
+
+func (u *queueUnreadable) Error() string { return u.err.Error() }
+
+func (u *queueUnreadable) Unwrap() error { return u.err }
+
 // queueTable is a queue's table, its arguments and its statements on
 // Postgres, which the TypeScript types' queues.ts carries too, so the two
 // claim alike.
@@ -61,6 +79,9 @@ type queueTable struct {
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
 	insert, expire, claim, complete, fail, extend, release, prune string
+	// due reads whether a message is due, on SQLite alone, where a claim
+	// runs it before it takes the write lock.
+	due string
 }
 
 // insert writes one message into the table in tx: the columns its fields
@@ -96,13 +117,25 @@ func (t queueTable) claim(ctx context.Context, pool *pgxpool.Pool, n int, lease 
 		return fmt.Errorf("claim on %s: %w", t.name, err)
 	}
 	defer rows.Close()
+	var unreadable []*queueUnreadable
 	for rows.Next() {
 		if err := scan(rows); err != nil {
+			var u *queueUnreadable
+			if errors.As(err, &u) {
+				unreadable = append(unreadable, u)
+				continue
+			}
 			return fmt.Errorf("claim on %s: %w", t.name, err)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("claim on %s: %w", t.name, err)
+	}
+	rows.Close()
+	// Each row is claimed already: one that does not read fails alone, and
+	// a failure to record that leaves it to its lease.
+	for _, u := range unreadable {
+		_, _ = t.fail(ctx, pool, u.id, u.token, Unreadable+": "+u.err.Error())
 	}
 	return nil
 }
@@ -277,8 +310,9 @@ type OrderPlacedClaim struct {
 	Message types.OrderPlaced
 }
 
-// Claim claims up to n due messages for lease. Each field reads its column
-// as a table's field does.
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
 func (q *OrderPlacedQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]OrderPlacedClaim, error) {
 	var claims []OrderPlacedClaim
 	err := orderPlacedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
@@ -295,11 +329,11 @@ func (q *OrderPlacedQueue) Claim(ctx context.Context, n int, lease time.Duration
 		}
 		if len(tempShipTo) > 0 {
 			if err := unmarshalJSONFieldValue(tempShipTo, &msg.ShipTo); err != nil {
-				return fmt.Errorf("message %s field shipTo: %w", claim.ID, err)
+				return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field shipTo: %w", claim.ID, err)}
 			}
 		}
 		if err := copyListElements("tags", tempTags, &msg.Tags); err != nil {
-			return fmt.Errorf("message %s field tags: %w", claim.ID, err)
+			return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field tags: %w", claim.ID, err)}
 		}
 		claims = append(claims, claim)
 		return nil
@@ -426,8 +460,9 @@ type PingClaim struct {
 	Message types.Ping
 }
 
-// Claim claims up to n due messages for lease. Each field reads its column
-// as a table's field does.
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
 func (q *PingQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]PingClaim, error) {
 	var claims []PingClaim
 	err := pingQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
