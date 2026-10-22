@@ -25,6 +25,9 @@
 #      entrypoints of the storefront and the wishlist and bundle.ts beside
 #      each main.ts, and brings the Cargo workspace's
 #      lockfile up to date, which fails the check when that changes it;
+#   1a. shop-db's engine archive builds from the project's engine crate the
+#      build writes, with the commerce crate (D70), and every Go module
+#      below links it;
 #   2. every generated Go module builds and vets, the entrypoints of
 #      shop-stack's Go servers, job and worker included, and shop-stack's
 #      Rust server, shop-stock, and its Rust job and worker check with its
@@ -50,7 +53,9 @@
 #      rust/ builds against the generated Rust SDK and its type tests pass;
 #      the Rust server in rust-server/ builds, and its lists page and its
 #      reviews search alike in memory and over SQLite;
-#   4. the Go app in go/ builds, vets and passes its tests, which call the
+#   4. the Go app in go/ builds, vets and passes its tests, which sell,
+#      book and refund through shop-db's engine on SQLite with acmepay
+#      in-process (go/commerce_test.go), call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
 #      compare what they print; then run all four clients against
@@ -62,21 +67,25 @@
 #      server reads too, and check they print the same; and, when Docker
 #      runs, `superschematic stack dev` runs shop-stack's Dev environment,
 #      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
-#      servers, shop-stock's Rust server, which cargo builds, and the
-#      storefront's TypeScript server on Bun, each on its generated
-#      entrypoint, shop-orders' worker, shop-stock's Rust worker and the
-#      site shop-web, and the test
+#      servers, shop-stock's Rust server, which cargo builds, and shop-cart's
+#      and the storefront's TypeScript servers on Bun, each on its generated
+#      entrypoint, shop-db's engine runner, shop-orders' worker, shop-stock's
+#      Rust worker and the site shop-web, and the test
 #      calls each Go and Rust API through its Go SDK and the storefront over
 #      HTTP, uploads a product's image to shop-media through the URL
-#      shop-api signs and reads it back (D54), sets a product's stock and
-#      sees an order reserve it on shop-stock through shop-orders' service
-#      credential, and an order beyond it refused (D57), sees shop-orders'
-#      worker fulfil each order placed from shop-db's queue (D53), reads
+#      shop-api signs and reads it back (D54), counts a product's stock on
+#      shop-stock, fills a cart on shop-cart with a pickup slot, holds it
+#      in a checkout and sees one beyond the stock refused, pays at acmepay,
+#      whose signed webhook places the checkout, sees its order written
+#      and the sale reported to shop-stock with shop-orders' service
+#      credential (D57, D70), and a refund two members of staff sign off
+#      made by SettlePayments; sees shop-orders' worker fulfil each order
+#      placed from shop-db's queue (D53), reads
 #      the site and its config, and checks shop-api's CORS for the site's
 #      origin (milestones 1 and 7 of docs/stack-model.md), then sees
 #      shop-orders' job ship an order with `superschematic stack run` and
 #      on the every-minute schedule stack dev runs (D52); and sees the
-#      order that ran a product below its threshold enqueue StockLow,
+#      sale that left a product low enqueue StockLow,
 #      shop-stock's Rust worker file the product's restock request, and its
 #      Rust job, run with `stack run`, order it, then runs stack dev and the
 #      job once more into an output root of the test's own (D65);
@@ -279,8 +288,11 @@ RUNTIME="$REPO_ROOT/runtime/http/typescript"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 # shop-cart's server and implementation import the engine's package, whose
-# types the type-check reads from its build.
-(cd "$REPO_ROOT/runtime/engine/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+# types the type-check reads from its build, and whose addon, the core's,
+# which carries the commerce behaviors (D70), shop-cart's server opens
+# shop-db's engine with under stack dev.
+(cd "$REPO_ROOT/runtime/engine/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null &&
+  "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null)
 # The output root is one Bun workspace of the generated TypeScript packages,
 # the stack's TypeScript server and the packages in typescript/: the
 # storefront's implementation and the clients (D51). Installing it links
@@ -535,11 +547,11 @@ done
 test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 14
 # A schema's references to other services in its decorators' arguments
 # are recorded under dist (D41): each stack's to the APIs it deploys, and
-# shop-stock's to shop-orders, the one caller its reservations admit. So
+# shop-stock's to shop-orders, the one caller its sales admit. So
 # once dist is gone, they build again, and so does shop-orders, whose key
 # covers shop-stock's, the API it calls; each is cached under its new key,
 # and every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 8
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 9
 for service in shop-stock shop-orders shop-stack storefront-stack wishlist-stack; do
   grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
 done

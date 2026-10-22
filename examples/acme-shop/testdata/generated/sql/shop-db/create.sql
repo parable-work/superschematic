@@ -20,7 +20,9 @@ CREATE TABLE "order" (
   placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   shipping_address TEXT NOT NULL,
   cancel_reason TEXT,
-  total_cents BIGINT NOT NULL
+  checkout_id UUID,
+  total_cents BIGINT NOT NULL,
+  UNIQUE (checkout_id)
 );
 
 COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first.';
@@ -66,8 +68,8 @@ CREATE TABLE restock_request (
 );
 
 COMMENT ON TABLE restock_request IS 'A request to the supplier for more of a product: shop-stock''s worker
-ReorderStock files one when a reservation runs the product low, and its
-job OrderRestocks orders each open one. A product has at most one
+ReorderStock files one when a sale runs the product low, and its job
+OrderRestocks orders each open one. A product has at most one
 open request: openProductId is the product while the request is open and
 null once it is ordered, and the unique index over it admits one row per
 product, since a unique index lets nulls repeat.';
@@ -122,17 +124,6 @@ CREATE TABLE "session" (
 );
 
 COMMENT ON TABLE "session" IS 'A signed-in session: the user it signs in, the SHA-256 of its token, and when it ends.';
-
-CREATE TABLE stock_level (
-  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  updated_at TIMESTAMPTZ,
-  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-  product_id UUID NOT NULL,
-  quantity BIGINT NOT NULL,
-  threshold BIGINT
-);
-
-COMMENT ON TABLE stock_level IS 'How many units of a product the warehouse holds, one row per product.';
 
 CREATE TABLE "user" (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -201,11 +192,13 @@ CREATE TABLE stock_low_queue (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE stock_low_queue IS 'Enqueued by shop-stock''s reservation, in its transaction, when it takes a
-product''s level below its threshold: shop-stock''s worker ReorderStock
-files a restock request for the product. The message holds the level and
-the threshold as the reservation left them. A message whose handler fails
-is retried every half minute, five times at most.';
+COMMENT ON TABLE stock_low_queue IS 'Enqueued by shop-stock when a sale leaves a product low, its Inventory''s
+available units at or below its reorderAt (Stock.low, D70), and by its
+job OrderRestocks for one a count left low: shop-stock''s worker
+ReorderStock files a restock request for the product. The message holds
+the units available and the reorder level as the sale left them. A
+message whose handler fails is retried every half minute, five times at
+most.';
 
 -- Add foreign key constraints
 
@@ -251,12 +244,6 @@ ALTER TABLE "session"
   REFERENCES "user"(id)
   ON DELETE CASCADE;
 
-ALTER TABLE stock_level
-  ADD CONSTRAINT fk_stock_level_product_id
-  FOREIGN KEY (product_id)
-  REFERENCES product(id)
-  ON DELETE CASCADE;
-
 ALTER TABLE user_credential
   ADD CONSTRAINT fk_user_credential_user_id
   FOREIGN KEY (user_id)
@@ -288,8 +275,6 @@ CREATE UNIQUE INDEX uq_review_one_per_author ON review USING BTREE (product_id, 
 CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_ops);
 
 CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
-
-CREATE UNIQUE INDEX uq_stock_level_one_per_product ON stock_level USING BTREE (product_id);
 
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);
 

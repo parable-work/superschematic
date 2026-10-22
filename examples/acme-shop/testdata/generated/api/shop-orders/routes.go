@@ -94,7 +94,9 @@ func (c *Config) Validate() error {
 //		Logger:                      logger,
 //		Identity:                    identityService,
 //		Implementations: shoporders.Implementations{
+//			Checkouts: &myCheckoutsImpl{},
 //			Order: &myOrderImpl{},
+//			PaymentWebhooks: &myPaymentWebhooksImpl{},
 //			ProductCatalog: &myProductCatalogImpl{},
 //			ProductReviews: &myProductReviewsImpl{},
 //		},
@@ -162,6 +164,14 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		{
+			Method:  "POST",
+			Path:    "/payments/acmepay/events",
+			Handler: createPaymentWebhooksPaymentEventsHandler(cfg.Implementations.PaymentWebhooks),
+			Middlewares: []runtimerouting.Middleware{
+				webhookHMACVerifierMiddleware(cfg, "acmepay"),
+			},
+		},
 		// The products, by name, or by price with sort, then by id; ids narrows
 		// them to the products with those ids, the lookup a page names its
 		// products' ids through, and q to those whose name holds each of its
@@ -191,6 +201,42 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		// A placed checkout's order is written the first time it is read, if
+		// SettlePayments has not written it yet.
+		{
+			Method:  "GET",
+			Path:    "/checkouts/{id}",
+			Handler: createCheckoutsGetCheckoutHandler(cfg.Implementations.Checkouts),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("orders.read"),
+			},
+		},
+		{
+			Method:  "POST",
+			Path:    "/checkouts/{id}/pay",
+			Handler: createCheckoutsPayCheckoutHandler(cfg.Implementations.Checkouts),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("orders.write"),
+			},
+		},
+		// Asks for a refund of a placed checkout, which two members of staff
+		// sign off before it is issued.
+		{
+			Method:  "POST",
+			Path:    "/checkouts/{id}/refunds",
+			Handler: createCheckoutsRequestRefundHandler(cfg.Implementations.Checkouts),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("orders.write"),
+			},
+		},
+		{
+			Method:  "POST",
+			Path:    "/checkouts/{id}/start",
+			Handler: createCheckoutsStartCheckoutHandler(cfg.Implementations.Checkouts),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("orders.write"),
+			},
+		},
 		// The caller's orders, or every customer's for staff, oldest first:
 		// by when each was placed, or by its total with sort, then by their ids.
 		{
@@ -248,6 +294,216 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // =============================================================================
 // Each handler factory creates a handler that calls the corresponding
 // implementation method. This allows for dependency injection and testing.
+
+// createCheckoutsGetCheckoutHandler creates a handler for GET /api/checkouts/{id}
+//
+// A placed checkout's order is written the first time it is read, if
+// SettlePayments has not written it yet.
+func createCheckoutsGetCheckoutHandler(impl CheckoutsImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.GetCheckout(r.Context(), Id)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createCheckoutsPayCheckoutHandler creates a handler for POST /api/checkouts/{id}/pay
+func createCheckoutsPayCheckoutHandler(impl CheckoutsImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.PayCheckout(r.Context(), Id)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createCheckoutsRequestRefundHandler creates a handler for POST /api/checkouts/{id}/refunds
+//
+// Asks for a refund of a placed checkout, which two members of staff
+// sign off before it is issued.
+func createCheckoutsRequestRefundHandler(impl CheckoutsImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RequestRefundInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.RequestRefund(r.Context(), Id, &input)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createCheckoutsStartCheckoutHandler creates a handler for POST /api/checkouts/{id}/start
+func createCheckoutsStartCheckoutHandler(impl CheckoutsImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.StartCheckoutInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.StartCheckout(r.Context(), Id, &input)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
 
 // createOrderListOrdersHandler creates a handler for GET /api/orders
 //
@@ -459,6 +715,53 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 
 		// Call implementation
 		result, err := impl.CancelOrder(r.Context(), Id, requestBody.Reason)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createPaymentWebhooksPaymentEventsHandler creates a handler for POST /api/payments/acmepay/events
+func createPaymentWebhooksPaymentEventsHandler(impl PaymentWebhooksImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.AcmepayEvent
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.PaymentEvents(r.Context(), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -889,5 +1192,22 @@ func createRapiDocHandler() gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(rapidocHTML))
+	}
+}
+
+func webhookHMACVerifierMiddleware(cfg Config, provider string) runtimerouting.Middleware {
+	return func(next gohttp.Handler) gohttp.Handler {
+		return gohttp.HandlerFunc(func(w gohttp.ResponseWriter, r *gohttp.Request) {
+			if cfg.Implementations.WebhookVerifiers == nil {
+				RespondError(w, r, gohttp.StatusInternalServerError, "webhook verifiers map is nil")
+				return
+			}
+			v, ok := cfg.Implementations.WebhookVerifiers[provider]
+			if !ok || v == nil {
+				RespondError(w, r, gohttp.StatusInternalServerError, "webhook verifier not registered for provider")
+				return
+			}
+			v(next).ServeHTTP(w, r)
+		})
 	}
 }
