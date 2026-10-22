@@ -3,7 +3,9 @@
 //! before the server reports the engine ready. A document whose live
 //! version has its hash is left as it is, so a server that starts again,
 //! or a second instance, writes nothing; a changed one becomes its next
-//! version if the compatibility rule allows it. The C ABI's `deploy` call
+//! version if the compatibility rule allows it. A document refused is
+//! tried again after the others, so a config that names another schema
+//! deploys after it (D58, amended). The C ABI's `deploy` call
 //! (the Go binding's `Deploy`) and a Rust server's entrypoint run this.
 
 use std::borrow::Cow;
@@ -46,61 +48,90 @@ impl Engine {
     /// Defines and publishes each of `documents`, a schema document or its
     /// JSON text, in `namespace` (the default namespace when `None`), as
     /// the engine's own principal: a document whose live version has its
-    /// hash is left as it is. It stops at the first refusal, the documents
-    /// before it deployed.
+    /// hash is left as it is. A behavior's config may name another schema
+    /// whose live version it reads (Rollups' source, a Holds supply, a
+    /// Payments `refundOf` link's target), which an engine document lists
+    /// in its types' name order, so a document the engine refuses is tried
+    /// again after the others: each pass deploys what it can, in the order
+    /// given, and a pass that deploys none of the documents left returns
+    /// the first refusal of that pass, every other document deployed. The
+    /// result lists each document in the order given.
     pub fn deploy(&self, documents: &[Value], namespace: Option<&str>) -> Result<Vec<Deployed>> {
-        let target = || SchemaTarget { namespace };
-        let system = Principal::system();
-        let mut deployed = Vec::with_capacity(documents.len());
-        for given in documents {
-            let document: Cow<'_, Value> = match given {
-                Value::String(text) => Cow::Owned(serde_json::from_str(text).map_err(|error| {
-                    Error::usage(format!("a schema document's text is JSON: {error}"))
-                })?),
-                other => Cow::Borrowed(other),
-            };
-            let name = document
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::usage("deploy: a schema document names its schema (name)"))?
-                .to_owned();
-            let hash = json::canonical_json(&document)
-                .map(|canonical| json::sha256_hex(&canonical))
-                .ok();
-            if let Some(live) = self.schemas().live(&system, &name, target())? {
-                if hash.as_deref() == Some(live.hash.as_str()) {
-                    deployed.push(Deployed {
-                        name,
-                        namespace: live.namespace,
-                        version: live.version.unwrap_or_default(),
-                        defined: false,
-                        published: false,
-                    });
-                    continue;
+        let mut deployed: Vec<Option<Deployed>> = vec![None; documents.len()];
+        let mut left: Vec<usize> = (0..documents.len()).collect();
+        while !left.is_empty() {
+            let mut refused = None;
+            let mut again = Vec::new();
+            for &index in &left {
+                match self.deploy_one(&documents[index], namespace) {
+                    Ok(one) => deployed[index] = Some(one),
+                    Err(error @ (Error::Engine(_) | Error::Config(_))) => {
+                        refused.get_or_insert(error);
+                        again.push(index);
+                    }
+                    Err(error) => return Err(error),
                 }
             }
-            let input = match given {
-                Value::String(text) => SchemaInput::Text(Cow::Borrowed(text)),
-                other => SchemaInput::Document(Cow::Borrowed(other)),
-            };
-            self.schemas().define(
-                &system,
-                input,
-                DefineOptions {
-                    namespace,
-                    source: None,
-                },
-            )?;
-            let published = self.schemas().publish(&system, &name, target())?;
-            deployed.push(Deployed {
-                name,
-                namespace: published.namespace,
-                version: published.version,
-                defined: true,
-                published: published.published,
-            });
+            if again.len() == left.len() {
+                if let Some(error) = refused {
+                    return Err(error);
+                }
+            }
+            left = again;
         }
-        Ok(deployed)
+        Ok(deployed.into_iter().flatten().collect())
+    }
+
+    // deploy_one defines and publishes one document, or leaves it when the
+    // live version has its hash.
+    fn deploy_one(&self, given: &Value, namespace: Option<&str>) -> Result<Deployed> {
+        let target = || SchemaTarget { namespace };
+        let system = Principal::system();
+        let document: Cow<'_, Value> = match given {
+            Value::String(text) => Cow::Owned(serde_json::from_str(text).map_err(|error| {
+                Error::usage(format!("a schema document's text is JSON: {error}"))
+            })?),
+            other => Cow::Borrowed(other),
+        };
+        let name = document
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::usage("deploy: a schema document names its schema (name)"))?
+            .to_owned();
+        let hash = json::canonical_json(&document)
+            .map(|canonical| json::sha256_hex(&canonical))
+            .ok();
+        if let Some(live) = self.schemas().live(&system, &name, target())? {
+            if hash.as_deref() == Some(live.hash.as_str()) {
+                return Ok(Deployed {
+                    name,
+                    namespace: live.namespace,
+                    version: live.version.unwrap_or_default(),
+                    defined: false,
+                    published: false,
+                });
+            }
+        }
+        let input = match given {
+            Value::String(text) => SchemaInput::Text(Cow::Borrowed(text)),
+            other => SchemaInput::Document(Cow::Borrowed(other)),
+        };
+        self.schemas().define(
+            &system,
+            input,
+            DefineOptions {
+                namespace,
+                source: None,
+            },
+        )?;
+        let published = self.schemas().publish(&system, &name, target())?;
+        Ok(Deployed {
+            name,
+            namespace: published.namespace,
+            version: published.version,
+            defined: true,
+            published: published.published,
+        })
     }
 }
 

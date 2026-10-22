@@ -9071,3 +9071,22 @@ Optional `number` and `string` fields keep value types with `omitempty`.
 `TestOptionalIntegerEnvVarKeepsExplicitZero` cover these shapes.
 
 The rule is reversible until the first release.
+
+### D58, amended: a deploy tries a refused document again after the others
+
+A server's deploy defined and published its engine document's schemas in
+the document's order, the engine types' name order, and stopped at the
+first refusal. A behavior whose config reads another schema's live
+version (Rollups' source, a Holds supply, a Payments `refundOf` link's
+target, D70) was refused when that schema came later by name:
+shop-commerce-db's Checkout, which holds Inventory, never deployed, so
+no commerce server became ready.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Engine::deploy` deploys in passes: each pass defines and publishes the documents left, in the order given, and keeps a refused one (a refusal or a behavior's config error) for the next pass. A pass that deploys none of those left returns its first refusal, every other document deployed. Storage and internal errors stop it at once. The result lists the documents in the order given. The Go binding's `Deploy` and the TypeScript `deploy` call it, so all three servers take the same documents in any order. | The engine document's generator ordering the schemas by the schemas each config names, which needs every behavior's references, an extension's included, known to the compiler; stopping at the first refusal, which made a document's validity depend on its types' names |
+
+`commerce_holds.rs`'s `a_deploy_publishes_a_claim_after_the_supplies_it_names`
+deploys Checkout before Counter and Inventory on SQLite and Postgres,
+deploys again writing nothing, and has a config naming a schema that is
+never live refused after the rest deployed.

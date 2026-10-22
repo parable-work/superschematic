@@ -264,8 +264,10 @@ export class AsyncEngine {
    * request can be: a document whose live version has its hash is left as
    * it is, so a restart with the same documents writes nothing, and a
    * changed one becomes its next version if the compatibility rule allows
-   * it. A server deploys its database's EngineDocument before it reports
-   * the engine ready.
+   * it. A document refused, say because its config names a schema not yet
+   * live, is tried again after the others, and a pass that deploys none of
+   * those left rejects with its first refusal. A server deploys its
+   * database's EngineDocument before it reports the engine ready.
    */
   deploy(documents: readonly unknown[], options: DeployOptions = {}): Promise<DeployedSchema[]> {
     return this.call('deploy', undefined, [documents, options]) as Promise<DeployedSchema[]>;

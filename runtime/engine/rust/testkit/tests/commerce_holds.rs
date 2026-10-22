@@ -261,16 +261,19 @@ fn open_with(target: &Target, holds: Value) -> Engine {
     open_document(target, &checkout(holds))
 }
 
-/// An engine with Inventory, Counter and the Checkout schema given.
-fn open_document(target: &Target, checkout: &Value) -> Engine {
-    let engine = target.open_with(behaviors(), configure);
+/// Inventory: Stock at its priceCents in GBP.
+fn inventory() -> Value {
     let mut inventory =
         schema_document("Inventory", json!([title(), int("priceCents")]), json!({}));
     inventory["types"]["Inventory"]["behaviors"] = json!([{"name": "Stock", "config": {
         "permission": "stock.adjust",
         "price": {"field": "priceCents", "currency": "GBP"}
     }}]);
-    publish(&engine, &inventory).expect("publish Inventory");
+    inventory
+}
+
+/// Counter: a timed test supply at its feeCents in GBP.
+fn counter() -> Value {
     let mut counter = schema_document(
         "Counter",
         json!([title(), int("units"), int("feeCents")]),
@@ -278,7 +281,14 @@ fn open_document(target: &Target, checkout: &Value) -> Engine {
     );
     counter["types"]["Counter"]["behaviors"] =
         json!([{"name": "test.Slots", "config": {"priceField": "feeCents", "currency": "GBP"}}]);
-    publish(&engine, &counter).expect("publish Counter");
+    counter
+}
+
+/// An engine with Inventory, Counter and the Checkout schema given.
+fn open_document(target: &Target, checkout: &Value) -> Engine {
+    let engine = target.open_with(behaviors(), configure);
+    publish(&engine, &inventory()).expect("publish Inventory");
+    publish(&engine, &counter()).expect("publish Counter");
     publish(&engine, checkout).expect("publish Checkout");
     engine.runner().run_due().expect("the runner's first pass");
     for (id, units, price) in [("anvil", 3, 1250), ("rope", 5, 300)] {
@@ -1001,6 +1011,41 @@ fn a_config_is_held_to_the_types_workflow_links_and_fields() {
             .contains("holds.slot.interval.start \"title\" is not a date-time field of Checkout"));
         assert!(refused(holds_config(json!({"lines": {"each": {"field": "lines", "target": "inventoryId"}, "schema": "Inventory", "interval": {"start": "at", "durationMs": 60000}}})))
             .contains("holds.lines asks an interval of Inventory, whose Stock holds units"));
+    }
+}
+
+#[test]
+fn a_deploy_publishes_a_claim_after_the_supplies_it_names() {
+    for target in targets("holds_deploy_order") {
+        let engine = target.open_with(behaviors(), configure);
+        // An engine document lists its types in name order: Checkout
+        // names Inventory, which is not live yet when it comes first.
+        let documents = [paid_checkout(), counter(), inventory()];
+        let deployed = engine
+            .deploy(&documents, None)
+            .expect("the deploy publishes Checkout after its supplies");
+        assert_eq!(
+            deployed
+                .iter()
+                .map(|one| (one.name.as_str(), one.version, one.published))
+                .collect::<Vec<_>>(),
+            [
+                ("Checkout", 1, true),
+                ("Counter", 1, true),
+                ("Inventory", 1, true)
+            ]
+        );
+        // A second deploy writes nothing.
+        let again = engine.deploy(&documents, None).expect("deploy again");
+        assert!(again.iter().all(|one| !one.defined && !one.published));
+        // A document no order fixes is refused, after the rest deployed.
+        let mut broken = paid_checkout();
+        broken["types"]["Checkout"]["behaviors"][2]["config"]["holds"]["lines"]["schema"] =
+            json!("Nowhere");
+        let refused = engine
+            .deploy(&[broken, inventory()], None)
+            .expect_err("Nowhere is never live");
+        assert!(refused.to_string().contains("Nowhere"), "{refused}");
     }
 }
 
