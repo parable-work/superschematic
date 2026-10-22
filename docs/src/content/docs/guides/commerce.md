@@ -491,11 +491,12 @@ one slot of capacity 1 hold exactly one.
 The same lock makes a namespace's commerce writes one queue: a flash
 sale on one product waits with every other write in the namespace.
 Measured on a laptop, three servers and 24 clients against Postgres in a
-local VM, a checkout of one item held at about 6 a second, of ten items
-26 holds a second, and of fifty 35 holds a second. The time is in the
-statements each move runs under the lock, a few hundred for a checkout
-of ten items, each a round trip to the database, rather than in the
-database's own work; a database closer to the servers is faster. A
+local VM, a checkout of one item held at about 12 a second, of ten items
+51 holds a second, and of fifty 75 holds a second, and 1,000 carts list
+in about 10 seconds in pages of 100. The time is in the statements each
+move runs under the lock, about 400 for a checkout of ten items, each a
+round trip to the database, rather than in the database's own work; a
+database closer to the servers is faster. A
 move that waits in the queue past a server's 30-second engine route
 timeout answers 504 `gateway_timeout`, which a client asks again. Give
 each shop a namespace of its own.

@@ -500,7 +500,7 @@ struct Unit {
     behavior: String,
     namespace: String,
     schema: String,
-    record: SchemaRecord,
+    record: Arc<SchemaRecord>,
     runtime: Arc<VersionRuntime>,
     /// The behavior's position on the type.
     index: usize,

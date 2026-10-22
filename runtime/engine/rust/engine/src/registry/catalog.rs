@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use superschematic_engine_storage::behavior::{prefix_of, stored_key};
+use superschematic_engine_storage::behavior::{instance_column, prefix_of, stored_key};
 use superschematic_engine_storage::{Db, Row, Sql, SqlValue, Tx};
 use superschematic_schema_ir::schemafile::SchemaFileLoader;
 
@@ -72,6 +72,7 @@ use crate::instances::filters::{
 use crate::json::{self, compare_utf16};
 use crate::namespaces::NamespaceView;
 use crate::principal::Actor;
+use crate::reads::Reads;
 use crate::values::ValueStore;
 
 /// A stored draft or published version of a schema.
@@ -133,6 +134,10 @@ pub(crate) struct VersionRuntime {
     pub composition: Composition,
     /// Each composed behavior's storage prefix, in the composition's order.
     pub prefixes: Vec<String>,
+    /// Every composed behavior's columns on `engine_instances`, as the
+    /// database names them, in the composition's order: what a read of an
+    /// instance's behavior columns selects (`Reads`).
+    pub columns: Vec<String>,
     /// The indexes of the instance type's own fields (`indexes`).
     pub indexes: Vec<OwnIndex>,
     /// The own fields an index covers, which a row keeps inline whatever
@@ -150,7 +155,7 @@ pub(crate) struct Change<'a> {
 }
 
 /// Which stored document of a name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Which {
     Live,
     Draft,
@@ -303,6 +308,7 @@ impl Catalog {
                 SqlValue::from(by.actor.as_str()),
             ],
         )?;
+        Reads::forget_all(tx);
         let mut hashed = Map::new();
         hashed.insert("hash".into(), Value::from(hash.as_str()));
         append_schema_event(
@@ -356,6 +362,7 @@ impl Catalog {
                         SqlValue::Integer(DRAFT),
                     ],
                 )?;
+                Reads::forget_all(tx);
                 return Ok(PublishResult {
                     namespace: namespace.to_owned(),
                     name: name.to_owned(),
@@ -377,6 +384,8 @@ impl Catalog {
         for bound in &composition.behaviors {
             ensure_storage(tx, &bound.behavior, now)?;
         }
+        // A behavior's storage adds columns to the instances' rows.
+        Reads::forget_all(tx);
         // The indexes of the instance type's own fields follow the version:
         // the ones it drops go, and a new unique one the stored instances
         // break refuses it.
@@ -412,6 +421,7 @@ impl Catalog {
                 SqlValue::Integer(DRAFT),
             ],
         )?;
+        Reads::forget_all(tx);
         let transitions = config_transitions(before.as_ref(), &model, &self.registry())?;
         after_config_changes(
             engine,
@@ -471,13 +481,17 @@ impl Catalog {
         name: &str,
         namespace: &str,
         which: Which,
-    ) -> Result<Option<SchemaRecord>> {
-        for holder in view.lookup(namespace) {
-            if let Some(found) = row(tx, &holder, name, which)? {
-                return Ok(Some(to_record(&found)?));
+    ) -> Result<Option<Arc<SchemaRecord>>> {
+        // Each document is read once a transaction: the hooks of a call
+        // ask for the same schemas again and again.
+        Reads::schema(tx, namespace, name, which, || {
+            for holder in view.lookup(namespace) {
+                if let Some(found) = row(tx, &holder, name, which)? {
+                    return Ok(Some(to_record(&found)?));
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })
     }
 
     /// Every schema name the namespace reaches, its own and the shared
@@ -584,10 +598,23 @@ impl Catalog {
             })
             .collect();
         let filters = filterables_of(&own, &indexes, &filtering);
+        let columns = composition
+            .behaviors
+            .iter()
+            .zip(&prefixes)
+            .flat_map(|(bound, prefix)| {
+                bound
+                    .behavior
+                    .columns
+                    .iter()
+                    .map(|column| instance_column(tx.dialect(), prefix, column))
+            })
+            .collect();
         let runtime = Arc::new(VersionRuntime {
             validator: Arc::new(SchemaValidator::new(model)?),
             composition,
             prefixes,
+            columns,
             inline: indexes
                 .iter()
                 .flat_map(|index| index.keys.iter().cloned())
