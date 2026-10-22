@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine-commerce",
   "version": "0.0.0",
-  "description": "Commerce for @superschematic/engine (D70): the commerce behaviors, Stock and Holds so far, which are Rust (runtime/engine-commerce/rust, D58) in the engine's addon and a deployment names in the engine's behaviors option (commerceBehaviors), with their configs' and records' types. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
+  "description": "Commerce for @superschematic/engine (D70): the commerce behaviors, Stock, Calendar and Holds so far, which are Rust (runtime/engine-commerce/rust, D58) in the engine's addon and a deployment names in the engine's behaviors option (commerceBehaviors), with their configs' and records' types. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

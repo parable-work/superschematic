@@ -10,7 +10,11 @@
 //! `{schema, id}`; the hold's name in the holder's `Holds` config; the
 //! item's index in that hold (its element's index in an `each` hold's
 //! list, 0 for a `link` hold); and what is asked, a `quantity` of counted
-//! supply or an `interval`, `{startMs, endMs}`, of timed supply.
+//! supply or an `interval`, `{startMs, endMs}`, of timed supply, from
+//! 1900 to 9000 ([`EARLIEST_MS`], [`LATEST_MS`]). `checkHold` also takes
+//! `also` ([`also`]): what the claim's other items still to hold ask of the
+//! same instance, which it counts as taken, so two lines of one supply are
+//! checked together.
 //!
 //! The holder check. A supply takes a writing call only from the claim
 //! itself, as Budget's scope operations take one only from the instance
@@ -22,9 +26,11 @@
 //! it calls the supply, in the same transaction, so a caller that invokes
 //! `releaseFor` over HTTP for an item its claim still holds is refused, as
 //! is one that holds for an item its claim has not taken. A holder that
-//! is gone, which a claim's delete leaves its afterChange to read, gets
-//! back what it held: `releaseFor` and `returnFor` are taken for it, for
-//! what the supply's record of the item asks, and nothing else is.
+//! is gone, which a claim's delete leaves its afterChange to read, lets go
+//! through `releaseFor` alone, for what the supply's record of the item
+//! asks: what it held is released, what it committed stays committed
+//! (units sold, time booked), and the record is retired. Nothing gives a
+//! gone holder's committed units back: a return is a live claim's move.
 //!
 //! The record. A supply keeps a row per holder, hold and item
 //! ([`rows_table`]), and a call moves it only forward
@@ -32,7 +38,10 @@
 //! it asks for changes and writes nothing, and one whose row is in no
 //! state the call moves from is `not_requested`. [`begin`] runs the holder
 //! check and the step; the supply then checks what is free, for `holdFor`,
-//! and [`finish`] records the row and answers.
+//! and [`finish`] records the row and answers. A retired record keeps its
+//! state and still counts what it takes, but no longer answers for the
+//! holder's id ([`recorded`]), so a claim created again with a deleted
+//! one's id holds afresh.
 //!
 //! What does not fit is `unavailable` ([`Unavailable`]): its details name
 //! the supply, the hold and item, what was asked, and what is free, a
@@ -43,7 +52,7 @@
 //! ([`claim_details`]).
 //!
 //! A supply refuses its own delete while it holds anything (`held`,
-//! [`holding`]).
+//! [`holding`]): an item held, or committed time that has not ended.
 
 use serde_json::{json, Map, Value};
 
@@ -69,8 +78,22 @@ pub const UNAVAILABLE: &str = "unavailable";
 /// A supply's delete while it holds something for a claim.
 pub const HELD: &str = "held";
 
+/// `checkHold`'s parameter of what the claim's other items still to hold
+/// ask of the same instance.
+pub const ALSO: &str = "also";
+
 /// The largest integer a JavaScript number holds exactly.
-const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+/// The earliest instant an interval of the contract starts:
+/// 1900-01-01T00:00Z.
+pub const EARLIEST_MS: i64 = -2_208_988_800_000;
+/// The latest instant an interval of the contract ends:
+/// 9000-01-01T00:00Z, well inside what a time zone database answers.
+pub const LATEST_MS: i64 = 221_845_392_000_000;
+
+/// The most asks `checkHold`'s `also` lists.
+pub const MAX_ALSO: usize = 100;
 
 /// What a supply holds: units it counts, or time it opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,9 +401,21 @@ impl SupplyCall {
         Value::Object(out)
     }
 
+    /// The parameters of a `checkHold` call that also counts what the
+    /// claim's other items still to hold ask of the same instance
+    /// ([`ALSO`]); `also` empty leaves the member out.
+    pub fn to_check_params(&self, also: &[Ask]) -> Value {
+        let mut params = self.to_params();
+        if !also.is_empty() {
+            params[ALSO] = Value::Array(also.iter().map(Ask::to_json).collect());
+        }
+        params
+    }
+
     /// Reads a call's parameters, which the operation's paramsSchema
     /// ([`params_schema`]) accepted, for a supply of `kind`: an interval
-    /// must end after it starts. `behavior` names the supply in a refusal.
+    /// must end after it starts, from [`EARLIEST_MS`] to [`LATEST_MS`].
+    /// `behavior` names the supply in a refusal.
     pub fn parse(
         behavior: &str,
         operation: SupplyOperation,
@@ -431,6 +466,18 @@ impl SupplyCall {
                         "must be {startMs, endMs}, each an integer",
                     ));
                 };
+                if start_ms < EARLIEST_MS {
+                    return Err(refuse(
+                        "/interval/startMs",
+                        "must be no earlier than 1900-01-01T00:00Z",
+                    ));
+                }
+                if end_ms > LATEST_MS {
+                    return Err(refuse(
+                        "/interval/endMs",
+                        "must be no later than 9000-01-01T00:00Z",
+                    ));
+                }
                 if end_ms <= start_ms {
                     return Err(refuse("/interval/endMs", "must be after startMs"));
                 }
@@ -444,6 +491,58 @@ impl SupplyCall {
             ask,
         })
     }
+}
+
+/// What a `checkHold` call's `also` lists ([`ALSO`]): the asks of the
+/// claim's other items still to hold of the same instance, which the
+/// supply counts as taken beside its records, each a quantity or an
+/// interval as the supply's kind asks. Absent is none.
+pub fn also(behavior: &str, kind: SupplyKind, params: &Value) -> Result<Vec<Ask>> {
+    let Some(listed) = params.get(ALSO) else {
+        return Ok(Vec::new());
+    };
+    let refuse = |path: String, message: &str| -> Error {
+        EngineError::operation_params(
+            behavior,
+            SupplyOperation::Check.name(),
+            vec![SchemaIssue::new(path, message)],
+        )
+        .into()
+    };
+    let Some(listed) = listed.as_array().filter(|listed| listed.len() <= MAX_ALSO) else {
+        return Err(refuse(
+            format!("/{ALSO}"),
+            "must be a list of at most 100 asks",
+        ));
+    };
+    let mut out = Vec::with_capacity(listed.len());
+    for (at, one) in listed.iter().enumerate() {
+        let call = SupplyCall::parse(
+            behavior,
+            SupplyOperation::Check,
+            kind,
+            &json!({
+                "holder": {"schema": "-", "id": "-"},
+                "hold": "-",
+                "item": 0,
+                "quantity": one.get("quantity"),
+                "interval": one.get("interval"),
+            }),
+        )
+        .map_err(|_| {
+            refuse(
+                format!("/{ALSO}/{at}"),
+                match kind {
+                    SupplyKind::Counted => "must be {quantity}, an integer of at least 1",
+                    SupplyKind::Timed => {
+                        "must be {interval: {startMs, endMs}}, from 1900 to 9000, ending after it starts"
+                    }
+                },
+            )
+        })?;
+        out.push(call.ask);
+    }
+    Ok(out)
 }
 
 /// A supply's unit price, which `holdFor` returns and `Holds` keeps on the
@@ -535,15 +634,25 @@ pub fn holder_items(items: Option<&Value>) -> Vec<HolderItem> {
 
 /// The holder check: reads the holder of a writing call through its own
 /// `Holds.items`, as the call's principal reaches it, and returns the item
-/// the call names. Refuses, `not_requested`, a holder that is gone or does
-/// not compose `Holds`, and an item it does not have, that names another
+/// the call names. Refuses, `not_requested`, a holder that does not
+/// compose `Holds`, and an item it does not have, that names another
 /// supply, that asks other than the call, or that is not yet in the state
-/// the call moves the supply's record to.
+/// the call moves the supply's record to. A holder that is gone is
+/// refused but for `releaseFor`, which lets go of what it took.
 pub fn check_holder<C>(
     view: &InstanceView<'_, C>,
     operation: SupplyOperation,
     call: &SupplyCall,
 ) -> Result<HolderItem> {
+    holder_check(view, operation, call).map(|(item, _)| item)
+}
+
+// holder_check is the holder check, and whether the holder is gone.
+fn holder_check<C>(
+    view: &InstanceView<'_, C>,
+    operation: SupplyOperation,
+    call: &SupplyCall,
+) -> Result<(HolderItem, bool)> {
     let Some(needs) = operation.state() else {
         return Err(Error::behavior(
             view.behavior(),
@@ -570,21 +679,22 @@ pub fn check_holder<C>(
         // A claim's delete lets go of what it holds from its afterChange,
         // when a read finds it gone, as Budget's scope reads an inner
         // instance that is gone as releasing everything: what a gone
-        // holder held is released, and what it committed is returned.
-        // The supply's record holds the call to what was asked
-        // ([`begin`]).
-        if matches!(
-            operation,
-            SupplyOperation::Release | SupplyOperation::Return
-        ) {
-            return Ok(HolderItem {
-                hold: call.hold.clone(),
-                item: call.item,
-                supply: InstanceRef::of(view),
-                ask: call.ask,
-                state: needs,
-                price: None,
-            });
+        // holder held is released, what it committed stays so, and its
+        // records retire ([`begin`]). The supply's record holds the call
+        // to what was asked. Nothing returns a gone holder's units: a
+        // return is a live claim's move into a returnOn state.
+        if operation == SupplyOperation::Release {
+            return Ok((
+                HolderItem {
+                    hold: call.hold.clone(),
+                    item: call.item,
+                    supply: InstanceRef::of(view),
+                    ask: call.ask,
+                    state: needs,
+                    price: None,
+                },
+                true,
+            ));
         }
         return Err(refuse(
             format!("{} {} does not exist", holder.schema, holder.id),
@@ -639,7 +749,7 @@ pub fn check_holder<C>(
             Some(item.state),
         ));
     }
-    Ok(item)
+    Ok((item, false))
 }
 
 /// The `not_requested` refusal of a call. Its details name the holder, the
@@ -811,6 +921,43 @@ impl CheckAnswer {
     }
 }
 
+/// What `checkHold` answers from the supply's record of the item a call
+/// names, as `holdFor` would take it: an item the record holds already,
+/// asking the same, fits; a record in any other state is
+/// `not_requested`, which `holdFor` would refuse; `None` when the supply
+/// has no record of it, and what is free decides.
+pub fn check_record(call: &SupplyCall, record: Option<&SupplyRecord>) -> Option<CheckAnswer> {
+    let found = record?;
+    if found.state == ItemState::Held && found.ask == call.ask {
+        return Some(CheckAnswer::Fits);
+    }
+    let mut details = Map::new();
+    details.insert("holder".into(), call.holder.to_json());
+    details.insert("hold".into(), Value::from(call.hold.as_str()));
+    details.insert("item".into(), Value::from(call.item));
+    details.insert("supplyState".into(), Value::from(found.state.as_str()));
+    Some(CheckAnswer::Refused(Refusal {
+        code: NOT_REQUESTED.to_owned(),
+        reason: format!(
+            "this supply records item {} of hold {} of {} {} as {}{}, which holdFor does not move",
+            call.item,
+            call.hold,
+            call.holder.schema,
+            call.holder.id,
+            found.state.as_str(),
+            if found.ask == call.ask {
+                String::new()
+            } else {
+                format!(
+                    " asking {}",
+                    superschematic_engine::json::stringify(&found.ask.to_json())
+                )
+            }
+        ),
+        details,
+    }))
+}
+
 /// A claim's details of `unavailable`: `{ items: [...] }`, one entry for
 /// each item that does not fit, each the supply's details with its `code`
 /// and `reason`.
@@ -834,11 +981,14 @@ pub struct SupplyRecord {
     pub price: Option<Price>,
     /// When the record last moved, by the engine's clock.
     pub at: i64,
+    /// Whether the record is a deleted holder's ([`retire`]): it keeps its
+    /// state, and no longer answers for the holder's id.
+    pub retired: bool,
 }
 
 impl SupplyRecord {
     /// `{ holder, hold, item, quantity | interval, state, unitPrice?,
-    /// currency?, at }`.
+    /// currency?, at, retired? }`, `retired` only when true.
     pub fn to_json(&self) -> Value {
         let mut out = Map::new();
         out.insert("holder".into(), self.holder.to_json());
@@ -853,16 +1003,22 @@ impl SupplyRecord {
             }
         }
         out.insert("at".into(), Value::from(self.at));
+        if self.retired {
+            out.insert("retired".into(), Value::Bool(true));
+        }
         Value::Object(out)
     }
 }
 
 const ROW_COLUMNS: &str = "holder_schema, holder_id, hold, item, quantity, start_ms, end_ms, state, unit_price, currency, at";
+const READ_COLUMNS: &str = "holder_schema, holder_id, hold, item, quantity, start_ms, end_ms, state, unit_price, currency, at, retired";
 
 /// A supply's table of records, keyed by its instance, the holder, the
-/// hold and the item, with an index for the overlap read of timed supply
-/// (instance, then `start_ms`). A supply names it in a migration of its
-/// own, and may add columns.
+/// hold, the item and `retired`, 0 while the holder lives and the
+/// record's number among the holder's retired ones after ([`retire`]),
+/// with an index for the overlap read of timed supply (instance, then
+/// `start_ms`). A supply names it in a migration of its own, and may add
+/// columns.
 pub fn rows_table(name: &str) -> TableSpec {
     TableSpec::new(name)
         .column("namespace", ColumnSpec::text().not_null())
@@ -879,6 +1035,7 @@ pub fn rows_table(name: &str) -> TableSpec {
         .column("unit_price", ColumnSpec::integer())
         .column("currency", ColumnSpec::text())
         .column("at", ColumnSpec::integer().not_null())
+        .column("retired", ColumnSpec::integer().not_null().default(0))
         .primary_key(&[
             "namespace",
             "schema",
@@ -887,6 +1044,7 @@ pub fn rows_table(name: &str) -> TableSpec {
             "holder_id",
             "hold",
             "item",
+            "retired",
         ])
         .index(IndexSpec::new(
             format!("{name}_start"),
@@ -947,11 +1105,13 @@ fn record_of(row: &Row) -> Result<SupplyRecord> {
             currency,
         }),
         at: row.i64("at")?,
+        retired: row.i64("retired")? != 0,
     })
 }
 
-/// The supply's record of the item a call names, in its table `table`;
-/// `None` when it has none.
+/// The supply's record of the item a call names, in its table `table`,
+/// while its holder lives; `None` when it has none. A retired record
+/// ([`retire`]) is no answer: it was a deleted holder's.
 pub fn recorded<C>(
     view: &InstanceView<'_, C>,
     table: &str,
@@ -960,44 +1120,81 @@ pub fn recorded<C>(
     let table = view.sql().table(table)?;
     let row = view.sql().get(
         format!(
-            "SELECT {ROW_COLUMNS} FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND holder_schema = ? AND holder_id = ? AND hold = ? AND item = ?"
+            "SELECT {READ_COLUMNS} FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND holder_schema = ? AND holder_id = ? AND hold = ? AND item = ? AND retired = 0"
         ),
         &call_key(view, call),
     )?;
     row.as_ref().map(record_of).transpose()
 }
 
-/// Every record of the instance in its table `table`, by holder, hold and
-/// item, text in byte order on both databases.
+/// Every record of the instance in its table `table`, retired ones too,
+/// by holder, hold, item and retirement, text in byte order on both
+/// databases.
 pub fn records<C>(view: &InstanceView<'_, C>, table: &str) -> Result<Vec<SupplyRecord>> {
     let table = view.sql().table(table)?;
     let select =
-        format!("SELECT {ROW_COLUMNS} FROM {table} WHERE namespace = ? AND schema = ? AND id = ?");
+        format!("SELECT {READ_COLUMNS} FROM {table} WHERE namespace = ? AND schema = ? AND id = ?");
     let rows = view.sql().all(
         Sql::per(
-            format!("{select} ORDER BY holder_schema, holder_id, hold, item"),
-            format!("{select} ORDER BY holder_schema COLLATE \"C\", holder_id COLLATE \"C\", hold COLLATE \"C\", item"),
+            format!("{select} ORDER BY holder_schema, holder_id, hold, item, retired"),
+            format!("{select} ORDER BY holder_schema COLLATE \"C\", holder_id COLLATE \"C\", hold COLLATE \"C\", item, retired"),
         ),
         &instance_key(view),
     )?;
     rows.iter().map(record_of).collect()
 }
 
-/// How many of the instance's records in its table `table` take supply:
-/// held, or committed and not returned. A supply refuses its own delete
-/// while it is above 0 (`held`).
+/// How many of the instance's records in its table `table` hold supply
+/// now: held, or committed time that has not ended by the engine's clock.
+/// Committed units are sold and committed time that has ended is spent,
+/// so neither counts. A supply refuses its own delete while it is above 0
+/// (`held`).
 pub fn holding<C>(view: &InstanceView<'_, C>, table: &str) -> Result<i64> {
     let table = view.sql().table(table)?;
+    let mut values = instance_key(view);
+    values.push(SqlValue::from(view.now()));
     let row = view.sql().get(
         format!(
-            "SELECT COUNT(*) AS n FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND state IN ('held', 'committed')"
+            "SELECT COUNT(*) AS n FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND (state = 'held' OR (state = 'committed' AND end_ms IS NOT NULL AND end_ms > ?))"
         ),
-        &instance_key(view),
+        &values,
     )?;
     Ok(match row {
         Some(row) => row.i64("n")?,
         None => 0,
     })
+}
+
+/// Retires the record of the item a call names, a deleted holder's: it
+/// keeps its state, so what it took stays taken (committed units sold,
+/// committed time booked), and moves off the holder's live key, so a
+/// holder created again with the id holds afresh. Its `retired` is one
+/// more than the item's last retired record's.
+pub fn retire<C>(cx: &InstanceCx<'_, C>, table: &str, call: &SupplyCall) -> Result<()> {
+    let name = cx.sql().table(table)?;
+    let key = call_key(cx, call);
+    let last = cx.sql().get(
+        format!(
+            "SELECT MAX(retired) AS n FROM {name} WHERE namespace = ? AND schema = ? AND id = ? AND holder_schema = ? AND holder_id = ? AND hold = ? AND item = ?"
+        ),
+        &key,
+    )?;
+    let next = last
+        .as_ref()
+        .map(|row| row.opt_i64("n"))
+        .transpose()?
+        .flatten()
+        .unwrap_or(0)
+        + 1;
+    let mut values = vec![SqlValue::from(next)];
+    values.extend(key);
+    cx.sql().run(
+        format!(
+            "UPDATE {name} SET retired = ? WHERE namespace = ? AND schema = ? AND id = ? AND holder_schema = ? AND holder_id = ? AND hold = ? AND item = ? AND retired = 0"
+        ),
+        &values,
+    )?;
+    Ok(())
 }
 
 /// Removes every record of the instance in its table `table`, as a
@@ -1027,14 +1224,16 @@ pub enum Begun {
 /// Starts a writing call of the contract: the holder check
 /// ([`check_holder`]), then the step the supply's record in its table
 /// `table` takes ([`SupplyOperation::step`]), refusing a record the call
-/// does not move from with `not_requested`.
+/// does not move from with `not_requested`. A gone holder's `releaseFor`
+/// releases a held record, which [`finish`] then retires, and retires any
+/// other at once, changing nothing else.
 pub fn begin<C>(
     cx: &InstanceCx<'_, C>,
     table: &str,
     operation: SupplyOperation,
     call: &SupplyCall,
 ) -> Result<Begun> {
-    let item = check_holder(cx, operation, call)?;
+    let (item, gone) = holder_check(cx, operation, call)?;
     let record = recorded(cx, table, call)?;
     // A record moves only with what it was taken for, so a commit or a
     // return moves no more than the item held.
@@ -1055,6 +1254,22 @@ pub fn begin<C>(
             Some(item.state),
             Some(found.state),
         ));
+    }
+    if gone {
+        return Ok(match &record {
+            Some(found) if found.state == ItemState::Held => Begun::Apply {
+                item,
+                recorded: record,
+            },
+            Some(found) => {
+                retire(cx, table, call)?;
+                Begun::Done(Some(SupplyRecord {
+                    retired: true,
+                    ..found.clone()
+                }))
+            }
+            None => Begun::Done(None),
+        });
     }
     match operation.step(record.as_ref().map(|record| record.state)) {
         Some(Step::Apply) => Ok(Begun::Apply {
@@ -1086,7 +1301,8 @@ pub fn begin<C>(
 
 /// Records the move a call makes, in the supply's table `table`, and
 /// answers it ([`outcome`]). `holdFor` records `price`; the other calls
-/// keep the price the record has.
+/// keep the price the record has. A gone holder's release retires the
+/// record it released ([`retire`]).
 pub fn finish<C>(
     cx: &OperationCx<'_, C>,
     table: &str,
@@ -1115,13 +1331,21 @@ pub fn finish<C>(
     };
     cx.sql().run(
         format!(
-            "INSERT INTO {name} (namespace, schema, id, {ROW_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (namespace, schema, id, holder_schema, holder_id, hold, item)
+            "INSERT INTO {name} (namespace, schema, id, {ROW_COLUMNS}, retired) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+             ON CONFLICT (namespace, schema, id, holder_schema, holder_id, hold, item, retired)
              DO UPDATE SET state = excluded.state, {keep_price}at = excluded.at"
         ),
         &values,
     )?;
     let record = recorded(cx, table, call)?;
+    if operation == SupplyOperation::Release
+        && cx
+            .instances()
+            .get(&call.holder.schema, &call.holder.id, Some(&[]))?
+            .is_none()
+    {
+        retire(cx, table, call)?;
+    }
     Ok(outcome(
         state,
         true,
@@ -1129,21 +1353,25 @@ pub fn finish<C>(
     ))
 }
 
-/// Answers a call that changed nothing, with the record as it is, and
-/// tells the engine so: no event, and the instance keeps its seq.
+/// Answers a call that moved no record's state, with the record as it is,
+/// and, unless [`begin`] retired it for a gone holder, tells the engine
+/// the call changed nothing: no event, and the instance keeps its seq.
 pub fn done<C>(
     cx: &OperationCx<'_, C>,
     operation: SupplyOperation,
     record: Option<&SupplyRecord>,
 ) -> Value {
-    cx.unchanged();
+    let retired = record.is_some_and(|record| record.retired);
+    if !retired {
+        cx.unchanged();
+    }
     let state = record
         .map(|record| record.state)
         .or(operation.state())
         .unwrap_or(ItemState::Released);
     outcome(
         state,
-        false,
+        retired,
         record.and_then(|record| record.price.as_ref()),
     )
 }
@@ -1205,8 +1433,8 @@ pub fn params_schema(kind: SupplyKind) -> Value {
                     "additionalProperties": false,
                     "required": ["startMs", "endMs"],
                     "properties": {
-                        "startMs": {"description": "When it starts.", "type": "integer"},
-                        "endMs": {"description": "When it ends, after startMs.", "type": "integer"}
+                        "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": EARLIEST_MS, "maximum": LATEST_MS},
+                        "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": EARLIEST_MS, "maximum": LATEST_MS}
                     }
                 }),
             );
@@ -1219,6 +1447,29 @@ pub fn params_schema(kind: SupplyKind) -> Value {
         "required": ["holder", "hold", "item", asked],
         "properties": properties,
     })
+}
+
+/// checkHold's paramsSchema: [`params_schema`]'s, and `also` ([`ALSO`]),
+/// what the claim's other items still to hold ask of the instance.
+pub fn check_params_schema(kind: SupplyKind) -> Value {
+    let mut schema = params_schema(kind);
+    let asked = match kind {
+        SupplyKind::Counted => "quantity",
+        SupplyKind::Timed => "interval",
+    };
+    let one = schema["properties"][asked].clone();
+    schema["properties"][ALSO] = json!({
+        "description": "What the claim's other items still to hold ask of this instance, which the answer counts as taken.",
+        "type": "array",
+        "maxItems": MAX_ALSO,
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [asked],
+            "properties": { asked: one }
+        }
+    });
+    schema
 }
 
 /// The resultSchema of the contract's writing operations ([`outcome`]).
@@ -1267,7 +1518,14 @@ pub fn operation_declarations(kind: SupplyKind) -> Vec<Value> {
             let mut out = Map::new();
             out.insert("name".into(), Value::from(operation.name()));
             out.insert("description".into(), Value::from(description));
-            out.insert("paramsSchema".into(), params_schema(kind));
+            out.insert(
+                "paramsSchema".into(),
+                if *operation == SupplyOperation::Check {
+                    check_params_schema(kind)
+                } else {
+                    params_schema(kind)
+                },
+            );
             out.insert("resultSchema".into(), result);
             if operation.writes() {
                 out.insert("writes".into(), Value::Bool(true));
@@ -1282,7 +1540,7 @@ pub fn veto_declarations() -> Vec<Value> {
     vec![
         json!({"code": NOT_REQUESTED, "description": "The claim the call names does not ask it: it has no such item for this supply, the item asks otherwise, or it is not in the state the call needs; or this supply's record of the item does not move that way."}),
         json!({"code": UNAVAILABLE, "description": "What the item asks does not fit what this supply has free (details: supply, hold, item, asked, and available or conflict)."}),
-        json!({"code": HELD, "description": "A supply is not deleted while it holds anything for a claim."}),
+        json!({"code": HELD, "description": "A supply is not deleted while it holds anything for a claim: an item held, or committed time that has not ended."}),
     ]
 }
 
@@ -1408,6 +1666,72 @@ mod tests {
             assert_eq!(schema["additionalProperties"], json!(false));
             assert_eq!(schema["required"].as_array().unwrap().len(), 4);
         }
+    }
+
+    #[test]
+    fn an_interval_lies_from_1900_to_9000_and_also_lists_the_claims_other_asks() {
+        let timed = |start: i64, end: i64| {
+            SupplyCall::parse(
+                "Calendar",
+                SupplyOperation::Check,
+                SupplyKind::Timed,
+                &json!({"holder": {"schema": "B", "id": "b"}, "hold": "slot", "item": 0,
+                        "interval": {"startMs": start, "endMs": end}}),
+            )
+        };
+        assert!(timed(EARLIEST_MS, LATEST_MS).is_ok());
+        let early = timed(EARLIEST_MS - 1, 0).unwrap_err();
+        assert!(early.to_string().contains("/interval/startMs"), "{early}");
+        let late = timed(0, LATEST_MS + 1).unwrap_err();
+        assert!(late.to_string().contains("/interval/endMs"), "{late}");
+        let huge = timed(-9_000_000_000_000_000, 9_000_000_000_000_000).unwrap_err();
+        assert!(huge.to_string().contains("/interval/startMs"), "{huge}");
+        let schema = check_params_schema(SupplyKind::Timed);
+        assert_eq!(
+            schema["properties"]["interval"]["properties"]["startMs"]["minimum"],
+            json!(EARLIEST_MS)
+        );
+        assert_eq!(
+            schema["properties"]["also"]["items"]["properties"]["interval"],
+            schema["properties"]["interval"]
+        );
+        assert!(params_schema(SupplyKind::Timed)["properties"]
+            .get("also")
+            .is_none());
+
+        let slot = Interval {
+            start_ms: 10,
+            end_ms: 20,
+        };
+        let params = call(Ask::Interval(slot)).to_check_params(&[Ask::Interval(slot)]);
+        assert_eq!(
+            params["also"],
+            json!([{"interval": {"startMs": 10, "endMs": 20}}])
+        );
+        assert_eq!(
+            also("Calendar", SupplyKind::Timed, &params).unwrap(),
+            [Ask::Interval(slot)]
+        );
+        assert!(call(Ask::Quantity(1))
+            .to_check_params(&[])
+            .get("also")
+            .is_none());
+        assert_eq!(
+            also(
+                "Stock",
+                SupplyKind::Counted,
+                &json!({"also": [{"quantity": 3}, {"quantity": 2}]})
+            )
+            .unwrap(),
+            [Ask::Quantity(3), Ask::Quantity(2)]
+        );
+        let refused = also(
+            "Stock",
+            SupplyKind::Counted,
+            &json!({"also": [{"quantity": 0}]}),
+        )
+        .unwrap_err();
+        assert!(refused.to_string().contains("/also/0"), "{refused}");
     }
 
     #[test]

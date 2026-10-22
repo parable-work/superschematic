@@ -463,9 +463,12 @@ fn a_checkout_takes_every_line_and_its_slot_as_it_enters_held_and_commits_as_it_
             json!([line("anvil", 2), line("rope", 1)]),
             true,
         );
-        // In cart the items are asked, not held.
+        // In cart the items are asked, not held, and nothing is priced.
         assert_eq!(created.behaviors["Holds"]["state"], json!("pending"));
-        assert_eq!(created.behaviors["Holds"]["total"], Value::Null);
+        assert_eq!(
+            created.behaviors["Holds"]["total"],
+            json!({"amount": 0, "currency": null})
+        );
         assert_eq!(stock(&engine, "anvil")["held"], json!(0));
         holds(&engine);
 
@@ -540,7 +543,9 @@ fn a_claim_holds_all_of_its_items_or_none_and_the_veto_lists_each_that_does_not_
             (behavior.as_str(), action.as_str(), code.as_deref()),
             ("Holds", "transition", Some("unavailable"))
         );
-        assert_eq!(reason, "3 items do not fit their supply");
+        // The two rope lines ask 10 of 5 together: each is listed, with
+        // what is left for it beside the other.
+        assert_eq!(reason, "4 items do not fit their supply");
         let listed: Vec<Value> = details.expect("details")["items"]
             .as_array()
             .expect("items")
@@ -557,8 +562,9 @@ fn a_claim_holds_all_of_its_items_or_none_and_the_veto_lists_each_that_does_not_
         assert_eq!(
             listed,
             [
+                json!(["rope", "lines", 0, 0]),
                 json!(["anvil", "lines", 1, 1]),
-                json!(["rope", "lines", 2, 5]),
+                json!(["rope", "lines", 2, 4]),
                 json!(["front", "pickup", 0, {"startMs": PICKUP_MS, "endMs": PICKUP_MS + 15 * MINUTE}])
             ]
         );
@@ -570,7 +576,8 @@ fn a_claim_holds_all_of_its_items_or_none_and_the_veto_lists_each_that_does_not_
         assert_eq!(stock(&engine, "rope"), before);
         holds(&engine);
 
-        // listHolds answers each pending item with its supply's check.
+        // listHolds answers each pending item with its supply's check, as
+        // the guard asked it.
         let listed =
             invoke(&engine, &alice(), "Checkout", "c2", "listHolds", json!({})).expect("listHolds");
         let fits: Vec<Value> = listed["items"]
@@ -581,19 +588,24 @@ fn a_claim_holds_all_of_its_items_or_none_and_the_veto_lists_each_that_does_not_
             .collect();
         assert_eq!(
             fits,
-            [json!(true), json!(false), json!(false), json!(false)]
+            [json!(false), json!(false), json!(false), json!(false)]
         );
         assert_eq!(listed["state"], "pending");
 
-        // Once c1 lets go, c2 takes everything that fits; nothing is
-        // held when one line still does not.
+        // Once c1 lets go, the anvil and the slot fit; nothing is held
+        // while the two rope lines still ask more than there is.
         move_to(&engine, "c1", "cancelled").expect("cancel");
         assert_eq!(states(&engine, "c1"), ["released", "released"]);
         let (_, _, _, code, details) = veto(move_to(&engine, "c2", "held"));
         assert_eq!(code.as_deref(), Some("unavailable"));
         assert_eq!(
-            details.expect("details")["items"].as_array().map(Vec::len),
-            Some(1)
+            details.expect("details")["items"]
+                .as_array()
+                .expect("items")
+                .iter()
+                .map(|entry| (entry["item"].clone(), entry["available"].clone()))
+                .collect::<Vec<_>>(),
+            [(json!(0), json!(0)), (json!(2), json!(4))]
         );
         update(
             &engine,
@@ -823,8 +835,8 @@ fn a_claim_commits_only_what_it_holds_and_what_it_holds_does_not_change() {
             ("Stock", Some("held"))
         );
 
-        // A placed checkout with a slot cannot be deleted: time is never
-        // returned.
+        // A placed checkout with a slot to come cannot be deleted: time
+        // is never returned, and it is the customer's booking.
         move_to(&engine, "c1", "placed").expect("place");
         let (behavior, _, reason, code, details) = veto(engine.instances().delete(
             &alice(),
@@ -838,7 +850,7 @@ fn a_claim_commits_only_what_it_holds_and_what_it_holds_does_not_change() {
         );
         assert_eq!(
             reason,
-            "the claim holds 1 committed item, which is not returned"
+            "the claim holds 1 committed item of time that has not ended"
         );
         assert_eq!(
             details,
@@ -947,7 +959,7 @@ fn retake_holds_takes_a_hold_a_new_version_adds() {
 }
 
 #[test]
-fn a_delete_lets_go_of_what_the_claim_holds_and_returns_what_it_committed() {
+fn a_delete_lets_go_of_what_the_claim_holds_and_keeps_what_it_sold() {
     for target in targets("holds_delete") {
         let engine = open(&target);
         cart(&engine, "c1", json!([line("anvil", 2)]), true);
@@ -961,9 +973,11 @@ fn a_delete_lets_go_of_what_the_claim_holds_and_returns_what_it_committed() {
             ["records"]
             .clone();
         assert_eq!(slots[0]["state"], "released");
+        assert_eq!(slots[0]["retired"], json!(true));
         holds(&engine);
 
-        // Committed units come back with a returnOn state.
+        // Committed units are sold: the delete leaves them so, and records
+        // no return.
         cart(&engine, "c2", json!([line("anvil", 2)]), false);
         move_to(&engine, "c2", "held").expect("hold");
         move_to(&engine, "c2", "placed").expect("place");
@@ -972,8 +986,62 @@ fn a_delete_lets_go_of_what_the_claim_holds_and_returns_what_it_committed() {
             .instances()
             .delete(&alice(), "Checkout", "c2", WriteOptions::default())
             .expect("delete"));
-        assert_eq!(stock(&engine, "anvil")["onHand"], json!(3));
+        assert_eq!(
+            stock(&engine, "anvil"),
+            json!({"onHand": 1, "held": 0, "available": 1, "low": false})
+        );
+        // Nor does a caller give a deleted claim's units back.
+        let (_, action, _, code, _) = veto(invoke(
+            &engine,
+            &stocker(),
+            "Inventory",
+            "anvil",
+            "returnFor",
+            json!({"holder": {"schema": "Checkout", "id": "c2"}, "hold": "lines", "item": 0, "quantity": 2}),
+        ));
+        assert_eq!(
+            (action.as_str(), code.as_deref()),
+            ("returnFor", Some("not_requested"))
+        );
+        let kinds: Vec<Value> = invoke(
+            &engine,
+            &alice(),
+            "Inventory",
+            "anvil",
+            "listStockMovements",
+            json!({}),
+        )
+        .expect("movements")["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .map(|movement| movement["kind"].clone())
+            .collect();
+        assert_eq!(kinds, [json!("commit"), json!("receive")]);
         holds(&engine);
+
+        // A claim created again with a deleted one's id holds afresh, of
+        // counted supply and of time.
+        cart(&engine, "c2", json!([line("anvil", 1)]), false);
+        cart(&engine, "c1", json!([line("rope", 1)]), true);
+        let checked = invoke(
+            &engine,
+            &alice(),
+            "Inventory",
+            "anvil",
+            "checkHold",
+            json!({"holder": {"schema": "Checkout", "id": "c2"}, "hold": "lines", "item": 0, "quantity": 1}),
+        )
+        .expect("checkHold");
+        assert_eq!(checked, json!({"fits": true}));
+        move_to(&engine, "c2", "held").expect("c2 holds again");
+        move_to(&engine, "c1", "held").expect("c1 holds again");
+        assert_eq!(states(&engine, "c1"), ["held", "held"]);
+        move_to(&engine, "c2", "placed").expect("c2 places again");
+        assert_eq!(stock(&engine, "anvil")["onHand"], json!(0));
+        holds(&engine);
+        move_to(&engine, "c1", "cancelled").expect("c1 lets go");
+
         // The supply holds nothing now, and goes.
         assert!(engine
             .instances()
@@ -1001,6 +1069,17 @@ fn a_config_is_held_to_the_types_workflow_links_and_fields() {
         let mut back = holds_config(json!({"lines": lines_hold()}));
         back["releaseOn"] = json!(["cart"]);
         assert!(refused(back).contains("a supply holds each item of a claim once"));
+        // A takeOn state's move to itself would start its expiry again.
+        let mut again = checkout(holds_config(json!({"lines": lines_hold()})));
+        again["types"]["Checkout"]["behaviors"][0]["config"]["transitions"]
+            .as_array_mut()
+            .expect("transitions")
+            .push(json!({"from": "held", "to": "held"}));
+        let message = publish(&engine, &again).expect_err("refused").to_string();
+        assert!(
+            message.contains("the Workflow moves from held to itself, and held takes holds"),
+            "{message}"
+        );
         assert!(refused(holds_config(
             json!({"lines": {"link": "nowhere", "quantity": 1}})
         ))

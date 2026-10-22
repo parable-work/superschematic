@@ -1,6 +1,6 @@
 {
   "name": "Holds",
-  "description": "Holds supply for a claim, such as a checkout, a booking or a rental, while its Workflow waits, and lets it go or keeps it as the claim moves. The config names the holds: a link to one supply, or an own list field whose elements each name one, with the units or the time each item asks. When the claim is created into, or moves into, a takeOn state, Holds asks each supply's checkHold and refuses the move with unavailable, listing every item that does not fit; otherwise it holds every item in the same transaction, all or none, through the supply contract's holdFor. Entering a commitOn state commits what is held, a releaseOn state releases it, and a returnOn state returns committed units, whichever operation moved the status: a transition, a Timers deadline, a Lease expiry or a Reactions rule. A hold expires by a Timers deadline that moves the claim into a releaseOn state; Holds has no expiry and no release of its own. While the claim holds, the fields a hold reads do not change. The claim keeps the unit price each supply held an item at, and their total. Deleting the claim releases what it holds. Requires Workflow.",
+  "description": "Holds supply for a claim, such as a checkout, a booking or a rental, while its Workflow waits, and lets it go or keeps it as the claim moves. The config names the holds: a link to one supply, or an own list field whose elements each name one, with the units or the time each item asks. When the claim is created into, or moves into, a takeOn state, Holds asks each supply's checkHold, counting the claim's other items of the same supply, and refuses the move with unavailable, listing every item that does not fit; otherwise it holds every item in the same transaction, all or none, through the supply contract's holdFor. Entering a commitOn state commits what is held, a releaseOn state releases it, and a returnOn state returns committed units, whichever operation moved the status: a transition, a Timers deadline, a Lease expiry or a Reactions rule. A hold expires by a Timers deadline that moves the claim into a releaseOn state; Holds has no expiry and no release of its own. While the claim holds, the fields a hold reads do not change. The claim keeps the unit price each supply held an item at, and their total. Deleting the claim releases what it holds; what it committed stays sold or booked, and a claim with committed time to come is not deleted. Requires Workflow.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -107,7 +107,7 @@
     },
     {
       "name": "total",
-      "description": "The sum of the items' unit prices times their quantities, as { amount, currency }, when every item has a price in one currency; null otherwise."
+      "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly."
     }
   ],
   "operations": [
@@ -142,13 +142,13 @@
           },
           "state": {"type": "string", "enum": ["none", "pending", "held", "committed", "released", "returned"]},
           "total": {
-            "description": "The sum of the items' prices, when every item has one in one currency; null otherwise.",
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
             "oneOf": [
               {
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["amount", "currency"],
-                "properties": {"amount": {"type": "integer"}, "currency": {"type": "string"}}
+                "properties": {"amount": {"type": "integer"}, "currency": {"type": ["string", "null"]}}
               },
               {"type": "null"}
             ]
@@ -159,7 +159,7 @@
     },
     {
       "name": "listHolds",
-      "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending.",
+      "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply.",
       "paramsSchema": {"type": "object", "additionalProperties": false, "properties": {}},
       "resultSchema": {
         "type": "object",
@@ -200,13 +200,13 @@
           },
           "state": {"type": "string", "enum": ["none", "pending", "held", "committed", "released", "returned"]},
           "total": {
-            "description": "The sum of the items' prices, when every item has one in one currency; null otherwise.",
+            "description": "The sum of the priced items' prices: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
             "oneOf": [
               {
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["amount", "currency"],
-                "properties": {"amount": {"type": "integer"}, "currency": {"type": "string"}}
+                "properties": {"amount": {"type": "integer"}, "currency": {"type": ["string", "null"]}}
               },
               {"type": "null"}
             ]
@@ -225,7 +225,7 @@
       "code": "held_fields",
       "description": "An update, while the claim holds, of a field a hold reads: the list, an element's target, quantity or interval fields, or the link (details: the fields)."
     },
-    {"code": "committed", "description": "The delete of a claim that holds committed items, on a type with no returnOn state."},
+    {"code": "committed", "description": "The delete of a claim that holds committed time that has not ended (details: the items)."},
     {"code": "too_many_items", "description": "Holds that ask more items together than the config's maxItems."},
     {"code": "not_taking", "description": "retakeHolds while the claim is in no takeOn state, or holds every item."},
     {"code": "no_supply", "description": "An item whose supply does not exist, or whose schema composes no supply."}

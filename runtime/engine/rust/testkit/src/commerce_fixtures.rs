@@ -159,11 +159,12 @@ fn return_for(supply: &TestSupply, cx: &OperationCx<'_, Value>, params: &Value) 
     contract(supply, cx, params, SupplyOperation::Return)
 }
 
-// check_hold answers whether holdFor would fit now; it takes no holder
-// check, since it reads only.
+// check_hold answers whether holdFor would fit now, beside what `also`
+// lists; it takes no holder check, since it reads only.
 fn check_hold(supply: &TestSupply, cx: &OperationCx<'_, Value>, params: &Value) -> Result<Value> {
     let call = SupplyCall::parse(supply.name(), SupplyOperation::Check, supply.kind, params)?;
-    Ok(match fit(supply, cx, &call)? {
+    let also = supply::also(supply.name(), supply.kind, params)?;
+    Ok(match fit(supply, cx, &call, &also)? {
         Some(refusal) => CheckAnswer::Refused(refusal),
         None => CheckAnswer::Fits,
     }
@@ -183,7 +184,7 @@ fn contract(
         Begun::Done(record) => Ok(supply::done(cx, operation, record.as_ref())),
         Begun::Apply { .. } => {
             let price = if operation == SupplyOperation::Hold {
-                if let Some(refusal) = fit(supply, cx, &call)? {
+                if let Some(refusal) = fit(supply, cx, &call, &[])? {
                     return Err(refusal.veto(cx, operation));
                 }
                 price_of(cx)?
@@ -196,29 +197,31 @@ fn contract(
 }
 
 // fit is what does not fit of a call's ask, beside what the instance
-// takes for every other item: units beyond those free, or an interval when
-// `units` holds already overlap it.
+// takes for every other item, a deleted claim's committed records
+// included, and what `also` asks: units beyond those free, or an interval
+// when `units` holds already overlap it.
 fn fit(
     supply: &TestSupply,
     view: &InstanceView<'_, Value>,
     call: &SupplyCall,
+    also: &[Ask],
 ) -> Result<Option<Refusal>> {
     let units = view.data()?.get(UNITS).and_then(Value::as_i64).unwrap_or(0);
-    let others: Vec<_> = supply::records(view, SUPPLY_TABLE)?
+    let others: Vec<Ask> = supply::records(view, SUPPLY_TABLE)?
         .into_iter()
         .filter(|record| {
             record.state.takes()
-                && !(record.holder == call.holder
+                && !(!record.retired
+                    && record.holder == call.holder
                     && record.hold == call.hold
                     && record.item == call.item)
         })
+        .map(|record| record.ask)
+        .chain(also.iter().copied())
         .collect();
     match (supply.kind, call.ask) {
         (SupplyKind::Counted, Ask::Quantity(quantity)) => {
-            let taken: i64 = others
-                .iter()
-                .filter_map(|record| record.ask.quantity())
-                .sum();
+            let taken: i64 = others.iter().filter_map(Ask::quantity).sum();
             let available = (units - taken).max(0);
             Ok((quantity > available).then(|| {
                 Unavailable::of(view, call, Free::Available(available)).refusal(format!(
@@ -231,7 +234,7 @@ fn fit(
         (SupplyKind::Timed, Ask::Interval(asked)) => {
             let overlapping: Vec<Interval> = others
                 .iter()
-                .filter_map(|record| record.ask.interval())
+                .filter_map(Ask::interval)
                 .filter(|held| held.overlaps(&asked))
                 .collect();
             Ok(match overlapping.first() {

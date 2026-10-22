@@ -14,7 +14,9 @@
 //!
 //! `holdFor` checks, in order, and vetoes with the first that fails:
 //! - the interval lies inside the opening hours (`outside_hours`) and
-//!   overlaps no closure (`closed`);
+//!   overlaps no closure (`closed`); these read only the interval's first
+//!   `maxMs` and a minute, so an interval of centuries costs what the
+//!   longest hold does and is `too_long` once that much is open;
 //! - it starts on the grid (`off_grid`);
 //! - its length is within the bounds (`too_short`, `too_long`);
 //! - it starts no sooner than the lead time (`too_soon`) and no further
@@ -25,11 +27,16 @@
 //!   count a long hold that two short ones overlap at different times
 //!   twice.
 //!
-//! `checkHold` answers the same without the holder check or a write, and
-//! `findAvailability`, at schema scope, lists the slots of a duration that
-//! would fit across the schema's instances over a window of at most 31
-//! days, soonest first. `listBookings` pages an instance's holds over such
-//! a window.
+//! `checkHold` answers the same without the holder check or a write, as
+//! the supply's record of the item allows (an item held already fits, one
+//! committed or released is `not_requested`), counting the intervals its
+//! `also` lists as held. `findAvailability`, at schema scope, lists the
+//! slots of a duration that would fit across the schema's instances over a
+//! window of at most 31 days, soonest first: one sweep of each instance's
+//! holds, which jumps past a full instant, a closure or a closed stretch,
+//! and stops at [`MAX_FIND_WORK`] (`truncated`). `listBookings` pages an
+//! instance's holds over such a window, a deleted claim's committed time
+//! among them.
 //!
 //! Storage, the same SQL on both databases: two columns of the instance,
 //! its own `hours` (JSON text) and `time_zone`, null for the config's, and
@@ -38,8 +45,13 @@
 //! serves the overlap read; and `closures`.
 //!
 //! Every field is volatile: `hours` and `timeZone` follow the config while
-//! the instance has none of its own, and `closures` leaves out the ones
-//! that have ended by the clock.
+//! the instance has none of its own, and `closures` reads the first 100
+//! that have not ended by the clock.
+//!
+//! An instance is not deleted while it holds time (`held`): an item held,
+//! or committed time that has not ended. `setOpeningHours` changes its
+//! own time zone, as a new version does the config's, only while it holds
+//! no time that has not ended (`has_bookings`).
 //!
 //! configChange: hours, the grid, buffers, lead time and horizon may change
 //! and apply to holds made after; `capacity` falls no lower than the most
@@ -67,12 +79,12 @@ use superschematic_engine::{
 };
 
 use crate::supply::{
-    self, Begun, CheckAnswer, InstanceRef, Interval, ItemState, Refusal, SupplyCall, SupplyKind,
-    SupplyOperation,
+    self, Ask, Begun, CheckAnswer, InstanceRef, Interval, ItemState, Refusal, SupplyCall,
+    SupplyKind, SupplyOperation,
 };
 use time::{
-    grid, inside, on_grid, opening, peak, wall_text, zone, Offsets, WeekHours, DAY_MS, EARLIEST_MS,
-    LATEST_MS, MINUTE_MS,
+    full_until, grid, inside, on_grid, opening, peak, peak_at, wall_text, zone, Offsets, WeekHours,
+    DAY_MS, EARLIEST_MS, LATEST_MS, MINUTE_MS,
 };
 
 /// The behavior's name.
@@ -93,6 +105,10 @@ pub const MAX_INSTANCES: usize = 100;
 pub const DEFAULT_SLOTS: i64 = 100;
 /// The longest hold when the config gives no maxMs.
 pub const DEFAULT_MAX_MS: i64 = DAY_MS;
+/// The most work one findAvailability does: each start it judges counts
+/// one, and one more for each hold it weighs that start against. Past
+/// it, the answer is `truncated`.
+pub const MAX_FIND_WORK: usize = 2_000_000;
 
 /// The vetoes Calendar adds to the contract's.
 pub const OUTSIDE_HOURS: &str = "outside_hours";
@@ -148,6 +164,19 @@ impl CalendarConfig {
         Interval {
             start_ms: interval.start_ms - self.buffer_before,
             end_ms: interval.end_ms + self.buffer_after,
+        }
+    }
+
+    /// What the rules read of an interval: all of it while it is no longer
+    /// than maxMs, and its first maxMs and a minute past that, which is
+    /// enough to find it too long, so an interval of centuries reads no
+    /// more hours, closures or holds than the longest hold does.
+    fn judged(&self, asked: &Interval) -> Interval {
+        Interval {
+            start_ms: asked.start_ms,
+            end_ms: asked
+                .end_ms
+                .min(asked.start_ms.saturating_add(self.max_ms + MINUTE_MS)),
         }
     }
 
@@ -211,22 +240,34 @@ struct Taken {
     item: i64,
     interval: Interval,
     state: ItemState,
+    /// A deleted holder's committed time, which stays booked.
+    retired: bool,
 }
 
 impl Taken {
+    /// `{ holder, hold, item, startMs, endMs, state, retired? }`,
+    /// `retired` only for a deleted claim's committed time.
     fn to_json(&self) -> Value {
-        json!({
+        let mut out = json!({
             "holder": self.holder.to_json(),
             "hold": self.hold,
             "item": self.item,
             "startMs": self.interval.start_ms,
             "endMs": self.interval.end_ms,
             "state": self.state.as_str(),
-        })
+        });
+        if self.retired {
+            out["retired"] = Value::Bool(true);
+        }
+        out
     }
 
+    /// Whether the record is the live one of the item a call names.
     fn is(&self, call: &SupplyCall) -> bool {
-        self.holder == call.holder && self.hold == call.hold && self.item == call.item
+        !self.retired
+            && self.holder == call.holder
+            && self.hold == call.hold
+            && self.item == call.item
     }
 }
 
@@ -406,10 +447,12 @@ fn taken_of(row: &Row) -> Result<Taken> {
         },
         state: ItemState::parse(state)
             .ok_or_else(|| Error::behavior(NAME, format!("a record holds the state {state}")))?,
+        retired: row.i64("retired")? != 0,
     })
 }
 
-const TAKEN_COLUMNS: &str = "id, holder_schema, holder_id, hold, item, start_ms, end_ms, state";
+const TAKEN_COLUMNS: &str =
+    "id, holder_schema, holder_id, hold, item, start_ms, end_ms, state, retired";
 
 // taken_over reads the records of the instances `ids` that take time from
 // `from` to `to`, by instance and start, through the index on (instance,
@@ -499,12 +542,13 @@ fn closures_over(
 }
 
 // resource reads an instance as the rules for an interval read it: its
-// settings, its capacity, the closures over the interval and the records
-// whose time with buffers can meet it.
+// settings, its capacity, the closures over what the rules judge of the
+// interval and the records whose time with buffers can meet it.
 fn resource(view: &InstanceView<'_, CalendarConfig>, asked: &Interval) -> Result<Resource> {
     let config = view.config();
     let sql = view.sql();
     let ids = [view.id()];
+    let asked = &config.judged(asked);
     let (from, to) = config.reach(asked);
     Ok(Resource {
         settings: settings(view, config)?,
@@ -528,33 +572,39 @@ fn resource(view: &InstanceView<'_, CalendarConfig>, asked: &Interval) -> Result
     })
 }
 
-// capacity_problem is what capacity refuses of an interval: the most of
-// the other records over it, with buffers, against capacity.
+// capacity_left is what capacity leaves of an interval: capacity less the
+// most of the other records over it, and of the intervals `also` the
+// claim's other items ask, each with buffers; and the one that conflicts
+// at the peak.
 fn capacity_left(
     config: &CalendarConfig,
     resource: &Resource,
     asked: &Interval,
     except: Option<&SupplyCall>,
+    also: &[Interval],
 ) -> (i64, Option<Interval>) {
-    let others: Vec<&Taken> = resource
+    let others: Vec<Interval> = resource
         .taken
         .iter()
         .filter(|taken| except.is_none_or(|call| !taken.is(call)))
+        .map(|taken| taken.interval)
+        .chain(also.iter().copied())
         .collect();
     let occupied: Vec<Interval> = others
         .iter()
-        .map(|taken| config.occupied(&taken.interval))
+        .map(|interval| config.occupied(interval))
         .collect();
     let (most, first) = peak(&occupied, &config.occupied(asked));
-    (
-        resource.capacity - most,
-        first.map(|index| others[index].interval),
-    )
+    (resource.capacity - most, first.map(|index| others[index]))
 }
 
 // judge holds an interval to holdFor's rules, in their order, at `now`,
-// leaving out the call's own record: the first refusal, or how many more
-// holds could take it.
+// leaving out the call's own record and counting the intervals `also` the
+// claim's other items ask: the first refusal, or how many more holds could
+// take it. The hours and closures are read over what the rules judge of
+// the interval (`CalendarConfig::judged`), so the work is the longest
+// hold's at most: an interval longer than that is too long once its first
+// maxMs is open.
 fn judge(
     config: &CalendarConfig,
     label: &str,
@@ -562,17 +612,26 @@ fn judge(
     asked: &Interval,
     now: i64,
     except: Option<&SupplyCall>,
+    also: &[Interval],
 ) -> std::result::Result<i64, Problem> {
     let settings = &resource.settings;
-    let offsets = Offsets::over(&settings.tz, asked.start_ms, asked.end_ms);
+    if asked.start_ms < EARLIEST_MS || asked.end_ms > LATEST_MS {
+        return Err(problem(
+            OUTSIDE_HOURS,
+            format!("{label} opens no time before 1900 or from 9000 on"),
+            json!({ "timeZone": settings.time_zone }),
+        ));
+    }
+    let judged = config.judged(asked);
+    let offsets = Offsets::over(&settings.tz, judged.start_ms, judged.end_ms);
     let span = format!(
         "{} to {} {}",
         wall_label(offsets.wall(asked.start_ms)),
         wall_label(offsets.wall(asked.end_ms)),
         settings.time_zone
     );
-    let open = opening(&settings.hours, &offsets, asked.start_ms, asked.end_ms);
-    if asked.start_ms < EARLIEST_MS || asked.end_ms > LATEST_MS || !inside(&open, asked) {
+    let open = opening(&settings.hours, &offsets, judged.start_ms, judged.end_ms);
+    if !inside(&open, &judged) {
         return Err(problem(
             OUTSIDE_HOURS,
             format!("{label} is not open for all of {span}"),
@@ -582,7 +641,7 @@ fn judge(
     if let Some(closure) = resource
         .closures
         .iter()
-        .find(|closure| closure.interval.overlaps(asked))
+        .find(|closure| closure.interval.overlaps(&judged))
     {
         return Err(problem(
             CLOSED,
@@ -652,7 +711,7 @@ fn judge(
             ));
         }
     }
-    let (left, conflict) = capacity_left(config, resource, asked, except);
+    let (left, conflict) = capacity_left(config, resource, asked, except, also);
     if left <= 0 {
         let reason = match resource.capacity {
             capacity if capacity <= 0 => format!("{label} takes no holds"),
@@ -692,8 +751,12 @@ fn refusal(
 }
 
 // fit is what does not fit of a contract call's interval, beside every
-// other record.
-fn fit(view: &InstanceView<'_, CalendarConfig>, call: &SupplyCall) -> Result<Option<Refusal>> {
+// other record and the intervals `also` the claim's other items ask.
+fn fit(
+    view: &InstanceView<'_, CalendarConfig>,
+    call: &SupplyCall,
+    also: &[Interval],
+) -> Result<Option<Refusal>> {
     let Some(asked) = call.ask.interval() else {
         return Err(Error::behavior(NAME, "a call asks a quantity of time"));
     };
@@ -706,6 +769,7 @@ fn fit(view: &InstanceView<'_, CalendarConfig>, call: &SupplyCall) -> Result<Opt
         &asked,
         view.now(),
         Some(call),
+        also,
     )
     .err()
     .map(|problem| refusal(view, call, problem)))
@@ -721,7 +785,7 @@ fn contract(
         Begun::Done(record) => Ok(supply::done(cx, operation, record.as_ref())),
         Begun::Apply { .. } => {
             if operation == SupplyOperation::Hold {
-                if let Some(refusal) = fit(cx, &call)? {
+                if let Some(refusal) = fit(cx, &call, &[])? {
                     return Err(refusal.veto(cx, operation));
                 }
             }
@@ -746,15 +810,26 @@ fn release_for(
     contract(cx, params, SupplyOperation::Release)
 }
 
-// check_hold answers whether holdFor would fit now; it reads only, so it
+// check_hold answers whether holdFor would hold the item now, as Stock's
+// does: an item the supply holds already fits, one its record has moved
+// past does not (not_requested), and any other is held to the rules beside
+// the intervals `also` the claim's other items ask. It reads only, so it
 // takes no holder check.
 fn check_hold(_: &Calendar, cx: &OperationCx<'_, CalendarConfig>, params: &Value) -> Result<Value> {
     let call = SupplyCall::parse(NAME, SupplyOperation::Check, SupplyKind::Timed, params)?;
-    Ok(match fit(cx, &call)? {
-        Some(refusal) => CheckAnswer::Refused(refusal),
-        None => CheckAnswer::Fits,
-    }
-    .to_json())
+    let also: Vec<Interval> = supply::also(NAME, SupplyKind::Timed, params)?
+        .iter()
+        .filter_map(Ask::interval)
+        .collect();
+    let recorded = supply::recorded(cx, HOLDS_TABLE, &call)?;
+    let answer = match supply::check_record(&call, recorded.as_ref()) {
+        Some(answer) => answer,
+        None => match fit(cx, &call, &also)? {
+            Some(refusal) => CheckAnswer::Refused(refusal),
+            None => CheckAnswer::Fits,
+        },
+    };
+    Ok(answer.to_json())
 }
 
 // set_opening_hours sets the instance's own hours, its zone, or both; null
@@ -799,6 +874,38 @@ fn set_opening_hours(
             time_zone = Some(name.to_owned());
         }
     }
+    let was = settings_of(cx.config(), before.0.as_deref(), before.1.as_deref())?;
+    let will = settings_of(cx.config(), hours.as_deref(), time_zone.as_deref())?;
+    if was.time_zone != will.time_zone {
+        // As a new version's timeZone: held time keeps its instants, and
+        // its wall times would move under it.
+        let future = all_taken_from(
+            &cx.sql(),
+            cx.namespace(),
+            cx.schema(),
+            Some(cx.id()),
+            cx.now(),
+        )?;
+        if !future.is_empty() {
+            return Err(veto(
+                cx.schema(),
+                cx.id(),
+                OPERATION,
+                problem(
+                    HAS_BOOKINGS,
+                    format!(
+                        "{} {} changes its time zone from {} to {} only while it holds no time that has not ended, and it holds time for {}",
+                        cx.schema(),
+                        cx.id(),
+                        was.time_zone,
+                        will.time_zone,
+                        guidance::plural(future.len() as i64, "claim item")
+                    ),
+                    json!({ "holds": future.iter().take(MAX_CLOSURES_SHOWN as usize).map(|(_, taken)| taken.to_json()).collect::<Vec<_>>() }),
+                ),
+            ));
+        }
+    }
     if (hours.clone(), time_zone.clone()) == before {
         cx.unchanged();
     } else {
@@ -807,8 +914,7 @@ fn set_opening_hours(
             ("time_zone", SqlValue::from(time_zone.clone())),
         ])?;
     }
-    let settings = settings_of(cx.config(), hours.as_deref(), time_zone.as_deref())?;
-    Ok(json!({ "hours": settings.hours_json, "timeZone": settings.time_zone }))
+    Ok(json!({ "hours": will.hours_json, "timeZone": will.time_zone }))
 }
 
 fn interval_params(operation: &str, params: &Value) -> Result<Interval> {
@@ -1202,24 +1308,31 @@ fn find_availability(
     };
     let wanted = usize::try_from(limit).unwrap_or(0) + 1;
     let mut slots: Vec<(i64, String, i64)> = Vec::new();
-    for row in rows {
+    let mut work = 0usize;
+    'instances: for row in rows {
         let id = row.text("id")?;
         let data: Map<String, Value> = row
             .opt_text("data")?
             .and_then(|text| serde_json::from_str(text).ok())
             .unwrap_or_default();
-        let resource = Resource {
-            settings: settings_of(config, row.opt_text("hours")?, row.opt_text("time_zone")?)?,
-            capacity: config.capacity_of(&data),
-            closures: drain(&mut closures, id),
-            taken: drain(&mut taken, id),
-        };
-        if resource.capacity <= 0 {
+        let capacity = config.capacity_of(&data);
+        let closures = drain(&mut closures, id);
+        let taken = drain(&mut taken, id);
+        if capacity <= 0 {
             continue;
         }
-        let settings = &resource.settings;
+        let settings = settings_of(config, row.opt_text("hours")?, row.opt_text("time_zone")?)?;
         let offsets = Offsets::over(&settings.tz, window.start_ms, window.end_ms);
         let open = opening(&settings.hours, &offsets, window.start_ms, window.end_ms);
+        let closed = time::merge(closures.iter().map(|closure| closure.interval).collect());
+        // Every hold's time with its buffers, by start: a sweep of the
+        // starts takes each in as the window reaches it and lets it go as
+        // the window passes it.
+        let mut occupied: Vec<Interval> = taken
+            .iter()
+            .map(|taken| config.occupied(&taken.interval))
+            .collect();
+        occupied.sort_by_key(|interval| (interval.start_ms, interval.end_ms));
         let starts = grid(
             &settings.hours,
             &offsets,
@@ -1227,27 +1340,54 @@ fn find_availability(
             window.end_ms - duration + 1,
             config.grid_ms(),
         );
-        let mut found = 0;
+        let (mut next, mut active, mut skip_to, mut found) = (0, Vec::new(), i64::MIN, 0);
         for start in starts {
             if start > latest || found == wanted {
                 break;
             }
+            if start < skip_to {
+                continue;
+            }
+            if work >= MAX_FIND_WORK {
+                truncated = true;
+                break 'instances;
+            }
+            work += 1;
             let slot = Interval {
                 start_ms: start,
                 end_ms: start + duration,
             };
-            if !inside(&open, &slot)
-                || resource
-                    .closures
+            if !inside(&open, &slot) {
+                // No start before the next open stretch fits.
+                skip_to = open
                     .iter()
-                    .any(|closure| closure.interval.overlaps(&slot))
-            {
+                    .map(|stretch| stretch.start_ms)
+                    .find(|from| *from > start)
+                    .unwrap_or(i64::MAX);
                 continue;
             }
-            let (left, _) = capacity_left(config, &resource, &slot, None);
+            if let Some(closure) = closed.iter().find(|closure| closure.overlaps(&slot)) {
+                skip_to = closure.end_ms;
+                continue;
+            }
+            let reach = config.occupied(&slot);
+            while next < occupied.len() && occupied[next].start_ms < reach.end_ms {
+                active.push(occupied[next]);
+                next += 1;
+            }
+            active.retain(|interval: &Interval| interval.end_ms > reach.start_ms);
+            work += active.len();
+            let (most, at) = peak_at(&active, &reach);
+            let left = capacity - most;
             if left > 0 {
                 slots.push((start, id.to_owned(), left));
                 found += 1;
+            } else if let Some(at) = at {
+                // Every start whose time with buffers reaches back into
+                // the full stretch from that instant is full too.
+                let until = full_until(&active, at, capacity);
+                work += active.len();
+                skip_to = until.saturating_add(config.buffer_before);
             }
         }
     }
@@ -1625,18 +1765,14 @@ impl Behavior for Calendar {
                         view.namespace(),
                         view.schema(),
                         &[view.id()],
-                        i64::MIN,
+                        view.now(),
                         i64::MAX,
-                        None,
+                        Some(MAX_CLOSURES_SHOWN),
                     )?;
-                    let now = view.now();
                     Ok(Some(Value::Array(
                         closures
                             .iter()
-                            .map(|(_, closure)| closure)
-                            .filter(|closure| closure.interval.end_ms > now)
-                            .take(MAX_CLOSURES_SHOWN as usize)
-                            .map(Closure::to_json)
+                            .map(|(_, closure)| closure.to_json())
                             .collect(),
                     )))
                 }),
@@ -1709,6 +1845,7 @@ mod tests {
             item: 0,
             interval: Interval { start_ms, end_ms },
             state: ItemState::Held,
+            retired: false,
         };
         let all = [taken(0, 10), taken(5, 15), taken(20, 30), taken(25, 35)];
         assert_eq!(peak_from(&all, 0), 2);

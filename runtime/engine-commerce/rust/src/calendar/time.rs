@@ -33,11 +33,10 @@ pub const DAY_MS: i64 = 24 * HOUR_MS;
 /// The days of the week as the config names them, Monday first.
 pub const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-/// The earliest instant Calendar opens: 1900-01-01T00:00Z.
-pub const EARLIEST_MS: i64 = -2_208_988_800_000;
-/// The instant after the latest Calendar opens: 9000-01-01T00:00Z, well
-/// inside what the time zone database answers.
-pub const LATEST_MS: i64 = 221_845_392_000_000;
+/// The earliest instant Calendar opens, 1900-01-01T00:00Z, and the
+/// instant after the latest, 9000-01-01T00:00Z, well inside what the time
+/// zone database answers: the contract's bounds on an interval.
+pub use crate::supply::{EARLIEST_MS, LATEST_MS};
 
 /// How far past a window the zone's offsets are read, so that every wall
 /// date the window reaches, at any offset, is covered.
@@ -358,8 +357,8 @@ pub fn grid(hours: &WeekHours, offsets: &Offsets, start: i64, end: i64, slot_ms:
 }
 
 /// The most of `taken` that overlap at any instant of `window`, and, when
-/// any do, the index of the first by start among those at the peak.
-pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
+/// any do, the first instant they do.
+pub fn peak_at(taken: &[Interval], window: &Interval) -> (i64, Option<i64>) {
     let mut events: Vec<(i64, i64)> = Vec::new();
     for interval in taken.iter().filter(|interval| interval.overlaps(window)) {
         events.push((interval.start_ms.max(window.start_ms), 1));
@@ -375,6 +374,37 @@ pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
             at = Some(instant);
         }
     }
+    (most, at)
+}
+
+/// The first instant from `at` on at which fewer than `capacity` of
+/// `taken` overlap: `at` itself when fewer do there already.
+pub fn full_until(taken: &[Interval], at: i64, capacity: i64) -> i64 {
+    let mut events: Vec<(i64, i64)> = taken
+        .iter()
+        .flat_map(|interval| [(interval.start_ms, 1), (interval.end_ms, -1)])
+        .collect();
+    events.sort_unstable();
+    let (mut count, mut index) = (0, 0);
+    while index < events.len() && events[index].0 <= at {
+        count += events[index].1;
+        index += 1;
+    }
+    let mut until = at;
+    while count >= capacity && index < events.len() {
+        until = events[index].0;
+        while index < events.len() && events[index].0 == until {
+            count += events[index].1;
+            index += 1;
+        }
+    }
+    until
+}
+
+/// The most of `taken` that overlap at any instant of `window`, and, when
+/// any do, the index of the first by start among those at the peak.
+pub fn peak(taken: &[Interval], window: &Interval) -> (i64, Option<usize>) {
+    let (most, at) = peak_at(taken, window);
     let first = at.and_then(|instant| {
         taken
             .iter()
@@ -527,6 +557,11 @@ mod tests {
         assert!(inside(&[i(9, 12), i(13, 17)], &i(13, 17)));
         assert!(!inside(&[i(9, 12), i(13, 17)], &i(11, 14)));
         assert!(!inside(&[], &i(11, 14)));
+        // Full from 9 until 10 with two places; with one, until 17.
+        assert_eq!(full_until(&taken, hour(9), 2), hour(10));
+        assert_eq!(full_until(&taken, hour(9), 1), hour(17));
+        assert_eq!(full_until(&[i(9, 10), i(10, 11)], hour(9), 1), hour(11));
+        assert_eq!(full_until(&taken, hour(18), 1), hour(18));
     }
 
     #[test]

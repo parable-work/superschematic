@@ -1,6 +1,6 @@
 {
   "name": "Calendar",
-  "description": "Opens time on a resource a claim books: a stylist, a chair, a room, a collection counter, a pool of bikes. Weekly opening hours in an IANA time zone, which an instance may set for itself, less its closures, give the times a hold may take; capacity says how many holds may overlap. A claim takes time only through the supply contract's operations, which Holds invokes by name: holdFor holds an interval an item of the claim asks, commitFor books it for good and releaseFor frees it. Each checks the claim's own Holds.items, so no caller holds or frees time by calling one directly, and each is idempotent. holdFor refuses an interval outside the hours or in a closure, off the start grid, too short or too long, too soon or too far ahead by the engine's clock, or beyond capacity at any instant, buffers included. findAvailability answers free slots across the schema's instances by the same rules. Wall times become instants through a time zone database the engine carries, so every server built from one lock file computes the same slots; a wall time a daylight-saving change skips has no slot. An instance is not deleted while it holds time for a claim. Calendar and Stock declare the same contract operations, so a type composes one of them.",
+  "description": "Opens time on a resource a claim books: a stylist, a chair, a room, a collection counter, a pool of bikes. Weekly opening hours in an IANA time zone, which an instance may set for itself, less its closures, give the times a hold may take; capacity says how many holds may overlap. A claim takes time only through the supply contract's operations, which Holds invokes by name: holdFor holds an interval an item of the claim asks, commitFor books it for good and releaseFor frees it. Each checks the claim's own Holds.items, so no caller holds or frees time by calling one directly, and each is idempotent. holdFor refuses an interval outside the hours or in a closure, off the start grid, too short or too long, too soon or too far ahead by the engine's clock, or beyond capacity at any instant, buffers included. findAvailability answers free slots across the schema's instances by the same rules. Wall times become instants through a time zone database the engine carries, so every server built from one lock file computes the same slots; a wall time a daylight-saving change skips has no slot. An instance is not deleted while it holds time for a claim: time held, or committed and not yet ended. Calendar and Stock declare the same contract operations, so a type composes one of them.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -175,7 +175,7 @@
   "operations": [
     {
       "name": "setOpeningHours",
-      "description": "Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay. Needs the config's permission.",
+      "description": "Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -446,8 +446,8 @@
             "additionalProperties": false,
             "required": ["startMs", "endMs"],
             "properties": {
-              "startMs": {"description": "When it starts.", "type": "integer"},
-              "endMs": {"description": "When it ends, after startMs.", "type": "integer"}
+              "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000},
+              "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000}
             }
           }
         }
@@ -500,8 +500,8 @@
             "additionalProperties": false,
             "required": ["startMs", "endMs"],
             "properties": {
-              "startMs": {"description": "When it starts.", "type": "integer"},
-              "endMs": {"description": "When it ends, after startMs.", "type": "integer"}
+              "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000},
+              "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000}
             }
           }
         }
@@ -554,8 +554,8 @@
             "additionalProperties": false,
             "required": ["startMs", "endMs"],
             "properties": {
-              "startMs": {"description": "When it starts.", "type": "integer"},
-              "endMs": {"description": "When it ends, after startMs.", "type": "integer"}
+              "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000},
+              "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000}
             }
           }
         }
@@ -608,8 +608,30 @@
             "additionalProperties": false,
             "required": ["startMs", "endMs"],
             "properties": {
-              "startMs": {"description": "When it starts.", "type": "integer"},
-              "endMs": {"description": "When it ends, after startMs.", "type": "integer"}
+              "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000},
+              "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000}
+            }
+          },
+          "also": {
+            "description": "What the claim's other items still to hold ask of this instance, which the answer counts as taken.",
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["interval"],
+              "properties": {
+                "interval": {
+                  "description": "The time the item asks, from startMs to endMs, in epoch milliseconds.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["startMs", "endMs"],
+                  "properties": {
+                    "startMs": {"description": "When it starts, no earlier than 1900-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000},
+                    "endMs": {"description": "When it ends, after startMs and no later than 9000-01-01T00:00Z.", "type": "integer", "minimum": -2208988800000, "maximum": 221845392000000}
+                  }
+                }
+              }
             }
           }
         }
@@ -628,7 +650,7 @@
     },
     {
       "name": "listBookings",
-      "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed.",
+      "description": "Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -663,7 +685,8 @@
                 "item": {"description": "The item's index in its hold.", "type": "integer"},
                 "startMs": {"type": "integer"},
                 "endMs": {"type": "integer"},
-                "state": {"type": "string", "enum": ["held", "committed"]}
+                "state": {"type": "string", "enum": ["held", "committed"]},
+                "retired": {"description": "True for a deleted claim's committed time, which stays booked; absent otherwise.", "type": "boolean"}
               }
             }
           },
@@ -714,7 +737,7 @@
               }
             }
           },
-          "truncated": {"description": "Whether more slots fit than limit returned.", "type": "boolean"}
+          "truncated": {"description": "Whether more slots fit than limit returned, more instances matched than were read, or the search stopped at its bound of work.", "type": "boolean"}
         }
       }
     }
@@ -728,7 +751,7 @@
       "code": "unavailable",
       "description": "What the item asks does not fit what this supply has free (details: supply, hold, item, asked, and available or conflict)."
     },
-    {"code": "held", "description": "A supply is not deleted while it holds anything for a claim."},
+    {"code": "held", "description": "A supply is not deleted while it holds anything for a claim: an item held, or committed time that has not ended."},
     {"code": "outside_hours", "description": "holdFor of an interval not inside the instance's opening hours (details as unavailable's)."},
     {"code": "closed", "description": "holdFor of an interval that overlaps a closure (details as unavailable's, with the closure)."},
     {"code": "off_grid", "description": "holdFor of an interval that does not start on the config's slotMs grid."},
@@ -736,7 +759,7 @@
     {"code": "too_long", "description": "holdFor of an interval longer than the config's maxMs."},
     {"code": "too_soon", "description": "holdFor of an interval that starts sooner than the config's leadMs from now."},
     {"code": "too_far", "description": "holdFor of an interval that starts further ahead than the config's horizonMs."},
-    {"code": "has_bookings", "description": "addClosure over time a claim holds, without force (details: the holds)."},
+    {"code": "has_bookings", "description": "addClosure over time a claim holds, without force, or setOpeningHours of another time zone while the instance holds time that has not ended (details: the holds)."},
     {"code": "window_too_long", "description": "listBookings or findAvailability over a window longer than 31 days."},
     {"code": "no_closure", "description": "removeClosure of a closure the instance does not have."}
   ]

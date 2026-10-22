@@ -1,6 +1,6 @@
 {
   "name": "Stock",
-  "description": "Counts units of what the instance stands for: a product's inventory, a ticket type, a coupon's redemptions. Stock keeps the units on hand and the units claims hold, and every change of the count on hand is a movement with a reason, the claim it was for and who made it. A claim takes units only through the supply contract's operations, which Holds invokes by name: holdFor holds what an item of the claim asks, commitFor takes held units out of what is on hand (they are sold), releaseFor frees them, and returnFor puts committed units back. Each checks the claim's own Holds.items, so no caller holds or frees units by calling one directly, and each is idempotent. A hold that does not fit what is available is refused, unless the config allows backorder. A caller with the config's permission receives, adjusts and counts stock. With a price, holdFor returns the unit price and its currency, and the claim keeps the price each item was held at. An instance is not deleted while it holds units for a claim. Stock and Calendar declare the same contract operations, so a type composes one of them.",
+  "description": "Counts units of what the instance stands for: a product's inventory, a ticket type, a coupon's redemptions. Stock keeps the units on hand and the units claims hold, and every change of the count on hand is a movement with a reason, the claim it was for and who made it. A claim takes units only through the supply contract's operations, which Holds invokes by name: holdFor holds what an item of the claim asks, commitFor takes held units out of what is on hand (they are sold), releaseFor frees them, and returnFor puts committed units back. Each checks the claim's own Holds.items, so no caller holds or frees units by calling one directly, and each is idempotent. A hold that does not fit what is available is refused, unless the config allows backorder; checkHold counts what the claim's other items of the instance ask. A deleted claim's committed units stay sold. A caller with the config's permission receives, adjusts and counts stock. With a price, holdFor returns the unit price and its currency, and the claim keeps the price each item was held at. An instance is not deleted while it holds units for a claim. Stock and Calendar declare the same contract operations, so a type composes one of them.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -644,6 +644,26 @@
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
+          "also": {
+            "description": "What the claim's other items still to hold ask of this instance, which the answer counts as taken.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "quantity": {
+                  "description": "How many units the item asks.",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "quantity"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
           "hold": {
             "description": "The hold's name in the claim's Holds config.",
             "minLength": 1,
@@ -847,7 +867,7 @@
     },
     {
       "code": "held",
-      "description": "A supply is not deleted while it holds anything for a claim."
+      "description": "A supply is not deleted while it holds anything for a claim: an item held, or committed time that has not ended."
     },
     {
       "code": "over_max",

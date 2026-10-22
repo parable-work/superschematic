@@ -1,7 +1,7 @@
 /*
 The commerce behaviors' configs, records and constants (D70): what a
-schema gives Stock and Holds, what their fields hold, and what their
-operations return. The behaviors are Rust (runtime/engine-commerce/rust,
+schema gives Stock, Calendar and Holds, what their fields hold, and what
+their operations return. The behaviors are Rust (runtime/engine-commerce/rust,
 D58), in the engine's addon.
 */
 
@@ -122,8 +122,13 @@ export interface HoldsRecord {
   readonly items: readonly HoldItem[];
   /** The least advanced item's state; none before any is asked. */
   readonly state: 'none' | HoldState;
-  /** The sum of the prices when every item has one in one currency; null otherwise. */
-  readonly total: { readonly amount: number; readonly currency: string } | null;
+  /**
+   * The sum of the priced items' unit prices times their quantities (1 for
+   * time). An item without a price adds nothing; with none priced it is
+   * `{ amount: 0, currency: null }`. Null only when the priced items'
+   * currencies differ or the sum passes what a number holds exactly.
+   */
+  readonly total: { readonly amount: number; readonly currency: string | null } | null;
 }
 
 /** checkHold's answer, and listHolds' check of a pending item. */
@@ -132,4 +137,80 @@ export interface HoldCheck {
   readonly code?: string;
   readonly reason?: string;
   readonly details?: Readonly<Record<string, unknown>>;
+}
+
+/** The longest window listBookings and findAvailability read: 31 days. */
+export const MAX_WINDOW_MS = 31 * 24 * 60 * 60 * 1000;
+
+/** A day's opening hours: [open, close] wall times, HH:MM from 00:00 to 24:00. */
+export type OpeningRanges = ReadonlyArray<readonly [string, string]>;
+
+/** Weekly opening hours by day; a day absent or empty is closed. */
+export type OpeningHours = Readonly<Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', OpeningRanges>>>;
+
+/** Calendar's config. */
+export interface CalendarConfig {
+  /** The IANA time zone the hours are wall times in. */
+  readonly timeZone: string;
+  readonly hours?: OpeningHours;
+  /** How many holds may overlap at any instant: a count, or an own integer field; 1 when absent. */
+  readonly capacity?: number | FieldRef;
+  /** The start grid: a hold starts a whole number of slots after an opening time; any whole minute when absent. */
+  readonly slotMs?: number;
+  /** The shortest hold; slotMs, or a minute, when absent. */
+  readonly minMs?: number;
+  /** The longest hold; a day when absent. */
+  readonly maxMs?: number;
+  /** Time kept free around each hold. */
+  readonly bufferMs?: { readonly before?: number; readonly after?: number };
+  /** How long ahead of its start a hold must be made, by the engine's clock. */
+  readonly leadMs?: number;
+  /** How far ahead a hold may start. */
+  readonly horizonMs?: number;
+  /** What setOpeningHours and the closures need; nobody may when absent. */
+  readonly permission?: string;
+}
+
+/** A closure of an instance, as addClosure returns it. */
+export interface CalendarClosure {
+  readonly closure: string;
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly reason: string;
+}
+
+/** Calendar's fields, as a read returns them under behaviors.Calendar. */
+export interface CalendarRecord {
+  readonly timeZone: string;
+  readonly hours: OpeningHours;
+  /** The first hundred closures that have not ended, soonest first. */
+  readonly closures: readonly CalendarClosure[];
+}
+
+/** One hold of an instance, as listBookings returns it. */
+export interface CalendarBooking {
+  readonly holder: InstanceRef;
+  readonly hold: string;
+  readonly item: number;
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly state: 'held' | 'committed';
+  /** True for a deleted claim's committed time, which stays booked. */
+  readonly retired?: boolean;
+}
+
+/** One slot findAvailability found. */
+export interface CalendarSlot {
+  readonly id: string;
+  readonly startMs: number;
+  readonly endMs: number;
+  /** How many more holds the instance can take then. */
+  readonly remaining: number;
+}
+
+/** What findAvailability returns. */
+export interface CalendarAvailability {
+  readonly slots: readonly CalendarSlot[];
+  /** Whether more slots fit than limit returned, more instances matched than were read, or the search stopped at its bound of work. */
+  readonly truncated: boolean;
 }
