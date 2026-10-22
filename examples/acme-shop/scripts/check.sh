@@ -171,7 +171,7 @@ if [[ -f "$DIST/Cargo.lock" ]]; then
 fi
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 13 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 14 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -184,6 +184,8 @@ built_before shop-db shop-api
 built_before shop-db shop-orders
 built_before shop-db shop-stock
 built_before shop-stock shop-orders
+built_before shop-db shop-cart
+built_before shop-cart shop-stack
 built_before shop-api shop-stack
 built_before shop-orders shop-stack
 built_before shop-stock shop-stack
@@ -209,6 +211,17 @@ elif ! diff -u "$COMMITTED_CARGO_LOCK" "$DIST/Cargo.lock" >&2; then
   echo "the build changed schemas/dist/Cargo.lock: rerun with UPDATE=1 and commit it" >&2
   exit 1
 fi
+
+echo "==> shop-db's engine archive"
+# shop-db's engine types compose the commerce behaviors (D70), which the
+# core's engine archive leaves out, so its build writes the project's engine
+# crate, whose archive every Go module that opens the engine links in the
+# core's place, as stack dev's Go servers do: the Go tests of a checkout run
+# on it. It builds from the engine's lock file into Cargo's target directory.
+ENGINE_ARCHIVE="$OUT/engine"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" \
+  "$REPO_ROOT/scripts/engine-archive.sh" --crate "$DIST/engine/rust/shop-db/ffi" --out "$ENGINE_ARCHIVE" >/dev/null
+export CGO_LDFLAGS="-L$ENGINE_ARCHIVE $CGO_LDFLAGS"
 
 echo "==> rust-server/identity.sql holds shop-db's identity tables"
 # The Rust server, the Topcoat app in memory and the Go test of the Rust
@@ -246,7 +259,7 @@ done
 # superschematic writes no go.sum for an entrypoint, and go mod tidy would
 # resolve the imports of go/'s tests too; -mod=mod fills it as the build
 # reads each module, as stack dev's build does.
-for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-fulfil-orders; do
+for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-settle-payments shop-orders-fulfil-orders shop-db-engine-runner; do
   echo "    server/shop-stack/$entrypoint"
   (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
@@ -265,6 +278,9 @@ echo "==> TypeScript: the generated packages, the storefront's entrypoint and im
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+# shop-cart's server and implementation import the engine's package, whose
+# types the type-check reads from its build.
+(cd "$REPO_ROOT/runtime/engine/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 # The output root is one Bun workspace of the generated TypeScript packages,
 # the stack's TypeScript server and the packages in typescript/: the
 # storefront's implementation and the clients (D51). Installing it links
@@ -285,9 +301,10 @@ TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
   "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
+  "$DIST/api/shop-cart" "$DIST/sdk/typescript/shop-cart" "$DIST/server/shop-stack/shop-cart" \
   "$DIST/server/storefront-stack/shop-storefront" \
   "$DIST/api/shop-wishlist" "$DIST/server/wishlist-stack/shop-wishlist" \
-  "$APP/shop-storefront" "$APP/shop-wishlist" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
+  "$APP/shop-storefront" "$APP/shop-cart" "$APP/shop-wishlist" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
   echo "    ${pkg#"$EXAMPLE_DIR/"}"
   (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
@@ -404,7 +421,7 @@ echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Ru
 # on a runner whose caches are cold the tests take more than go test's
 # default ten minutes.
 (cd "$EXAMPLE_DIR/go" &&
-  ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
+  ACME_SHOP_CLIENTS=1 ACME_SHOP_ENGINE=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
     ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
     go test -count=1 -timeout 30m -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
@@ -419,6 +436,7 @@ if docker info >/dev/null 2>&1; then
   grep -q '^--- PASS: TestStackDevRunsTheShop ' "$OUT/go-test.log"
 fi
 grep -q '^--- PASS: TestStackDevRunsTheStorefront ' "$OUT/go-test.log"
+grep -q '^--- PASS: TestACheckoutHoldsPaysPlacesAndRefunds ' "$OUT/go-test.log"
 grep -q '^--- PASS: TestStackDevRunsTheWishlist ' "$OUT/go-test.log"
 
 echo "==> the wishlist's second version: expand, both versions, contract"
@@ -514,7 +532,7 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 13
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 14
 # A schema's references to other services in its decorators' arguments
 # are recorded under dist (D41): each stack's to the APIs it deploys, and
 # shop-stock's to shop-orders, the one caller its reservations admit. So

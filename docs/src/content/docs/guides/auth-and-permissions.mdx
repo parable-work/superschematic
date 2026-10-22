@@ -242,11 +242,12 @@ the operation's user clause (`@auth`, `@requirePermission`,
 it, every server with a `calls` edge to this API is listed; at run time,
 that is every caller the server's service auth config lists
 ([below](#say-who-the-calling-service-is)). The acme shop's stock API,
-`shop-stock`, which `shop-orders`' server calls as it places an order
-(D57), admits only that server to its reservations, forwarding a shopper
-who may place the order:
+`shop-stock`, which `shop-orders` tells what a placed checkout sold
+(D57), admits only `shop-orders`, its server or its job, to its sales, and
+looks at no end user, since a payment's webhook, which places a checkout,
+brings none:
 
-<Snippet file="schemas/services/shop-stock/src/stock.schema.ts" symbol="StockReservations" />
+<Snippet file="schemas/services/shop-stock/src/stock.schema.ts" symbol="StockSales" />
 
 The other two rules would read, on operations the shop does not have:
 
@@ -263,10 +264,11 @@ export class StockMaintenance {
     throw new Error("schema declaration only");
   }
 
-  // Any server with a calls edge to this API, and no end user.
-  @requireService()
-  @rest(HttpMethod.POST, "stock/reindex")
-  reindexStock(): StockView[] {
+  // A shopper who may, forwarded by shop-orders' server.
+  @requirePermission(["orders.write"])
+  @requireService({ from: [ShopOrders] })
+  @rest(HttpMethod.POST, "stock/reservations")
+  reserveStock(input: ReserveStockInput): StockView[] {
     throw new Error("schema declaration only");
   }
 }

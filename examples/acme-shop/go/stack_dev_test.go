@@ -46,9 +46,11 @@ import (
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; shop-stock on its
 // generated Rust entrypoint, which cargo builds with the implementation in
-// rust-impl/shop-stock (D57); and shop-storefront on its generated
-// TypeScript entrypoint, which Bun runs with the implementation in
-// typescript/shop-storefront (D51). Every connection string, URL and port
+// rust-impl/shop-stock (D57); shop-cart and shop-storefront on their
+// generated TypeScript entrypoints, which Bun runs with the implementations
+// in typescript/shop-cart and typescript/shop-storefront (D51); and
+// shop-db's engine runner, which runs its engine types' reactions and
+// deadlines (D58, D70). Every connection string, URL and port
 // the test uses comes from the environment the build resolved. The test
 // waits for each server's /readyz, creates a user in shop-db with the
 // identity runtime's store, as staff would through the administration
@@ -57,15 +59,22 @@ import (
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
 // would, and reads back from shop-media. Anyone lists shop-stock's stock,
-// and staff set the product's level. PlaceOrder reserves the order's stock
-// on shop-stock through its Go SDK, which sends shop-orders' service
-// credential and forwards the shopper, and an order beyond the stock is
-// refused 409; a reservation with the shopper's session and no service
-// credential is refused 401. PlaceOrder enqueues an OrderPlaced message on
-// shop-db's queue in the order's transaction, and shop-orders' worker
-// FulfilOrders, a process of its own on its generated entrypoint with the
-// implementation's NewWorkers, claims it and fulfils the order (section
-// 8.8, D53). It reads the static site shop-web, which
+// and staff count the product's shelf, which gives it an Inventory in
+// shop-db's engine (D70). Staff open a collection point through the
+// engine's routes; a cart on shop-cart takes two units and a pickup slot
+// from the slots it lists; shop-orders' startCheckout holds them, and a
+// second checkout beyond the stock is refused 409 unavailable. acmepay,
+// the fake provider, which the test runs where ACMEPAY_URL points with the
+// keys of Dev's secrets, takes the payment and posts the capture to
+// shop-orders' webhook, signed; the runner places the checkout, whose
+// order shop-orders writes, enqueuing OrderPlaced, and tells shop-stock
+// what it sold through its Go SDK with shop-orders' service credential; a
+// sale reported with the shopper's session and no service credential is
+// refused 401. A refund two members of staff sign off through the engine's
+// routes is made at acmepay by SettlePayments, run with stack run.
+// shop-orders' worker FulfilOrders, a process of its own on its generated
+// entrypoint with the implementation's NewWorkers, claims the OrderPlaced
+// message and fulfils the order (section 8.8, D53). It reads the static site shop-web, which
 // stack dev built and serves with its config, and asks shop-api, as a
 // browser would, whether the site's origin may call it, and another origin
 // (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
@@ -77,24 +86,24 @@ import (
 // shopper's own and staff every customer's, and a product's reviews
 // searched by their words and paged (D60, D61, D62); a shopper gets and
 // cancels no other customer's order.
-// The order took the product's level below the threshold staff set, so
-// shop-stock's reservation enqueued StockLow in its transaction, and
+// The sale left the product low, at the level staff set, so shop-stock
+// enqueued StockLow, and
 // shop-stock's worker ReorderStock, a Rust process on its generated
 // entrypoint with the implementation's create_workers, files the product's
 // restock request in shop-db; shop-stock's job OrderRestocks, a Rust job
 // Dev runs only on demand, orders it when stack run runs it (D65). Every
 // server, job and worker exports its traces to an OTLP receiver of the
 // test's own, which the test's environment names and stack dev hands on
-// (D67): an order is one trace from shop-orders' Go server through its call
-// to shop-stock's Rust server, the storefront's requests are spans named by
+// (D67): a sale is one trace from shop-orders' Go call to shop-stock's
+// Rust server, the storefront's requests are spans named by
 // their routes, each worker makes a span of the message it handles, and
 // each job's process sends the span of its run before it exits. The
 // test stops the stack as Ctrl-C does, which with --remove-data removes
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
 // against that root's mirror of rust-impl/shop-stock and its own API
-// crates, and shop-storefront against its mirror of
-// typescript/shop-storefront, and runs the job there with stack run. The
+// crates, and shop-cart and shop-storefront against their mirrors of
+// typescript/shop-cart and typescript/shop-storefront, and runs the job there with stack run. The
 // project's own TypeScript packages keep the links the default output
 // root's install made.
 //

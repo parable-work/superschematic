@@ -180,10 +180,20 @@ dependencies, then:
 - builds each worker, `shop-orders`' `FulfilOrders` and `shop-stock`'s
   `ReorderStock`, in Rust, and starts it as a process
   ([Queues and workers](/superschematic/guides/queues/));
-- builds `shop-orders`' job `ShipOrders` and runs it every minute, as
-  `Dev`'s settings say, and `shop-stock`'s Rust job `OrderRestocks`,
-  which `Dev` runs only when `superschematic stack run` asks
-  ([Jobs](/superschematic/guides/stacks/#jobs)).
+- builds `shop-orders`' jobs `ShipOrders` and `SettlePayments` and runs
+  them every minute, as `Dev`'s settings say, and `shop-stock`'s Rust job
+  `OrderRestocks`, which `Dev` runs only when `superschematic stack run`
+  asks ([Jobs](/superschematic/guides/stacks/#jobs));
+- builds and starts `shop-db`'s engine runner, which runs the reactions
+  and deadlines of its engine types, the shop's checkouts among them
+  ([Engine behaviors](/superschematic/guides/engine-behaviors/)).
+
+The checkouts pay through acmepay, a fake payment provider in
+`go/acmepay`, which `stack dev` reaches at the address `shop-orders`'
+`ACMEPAY_URL` defaults to, with the keys you give its `Dev` environment
+once: run `superschematic stack secrets set Dev --stack
+schemas/services/shop-stack`, then acmepay beside the stack, with the same
+keys, as the example's README says.
 
 Nothing in the project names a port or a connection string. The build
 derives them and writes the environment it resolved to

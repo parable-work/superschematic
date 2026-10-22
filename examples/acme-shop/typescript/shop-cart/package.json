@@ -12,8 +12,9 @@
   "dependencies": {
     "@acme/shop-cart-api": "workspace:*",
     "@acme/shop-cart-types": "workspace:*",
+    "@superschematic/engine": "*",
     "@superschematic/http-runtime": "*",
-    "@superschematic/engine": "*"
+    "superscalar": "*"
   },
   "devDependencies": {
     "@types/node": "22.19.9",

@@ -16,8 +16,8 @@ import { environment, stack } from "@superschematic/stack";
 // the static site whose browser code calls shop-api. Shoppers and staff
 // call every API, so all five are exposed; a site always is.
 @stack({
-  deploy: [ShopApi, ShopOrders, ShopStock, ShopCart, ShopStorefront, ShopWeb],
-  expose: [ShopApi, ShopOrders, ShopStock, ShopCart, ShopStorefront]
+  deploy: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, ShopWeb],
+  expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront]
 })
 export abstract class Shop {}
 

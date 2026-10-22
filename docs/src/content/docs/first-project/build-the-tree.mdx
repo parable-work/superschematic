@@ -23,9 +23,9 @@ superschematic build-all schemas/services
 Each service's own build lines, as `build` prints them, come between these
 summary lines.
 
-The order comes from the configs: `shop-api`, `shop-orders` and
-`shop-stock` name `shop-db` as their `authDb`, `shop-orders` calls
-`shop-stock`, `shop-storefront` lists `shop-common` in its
+The order comes from the configs: `shop-api`, `shop-orders`,
+`shop-stock` and `shop-cart` name `shop-db` as their `authDb`,
+`shop-orders` calls `shop-stock`, `shop-storefront` lists `shop-common` in its
 `dependencies` and `shop-wishlist` lists `shop-wishlist-db`, so each
 builds after the service it needs. Each stack, `shop-stack`,
 `storefront-stack` and `wishlist-stack`, builds after the APIs it

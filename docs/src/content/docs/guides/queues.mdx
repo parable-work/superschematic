@@ -169,13 +169,15 @@ queue whose message holds a list of either, a `POINT[]` or an
 `INTERVAL[]` column, stays out of `queues`, which says so, and the build
 refuses a Rust worker of it.
 
-In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`'s
-reservation, in Rust, enqueues in its transaction for each line that takes
-a product's level below its threshold:
+In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`,
+in Rust, enqueues when `shop-orders` tells it of a sale: one message for
+each product the sale left low, its Inventory's available units at or
+below its reorder level (`Stock.low`, which the engine keeps), all in one
+transaction:
 
 <Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="StockLow" />
 
-<Snippet file="rust-impl/shop-stock/src/lib.rs" from="if let Some(threshold) = fell_below" to="                levels.push(level);" />
+<Snippet file="rust-impl/shop-stock/src/lib.rs" from="        for (level, reorder_at) in &levels {" to="        tx.commit()" />
 
 The descriptor carries the statements the Go ORM runs, so a message
 enqueued from Rust is claimed alike by a worker in any language, and the

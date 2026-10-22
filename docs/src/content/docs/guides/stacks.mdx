@@ -137,8 +137,9 @@ commands to run next:
 ```
 Wrote the Stack service shop-stack in ./schemas/services/shop-stack:
   ...
-It deploys shop-api, shop-orders, shop-storefront and shop-web; the databases and buckets they reach come with them.
+It deploys shop-api, shop-cart, shop-orders, shop-storefront and shop-web; the databases and buckets they reach come with them.
   shop-api         exposed: Account.login is not @requireService
+  shop-cart        exposed: Carts.openCart is not @requireService
   shop-orders      exposed: OrderQueries.getOrder is not @requireService
   shop-storefront  exposed: StorefrontProbes.getHealth is not @requireService
   A site is always exposed: shop-web.
@@ -914,23 +915,26 @@ malformed declarations and names nothing registers.
 
 `examples/acme-shop` runs on a stack of its own, `shop-stack`. It deploys
 `shop-api` and `shop-orders`, each on a default Go server, `shop-stock`,
-on a default Rust server, and `shop-storefront`, on a default TypeScript
-server, and exposes all four; `shop-db`, the `authDb` of `shop-api`,
-`shop-orders` and `shop-stock`, joins as their database; `shop-media`,
-the bucket `shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`,
-which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
+on a default Rust server, and `shop-cart` and `shop-storefront`, each on a
+default TypeScript server, and exposes all five; `shop-db`, the `authDb`
+of `shop-api`, `shop-orders`, `shop-stock` and `shop-cart`, joins as their
+database, and its engine types (D70) bring its engine runner,
+`shop-db-engine-runner`, in `shop-api`'s Go; `shop-media`, the bucket
+`shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`, which
+handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
-`shop-orders`' `ShipOrders` and `shop-stock`'s `OrderRestocks`, in
-Rust, as jobs; and `shop-web`, a static site whose browser code calls
-`shop-api`, as a site. A second stack, `storefront-stack`, deploys the
-storefront alone, on Bun in its `Dev` and on Cloudflare Workers in its
-`Staging` ([Servers on Workers](#servers-on-workers)), so each `stack`
-command run from the example names its stack. `shop-orders` calls
-`shop-stock`, whose reservations admit only `shop-orders`' server
+`shop-orders`' `ShipOrders` and `SettlePayments` and `shop-stock`'s
+`OrderRestocks`, in Rust, as jobs; and `shop-web`, a static site whose
+browser code calls `shop-api`, as a site. A second stack,
+`storefront-stack`, deploys the storefront alone, on Bun in its `Dev` and
+on Cloudflare Workers in its `Staging`
+([Servers on Workers](#servers-on-workers)), so each `stack` command run
+from the example names its stack. `shop-orders` calls `shop-stock`, whose
+sales admit only `shop-orders`
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
-runs `ShipOrders` every minute, and turns `OrderRestocks`' schedule
-off, so it runs only when `stack run` asks:
+runs `ShipOrders` and `SettlePayments` every minute, and turns
+`OrderRestocks`' schedule off, so it runs only when `stack run` asks:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
@@ -939,8 +943,9 @@ Each API's implementation lives at the naming file's
 default: `go/shop-api` and `go/shop-orders`, whose `New(deps)` the Go
 entrypoints call, building each API's identity service over `shop-db`,
 whose `User` table has the user model's trait, and
-`typescript/shop-storefront`, whose `create(deps)` and `authenticate(deps)`
-the TypeScript one calls. `shop-stock`'s is at `rust-impl/shop-stock`, the
+`typescript/shop-cart` and `typescript/shop-storefront`, whose
+`create(deps)` the TypeScript ones call, with the storefront's
+`authenticate(deps)`. `shop-stock`'s is at `rust-impl/shop-stock`, the
 `rust` template the example's naming file sets, `rust-impl/{service}`,
 since its `rust/` is a client crate: the Rust entrypoint calls its
 `create(deps)` and builds the identity service over `shop-db` and the
@@ -961,29 +966,33 @@ worker as a process, `ShipOrders` on its schedule, and the site, built
 once and served with its config.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
 running, calls each Go and Rust server through its Go SDK, uploads a
-product's image to `shop-media` through the URL `shop-api` signs, sets the
-product's stock and threshold on `shop-stock` as staff, reads a cart
-from the storefront, places an order, which reserves its stock on
-`shop-stock` and runs it low, sees an order beyond the stock refused and
-a reservation with the shopper's session alone refused 401, sees the
-worker fulfil the order it placed and `ReorderStock` file the product's
-restock request, reads the site and its config, checks that `shop-api`
-answers CORS for the site's origin and no other, sees `ShipOrders` ship
-the order, once with `stack run` and once on the schedule, and sees
-`OrderRestocks`, run with `stack run`, order the restock request.
-Then it runs `stack dev` and the job once more, into an output root of
-its own (`--out`), where `shop-stock`'s server, worker and job build
-against that root's mirror of `rust-impl/shop-stock`, the storefront
-against its copy of `typescript/shop-storefront`, and `shop-web` in its
-copy of `web/shop-web`, while the example's packages keep the links
-`schemas/dist`'s install made. `PlaceOrder`
-reserves the
-stock through the client of `shop-stock` its `Deps` holds, which sends
-`shop-orders`' credential and forwards the shopper of the request its
-context belongs to, and refuses the order with `shop-stock`'s reason when
-the warehouse cannot fill it:
+product's image to `shop-media` through the URL `shop-api` signs, counts
+the product's stock on `shop-stock` as staff, low at two, opens a
+collection point through `shop-db`'s engine routes, fills a cart on
+`shop-cart` and picks a pickup slot, starts the checkout on `shop-orders`,
+which holds the units and the slot, sees another checkout beyond the
+stock refused, pays at acmepay, the fake provider in `go/acmepay`, whose
+signed webhook `shop-orders` records, sees the checkout placed, its order
+written and the sale reported to `shop-stock` in one trace, a sale
+reported with a shopper's session alone refused 401, the worker fulfil
+the order and `ReorderStock` file the product's restock request, and a
+refund two members of staff sign off made by `SettlePayments`, run with
+`stack run`; reads a cart from the storefront and the site and its
+config, checks that `shop-api` answers CORS for the site's origin and no
+other, sees `ShipOrders` ship an order, once with `stack run` and once on
+the schedule, and sees `OrderRestocks`, run with `stack run`, order the
+restock request. Then it runs `stack dev` and the job once more, into an
+output root of its own (`--out`), where `shop-stock`'s server, worker and
+job build against that root's mirror of `rust-impl/shop-stock`, the
+TypeScript servers against their copies of `typescript/shop-cart` and
+`typescript/shop-storefront`, and `shop-web` in its copy of `web/shop-web`,
+while the example's packages keep the links `schemas/dist`'s install
+made. A placed checkout writes its order once, by its unique
+`checkoutId`, and tells `shop-stock` what it sold through the client of
+`shop-stock` its `Deps` holds, which sends `shop-orders`' credential
+(`go/shop-orders/checkouts.go`):
 
-<Snippet file="go/shop-orders/orders.go" symbol="Orders.reserve" />
+<Snippet file="go/shop-orders/checkouts.go" symbol="placeOrder" />
 
 The worker's code is `NewWorkers` in `go/shop-orders/workers.go`, and the
 job's `NewJobs` in `go/shop-orders/jobs.go`:
@@ -992,13 +1001,13 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 
 <Snippet file="go/shop-orders/jobs.go" symbol="Jobs.ShipOrders" />
 
-`shop-stock`'s reservation enqueues `StockLow` in its transaction when a
-line takes a product's level below its threshold
+`shop-stock` enqueues `StockLow` for each product a sale leaves low
 ([Rust servers](#rust-servers)). Its worker and job are
 `create_workers` and `create_jobs` in `rust-impl/shop-stock/src/lib.rs`.
 The worker files one open restock request per product, which a unique
-index in `shop-db` holds it to, and the job orders each open one, watching
-the `Shutdown` its entrypoint cancels on SIGTERM:
+index in `shop-db` holds it to, and the job files one for each product the
+engine lists low (`Stock.low`) and orders each open one, watching the
+`Shutdown` its entrypoint cancels on SIGTERM:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
@@ -1322,15 +1331,15 @@ runs, brings the copy up to date. A crate that inherits from a workspace
 (`workspace = true`) is refused, since the copy belongs to none.
 
 `examples/acme-shop`'s `shop-stock` is a Rust server. Its implementation,
-`rust-impl/shop-stock`, reads and writes `shop-db`'s `stock_level` table
-with tokio-postgres, which the HTTP runtime re-exports, over the pool its
-`Deps` holds, since no ORM is generated for Rust. A reservation takes
-every line off the shelf in one transaction, or none, and enqueues
-`StockLow` in it, with the runtime's `queue::enqueue` and the descriptor
-`shop-db`'s Rust types hold, for each line that takes its product's level
-below its threshold:
+`rust-impl/shop-stock`, keeps the stock in `shop-db`'s `Inventory`, which
+the engine keeps (D70): it calls the engine in-process, through the
+`Background` its `Deps` holds, on the blocking pool, since the engine is
+synchronous. It reads `shop-db`'s `product` table with tokio-postgres,
+which the HTTP runtime re-exports, over the pool its `Deps` holds, since
+no ORM is generated for Rust, and enqueues `StockLow` with the runtime's
+`queue::enqueue` and the descriptor `shop-db`'s Rust types hold:
 
-<Snippet file="rust-impl/shop-stock/src/lib.rs" from="/// Takes each line's units off the shelf" to="        Ok(levels)" />
+<Snippet file="rust-impl/shop-stock/src/lib.rs" symbol="engine_call" />
 
 The example commits `schemas/dist/Cargo.lock`, and its check fails when a
 build changes it. The Dockerfile builds the
