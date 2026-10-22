@@ -17,7 +17,7 @@
   "devDependencies": {
     "@acme/shop-storefront-sdk": "workspace:*",
     "@types/node": "22.19.9",
-    "hono": "4.13.8",
+    "hono": "4.13.11",
     "typescript": "5.9.3"
   }
 }
