@@ -13,11 +13,17 @@ publish = false
 
 # The generated API crate, and the HTTP runtime it is built on, whose
 # postgres feature is the pool Deps holds and the tokio-postgres it
-# re-exports; and tracing, which logs inside the API's span.
+# re-exports; the engine, whose Background Deps holds and whose calls take
+# and return JSON (D58); tokio, whose blocking pool runs them; and
+# tracing, which logs inside the API's span.
 [dependencies]
 async-trait = "0.1.89"
 acme-shop-stock-api = { path = "../../schemas/dist/api/shop-stock" }
+http = "1"
+serde_json = "1.0.149"
+superschematic-engine = { path = "../../../../runtime/engine/rust/engine", default-features = false, features = ["background"] }
 superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["postgres"] }
+tokio = { version = "1.52.2", features = ["rt"] }
 tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 
 # Its own workspace, so no Cargo.toml above this directory claims it.

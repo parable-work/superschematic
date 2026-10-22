@@ -17,6 +17,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superscalar/go v1.0.0
+	github.com/parable-work/superschematic/runtime/engine/go v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.28.0
 	modernc.org/sqlite v1.60.1
@@ -38,6 +39,7 @@ require (
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
@@ -76,6 +78,7 @@ replace (
 	example.com/acme/types/go/shop-stock => ../schemas/dist/types/go/shop-stock
 	github.com/parable-work/superscalar/go => ../../../third_party/superscalar/go
 	github.com/parable-work/superschematic/ir => ../../../ir
+	github.com/parable-work/superschematic/runtime/engine/go => ../../../runtime/engine/go
 	github.com/parable-work/superschematic/runtime/http/go => ../../../runtime/http/go
 	github.com/parable-work/superschematic/runtime/schema/go => ../../../runtime/schema/go
 )

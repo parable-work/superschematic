@@ -28,6 +28,18 @@ http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
 http_runtime_typescript = "../../runtime/http/typescript"
 versiongraph_go = "../../runtime/versiongraph/go"
+# The engine's crates, its Go binding and its npm package (D58), and the
+# commerce crate (D70): shop-db's engine types compose the commerce
+# behaviors, so its build writes the project's engine crate with them,
+# which shop-stock's Rust server and its job and worker, shop-orders' Go
+# ones and the runner build from, and every API on shop-db opens the engine.
+engine_rust = "../../runtime/engine/rust/engine"
+engine_behaviors_rust = "../../runtime/engine/rust/behaviors"
+engine_commerce_rust = "../../runtime/engine-commerce/rust"
+engine_abi_rust = "../../runtime/engine/rust/abi"
+engine_napi_rust = "../../runtime/engine/rust/napi"
+engine_go = "../../runtime/engine/go"
+engine_typescript = "../../runtime/engine/typescript"
 # The servers' images build from the checkout's root, which holds the
 # runtime modules above as well as this example.
 build_context = "../.."
