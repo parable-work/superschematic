@@ -76,6 +76,12 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
         config.record_permission
     )
     .replace("  ", " ")];
+    if config.amount == AmountSource::Holds {
+        summary.push(
+            "What is owed is not known while a held line is pending, or its priced lines are in two currencies: openPayment and a move that waits for payment refuse with total_unknown. A claim with nothing priced owes 0."
+                .to_owned(),
+        );
+    }
     if !config.require.is_empty() {
         summary.push(format!(
             "A move waits for payment: {}.",
@@ -125,8 +131,8 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
             said(
                 "Use to start paying what is outstanding at a provider; give the same idempotencyKey to retry.",
                 Some("Do not use to pay part of it, or a second time while an attempt is in flight: void that one first."),
-                "Returns the attempt, its amount and currency; the adapter creates it at the provider.",
-                &[NOTHING_DUE, CURRENCY_MISMATCH, KEY_REUSED],
+                "Returns the attempt, its amount and currency; the adapter creates it at the provider, and voids an earlier attempt that failed.",
+                &[NOTHING_DUE, TOTAL_UNKNOWN, CURRENCY_MISMATCH, KEY_REUSED],
             ),
         ));
         operations.push((
@@ -184,8 +190,8 @@ pub(crate) fn guidance(config: &PaymentsConfig, target: &DescribeTarget) -> Beha
             said(
                 "Do not call it yourself: a refund instance's Payments calls it as the instance enters an issueOn state.",
                 None,
-                "Returns the refund.",
-                &[NOT_LINKED, EXCEEDS_REFUNDABLE, CURRENCY_MISMATCH],
+                "Returns the refund: one per refund instance while it is asked or paid, under the key that instance derives.",
+                &[NOT_LINKED, KEY_REUSED, EXCEEDS_REFUNDABLE, CURRENCY_MISMATCH],
             ),
         ));
     } else {
