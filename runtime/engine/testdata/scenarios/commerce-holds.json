@@ -15,7 +15,7 @@
       "behaviors": ["Holds","Links","Stock","Workflow"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"sam":{"subject":"sam","permissions":["stock.adjust"]}},
       "steps": [
-        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Holds"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Calendar","Holds","Payments"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
         {"call":"schemas.define","principal":"alice","args":[{"kind":"General","name":"Inventory","types":{"Inventory":{"name":"Inventory","role":"EmbeddedStruct","behaviors":[{"name":"Stock","config":{"permission":"stock.adjust","price":{"field":"priceCents","currency":"GBP"}}}],"fields":[{"name":"title","typeRef":{"name":"string"}},{"name":"priceCents","typeRef":{"name":"Generic.Int64"}},{"name":"reorderAt","typeRef":{"name":"Generic.Int64"}}]}}}],"expect":{"$shared":"s1"}},
         {"call":"schemas.publish","principal":"alice","args":["Inventory"],"expect":{"namespace":"default","name":"Inventory","version":1,"published":true}},
         {"call":"schemas.define","principal":"alice","args":[{"$shared":"s2"}],"expect":{"$shared":"s3"}},
@@ -43,7 +43,7 @@
       "behaviors": ["Holds","Links","Stock","Workflow"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"sam":{"subject":"sam","permissions":["stock.adjust"]}},
       "steps": [
-        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Holds"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Calendar","Holds","Payments"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
         {"call":"schemas.define","principal":"alice","args":[{"kind":"General","name":"Inventory","types":{"Inventory":{"name":"Inventory","role":"EmbeddedStruct","behaviors":[{"name":"Stock","config":{"permission":"stock.adjust","price":{"field":"priceCents","currency":"GBP"}}}],"fields":[{"name":"title","typeRef":{"name":"string"}},{"name":"priceCents","typeRef":{"name":"Generic.Int64"}},{"name":"reorderAt","typeRef":{"name":"Generic.Int64"}}]}}}],"expect":{"$shared":"s1"}},
         {"call":"schemas.publish","principal":"alice","args":["Inventory"],"expect":{"namespace":"default","name":"Inventory","version":1,"published":true}},
         {"call":"schemas.define","principal":"alice","args":[{"$shared":"s2"}],"expect":{"$shared":"s3"}},
@@ -73,7 +73,7 @@
       "behaviors": ["Holds","Links","Stock","Workflow"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"sam":{"subject":"sam","permissions":["stock.adjust"]}},
       "steps": [
-        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Holds"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Calendar","Holds","Payments"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
         {"call":"schemas.define","principal":"alice","args":[{"kind":"General","name":"Inventory","types":{"Inventory":{"name":"Inventory","role":"EmbeddedStruct","behaviors":[{"name":"Stock","config":{"permission":"stock.adjust","price":{"field":"priceCents","currency":"GBP"}}}],"fields":[{"name":"title","typeRef":{"name":"string"}},{"name":"priceCents","typeRef":{"name":"Generic.Int64"}},{"name":"reorderAt","typeRef":{"name":"Generic.Int64"}}]}}}],"expect":{"$shared":"s1"}},
         {"call":"schemas.publish","principal":"alice","args":["Inventory"],"expect":{"namespace":"default","name":"Inventory","version":1,"published":true}},
         {"call":"schemas.define","principal":"alice","args":[{"$shared":"s2"}],"expect":{"$shared":"s3"}},
@@ -101,7 +101,7 @@
       "behaviors": ["Holds","Links","Stock","Workflow"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"sam":{"subject":"sam","permissions":["stock.adjust"]}},
       "steps": [
-        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Holds"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Stock","Calendar","Holds","Payments"],"clock":"fixed","ids":"seeded"}],"now":1792573200000},
         {"call":"schemas.define","principal":"alice","args":[{"kind":"General","name":"Inventory","types":{"Inventory":{"name":"Inventory","role":"EmbeddedStruct","behaviors":[{"name":"Stock","config":{"permission":"stock.adjust","price":{"field":"priceCents","currency":"GBP"}}}],"fields":[{"name":"title","typeRef":{"name":"string"}},{"name":"priceCents","typeRef":{"name":"Generic.Int64"}},{"name":"reorderAt","typeRef":{"name":"Generic.Int64"}}]}}}],"expect":{"$shared":"s1"}},
         {"call":"schemas.publish","principal":"alice","args":["Inventory"],"expect":{"namespace":"default","name":"Inventory","version":1,"published":true}},
         {"call":"schemas.define","principal":"alice","args":[{"$shared":"s2"}],"expect":{"$shared":"s3"}},

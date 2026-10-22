@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { checkCorpus } from '../../../engine/typescript/test/corpus.ts';
 
 /** The test files whose scenarios the corpus holds. */
-export const SCENARIO_FILES = ['holds', 'holds-timers', 'stock'];
+export const SCENARIO_FILES = ['holds', 'holds-timers', 'payments', 'payments-holds', 'payments-refunds', 'stock'];
 
 test('the committed commerce scenarios are what the recorder writes', { timeout: 600_000 }, () =>
   checkCorpus({ root: fileURLToPath(new URL('..', import.meta.url)), prefix: 'commerce-', scenarios: SCENARIO_FILES, http: [] })

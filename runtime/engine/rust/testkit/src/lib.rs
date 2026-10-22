@@ -1496,10 +1496,13 @@ impl AccessPolicy for AnswerPolicy {
 /// behaviors' files, the work queue's (`workqueue-*`) and the commerce
 /// package's (`commerce-*`), whose engines register the package's
 /// behaviors by name after the core's ([`behaviors::package_behavior`]).
-pub const ENGINE_FILES: [&str; 48] = [
+pub const ENGINE_FILES: [&str; 51] = [
     "access",
     "commerce-holds",
     "commerce-holds-timers",
+    "commerce-payments",
+    "commerce-payments-holds",
+    "commerce-payments-refunds",
     "commerce-stock",
     "compat",
     "core-approvals",
