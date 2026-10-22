@@ -8833,9 +8833,9 @@ Three rules hold throughout, beside D56's.
 | A supply behavior serves the instance operations `holdFor`, `commitFor`, `releaseFor` and, for counted supply, `returnFor`, plus the read-only `checkHold`. Each takes the holder (`{schema, id}`), the hold's name, the item's index and its `quantity` or its `interval` (`{startMs, endMs}`). `Holds` writes an item's new state before it calls the supply, in the same transaction, and a supply refuses a call unless the holder's `Holds.items` already shows that item, asking what the call asks, in the state the call moves the supply's record to (`not_requested`), so a caller cannot hold or release by calling it directly. Its rows, keyed by holder, hold and item, make each call idempotent and move only forward. What does not fit is `unavailable`, its details giving the supply, the hold and item, what was asked and what is free. `Stock` and `Calendar` declare the same operations and conflict. | A supply operation per behavior (`holdStock`, `bookSlot`), which Holds would name supply by supply and an extension's supply could not join; Budget's `reserveFor` itself, whose meters, leases and scopes a supply does not have; trusting the caller's parameters, which lets anyone free stock |
 | A supply may name an own integer field as its unit price, with a currency: `holdFor` returns it, and Holds keeps it on the item. A line keeps the price it was held at, and the shopper never sets it. | A general copy-at-create mechanism, which nothing but a price needs yet; reading the price again at payment, which charges what the product costs then |
 | `Holds` requires `Workflow`. Its config is a map of named holds:<br>- each hold is a single-valued `link`, or `each`, an own list field whose elements name a `target` id in a `schema`;<br>- each hold has a `quantity` (an integer or a field) for counted supply, or an `interval` (`start` with `end` or `durationMs`, each a `date-time` field) for time, read from the list's element for an `each` hold;<br>- the config names the states it takes in (`takeOn`, the create when absent), commits in (`commitOn`), releases in (`releaseOn`) and returns in (`returnOn`), and at most `maxItems` items, 100 when absent.<br><br>A many-valued link is refused, as D56 refuses one wherever one target is read. | A hold per `OrderLine` instance, each with a Workflow of its own, so one checkout moves N state machines; a TTL in Holds' config, a second expiry mechanism beside Timers |
-| A create into a `takeOn` state, or a transition into one, writes the claim's items as `pending`. Its guard asks each supply's `checkHold` and vetoes with `unavailable`, listing every item that does not fit. Its `afterChange` then holds them in the same transaction, each call in a savepoint, so the claim holds all of its items or none. Entering a `commitOn`, `releaseOn` or `returnOn` state commits, releases or returns them. `afterChange` reads the status from the instance as it is, never from which operation ran, so a Timers fire, a Lease expiry and a Reactions move are each caught, as Timers' arming is (D56). `retakeHolds` takes them again in a `takeOn` state after a supply refused. | Holding in `afterChange` alone, whose failure is an internal error a client cannot read; releasing only on `transition`, which a Timers move would skip |
-| A transition into a `commitOn` state while an item is not held is vetoed with `holds_missing`. While the claim holds, an update that changes a field a hold reads is vetoed with `held_fields`. A delete releases what the claim holds, and is vetoed with `committed` while it holds committed items and the type returns none. A claim records a reference to each supply it holds, and a supply refuses its own delete while it holds anything (`held`). Holds has no release operation: a claim lets go by a move of its status, which runs its guards and leaves its event. | `releaseHolds` beside the Workflow, a second way to end a claim that no state shows; leaving the lines to StateRules alone, which a schema may not compose |
-| `Holds.items` gives each item's hold, supply, quantity or interval, state (`pending`, `held`, `committed`, `released`, `returned`), and unit price and currency when the supply gives them. `Holds.state` is the least advanced item's state, `none` before any. `Holds.total` is the sum of the prices when every item has one in one currency, and null otherwise. None of them is volatile: each moves only with the claim's own events, so a Reactions rule hears `Holds.state` turn `committed`. Reactions' `holds` trigger, a rollup that comes to hold, is a rule key and never meets the behavior's name. | A total computed at read from the supplies, which moves when a supply's price does |
+| A create into a `takeOn` state, or a transition into one, writes the claim's items as `pending`. Its guard asks each supply's `checkHold`, counting what the claim's other items still to hold ask of the same instance (`also`), and vetoes with `unavailable`, listing every item that does not fit. Its `afterChange` then holds them in the same transaction, each call in a savepoint, so the claim holds all of its items or none. Entering a `commitOn`, `releaseOn` or `returnOn` state commits, releases or returns them. `afterChange` reads the status from the instance as it is, never from which operation ran, so a Timers fire, a Lease expiry and a Reactions move are each caught, as Timers' arming is (D56). `retakeHolds` takes them again in a `takeOn` state after a supply refused. | Holding in `afterChange` alone, whose failure is an internal error a client cannot read; releasing only on `transition`, which a Timers move would skip |
+| A transition into a `commitOn` state while an item is not held is vetoed with `holds_missing`. While the claim holds, an update that changes a field a hold reads is vetoed with `held_fields`. A delete releases what the claim holds and leaves what it committed so: units stay sold and time booked, since a return is a move into a `returnOn` state and never a delete. It is vetoed with `committed` while the claim holds committed time that has not ended. A claim records a reference to each supply it holds, and a supply refuses its own delete while it holds anything (`held`): an item held, or committed time that has not ended. Holds has no release operation: a claim lets go by a move of its status, which runs its guards and leaves its event. | `releaseHolds` beside the Workflow, a second way to end a claim that no state shows; leaving the lines to StateRules alone, which a schema may not compose |
+| `Holds.items` gives each item's hold, supply, quantity or interval, state (`pending`, `held`, `committed`, `released`, `returned`), and unit price and currency when the supply gives them. `Holds.state` is the least advanced item's state, `none` before any. `Holds.total` is the sum of the priced items' prices: an item without a price (time, or units of a Stock with no `price`) adds nothing, and with none priced it is `{ amount: 0, currency: null }`. It is null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly, so a reader that needs money, such as Payments, fails closed on null. None of them is volatile: each moves only with the claim's own events, so a Reactions rule hears `Holds.state` turn `committed`. Reactions' `holds` trigger, a rollup that comes to hold, is a rule key and never meets the behavior's name. | A total computed at read from the supplies, which moves when a supply's price does |
 | A hold expires through a Timers deadline the schema writes, such as `{ start: { enters: "held" }, afterMs, then: { transition: "expired" } }`, with `expired` among the `releaseOn` states. Holds' guidance names a `takeOn` state that no deadline leaves. A hold is let go at most Timers' `sweepMs` after its deadline while the runner runs, and when the runner comes back if it is off (D58, amended). | An expiry sweep in Holds, which D56's Timers was built first to avoid; refusing a `takeOn` state with no deadline, which a quote held until withdrawn needs |
 | A namespace's commerce writes serialize on D58's namespace lock, which is what keeps two shoppers from holding the last unit. A shop or tenant is a namespace of its own, and a load test measures the rate. | A lock per supply, which needs a D58 amendment and breaks behaviors that read across instances; a Postgres row lock or exclusion constraint, which SQLite lacks |
 
@@ -8855,7 +8855,7 @@ Three rules hold throughout, beside D56's.
 | `Calendar` opens a resource's time:<br>- weekly hours as `["HH:MM", "HH:MM"]` ranges per day in an IANA `timeZone`;<br>- a `capacity` (an integer or an own field);<br>- a start grid (`slotMs`);<br>- length bounds (`minMs`, `maxMs`);<br>- buffers before and after a hold;<br>- a lead time and a horizon (`leadMs`, `horizonMs`), read against the engine's clock;<br>- `permission`.<br><br>`setOpeningHours` and `addClosure`/`removeClosure` change an instance's own hours and closures. A closure over held time is `has_bookings` unless forced with the permission's `.override`. | Hours as an own field the config names, whose shape no behavior's parameters check; durations in ISO 8601, which D56's rule leaves out |
 | `holdFor` checks, in order:<br>- the opening hours and closures (`outside_hours`, `closed`);<br>- the grid (`off_grid`);<br>- the length bounds (`too_short`, `too_long`);<br>- the lead time and horizon (`too_soon`, `too_far`);<br>- capacity: the most holds over any instant of the interval, buffers included, must stay below it (`unavailable`, with the conflicting interval).<br><br>Holds are rows of `(instance, start_ms, end_ms)`, indexed by instance and start, and the overlap read is the same on both databases. | A Postgres exclusion constraint, which SQLite lacks and the namespace's one writer makes unnecessary; counting overlapping holds, which over-counts a long hold that two short ones overlap at different times |
 | Local times become instants through `jiff` with its time zone database bundled, so every server built from one lock file computes the same slots. A wall time that DST skips has no slot, and a repeated one gives two. The schema-level, read-only `findAvailability({ startMs, endMs, durationMs, ids?, where?, limit })` gives free slots across instances: at most 500, over at most 31 days (`window_too_long`), by `holdFor`'s rules. `listBookings` reads an instance's holds over the same window. | The system's zone files, which differ between a distroless image and a laptop; chrono-tz, whose API is further from the Temporal names superscalar's scalars use; joint availability across two resources' schemas, which the caller intersects for now |
-| Hours, the grid, buffers, lead time and horizon may change in a new version, and apply to holds made after it. `capacity` falls no lower than the current peak. `timeZone` changes only while no instance holds future time. | Moving held time when the hours change, which a business does by hand with its customers |
+| Hours, the grid, buffers, lead time and horizon may change in a new version, and apply to holds made after it. `capacity` falls no lower than the current peak. `timeZone` changes only while no instance holds future time, and an instance's own zone, through `setOpeningHours`, only while it holds none (`has_bookings`). | Moving held time when the hours change, which a business does by hand with its customers |
 
 ### `Payments`
 
@@ -8939,8 +8939,10 @@ What the build settled:
 - `parse_config` refuses a transition from a `releaseOn` or `returnOn`
   state into a `takeOn` state, since a supply records each item of a
   claim once.
-- A supply takes `releaseFor` and `returnFor` for a holder that is gone,
-  which a claim's delete makes.
+- A supply takes `releaseFor` alone for a holder that is gone, which a
+  claim's delete makes: it releases what was held, leaves what was
+  committed, and retires the records (amended by the supply review
+  below).
 - Stock refuses its delete while it holds units, not while claims have
   committed some, which are sold.
 - `Stock.low` filters through a column each write sets, so after a new
@@ -8979,16 +8981,63 @@ elapsed time. Where the build settled what this entry left open:
   ended, without buffers; a new version refused for capacity or zone is a
   `BehaviorConfigError` of the publish; Calendar leaves only a schema with
   no instances;
-- a resource with any held or committed record, past ones included, is
-  not deleted (`held`), as the contract's helper counts.
+- a resource with held time, or committed time that has not ended, is not
+  deleted (`held`), as the contract's helper counts (amended by the
+  supply review below; past bookings once kept it for good).
 
 `commerce_calendar.rs` in testkit, the core-calendar suite, runs it
 through the contract and testkit's Holds stand-in on SQLite and Postgres:
 thirteen cases, among them the daylight-saving Sundays of Europe/London,
 America/New_York and Australia/Lord_Howe held to Python's zoneinfo
 instants, a sweep held to a minute-scan model, and two engines racing
-eight threads for two places. The TypeScript suite and the recorded
-`commerce-calendar.json` wait for the commerce package's TypeScript side.
+eight threads for two places. The commerce package's TypeScript suite
+covers it (`test/calendar.test.ts`), and its recording,
+`commerce-calendar.json`, is in the corpus the test kit replays.
+
+The supply review of Stock, Holds and Calendar settled:
+- An interval of the contract lies from 1900 to 9000, in its paramsSchema
+  and in `SupplyCall::parse`. Calendar reads hours, closures and holds
+  over an interval's first `maxMs` and a minute only, so one of centuries
+  costs what the longest hold does and is `too_long` once that much is
+  open; before, one call could hang a server under the namespace lock.
+  Holds lists an item whose own date-time fields ask time outside the
+  bounds as `unavailable` without asking the supply.
+- `checkHold` takes `also`, the asks of the claim's other items still to
+  hold of the same instance: a count Stock subtracts from what is
+  available, intervals Calendar counts against capacity. Holds' guard and
+  `listHolds` send it, so two lines of one supply that do not fit
+  together are each listed, rather than failing in `afterChange`.
+- A claim's delete leaves committed units sold: a gone holder's
+  `releaseFor` is the only call a supply takes for it, so no caller gives
+  a deleted claim's units back, and the ledger records no return that
+  did not happen.
+- A gone holder's records retire: a `retired` key column, 0 while the
+  holder lives, keeps their state, so committed time stays booked, and
+  frees the holder's id, so a claim created again with it holds afresh.
+  `listBookings` marks such time `retired`. Calendar's `checkHold` reads
+  the record as Stock's does, so both agree with `holdFor`.
+- A resource and a claim whose committed time has ended are deleted;
+  committed time to come keeps both.
+- `findAvailability` sweeps each instance's sorted holds once, jumps past
+  a full stretch, a closure and a closed stretch, and stops at
+  `MAX_FIND_WORK` (two million), answering `truncated`.
+- Stock's held and commit arithmetic is checked against what a JSON
+  number holds; backorder turns off only with no instance below zero, as
+  this entry says; without backorder a commit is `unavailable` while it
+  would leave fewer than 0 on hand, which a count with the override can
+  cause, and an adjustment up is taken while it leaves too few.
+- The `closures` field reads from now with a limit of 100, and
+  `parse_config` refuses a `takeOn` state's transition to itself, which
+  would start the hold's expiry again.
+
+`commerce_holds_calendar.rs` holds a desk's time through a booking's real
+Holds beside Workflow, Links, Timers, StateRules and Reactions (a rule on
+`Holds.state` turning `committed`), on SQLite and Postgres: commit,
+expiry, the delete that waits for committed time to pass, a claim
+created again with a deleted one's id, an interval of centuries refused
+at once, and two sessions of one desk listed together. Calendar's suite
+times `findAvailability` on a full calendar of 100 instances; Stock's
+covers the counts under backorder and after an override count.
 
 M5, `Payments`: built in `runtime/engine-commerce/rust` (`payments.rs`)
 and registered by `commerce()`, with its own tables of attempts, actions,

@@ -57,10 +57,10 @@ const CORRECTIONS: [(&str, &str); 13] = [
     ("too_long", "Ask at most details.maxMs."),
     ("too_soon", "Start at or after details.earliestMs."),
     ("too_far", "Start at or before details.latestMs."),
-    ("has_bookings", "Move the claims in details first, or force the closure with the permission's override."),
+    ("has_bookings", "Move the claims in details first, or force the closure with the permission's override; a time zone changes once no hold has time to come."),
     ("window_too_long", "Ask for 31 days or less, and page through longer spans."),
     ("no_closure", "Name a closure the Calendar.closures field lists."),
-    ("held", "Let go of, or move, the claims that hold its time first."),
+    ("held", "Let go of the claims that hold its time, or wait until their committed time has ended."),
 ];
 
 fn errors(codes: &[&str]) -> Vec<GuidanceError> {
@@ -182,8 +182,8 @@ pub(crate) fn guidance(config: &CalendarConfig, target: &DescribeTarget) -> Beha
         None => said(None, Some(CLOSED_TO_ALL.to_owned()), None, Vec::new()),
     };
     let set_hours = manage(
-        "set this instance's own weekly hours or time zone; null goes back to the config's, and holds already made stay",
-        &[],
+        "set this instance's own weekly hours or time zone; null goes back to the config's, holds already made stay, and the zone changes only while no hold has time to come",
+        &["has_bookings"],
     );
     let add = manage(
         "close the resource for a holiday, a repair or a training day; force closes over held time, keeps the holds, and needs the permission's override",

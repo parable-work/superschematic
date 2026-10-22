@@ -13,7 +13,7 @@ const CORRECTIONS: [(&str, &str); 7] = [
     ("unavailable", "Ask less, or wait for supply to free; details.items lists each item that does not fit and what is free."),
     ("holds_missing", "Take the holds first: retakeHolds, or move the claim into a takeOn state again."),
     ("held_fields", "Let go of the holds first (move the claim into a releaseOn state), or leave details.fields as they are."),
-    ("committed", "Move the claim into a returnOn state first, or keep it."),
+    ("committed", "Keep the claim until its committed time in details.items has ended; a delete leaves committed units sold."),
     ("too_many_items", "Ask fewer items in one claim."),
     ("not_taking", "Move the claim into a takeOn state first; nothing is left to take when every item is held."),
     ("no_supply", "Name an instance that exists, of a schema that composes a supply."),
