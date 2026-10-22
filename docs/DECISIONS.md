@@ -8896,17 +8896,22 @@ It uses:
 - D26 and D28 for webhooks, D37 for the adapter's principal, and D52 for
   its job.
 
-Status: declared. The core declares the four behaviors, twenty-six in
+Status: built, with acme-shop and the cross-language proof to follow.
+The core declares the four behaviors, twenty-six in
 all, with the package `@superschematic/engine-commerce`, and
 `runtime/engine-commerce/rust/declarations` carries their copies;
 `@superschematic/schema` types their configs. `fixture-commerce-json`
 and its TypeScript twin compose all four with Workflow, Links, Timers,
 Reactions, Numbering, StateRules and Approvals and load to the same IR,
-and `make cli-smoke` builds the JSON form. `fixture-commerce-currency`,
-whose currency is a `Finance.Currency` own field, and the Go runtime's
-test that `Finance.Currency` refuses `ABC`, skip until `superscalar.pin`
-carries the scalar. The names and rules are reversible until the first
-release.
+and `make cli-smoke` builds the JSON form. `superscalar.pin` names
+62b300e7, which adds `Finance.Currency` (superscalar#86):
+`fixture-commerce-currency`, whose currency is a `Finance.Currency` own
+field, loads in both forms to the same IR (`TestCommerceCurrencyFields`)
+and `make cli-smoke` builds its JSON form; the Go runtime refuses `ABC`
+(`TestFinanceCurrencyThroughTheCore`), and the engine refuses it as a
+`Finance.Currency` field's value
+(`a_finance_currency_field_takes_only_active_iso_4217_codes`). The names
+and rules are reversible until the first release.
 
 Stock (M2) and Holds (M3) are built in `runtime/engine-commerce/rust`,
 registered by `commerce()` and carried by the core's addon. Each has a
@@ -8916,8 +8921,13 @@ every step that `Stock.onHand` is the sum of the movements, `held` the
 sum of the records that hold, and that every held or committed item
 matches its supply's record. The suites cover all or none, expiry
 through the runner, the late-payment race and two claims racing for the
-last units on two engines over one Postgres. The race runs against a
-stand-in for Payments' guard until Payments is built. The package
+last units on two engines over one Postgres. The late-payment race runs
+on Payments over the claim's `Holds.total`: an attempt reported
+`processing` vetoes the expiry (`payment_in_progress`), its capture
+places the checkout through a Reactions rule on `Payments.state`, a
+failed payment lets the backstop release it, and a capture after the
+release leaves it released and asks a refund (`afterRelease: refund`).
+The package
 `@superschematic/engine-commerce` (`runtime/engine-commerce/typescript`)
 holds their names and types, and its suite records
 `commerce-{stock,holds,holds-timers}.json`, which the test kit replays.
@@ -8939,8 +8949,7 @@ What the build settled:
 - Under the default dotted permissions the permission covers its
   `.override`.
 - A literal currency is checked against ISO 4217 through superscalar's
-  table once `superscalar.pin` carries `Finance.Currency`, and against its
-  pattern until then.
+  `Finance.Currency` table (`currency.rs`), so `ABC` is refused.
 
 M4, `Calendar`, is built in the commerce crate (`src/calendar`) and
 registered in `NAMES`, so the core's Node-API addon carries it. It links
@@ -8986,10 +8995,9 @@ and registered by `commerce()`, with its own tables of attempts, actions,
 refunds, a refund instance's issues and the provider events it recorded,
 the same SQL on both databases. A literal currency, and the code an
 instance pays in, is checked against `Finance.Currency`'s table through
-the crate's `currency` module, which Stock's builder added: its `build.rs`
-turns the table on when the superscalar checkout carries the scalar, and
-until then a code is held to its shape alone. The testkit's
-`commerce_payments` (11 cases) and `commerce_payments_refunds` (4) pass on SQLite and Postgres:
+the crate's `currency` module, which Stock's builder added. The
+testkit's `commerce_payments` (12 cases) and `commerce_payments_refunds`
+(4) pass on SQLite and Postgres:
 idempotent and reordered events, `amount_locked` from a field and from a
 stand-in `Holds.total`, `require`, `voidOn` and `payment_in_progress`,
 `afterRelease`, manual capture and over-capture, direct refunds, a
@@ -9033,8 +9041,8 @@ is their client. servergen's `shop-commerce-db` fixture, with an API in
 Go, Rust and TypeScript, builds and serves offline in all three
 (`TestCommerceEngineEntrypointServes`, `…Rust`, `…TypeScript`); on
 Postgres each deploys the document and answers one script, the MCP
-tools' policies included, once the crate registers all four behaviors,
-and skips that half until then. The client parity corpus and the
+tools' policies included, now that the crate registers all four
+behaviors. The client parity corpus and the
 `@superschematic/engine-commerce` npm package wait for the behaviors.
 
 acme-shop and the cross-language proof follow.
