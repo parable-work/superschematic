@@ -19,12 +19,13 @@ use acme_shop_orders_api::{
     identity, types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation,
     OrderListOrdersArgs, OrderPlaceOrderArgs, ProductCatalogGetProductArgs,
     ProductCatalogImplementation, ProductCatalogListProductsArgs, ProductReviewsImplementation,
-    ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs,
+    ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, WebhookVerifier,
 };
 use async_trait::async_trait;
 use superschematic_http_runtime::page::{refused_cursor, Page, PageRequest, Sort};
 use superschematic_http_runtime::{covers, search, ApiError, RequestContext};
 
+mod checkouts;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
@@ -247,11 +248,17 @@ pub fn implementations<S: ShopImplementation>(
     shop: Arc<S>,
     users: Arc<Service>,
 ) -> Implementations {
+    let unserved = Arc::new(checkouts::NoCheckouts);
     Implementations {
+        checkouts: unserved.clone(),
         order: shop.clone(),
+        payment_webhooks: unserved.clone(),
         product_catalog: shop.clone(),
         product_reviews: shop,
         authenticator: Arc::new(IdentityAuthenticator::new(users)),
+        webhook_verifiers: [("acmepay".to_owned(), unserved as Arc<dyn WebhookVerifier>)]
+            .into_iter()
+            .collect(),
     }
 }
 

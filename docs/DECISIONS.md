@@ -8906,7 +8906,7 @@ It uses:
 - D26 and D28 for webhooks, D37 for the adapter's principal, and D52 for
   its job.
 
-Status: built, with acme-shop and the cross-language proof to follow.
+Status: built and proved across languages, and acme-shop is built.
 The core declares the four behaviors, twenty-six in
 all, with the package `@superschematic/engine-commerce`, and
 `runtime/engine-commerce/rust/declarations` carries their copies;
@@ -9106,7 +9106,73 @@ behaviors. The client parity corpus carries the commerce schemas, and
 the release publishes `@superschematic/engine-commerce` (D70, amended
 below).
 
-acme-shop and the cross-language proof follow.
+acme-shop is built (D70, amended below: acme-shop sells, books and
+refunds through the engine).
+
+The cross-language proof (M8). servergen's `shop-checkout-stack` serves
+`shop-commerce-db`'s three APIs, in Go, Rust and TypeScript, each naming
+the database as its authDb, so its members hold the permissions their
+roles grant, beside one runner; the database gains the user model, a
+`Bay` of capacity 1 with a `Booking` that holds it, and a two-second
+hold expiry. `TestCommerceServersAnswerOneScriptAlike` runs the design's
+script against each server on one Postgres, its ids, logins, provider
+and event ids tagged per run: staff receive three units, which a shopper
+may not; a cart holds two and a pickup slot, owes `total_unknown` while
+they are pending and their price once held, and a second cart's two are
+`unavailable`; a payment opens twice under one key, and the adapter,
+staff holding `payments.record`, lists its action and records
+`processing`, `captured`, the capture again (`applied: false`), a late
+`requiresAction` (ignored) and an event in EUR (`currency_mismatch`),
+which a shopper may not record; placing commits the units and the slot;
+a refund past what is refundable is `exceeds_refundable`, and a Refund
+its creator may not sign and one sign-off cannot approve is approved by
+two, asked of the checkout, and settled by the provider's refund event;
+then two checkouts hold a unit each, one paying, and the runner expires
+the unpaid one, its unit back, vetoes the paying one's expiry
+(`payment_in_progress`, the deadline fired with the outcome `vetoed`)
+and moves the Refund to issued, and once the late capture is recorded
+places the paying one through Reactions. After each run onHand is the
+sum of the ledger's movements. The three normalised transcripts, 65
+exchanges each, are identical: a Numbering label and seq are symbols,
+since the runs share the namespace's count. Each server then reads what
+each other wrote, with its own staff's session and the writer's, alike.
+`TestCommerceServersOversellNothing` moves 1,000 checkouts cart→held at
+once, a third through each server and at most 32 requests in flight to
+each, for an Inventory's three units: three hold, 997 are vetoed
+`unavailable` and stay in their carts, and Stock's ledger holds (onHand
+the sum of the movements, held the sum of the held checkouts' items,
+none available); 1,000 bookings of one slot of the Bay hold one. With
+128 in flight to each server, the moves at the back of the namespace's
+queue waited past the servers' 30-second engine route timeout and
+answered 504 `gateway_timeout` (12 and 189 of the 1,000 in two runs),
+and still exactly three held. CI's engine-servers job and `make
+engine-servers` run both.
+
+`TestCommerceHoldsLoad`, which runs only with
+`SUPERSCHEMATIC_COMMERCE_LOAD=1`, measured three servers and 24 clients
+on a laptop against Postgres 17 in a local VM: checkouts of one item
+held at 6.2 a second (6 holds a second), of ten items at 2.6 (26 holds
+a second), and of fifty at 0.7 (35 holds a second); checkouts were
+created at about 12 a second. In the oversell test the refused moves ran
+at about 13 a second, and the Bay's bookings, a type of fewer behaviors,
+at about 60. Statement logging puts the time in round trips under the
+namespace lock rather than in the database's work: holding a checkout
+of ten items ran about 680 statements in one transaction, with about
+7 ms of database time, and creating one about 165. Each behavior's hook
+reads the schema's document and the instance again, 109 times each in
+that hold, so a cache of those reads within a transaction is the first
+step to a faster checkout; until then a namespace per shop keeps shops
+from queueing on each other. Reads pay the same way: listing the 997
+checkouts the oversell test leaves in their carts, whose pending items
+each read their supply, took about 58 seconds in pages of 100, and one
+page of 500 passed the 30-second route timeout.
+
+The guide "Selling and booking with the engine"
+(`docs/src/content/docs/guides/commerce.md`) and
+`runtime/engine-commerce/README.md` describe the four behaviors, the
+supply contract, totals and currency, the payment adapter outside the
+engine, refunds with Approvals, expiry with Timers and the MCP tools'
+policy.
 
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 
@@ -9518,3 +9584,41 @@ spans reach a collector from `waitUntil`; and a presigned PUT and GET for
 an EU bucket, with the edge's token scoped to it.
 
 The rule is reversible until the first release.
+
+### D70, amended: acme-shop sells, books and refunds through the engine
+
+D70 moved acme-shop's stock and checkout onto the engine: `Inventory`
+(`Stock`), `CollectionPoint` (`Calendar`), `Checkout` (`Holds`, `Timers`,
+`Payments`) and `Refund`, with the `Order` table and its queues staying.
+Building it settled where each piece runs and what the old shop keeps.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cart is a TypeScript API of its own, `shop-cart`: a shopper's cart is a `Checkout` in `cart`, and the pickup slots are `CollectionPoint`'s `findAvailability`. `shop-storefront` keeps its carts in memory, since `storefront-stack` runs it as a Cloudflare Worker, which cannot load the engine (D64). | Moving the storefront's carts onto the engine, which ends `storefront-stack`'s `Staging`; the storefront calling `shop-orders`, whose `calls` edge brings `shop-orders` and `shop-db` into that stack |
+| `shop-stock`'s `reserveStock` goes. `shop-orders` tells `shop-stock` what a placed checkout sold through a `@requireService` operation with no user clause, `stockSold`, since a payment's webhook brings no shopper, and `shop-stock` enqueues `StockLow` for each product the sale left low (`Stock.low`). `StockLow` and `ReorderStock` stay, so the Go to Rust service call (D37, D57) and the Rust worker and job (D65) keep their proofs; `OrderRestocks` also files a request for each `Inventory` the engine lists low with none open, which a count or an adjustment leaves, and then orders the open ones. | Retiring `StockLow` and `ReorderStock` for `OrderRestocks` over `Stock.low` alone, which drops the queue's proof; a `Reactions` rule, which moves statuses and runs no project code |
+| `placeOrder` stays, an order taken in one step that holds no stock and takes no payment, which the Rust server, the Topcoat app and the SDKs' tests place. The Rust server answers the checkouts 501, and the Topcoat app mounts the engine at `/engine` on a SQLite file of its own and sells nothing through it yet. | Retiring `placeOrder`, which takes the D60–D62 and Topcoat proofs with it |
+| The runner's `Reactions` rule places a paid checkout after the webhook that recorded the capture answered, so the `Order` row (unique `checkoutId`) is written when `shop-orders` next looks: the webhook, if the checkout is placed already, `getCheckout`, or `SettlePayments`, which reads every placed checkout. The row's lines are the prices `Holds` held. | The webhook moving the checkout to `placed` itself, which races the rule |
+| `go/acmepay` is the provider: intents, cancellations, refunds and webhooks signed `t=…,v1=` (HMAC-SHA256 of `t.body`, five minutes' tolerance, two secrets during a rotation), with idempotency keys. Every change is an event with an id, which its API's answer names, so the adapter records the answer under the event's id and the webhook that brings the same event applies once. It takes a payer's test token and refuses any other field, a card number among them. `stack dev` runs no process of a project's own, so acmepay runs beside it at `ACMEPAY_URL`'s default address, `127.0.0.1:4250`, with `Dev`'s secrets, and the tests run it in-process. | A real provider's test mode, which needs its keys; an API of the stack's that serves the fake in `Dev` alone, which a stack cannot declare per environment |
+| An engine id that a type's `Identity.UUID` field names is that UUID's canonical text, as the scalar writes it (base62): a line's `inventoryId` names an `Inventory` whose id is its product's, and a checkout's `customerId` is the shopper's id as the engine stores it. | The UUID's hyphenated form, which the engine's `Identity.UUID` fields would hold in the other form, so no hold found its supply |
+| `shop-db`'s policy is rules, the first that matches deciding: `shop-orders` reads and writes, `shop-cart` writes checkouts and reads the stock and the counters, `shop-stock` the stock, any other service nothing, the runner (`shop-db-engine-runner`) each type by its name, then staff by their roles (`refunds.approve`, `orders.any`, `stock.write`, `calendar.manage`). Every `Payments` operation asks; `receiveStock` is `auto`, a warehouse's routine its ledger records with a reason; `adjustStock` and `countStock` ask, since each takes units out of sale. | `allowAll`, which a deployment should not copy; the runner's rule after the staff's, which a read of a checkout by the runner met first |
+
+A build of one stack, `superschematic build`, read its engine database's
+config only where build-all hands it over, so its servers opened the
+engine with the default `permission` policy rather than the database's;
+the engine's settings now come from the config either way (D58).
+
+Status: built. `examples/acme-shop/go/commerce_test.go` opens `shop-db`'s
+engine on SQLite with the project's engine archive and the policy
+`shop-stack`'s servers open it with, and serves `shop-orders` over it:
+a checkout holds two units and a pickup slot, another finds one free
+(`unavailable`), acmepay's signed capture places it through the runner, a
+webhook signed with another secret, with none or long ago is refused, a
+resent one changes nothing, the order is written once and `shop-stock`
+told of the sale, the slot is committed, and a refund two members of
+staff sign off is made by `SettlePayments` and issued, once. acmepay has
+tests of its own. `TestStackDevRunsTheShop` runs the same sale on
+`stack dev` over Postgres, `shop-cart` on Bun included, with the sale one
+trace from `shop-orders` into `shop-stock`, and
+`TestStackInitOverAcmeShop` resolves the stack on gcp.
+`internal/generator`'s `TestABuildOfOneStackOpensTheEngineWithItsPolicy`
+holds the policy fix. The rule is reversible until the first release.

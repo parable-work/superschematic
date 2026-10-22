@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	api "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
-	stocksdk "example.com/acme/sdk/go/shop-stock"
 	db "example.com/acme/types/go/shop-db"
 	types "example.com/acme/types/go/shop-orders"
-	stocktypes "example.com/acme/types/go/shop-stock"
 	"github.com/jackc/pgx/v5/pgconn"
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
@@ -25,12 +22,6 @@ import (
 // orders.any, every customer's.
 type Orders struct {
 	DB orm.DatabaseInterface
-
-	// Stock is the client of shop-stock, which reserves an order's stock.
-	// The server's entrypoint builds it with shop-orders' service
-	// credential, and it forwards the shopper of the request each call's
-	// context belongs to.
-	Stock *stocksdk.ShopStockSDK
 }
 
 var _ api.OrderImplementation = (*Orders)(nil)
@@ -43,6 +34,9 @@ func withLines() *orm.OrderGetOptions {
 	return &orm.OrderGetOptions{Fields: fields}
 }
 
+// PlaceOrder records an order taken in one step, at the products' prices
+// now, which the Topcoat app and the SDKs' tests place: it holds no stock
+// and takes no payment, which a checkout does (checkouts.go).
 func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error) {
 	customer, err := caller(ctx)
 	if err != nil {
@@ -50,7 +44,6 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 	}
 	ctx = actingUser(ctx)
 	var placed *db.Order
-	reservation := stocktypes.ReserveStockInput{Lines: make([]stocktypes.ReserveStockLine, 0, len(input.Lines))}
 	err = o.DB.Transaction(ctx, func(tx orm.TxInterface) error {
 		// Each line's product, at its price now. The order stores its
 		// total, the sum of its lines, which do not change after.
@@ -88,17 +81,6 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 				return err
 			}
 			order.Lines = append(order.Lines, *line)
-			reservation.Lines = append(reservation.Lines, stocktypes.ReserveStockLine{
-				ProductId: *product.Id,
-				Quantity:  stocktypes.GenericInt64(item.Quantity),
-			})
-		}
-		// shop-stock takes every line off the shelf, or none, for the
-		// shopper this request's context forwards. Its refusal rolls the
-		// order back. Should the commit fail after it, the stock stays
-		// reserved: this shop releases none.
-		if err := o.reserve(ctx, reservation); err != nil {
-			return err
 		}
 		placed = order
 		// FulfilOrders, shop-orders' worker, fulfils the order. The message
@@ -110,22 +92,6 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 	}
 	view := orderView(placed)
 	return &view, nil
-}
-
-// reserve reserves an order's stock on shop-stock. The warehouse's
-// refusal, a 409 for a line it cannot fill, is the shopper's to read, so
-// the order is refused with its message; any other failure is the
-// server's.
-func (o *Orders) reserve(ctx context.Context, reservation stocktypes.ReserveStockInput) error {
-	_, err := o.Stock.StockReservationsNamespace.ReserveStock(ctx, reservation)
-	var refused *stocksdk.APIError
-	if errors.As(err, &refused) && refused.StatusCode == http.StatusConflict {
-		return api.ConflictError(refused.Message, err)
-	}
-	if err != nil {
-		return fmt.Errorf("reserve the order's stock on shop-stock: %w", err)
-	}
-	return nil
 }
 
 // everyOrder is the permission of staff, who read and cancel every

@@ -4,11 +4,13 @@ import { AutoGenerate, Relation, index, key, queue } from "@superschematic/db";
 
 import { Auditable, Product } from "./shop.schema";
 
-// Enqueued by shop-stock's reservation, in its transaction, when it takes a
-// product's level below its threshold: shop-stock's worker ReorderStock
-// files a restock request for the product. The message holds the level and
-// the threshold as the reservation left them. A message whose handler fails
-// is retried every half minute, five times at most.
+// Enqueued by shop-stock when a sale leaves a product low, its Inventory's
+// available units at or below its reorderAt (Stock.low, D70), and by its
+// job OrderRestocks for one a count left low: shop-stock's worker
+// ReorderStock files a restock request for the product. The message holds
+// the units available and the reorder level as the sale left them. A
+// message whose handler fails is retried every half minute, five times at
+// most.
 @queue({ retries: 5, backoff: "30s" })
 export abstract class StockLow {
   productId: Identity.UUID;
@@ -24,8 +26,8 @@ export enum RestockStatus {
 }
 
 // A request to the supplier for more of a product: shop-stock's worker
-// ReorderStock files one when a reservation runs the product low, and its
-// job OrderRestocks orders each open one. A product has at most one
+// ReorderStock files one when a sale runs the product low, and its job
+// OrderRestocks orders each open one. A product has at most one
 // open request: openProductId is the product while the request is open and
 // null once it is ordered, and the unique index over it admits one row per
 // product, since a unique index lets nulls repeat.

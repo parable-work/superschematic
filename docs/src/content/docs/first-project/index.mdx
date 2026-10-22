@@ -44,16 +44,18 @@ calls from its pages.
     - tsconfig.base.json
     - services/
       - shop-common/ General: Price and Currency
-      - shop-db/ DB: the tables
+      - shop-db/ DB: the tables, and the engine's stock, checkouts and refunds
       - shop-api/ API: products and sign-in, served in Go
-      - shop-orders/ API: orders and reviews, for the guides
+      - shop-orders/ API: orders, reviews and checkouts, for the guides
       - shop-stock/ API: stock, served in Rust
+      - shop-cart/ API: a shopper's cart and the pickup slots, served in TypeScript
       - shop-storefront/ API: carts, served in TypeScript
       - shop-stack/ Stack: what runs, and the Dev environment stack dev runs
   - go/ the Go module: the implementations and tests
     - shop-api/ the implementation of shop-api
     - shop-orders/ the implementation of shop-orders
-  - typescript/ the TypeScript service, a client and tests
+    - acmepay/ a fake payment provider, which the checkouts pay through
+  - typescript/ the TypeScript services, a client and tests
   - python/ a client and tests
   - rust/ a client and tests
   - rust-impl/
