@@ -1204,7 +1204,7 @@
           },
           "total": {
             "schema": {
-              "description": "The sum of the items' unit prices times their quantities, as { amount, currency }, when every item has a price in one currency; null otherwise.",
+              "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
               "oneOf": [
                 {
                   "additionalProperties": false,
@@ -1213,7 +1213,10 @@
                       "type": "integer"
                     },
                     "currency": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
