@@ -8906,7 +8906,7 @@ It uses:
 - D26 and D28 for webhooks, D37 for the adapter's principal, and D52 for
   its job.
 
-Status: built, with acme-shop and the cross-language proof to follow.
+Status: built and proved across languages, with acme-shop to follow.
 The core declares the four behaviors, twenty-six in
 all, with the package `@superschematic/engine-commerce`, and
 `runtime/engine-commerce/rust/declarations` carries their copies;
@@ -9106,7 +9106,63 @@ behaviors. The client parity corpus carries the commerce schemas, and
 the release publishes `@superschematic/engine-commerce` (D70, amended
 below).
 
-acme-shop and the cross-language proof follow.
+The cross-language proof (M8). servergen's `shop-checkout-stack` serves
+`shop-commerce-db`'s three APIs, in Go, Rust and TypeScript, each naming
+the database as its authDb, so its members hold the permissions their
+roles grant, beside one runner; the database gains the user model, a
+`Bay` of capacity 1 with a `Booking` that holds it, and a two-second
+hold expiry. `TestCommerceServersAnswerOneScriptAlike` runs the design's
+script against each server on one Postgres, its ids, logins, provider
+and event ids tagged per run: staff receive three units, which a shopper
+may not; a cart holds two and a pickup slot, owes `total_unknown` while
+they are pending and their price once held, and a second cart's two are
+`unavailable`; a payment opens twice under one key, and the adapter,
+staff holding `payments.record`, lists its action and records
+`processing`, `captured`, the capture again (`applied: false`), a late
+`requiresAction` (ignored) and an event in EUR (`currency_mismatch`),
+which a shopper may not record; placing commits the units and the slot;
+a refund past what is refundable is `exceeds_refundable`, and a Refund
+its creator may not sign and one sign-off cannot approve is approved by
+two, asked of the checkout, and settled by the provider's refund event;
+then two checkouts hold a unit each, one paying, and the runner expires
+the unpaid one, its unit back, vetoes the paying one's expiry
+(`payment_in_progress`, the deadline fired with the outcome `vetoed`)
+and moves the Refund to issued, and once the late capture is recorded
+places the paying one through Reactions. After each run onHand is the
+sum of the ledger's movements. The three normalised transcripts, 65
+exchanges each, are identical: a Numbering label and seq are symbols,
+since the runs share the namespace's count. Each server then reads what
+each other wrote, with its own staff's session and the writer's, alike.
+`TestCommerceServersOversellNothing` moves 1,000 checkouts cart→held at
+once, a third through each server and at most 128 requests in flight to
+each, for an Inventory's three units: three hold, 997 are vetoed
+`unavailable` and stay in their carts, and Stock's ledger holds (onHand
+the sum of the movements, held the sum of the held checkouts' items,
+none available); 1,000 bookings of one slot of the Bay hold one. CI's
+engine-servers job and `make engine-servers` run both.
+
+`TestCommerceHoldsLoad`, which runs only with
+`SUPERSCHEMATIC_COMMERCE_LOAD=1`, measured three servers and 24 clients
+on a laptop against Postgres 17 in a local VM: checkouts of one item
+held at 6.2 a second (6 holds a second), of ten items at 2.6 (26 holds
+a second), and of fifty at 0.7 (35 holds a second); checkouts were
+created at about 12 a second. In the oversell test the refused moves ran
+at about 13 a second, and the Bay's bookings, a type of fewer behaviors,
+at about 60. Statement logging puts the time in round trips under the
+namespace lock rather than in the database's work: holding a checkout
+of ten items ran about 680 statements in one transaction, with about
+7 ms of database time, and creating one about 165. Each behavior's hook
+reads the schema's document and the instance again, 109 times each in
+that hold, so a cache of those reads within a transaction is the first
+step to a faster checkout; until then a namespace per shop keeps shops
+from queueing on each other.
+
+The guide "Selling and booking with the engine"
+(`docs/src/content/docs/guides/commerce.md`) and
+`runtime/engine-commerce/README.md` describe the four behaviors, the
+supply contract, totals and currency, the payment adapter outside the
+engine, refunds with Approvals, expiry with Timers and the MCP tools'
+policy. acme-shop follows.
 
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 

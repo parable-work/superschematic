@@ -28,8 +28,10 @@ engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
 `@superschematic/engine-workqueue`). The last four, `Stock`, `Calendar`,
 `Holds` and `Payments`, are commerce (D70): the core declares them with
-the package `@superschematic/engine-commerce`, and no engine runs them
-yet.
+the package `@superschematic/engine-commerce`, the core's addon carries
+them and a project's engine crate links them, and an engine runs them
+once a deployment names them (`commerceBehaviors`), as a generated
+server does.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -49,7 +51,7 @@ yet.
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
-| `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it (declared, not yet run) | `Workflow` for `Holds` | [D70](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md) |
+| `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
 
 A running engine lists the behaviors it runs, an extension's included,
 at `GET /behaviors`, and returns one's declaration at
@@ -1704,6 +1706,8 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 
 - [Work queues](/superschematic/guides/work-queues/): leases, claims,
   worker heartbeats, stamped children, budgets and retries.
+- [Selling and booking](/superschematic/guides/commerce/): stock, time,
+  a claim's holds on both, and payments and refunds.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors):
   the behavior interface, for writing your own.
 - [Write an extension](/superschematic/extending/write-an-extension/#a-behavior):

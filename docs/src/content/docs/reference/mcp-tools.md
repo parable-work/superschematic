@@ -470,7 +470,11 @@ composed behavior declares, and the engine document adds, wherever
 `recordPaymentEvent`, which a provider's adapter calls, and
 `settleRefundFor`, which a refunded instance calls on its refund. An
 engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
-is given.
+is given. Three generated servers, in Go, Rust and TypeScript, list the
+same tools with the same policies over one commerce database
+(`TestCommerceServersAnswerOneScriptAlike`), and
+[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
+says why each of these operations asks.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under

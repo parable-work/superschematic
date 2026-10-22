@@ -1847,7 +1847,10 @@ what another wrote and streams what another commits, a session one signed
 in reaches the others, since the user model's tables are the database's,
 and the database has one runner. `TestEngineServersAnswerOneScriptAlike`
 runs one script against a Go, a Rust and a TypeScript server over one
-database and requires their answers to be the same (D58).
+database and requires their answers to be the same (D58), and
+`TestCommerceServersAnswerOneScriptAlike` does the same for three servers
+over a database whose types compose the commerce behaviors, linked
+through the project's engine crate (D70).
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on
