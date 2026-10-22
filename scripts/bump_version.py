@@ -34,6 +34,8 @@ Version sites (relative to the repository root):
                                       packages, @superschematic/engine-<target>
   runtime/engine-workqueue/typescript/package.json
                                       version
+  runtime/engine-commerce/typescript/package.json
+                                      version
   runtime/schema/python/pyproject.toml
                                       [project] version, in PEP 440 form
   runtime/schema/python/uv.lock       the superschematic-schema-runtime package,
@@ -269,13 +271,14 @@ def sites():
                 "semver",
             )
         )
-    out.append(
-        (
-            ROOT / "runtime" / "engine-workqueue" / "typescript" / "package.json",
-            [(r'(\n  "version": ")' + V + r'(",)', 1)],
-            "semver",
+    for package in ("engine-workqueue", "engine-commerce"):
+        out.append(
+            (
+                ROOT / "runtime" / package / "typescript" / "package.json",
+                [(r'(\n  "version": ")' + V + r'(",)', 1)],
+                "semver",
+            )
         )
-    )
     out.append(
         (
             ROOT / "runtime" / "schema" / "python" / "pyproject.toml",
