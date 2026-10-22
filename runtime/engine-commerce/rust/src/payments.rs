@@ -1145,7 +1145,8 @@ enum HoldsOwed {
 // - an item still pending has no price yet, which comes when it is held,
 //   so nothing is known while one is;
 // - `Holds.total`, `{ amount, currency }`, is what is owed when it is
-//   there;
+//   there; `{ amount: 0, currency: null }`, a claim with nothing priced,
+//   owes nothing;
 // - a null total is 0 when no item carries a price (a free booking), and
 //   unknown when one does: the priced items' currencies differ, or their
 //   sum is past what an integer holds.
@@ -1194,7 +1195,14 @@ fn holds_owed(view: &InstanceView<'_, PaymentsConfig>) -> Result<HoldsOwed> {
         .collect();
     currencies.sort_unstable();
     currencies.dedup();
-    Ok(HoldsOwed::Unknown(if currencies.len() > 1 {
+    let unnamed = items
+        .iter()
+        .filter(|item| item.get("unitPrice").is_some_and(|price| !price.is_null()))
+        .any(|item| item.get("currency").and_then(Value::as_str).is_none());
+    if unnamed {
+        currencies.push("a price with no currency");
+    }
+    Ok(HoldsOwed::Unknown(if currencies.len() > 1 || unnamed {
         format!(
             "Holds.total is null: its priced items are in {}, which are never added",
             currencies.join(" and ")
