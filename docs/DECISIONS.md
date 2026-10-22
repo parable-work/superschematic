@@ -9172,7 +9172,7 @@ The guide "Selling and booking with the engine"
 `runtime/engine-commerce/README.md` describe the four behaviors, the
 supply contract, totals and currency, the payment adapter outside the
 engine, refunds with Approvals, expiry with Timers and the MCP tools'
-policy. acme-shop follows.
+policy.
 
 ### D21, amended: a nullable Go integer scalar keeps an explicit `0`
 

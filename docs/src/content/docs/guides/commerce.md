@@ -516,26 +516,58 @@ and keep the payer's identity with the provider.
 `examples/acme-shop` is the worked example. Its shop database's engine
 types are `Inventory` (`Stock`), `CollectionPoint` (`Calendar`),
 `Checkout` (`Workflow`, `Links`, `Holds`, `Timers`, `Payments`,
-`Reactions`, `Numbering` and `StateRules`) and `Refund` (two
-`Approvals` sign-offs, `Numbering`, and `Payments` with `refundOf`), and
-each service plays one part in its own language:
+`Reactions`, `Numbering` and `StateRules`) and `Refund` (`Workflow`, two
+`Approvals` sign-offs, `Links`, `Numbering`, `StateRules`, `Payments`
+with `refundOf`, and `Reactions`). Every server, job, worker and runner
+on the database opens its engine, and each service plays one part:
 
-- a TypeScript API is the cart: a `Checkout` in `cart`, and pickup slots
-  from `CollectionPoint`'s `findAvailability`;
-- the Go orders API starts a checkout (`cart` to `held`), opens its
-  payment and calls the provider, receives the provider's events at a
-  webhook verified by `@hmacVerified` (a `t=…,v1=…` HMAC with a
-  five-minute tolerance), drains the waiting actions in a settle job,
-  and asks refunds;
-- the Rust stock API runs over `Inventory`;
+- `shop-cart`, a TypeScript API, is the cart: a shopper's cart is a
+  `Checkout` in `cart`, and the pickup slots are `CollectionPoint`'s
+  `findAvailability`;
+- `shop-orders`, in Go, moves a checkout from `cart` to `held`
+  (`startCheckout`), which holds every line's units and the slot or none;
+  opens its payment and makes the intent at the provider (`payCheckout`);
+  receives the provider's events at `paymentEvents`, a webhook verified
+  by `@hmacVerified` (a `t=…,v1=…` HMAC with a five-minute tolerance),
+  recording each under the event's id;
+  and asks for refunds (`requestRefund`). Its job `SettlePayments` makes
+  the payment actions the engine holds at the provider, each with the
+  action's id as its idempotency key, asks after attempts left
+  processing, and writes the `Order` row of each placed checkout;
+- the runner's `Reactions` rule places a checkout once its capture is
+  recorded, which commits its units and slot. The `Order` row, unique by
+  `checkoutId`, is written when `shop-orders` next looks: the webhook,
+  `getCheckout` or `SettlePayments`. `shop-orders` then tells `shop-stock`
+  what the checkout sold;
+- `shop-stock`, in Rust, keeps the stock over `Inventory`: staff count a
+  product's shelf and book deliveries in, and `stockSold`, which only
+  `shop-orders` may call (`@requireService`), enqueues `StockLow` for a
+  product a sale left low (`Stock.low`). Its job `OrderRestocks` files a
+  restock request for each `Inventory` the engine lists low;
+- a `Refund` of a placed checkout is approved by two members of staff
+  who hold `refunds.approve`; `SettlePayments` makes it at the provider,
+  and the runner's rule moves it to `issued` once refunded;
 - `acmepay`, a fake provider in Go, takes test tokens only and refuses
-  card numbers, signs its webhooks and honours idempotency keys, so
-  `stack dev` and the tests pay without a real provider.
+  card numbers, signs its webhooks and honours idempotency keys. `stack
+  dev` and the tests pay through it without a real provider: it runs
+  beside `stack dev` on `127.0.0.1:4250`, and in-process in the tests.
 
-A TypeScript server runs the commerce behaviors on the core's addon,
-and the Go and Rust servers link the project's engine crate. The
-[README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md)
-walks through it.
+The database's policy is ordered rules, the first that matches deciding:
+`shop-orders` reads and writes every type, `shop-cart` writes checkouts
+and reads the stock and the counters, `shop-stock` keeps the stock, and
+any other service is refused; then the runner (`shop-db-engine-runner`)
+holds each type by its name, a rule that comes before the staff's, since
+the runner reading a checkout would otherwise meet a staff rule first;
+then staff by their roles: `refunds.approve`, `orders.any`, `stock.write`
+and `calendar.manage`.
+
+`placeOrder` still takes an order in one step, holding no stock and
+taking no payment, for the shop's Rust server, which answers the
+checkout routes and the webhook 501, and its Topcoat app, which mounts
+the engine at `/engine` but sells nothing through it yet. The
+[README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md#commerce)
+walks through a sale, and D70's amendment, "acme-shop sells, books and
+refunds through the engine", records why each piece runs where it does.
 
 ## The proof
 
