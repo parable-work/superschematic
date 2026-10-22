@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 
 use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, DefineOptions, Engine, EngineOptions, Error, InstanceRecord,
-    Principal, RunnerOptions, SchemaTarget, WriteOptions,
+    Principal, ReadEvents, RunnerOptions, SchemaTarget, WriteOptions,
 };
 use superschematic_engine_testkit::commerce_fixtures::TestSupply;
 
@@ -1093,10 +1093,42 @@ fn a_config_is_held_to_the_types_workflow_links_and_fields() {
     }
 }
 
+/// How many define events the event log holds for a schema.
+fn defines(engine: &Engine, name: &str) -> usize {
+    let page = engine
+        .events()
+        .read(
+            &alice(),
+            &ReadEvents {
+                schema: Some(name),
+                kinds: Some(vec!["define".to_owned()]),
+                limit: Some(500),
+                ..Default::default()
+            },
+        )
+        .expect("read the event log");
+    page.events.len()
+}
+
 #[test]
 fn a_deploy_publishes_a_claim_after_the_supplies_it_names() {
     for target in targets("holds_deploy_order") {
         let engine = target.open_with(behaviors(), configure);
+        // A supply that cannot deploy fails with its own refusal, not the
+        // claim's that names it, and what does not need it deploys.
+        let mut bad = inventory();
+        bad["types"]["Inventory"]["behaviors"][0]["config"]["price"]["field"] = json!("nope");
+        let refused = engine
+            .deploy(&[paid_checkout(), counter(), bad], None)
+            .expect_err("Inventory's Stock config names no field nope");
+        assert!(
+            refused.to_string().contains("price.field \"nope\""),
+            "{refused}"
+        );
+        assert!(
+            !refused.to_string().contains("no live version"),
+            "{refused}"
+        );
         // An engine document lists its types in name order: Checkout
         // names Inventory, which is not live yet when it comes first.
         let documents = [paid_checkout(), counter(), inventory()];
@@ -1106,14 +1138,18 @@ fn a_deploy_publishes_a_claim_after_the_supplies_it_names() {
         assert_eq!(
             deployed
                 .iter()
-                .map(|one| (one.name.as_str(), one.version, one.published))
+                .map(|one| (one.name.as_str(), one.version, one.defined))
                 .collect::<Vec<_>>(),
             [
                 ("Checkout", 1, true),
-                ("Counter", 1, true),
+                ("Counter", 1, false),
                 ("Inventory", 1, true)
             ]
         );
+        // Ordered by what each names, each document is defined once.
+        for name in ["Checkout", "Counter", "Inventory"] {
+            assert_eq!(defines(&engine, name), 1, "{name}");
+        }
         // A second deploy writes nothing.
         let again = engine.deploy(&documents, None).expect("deploy again");
         assert!(again.iter().all(|one| !one.defined && !one.published));

@@ -9123,7 +9123,7 @@ Optional `number` and `string` fields keep value types with `omitempty`.
 
 The rule is reversible until the first release.
 
-### D58, amended: a deploy tries a refused document again after the others
+### D58, amended: a deploy orders its documents by the schemas their configs name, and tries a refused one again after the others
 
 A server's deploy defined and published its engine document's schemas in
 the document's order, the engine types' name order, and stopped at the
@@ -9135,12 +9135,17 @@ no commerce server became ready.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Engine::deploy` deploys in passes: each pass defines and publishes the documents left, in the order given, and keeps a refused one (a refusal or a behavior's config error) for the next pass. A pass that deploys none of those left returns its first refusal, every other document deployed. Storage and internal errors stop it at once. The result lists the documents in the order given. The Go binding's `Deploy` and the TypeScript `deploy` call it, so all three servers take the same documents in any order. | The engine document's generator ordering the schemas by the schemas each config names, which needs every behavior's references, an extension's included, known to the compiler; stopping at the first refusal, which made a document's validity depend on its types' names |
+| `Engine::deploy` first orders the documents so that each comes after the others its behaviors' configs name: a string anywhere in a type's behavior config equal to another document's name. Documents that name each other, directly or not, keep the order given among themselves, and so does every document otherwise. | The engine document's generator ordering the schemas, which needs every behavior's references, an extension's included, known to the compiler; the order given alone, which made a document's validity depend on its types' names |
+| It then deploys in passes. A document refused as an invalid schema (`InvalidSchema`, which a behavior's config refusal is) is tried again in the next pass; a pass that deploys none of those left returns its first refusal in the dependency order, every other document deployed, so a supply that cannot deploy fails with its own refusal and not with its claim's "no live version". Any other error (an incompatible change, a busy or unavailable database) stops the deploy at once, as before. There are at most as many passes as documents, so at most n(n+1)/2 attempts. | Retrying every refusal, which retried an unavailable database and returned a dependent's refusal before its cause's |
+| A draft with the document's hash, which a publish refused a pass before left, is published again without a second define, so a retry writes no second draft and no second define event. The result lists the documents in the order given. The Go binding's `Deploy` and the TypeScript `deploy` call it. | |
 
 `commerce_holds.rs`'s `a_deploy_publishes_a_claim_after_the_supplies_it_names`
-deploys Checkout before Counter and Inventory on SQLite and Postgres,
-deploys again writing nothing, and has a config naming a schema that is
-never live refused after the rest deployed.
+deploys Checkout before Counter and Inventory on SQLite and Postgres:
+with an Inventory whose Stock config is wrong it fails with Inventory's
+refusal while Counter deploys; with a good one each schema is defined
+once; a second deploy writes nothing; and a config naming a schema that
+is never live is refused after the rest deployed. `deploy.rs`'s order
+tests cover a chain and a cycle.
 
 ### D70, amended: Payments fails closed, pays one refund per approval, asks back a double charge, and a deployment names every money-moving operation's policy
 
