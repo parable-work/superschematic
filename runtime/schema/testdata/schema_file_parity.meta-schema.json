@@ -960,6 +960,97 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Derived"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "from": {
+                          "description": "The own top-level fields the value is derived from, never the field itself or another derived field.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 16,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "instruction": {
+                          "description": "What the model is asked, given the inputs.",
+                          "maxLength": 4000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "model": {
+                          "description": "A label the deployment maps to a provider's model, which the engine only compares.",
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "states": {
+                          "description": "The states of the type's Workflow in which the field is derived; every state when absent.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "instruction",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "The derived fields, by own top-level field.",
+                    "maxProperties": 16,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "minLength": 1
+                    },
+                    "type": "object"
+                  },
+                  "maxAttempts": {
+                    "description": "How many failed attempts a field takes before it waits for its inputs to move; 3 when absent.",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "permission": {
+                    "description": "The permission a deriver needs to pull, settle and apply values.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fields",
+                  "permission"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Holds"
               }
             }
@@ -1827,6 +1918,102 @@
             "required": [
               "config"
             ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Provenance"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "description": "The own top-level fields it records; every one when absent.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "gates": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reviewed": {
+                          "description": "The recorded fields that must not be proposed, or all.",
+                          "oneOf": [
+                            {
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            {
+                              "const": "all"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reviewed"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "By state of the type's Workflow, the fields a move into it requires out of review.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                    },
+                    "type": "object"
+                  },
+                  "review": {
+                    "additionalProperties": false,
+                    "description": "Which writes enter review, and who reviews them.",
+                    "properties": {
+                      "below": {
+                        "description": "A confidence at or above which a write is accepted with no reviewer; every write from a source is proposed when absent.",
+                        "maximum": 1,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "permission": {
+                        "description": "The permission a reviewer needs to accept or reject.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "sources": {
+                        "description": "The behaviors whose writes enter review, each one the type composes.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "sources",
+                      "permission"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
           }
         },
         {
@@ -3042,12 +3229,14 @@
             "Comments",
             "Constants",
             "Dependencies",
+            "Derived",
             "Holds",
             "Lease",
             "Links",
             "Numbering",
             "Payments",
             "Presence",
+            "Provenance",
             "Queue",
             "Reactions",
             "Retries",

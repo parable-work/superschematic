@@ -9709,7 +9709,7 @@ answer, a provider's record or a reviewer's correction, knows where each
 value came from. Before this amendment, the engine kept only the
 operation's name, so another behavior's `afterChange` could not tell a
 value that a model gave at 0.6 from one that a person typed. The
-proposed `Derived` and `Provenance` behaviors (D73, in draft) need that
+`Derived` and `Provenance` behaviors (D73) need that
 difference, and so would a sync from a provider.
 
 An operation's `update(patch, { attribution })` (in Rust,
@@ -9739,3 +9739,73 @@ a `BehaviorError` that writes nothing.
 through the test addon's bridge, and a non-JSON attribution as the
 bridge's `BehaviorError`. The corpus is unchanged: no recorded operation
 attributes. The rule is reversible until the first release.
+
+## D73. A model outside the engine fills own fields, and each field records who set it
+
+A type often holds fields that a person should not have to fill: a
+ticket's category and priority, an article's summary, a document's
+extracted dates. A project used to write a worker for each one, which
+read the instance, asked a model and wrote the answer back, kept no
+record of which value came from the model and which from a person, and
+wrote over a person's correction when the inputs changed.
+
+This entry adds two behaviors that the core declares and the engine
+implements:
+- `Derived`: own fields a model outside the engine computes from other
+  own fields, under an instruction the schema holds.
+- `Provenance`: for each own field, who set it last and through what,
+  and a review that a Workflow state can require.
+
+Each works alone. Composed, with StateRules and Reactions, they give a
+record that a model fills and a person confirms when the model is
+unsure.
+
+Three rules hold throughout.
+- The engine calls no model. A deriver, a worker holding the config's
+  permission, pulls what is stale, asks its model, and settles the
+  answers with the hash it pulled, as search's vectors are settled (D16,
+  amended).
+- A derived value is an own field. The schema declares it and its type,
+  and the field's JSON Schema is the output the deriver asks for. Reads,
+  SDK types, filters, Search, StateRules and Reactions see it as any own
+  field, and a value the type refuses is not written.
+- A person's write wins. When a caller, or another behavior's operation,
+  writes a derived field, Derived stops deriving it until `rederive`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A derived value is an own field the schema types, and its JSON Schema is the model's output: an enum is a pick, a boolean a yes or no, a bounded integer a score, a string text, an object an extraction | a value under `behaviors.Derived` that no SDK types and no StateRules rule reads; a `kind` and an output schema in the config, which can disagree with the field's type |
+| A deriver pulls `staleDerivations` and settles with `settleDerivations`, presenting the hash it pulled: the SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value | the engine calling a provider inside a write transaction, which holds the namespace's one writer for seconds and puts provider keys in every server |
+| A settle writes each instance's values through `applyDerived`'s `update_attributed`, one event per instance, in a savepoint, so every guard judges them and a refusal skips that instance alone | no event, as for vectors: a derived field is a read's data, so the log must replay it |
+| A failure, a value the type refuses and another behavior's veto count an attempt in the behavior's own table and append no event; after `maxAttempts` the field waits until its hash moves | an event per failure, which fills the log with a provider outage's retries; `Retries`, which counts per instance and not per field |
+| A stale value stays until a new one settles | clearing it, so a ticket has no category while its body is edited |
+| A caller's create or update, or another behavior's operation, that writes a derived field overrides it until `rederive`; a value an instance holds when Derived is added counts as overridden, by `existing` | the newest write winning, so a changed input writes over a person's correction |
+| Provenance's source is the writing path, `caller` or a behavior's name from the change's attribution (D16, amended), and `by` the principal | a `person` or `model` kind the engine cannot know, since any principal can run a deriver |
+| Review is Provenance's: a source's write is `proposed` unless its confidence reaches `below`; `reject` writes the field as the reviewer, so Derived records an override; another write over a proposal is `edited` | a confidence threshold on Derived that holds a candidate outside the field, which reads, filters and StateRules cannot see |
+| A gate lists fields that must be out of review for a move into its state, and `inReview` is a column a list filters on | a StateRules amendment for qualified behavior fields, a larger change to a rule only own fields satisfy today |
+| Neither behavior narrows the generators' types yet: their fields keep the declarations' shapes | narrowing `Derived.fields` and `Provenance.fields` by the config's field names now, which can follow without breaking anything |
+
+A Reactions `changes` rule fires once, on the event that moves its
+field, and acts only where a transition exists and every guard allows
+it. A rule keyed on a derived value can therefore be lost: it hears the
+settle while the record is in a state with no such move, and does not
+fire again. The guide's recipe moves the record on the gate's own
+signals, `Derived.fields.<field>.settledAt` and `Provenance.inReview`.
+
+Status: built. `runtime/engine/rust/behaviors/src/derived.rs` and
+`provenance.rs` implement them, the core registers them
+(`internal/registry/behaviors`), and the schema file's meta-schema
+admits them. `runtime/engine/rust/testkit/tests/core_derived.rs` holds
+the pull and the settle, a moved hash, overrides and rederive, attempts,
+failures and StateRules' veto, states, the permission, the refusals at
+define and new versions; `core_provenance.rs` holds the records, review
+with `below`, accept, reject and edited, the filter, the gate, and the
+ticket recipe on the runner, a sure answer assigned with no person and an
+unsure one triaged until a reviewer accepts it.
+`runtime/engine/typescript/test/core-derived.test.ts` and
+`core-provenance.test.ts` hold the same through the addon, and their
+recordings join the scenario corpus. Left: a loader fixture that
+composes them for the cli smoke, the generators' narrowing, inputs from
+linked instances, a stack worker that runs a deriver, and a check of
+sensitive fields as inputs. The rule is reversible until the first
+release.

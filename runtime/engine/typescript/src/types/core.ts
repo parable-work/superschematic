@@ -2,7 +2,8 @@
 The core's behaviors (internal/registry/behaviors, D16), which every
 engine registers when it opens: Workflow, Comments, Revisions,
 Dependencies, Links, Rollups, Search, Reactions, Constants, Variants,
-Branches, StateRules, Approvals, Numbering and Timers. Each is the Rust
+Branches, StateRules, Approvals, Numbering, Timers, Derived and
+Provenance. Each is the Rust
 engine's (runtime/engine/rust/behaviors, D58); here are the configs a
 schema gives them, the records their operations return, their constants,
 and the readers of a config a client asks about any instance with.
@@ -554,6 +555,71 @@ export interface SignOffRecord {
   readonly at: number;
   /** When it was consumed; absent while it counts. */
   readonly consumedAt?: number;
+}
+
+/** One derived field of a Derived config, parsed. */
+export interface DerivedField {
+  /** The own top-level field the value is written to. */
+  readonly name: string;
+  /** The own top-level fields the value is derived from. */
+  readonly from: readonly string[];
+  readonly instruction: string;
+  /** The label of the model, which the engine only compares. */
+  readonly model: string;
+  /** The states of the type's Workflow it is derived in; every state when absent. */
+  readonly states?: readonly string[];
+}
+
+/** Derived's config, parsed: maxAttempts filled in. */
+export interface DerivedConfig {
+  /** The derived fields, in the config's order. */
+  readonly fields: readonly DerivedField[];
+  /** The permission a deriver needs. */
+  readonly permission: string;
+  /** How many failed attempts a field takes before it waits. */
+  readonly maxAttempts: number;
+}
+
+/** One item of staleDerivations: what a deriver computes. */
+export interface DerivationItem {
+  readonly id: string;
+  readonly field: string;
+  /** The hash a settle presents. */
+  readonly sourceHash: string;
+  /** Which attempt this is, from 1. */
+  readonly attempt: number;
+  readonly instruction: string;
+  readonly model: string;
+  /** The inputs that hold a value, by field name. */
+  readonly inputs: Readonly<Record<string, unknown>>;
+  /** The derived field's JSON Schema: what the value must be. */
+  readonly output: unknown;
+}
+
+/** Provenance's review, parsed. */
+export interface ProvenanceReview {
+  /** The behaviors whose writes enter review. */
+  readonly sources: readonly string[];
+  /** The confidence at or above which a write is accepted with no reviewer. */
+  readonly below?: number;
+  /** The permission a reviewer needs. */
+  readonly permission: string;
+}
+
+/** One field's record, as Provenance.fields holds it. */
+export interface ProvenanceRecord {
+  /** caller, or the name of the behavior whose operation wrote it. */
+  readonly source: string;
+  /** The subject of the principal who wrote it. */
+  readonly by: string;
+  /** When, in epoch milliseconds. */
+  readonly at: number;
+  readonly confidence?: number;
+  readonly review?: {
+    readonly state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+    readonly by?: string;
+    readonly at?: number;
+  };
 }
 
 /** Numbering's config, parsed. */

@@ -1588,7 +1588,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
 `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`,
-`Timers`, `StateRules`, `Numbering` and `Approvals`, and the work-queue
+`Timers`, `StateRules`, `Numbering`, `Approvals`, `Derived` and
+`Provenance`, and the work-queue
 package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`,
 `Budget` and `Retries`, and the commerce package's `Stock`, `Calendar`,
 `Holds` and `Payments`, D70), so its loader refuses any other.
@@ -2549,7 +2550,7 @@ tell a caller its read is stale.
 
 ### Core behaviors
 
-The core declares fifteen behaviors the engine implements
+The core declares seventeen behaviors the engine implements
 (`internal/registry/behaviors`, section 3.16 of
 `docs/extension-model.md`), so every binary's meta-schema admits them,
 and the engine implements them in `rust/behaviors` and registers them
@@ -4040,6 +4041,54 @@ does.
   leased instance's deadline for each next run
   (`runtime/engine-workqueue/README.md`, "The guard"). Its move is a
   `call()`, which the guard lets through.
+
+#### Derived
+
+Own fields a model outside the engine fills from other own fields (D73).
+The config names each derived field's inputs (`from`), its
+`instruction`, a `model` label and optionally the Workflow `states` it
+is derived in, and the `permission` a deriver needs. The engine calls no
+model: a deriver pulls `staleDerivations`, each item the field's inputs,
+instruction, model, its JSON Schema as `output` and a `sourceHash` (the
+SHA-256 of the model, the instruction, the output and the inputs that
+hold a value), and settles values or failures with `settleDerivations`,
+which invokes `applyDerived` on each instance in a savepoint.
+`applyDerived` writes through `update_attributed`, attributed to Derived
+with each value's confidence, so every `validate` and guard judges the
+values and the event records them. The behavior keeps a row for each
+instance and field in its table: the source hash, the last settled hash,
+model, confidence, who settled and when, an override, the failed
+attempts and whether a deriver is wanted (a partial index on it serves
+the pull). afterChange hashes the inputs again on every change and
+records an override when a caller's create or update, or another
+behavior's operation, writes a derived field; `rederive` clears it.
+Failures, invalid values and other behaviors' vetoes count attempts and
+append no event; after `maxAttempts` the field leaves the queue, which
+`failedDerivations` lists, until its hash moves. `Derived.stale` is
+volatile, since a new version's instruction or model moves it.
+afterConfigChange hashes every instance again, drops a removed field's
+rows and every row when the behavior goes, and counts a value an
+instance already holds as overridden, by `existing`. Vetoes:
+`not_derived`, `moved`, `out_of_state`, `overridden`. The guide's
+"Derived" section has the operations' shapes.
+
+#### Provenance
+
+Who set each own field last and through what (D73). afterChange compares
+a change's own fields before and after it and records each recorded
+field that moved: `caller` for a caller's create or update, else the
+attribution entry's behavior or the operation's own (D16, amended), the
+principal's subject, the time and the attributed confidence. With
+`review`, a write from one of its `sources` is `proposed`, or `accepted`
+when its confidence reaches `below`; `accept` and `reject` need the
+review's permission, and `reject` writes the field through its own
+`update()`, as source `Provenance`. Another write over a proposal makes
+it `edited`. The instance's `in_review` column holds whether any field
+is proposed, which the `inReview` filter reads. A gate's guard refuses a
+Workflow transition into its state while a field it lists is proposed
+(`unreviewed_fields`), and lets a move Workflow refuses through, as
+Approvals' does. Vetoes: `not_recorded`, `not_in_review`,
+`unreviewed_fields`.
 
 ## Namespaces
 
