@@ -21,8 +21,8 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has thirteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
+The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
 `new`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
@@ -1502,6 +1502,40 @@ and a project built with them names its checkouts in `[paths]`, whose
 ```
 eval "$(superschematic env)" && go build ./...
 go env -w CGO_LDFLAGS="$(superschematic env CGO_LDFLAGS)"
+```
+
+## `catalog scalars|decorators|behaviors|capabilities`
+
+Print a Markdown reference of what the binary knows, written from the
+registry it assembles, so the reference lists an extension's scalars,
+decorators and behaviors beside the core's. It is for whoever authors
+schemas with the binary, a coding agent among them, which reads it in
+place of documentation that could describe another version.
+
+- `scalars`: every scalar a field can have, one table per namespace,
+  with what it checks, its SQL type and its types in Go, TypeScript,
+  Python and Rust. The [scalar reference](/superschematic/reference/scalars/)
+  is this table for the core.
+- `decorators`: which kinds may import each authoring package, then each
+  decorator by package, with the TypeScript declaration `tsc` checks a
+  schema file against, its comment, the nodes it may sit on and the kinds
+  it is limited to; the type wrappers; and the exported types those name.
+  An extension's decorator has no declaration in the binary, so its entry
+  gives the JSON Schema of its argument instead. The core's declarations
+  are the binary's copy of `packages/`.
+- `behaviors`: every engine behavior, with its config's type, what it
+  requires and conflicts with, the fields and operations it adds and the
+  codes its refusals carry, then the core's config types. An extension's
+  behavior gives its config's JSON Schema.
+- `capabilities`: the [capability map](/superschematic/start/capabilities/),
+  with its links pointing at this site.
+
+`--naming` reads a naming file first, for a binary whose extensions read
+it. A name that is not one of the four fails, listing them.
+
+```
+superschematic catalog decorators | grep -A 12 '^### `@paginated`'
+superschematic catalog scalars > scalars.md
 ```
 
 ## Extension commands

@@ -111,8 +111,8 @@ exports both link directories for every Go target; outside make, run
 `tools.env` only; workflows read that file and never inline a version. Bump
 the superscalar commit in `superscalar.pin` and `go.mod` together (a test
 fails when they disagree), then run `go run ./internal/tools/scalarcatalog`
-to rewrite the TypeScript and Python scalar catalogs and
-`go run ./internal/tools/agentcatalog` to rewrite the agent skill's.
+to rewrite the TypeScript and Python scalar catalogs and the docs' scalar
+page.
 
 ## Running the gates
 
@@ -156,7 +156,7 @@ agent or a bot with write access counts.
 | `make go-test`        | `go test -count=1 ./...` in the Go modules                           |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
-| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule; the agent skill's catalogs (`skills/superschematic/references/`) and the docs' scalar page match superscalar, the registry and the authoring packages |
+| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule, and the docs' scalar page matches the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
@@ -238,18 +238,15 @@ build's context keeps a link as a link, as Docker's does.
 Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
 `runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`),
-the agent skill's catalogs (`skills/superschematic/references/scalars.md`,
-`decorators.md`, `behaviors.md`, and `capabilities.md`, copied from the
-docs' capability map) and the docs' scalar page
-(`docs/src/content/docs/reference/scalars.md`), the schema-file JSON Schema and TypeScript types
+the docs' scalar page (`docs/src/content/docs/reference/scalars.md`), the
+schema-file JSON Schema and TypeScript types
 (`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) and
 the modules `superschematic engine-client` writes for the engine's tests
 and the engine-notes example (`runtime/engine/typescript/test/generated/`,
 `examples/engine-notes/src/notes.client.ts`) with their parity vector
 (`runtime/engine/testdata/client_codegen_parity.json`) are
 regenerated, not edited. Change the generator or the pin, run
-`make go-goldens`, `go run ./internal/tools/scalarcatalog`,
-`go run ./internal/tools/agentcatalog` or
+`make go-goldens`, `go run ./internal/tools/scalarcatalog` or
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and
 commit it. CI fails on catalog or schema-file drift.
 

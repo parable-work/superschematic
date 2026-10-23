@@ -1,66 +1,98 @@
-// Command agentcatalog writes the catalogs the superschematic agent skill
-// (skills/superschematic) reads, and the docs' scalar reference, from the
-// sources the compiler itself reads, so neither restates a fact by hand:
+// Package agentcatalog writes Markdown references of what a superschematic
+// binary knows, for a reader that authors schemas: a person, or a coding
+// agent with no copy of this repository. `superschematic catalog` prints
+// them, so each matches the binary that prints it, the extensions it links
+// included. Nothing is restated by hand:
 //
-//	skills/superschematic/references/scalars.md     every builtin scalar, from the pinned superscalar Go package
-//	skills/superschematic/references/decorators.md  every core decorator and type wrapper, from the registry and packages/
-//	skills/superschematic/references/behaviors.md   every core engine behavior, from the registry and its config types
-//	skills/superschematic/references/capabilities.md the docs' capability map, with links to the docs site
-//	docs/src/content/docs/reference/scalars.md      the scalar catalog as a docs page
+//   - scalars: every scalar of the registry's catalog, from superscalar's
+//     metadata (and an extension's, when one replaces the catalog).
+//   - decorators: every registered decorator, joined with its TypeScript
+//     declaration in the core authoring packages, and the type wrappers.
+//   - behaviors: every registered engine behavior, from its declaration,
+//     with the core's config types.
+//   - capabilities: the docs' capability map, with links to the docs site.
 //
-// A decorator's entry joins two sources. The registry says where it may sit,
-// which kinds may use it and the JSON Schema its argument is checked
+// A decorator's entry joins two sources. The registry says where it may
+// sit, which kinds may use it and the JSON Schema its argument is checked
 // against; the authoring package's TypeScript declaration says how it is
 // written, with the declaration's comment and the exported types its
-// signature names. A registered decorator its packages do not declare fails
-// the run, so the catalog cannot list a decorator a schema cannot import.
-//
-// Run from the repository root: go run ./internal/tools/agentcatalog
-// With -check the command exits 1 when a committed file differs from what it
-// would write.
-package main
+// signature names. A core decorator its packages do not declare is an
+// error, so a reference cannot list a decorator a schema cannot import. An
+// extension's decorators have no declaration here; their entries give the
+// argument's JSON Schema instead.
+package agentcatalog
 
 import (
 	"bytes"
-	"flag"
+	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"sort"
 	"strings"
 
 	scalars "github.com/parable-work/superscalar/go"
 
-	"github.com/parable-work/superschematic/internal/generator"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
+// The names `superschematic catalog` takes, in the order its help lists
+// them.
 const (
-	skillScalarsPath      = "skills/superschematic/references/scalars.md"
-	skillDecoratorsPath   = "skills/superschematic/references/decorators.md"
-	skillBehaviorsPath    = "skills/superschematic/references/behaviors.md"
-	skillCapabilitiesPath = "skills/superschematic/references/capabilities.md"
-	docsCapabilitiesPath  = "docs/src/content/docs/start/capabilities.md"
-	docsScalarsPath       = "docs/src/content/docs/reference/scalars.md"
+	Scalars      = "scalars"
+	Decorators   = "decorators"
+	Behaviors    = "behaviors"
+	Capabilities = "capabilities"
 )
 
-// packageDirs maps each core authoring package to the directory holding its
-// TypeScript sources.
+// Names lists every catalog.
+func Names() []string { return []string{Scalars, Decorators, Behaviors, Capabilities} }
+
+// Sources are the files a catalog reads besides the registry.
+type Sources struct {
+	// Packages holds the core authoring packages' sources as packages/
+	// does: api/src/*.ts, db/src/*.ts and the others.
+	Packages fs.FS
+	// CapabilityMap is the docs' capability map page, frontmatter and all.
+	CapabilityMap []byte
+}
+
+// Render returns the named catalog as Markdown.
+func Render(name string, reg *registry.Registry, src Sources) ([]byte, error) {
+	switch name {
+	case Scalars:
+		return []byte("# Scalars\n\n" + ScalarBody(reg)), nil
+	case Decorators, Behaviors:
+		decls, err := readPackages(src.Packages)
+		if err != nil {
+			return nil, err
+		}
+		if name == Decorators {
+			return renderDecorators(decls, reg)
+		}
+		return renderBehaviors(decls[schemaPackage], reg)
+	case Capabilities:
+		return renderCapabilities(src.CapabilityMap)
+	}
+	return nil, fmt.Errorf("no catalog named %q; the catalogs are %s", name, strings.Join(Names(), ", "))
+}
+
+// packageDirs maps each core authoring package to the directory under
+// Sources.Packages holding its TypeScript sources.
 var packageDirs = map[string]string{
-	"@superschematic/schema":        "packages/schema/src",
-	"@superschematic/db":            "packages/db/src",
-	"@superschematic/api":           "packages/api/src",
-	"@superschematic/schema-config": "packages/schema-config/src",
-	"@superschematic/stack":         "packages/stack/src",
+	"@superschematic/schema":        "schema/src",
+	"@superschematic/db":            "db/src",
+	"@superschematic/api":           "api/src",
+	"@superschematic/schema-config": "schema-config/src",
+	"@superschematic/stack":         "stack/src",
 }
 
 // schemaPackage declares @behavior and the config type of each core
 // behavior (BehaviorConfigs).
 const schemaPackage = "@superschematic/schema"
 
-// packageOrder is the order the decorator catalog lists the packages in:
-// the one every kind imports first, then by kind.
+// packageOrder is the order the decorator catalog lists the core packages
+// in: the one every kind imports first, then by kind. An extension's
+// packages follow, sorted.
 var packageOrder = []string{
 	"@superschematic/schema",
 	"@superschematic/db",
@@ -78,104 +110,36 @@ var wrapperFiles = map[string][]string{
 	"@superschematic/api":    {"wrappers.ts", "bases.ts"},
 }
 
-func main() {
-	check := flag.Bool("check", false, "exit 1 when a committed catalog differs from the generated one")
-	flag.Parse()
-
-	root, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+func readPackages(fsys fs.FS) (map[string][]export, error) {
+	if fsys == nil {
+		return nil, fmt.Errorf("no authoring package sources to read declarations from")
 	}
-	outputs, err := render(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	paths := make([]string, 0, len(outputs))
-	for rel := range outputs {
-		paths = append(paths, rel)
-	}
-	sort.Strings(paths)
-	failed := false
-	for _, rel := range paths {
-		want := outputs[rel]
-		path := filepath.Join(root, rel)
-		if *check {
-			have, err := os.ReadFile(path)
-			if err != nil || !bytes.Equal(have, want) {
-				fmt.Fprintf(os.Stderr, "%s is out of date; run: go run ./internal/tools/agentcatalog\n", rel)
-				failed = true
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(path, want, 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
-	if failed {
-		os.Exit(1)
-	}
-}
-
-// render returns every catalog file, keyed by its path from the repository
-// root.
-func render(root string) (map[string][]byte, error) {
 	decls := map[string][]export{}
 	for pkg, dir := range packageDirs {
-		exports, err := readPackage(filepath.Join(root, dir))
+		exports, err := readPackage(fsys, dir)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pkg, err)
 		}
 		decls[pkg] = exports
 	}
-	reg := generator.CoreRegistry(naming.Naming{})
-	decorators, err := renderDecorators(decls, reg)
-	if err != nil {
-		return nil, err
-	}
-	behaviors, err := renderBehaviors(decls[schemaPackage], reg)
-	if err != nil {
-		return nil, err
-	}
-	capabilities, err := renderCapabilities(root)
-	if err != nil {
-		return nil, err
-	}
-	scalarBody := renderScalarBody()
-	return map[string][]byte{
-		skillCapabilitiesPath: capabilities,
-		skillScalarsPath:      []byte(generatedHeader("<!--", " -->") + "# Scalars\n\n" + scalarBody),
-		skillDecoratorsPath:   decorators,
-		skillBehaviorsPath:    behaviors,
-		docsScalarsPath:       []byte(docsScalarsFrontmatter + generatedHeader("<!--", " -->") + scalarBody),
-	}, nil
+	return decls, nil
 }
 
 // docsSite is where the docs are published; a docs page links another
 // under its base, /superschematic/.
 const docsSite = "https://parable-work.github.io"
 
-// renderCapabilities is the docs' capability map as the skill reads it:
-// its title as a heading in place of the frontmatter, and each link into
-// the docs made absolute, so it resolves outside the site.
-func renderCapabilities(root string) ([]byte, error) {
-	src, err := os.ReadFile(filepath.Join(root, docsCapabilitiesPath))
-	if err != nil {
-		return nil, err
-	}
-	rest, ok := strings.CutPrefix(string(src), "---\n")
+// renderCapabilities is the docs' capability map outside the site: its
+// title as a heading in place of the frontmatter, and each link into the
+// docs made absolute.
+func renderCapabilities(page []byte) ([]byte, error) {
+	rest, ok := strings.CutPrefix(string(page), "---\n")
 	if !ok {
-		return nil, fmt.Errorf("%s: no frontmatter", docsCapabilitiesPath)
+		return nil, fmt.Errorf("capability map: no frontmatter")
 	}
 	front, body, ok := strings.Cut(rest, "\n---\n")
 	if !ok {
-		return nil, fmt.Errorf("%s: unterminated frontmatter", docsCapabilitiesPath)
+		return nil, fmt.Errorf("capability map: unterminated frontmatter")
 	}
 	title := ""
 	for _, line := range strings.Split(front, "\n") {
@@ -184,35 +148,17 @@ func renderCapabilities(root string) ([]byte, error) {
 		}
 	}
 	if title == "" {
-		return nil, fmt.Errorf("%s: no title in the frontmatter", docsCapabilitiesPath)
+		return nil, fmt.Errorf("capability map: no title in the frontmatter")
 	}
 	body = strings.ReplaceAll(body, "](/superschematic/", "]("+docsSite+"/superschematic/")
-	header := "<!-- @generated by go run ./internal/tools/agentcatalog from " + docsCapabilitiesPath + "; edit that page -->\n\n"
-	return []byte(header + "# " + title + "\n" + body), nil
+	return []byte("# " + title + "\n" + body), nil
 }
 
-func generatedHeader(open, close string) string {
-	return open + " @generated by go run ./internal/tools/agentcatalog; do not edit" + close + "\n\n"
-}
-
-const docsScalarsFrontmatter = `---
-title: Scalars
-description: Every builtin scalar a field can have, with what it checks and its type in SQL and each language.
-sidebar:
-  order: 0
----
-
-`
-
-// renderScalarBody is the scalar catalog below its title: one table per
-// namespace, one row per scalar.
-func renderScalarBody() string {
-	names := make([]string, 0, len(scalars.ScalarMetadataByCanonical))
-	for name := range scalars.ScalarMetadataByCanonical {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
+// ScalarBody is the scalar catalog below its title: one table per
+// namespace, one row per scalar of the registry's catalog. The docs'
+// scalar page is this body under its frontmatter.
+func ScalarBody(reg *registry.Registry) string {
+	catalog := reg.Scalars()
 	var b strings.Builder
 	b.WriteString("A field's type is a scalar from superscalar, imported in a schema file as\n")
 	b.WriteString("`import { Contact, Generic, Identity } from \"superscalar\"` and written\n")
@@ -227,8 +173,11 @@ func renderScalarBody() string {
 	b.WriteString("checked and stored.\n")
 
 	namespace := ""
-	for _, name := range names {
-		meta := scalars.ScalarMetadataByCanonical[name]
+	for _, name := range catalog.Names() {
+		meta, ok := catalog.Scalar(name)
+		if !ok {
+			continue
+		}
 		ns, _, _ := strings.Cut(name, ".")
 		if ns != namespace {
 			namespace = ns
@@ -254,22 +203,23 @@ func renderScalarBody() string {
 
 // scalarChecks lists what a scalar's decoders check beyond its base type.
 func scalarChecks(meta *scalars.ScalarMetadata) string {
+	minLength, maxLength, minimum, maximum := meta.MinLength, meta.MaxLength, meta.Minimum, meta.Maximum
 	var checks []string
 	switch {
-	case meta.MinLength > 0 && meta.MaxLength > 0:
-		checks = append(checks, fmt.Sprintf("length %d to %d", meta.MinLength, meta.MaxLength))
-	case meta.MaxLength > 0:
-		checks = append(checks, fmt.Sprintf("at most %d characters", meta.MaxLength))
-	case meta.MinLength > 0:
-		checks = append(checks, fmt.Sprintf("at least %d characters", meta.MinLength))
+	case minLength > 0 && maxLength > 0:
+		checks = append(checks, fmt.Sprintf("length %d to %d", minLength, maxLength))
+	case maxLength > 0:
+		checks = append(checks, fmt.Sprintf("at most %d characters", maxLength))
+	case minLength > 0:
+		checks = append(checks, fmt.Sprintf("at least %d characters", minLength))
 	}
 	switch {
-	case meta.Minimum != nil && meta.Maximum != nil:
-		checks = append(checks, fmt.Sprintf("%d to %d", *meta.Minimum, *meta.Maximum))
-	case meta.Minimum != nil:
-		checks = append(checks, fmt.Sprintf("at least %d", *meta.Minimum))
-	case meta.Maximum != nil:
-		checks = append(checks, fmt.Sprintf("at most %d", *meta.Maximum))
+	case minimum != nil && maximum != nil:
+		checks = append(checks, fmt.Sprintf("%d to %d", *minimum, *maximum))
+	case minimum != nil:
+		checks = append(checks, fmt.Sprintf("at least %d", *minimum))
+	case maximum != nil:
+		checks = append(checks, fmt.Sprintf("at most %d", *maximum))
 	}
 	if meta.Format != "" {
 		checks = append(checks, "format "+code(meta.Format))
@@ -316,22 +266,19 @@ func cell(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// renderDecorators is the decorator catalog: per core authoring package,
-// its decorators as the registry knows them beside their declarations,
-// then its type wrappers, then the exported types those name. The
-// behaviors' config types are left to the behavior catalog.
+// renderDecorators is the decorator catalog: per authoring package, its
+// decorators as the registry knows them beside their declarations, then
+// its type wrappers, then the exported types those name. The behaviors'
+// config types are left to the behavior catalog.
 func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte, error) {
-
 	type entry struct {
 		name  string
 		specs []registry.DecoratorSpec
 	}
 	byPackage := map[string][]*entry{}
 	index := map[string]*entry{}
+	var extensionPackages []string
 	for _, spec := range reg.Decorators() {
-		if spec.Extension != "" {
-			continue
-		}
 		if len(spec.Packages) == 0 {
 			return nil, fmt.Errorf("decorator @%s names no authoring package", spec.Name)
 		}
@@ -341,29 +288,32 @@ func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte
 		if e == nil {
 			e = &entry{name: spec.Name}
 			index[key] = e
+			if _, core := packageDirs[home]; !core && len(byPackage[home]) == 0 {
+				extensionPackages = append(extensionPackages, home)
+			}
 			byPackage[home] = append(byPackage[home], e)
 		}
 		e.specs = append(e.specs, spec)
 	}
+	sort.Strings(extensionPackages)
+	packages := append(append([]string{}, packageOrder...), extensionPackages...)
 
 	var b bytes.Buffer
-	b.WriteString(generatedHeader("<!--", " -->"))
 	b.WriteString("# Decorators and type wrappers\n\n")
-	b.WriteString("Every decorator the core registers, grouped by the authoring package a\n")
-	b.WriteString("schema file imports it from, and the type wrappers beside them. An\n")
-	b.WriteString("extension's decorators come from its own package.\n\n")
-	b.WriteString("Each entry gives the TypeScript declaration `tsc` checks a schema file\n")
-	b.WriteString("against, its comment, the nodes it may sit on (a type is a class with\n")
-	b.WriteString("fields, an operation set a class with methods, an operation a method)\n")
-	b.WriteString("and the kinds it is limited to when it is. The JSON and YAML forms write\n")
-	b.WriteString("a decorator's argument as a JSON value; `superschematic json-schema`\n")
-	b.WriteString("prints the schema the loader checks it against, for every decorator the\n")
-	b.WriteString("binary you run knows, an extension's too.\n\n")
+	b.WriteString("Every decorator this binary registers, grouped by the authoring package\n")
+	b.WriteString("a schema file imports it from, and the core's type wrappers beside them.\n\n")
+	b.WriteString("Each entry of a core package gives the TypeScript declaration `tsc`\n")
+	b.WriteString("checks a schema file against, its comment, the nodes it may sit on (a\n")
+	b.WriteString("type is a class with fields, an operation set a class with methods, an\n")
+	b.WriteString("operation a method) and the kinds it is limited to when it is. An\n")
+	b.WriteString("extension's entry gives the JSON Schema its argument is checked against,\n")
+	b.WriteString("as the JSON and YAML forms write it; `superschematic json-schema` prints\n")
+	b.WriteString("that schema for every decorator.\n\n")
 	b.WriteString("## Which kinds may import a package\n\n")
 	b.WriteString("Operation sets and operations exist only in API schemas. Every kind may\n")
 	b.WriteString("import `superscalar` and the packages not listed here.\n\n")
 	b.WriteString("| Package | Kinds that may import it |\n| --- | --- |\n")
-	for _, pkg := range packageOrder {
+	for _, pkg := range packages {
 		var kinds []string
 		for _, kind := range reg.Kinds() {
 			spec, _ := reg.Kind(kind)
@@ -374,7 +324,7 @@ func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte
 		fmt.Fprintf(&b, "| `%s` | %s |\n", pkg, strings.Join(kinds, ", "))
 	}
 
-	for _, pkg := range packageOrder {
+	for _, pkg := range packages {
 		entries := byPackage[pkg]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 		fmt.Fprintf(&b, "\n## `%s`\n", pkg)
@@ -383,19 +333,22 @@ func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte
 			printed = closure(decls[pkg], []string{behaviorConfigs})
 		}
 		for _, e := range entries {
-			found := declarationsOf(decls, e.specs[0].Packages, e.name)
-			if len(found) == 0 {
-				return nil, fmt.Errorf("decorator @%s: no export named %s in %s", e.name, e.name, strings.Join(e.specs[0].Packages, ", "))
+			spec := e.specs[0]
+			found := declarationsOf(decls, spec.Packages, e.name)
+			if len(found) == 0 && spec.Extension == "" {
+				return nil, fmt.Errorf("decorator @%s: no export named %s in %s", e.name, e.name, strings.Join(spec.Packages, ", "))
 			}
 			fmt.Fprintf(&b, "\n### `@%s`\n\n", e.name)
-			b.WriteString("```ts\n")
-			for _, d := range found {
-				b.WriteString(d.signature() + "\n")
-				for _, name := range d.names() {
-					refs[name] = true
+			if len(found) > 0 {
+				b.WriteString("```ts\n")
+				for _, d := range found {
+					b.WriteString(d.signature() + "\n")
+					for _, name := range d.names() {
+						refs[name] = true
+					}
 				}
+				b.WriteString("```\n\n")
 			}
-			b.WriteString("```\n\n")
 			seen := map[string]bool{}
 			for _, d := range found {
 				if d.comment != "" && !seen[d.comment] {
@@ -403,15 +356,18 @@ func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte
 					b.WriteString(d.comment + "\n\n")
 				}
 			}
+			if spec.Extension != "" {
+				fmt.Fprintf(&b, "Registered by the `%s` extension.\n\n", spec.Extension)
+			}
 			// One line per kind restriction, naming every target it holds on.
 			var limits []string
 			targets := map[string][]string{}
-			for _, spec := range e.specs {
-				limit := strings.Join(spec.Kinds, " or ")
+			for _, s := range e.specs {
+				limit := strings.Join(s.Kinds, " or ")
 				if _, ok := targets[limit]; !ok {
 					limits = append(limits, limit)
 				}
-				targets[limit] = append(targets[limit], spec.Target.String())
+				targets[limit] = append(targets[limit], s.Target.String())
 			}
 			for _, limit := range limits {
 				fmt.Fprintf(&b, "- On %s", strings.Join(targets[limit], " or "))
@@ -420,11 +376,23 @@ func renderDecorators(decls map[string][]export, reg *registry.Registry) ([]byte
 				}
 				b.WriteString(".\n")
 			}
-			if pkg == schemaPackage && e.name == "behavior" {
-				b.WriteString("- Each behavior, its config and what it adds to a type: [behaviors.md](behaviors.md).\n")
+			if len(found) == 0 {
+				for _, s := range e.specs {
+					if len(s.Args) == 0 {
+						continue
+					}
+					arg, err := compactJSON(s.Args)
+					if err != nil {
+						return nil, fmt.Errorf("decorator @%s: %w", e.name, err)
+					}
+					fmt.Fprintf(&b, "- Argument on %s: %s\n", s.Target, arg)
+				}
 			}
-			if len(e.specs[0].Packages) > 1 {
-				fmt.Fprintf(&b, "- Also exported by %s.\n", codeList(e.specs[0].Packages[1:]))
+			if pkg == schemaPackage && e.name == "behavior" {
+				b.WriteString("- Each behavior, its config and what it adds to a type: `superschematic catalog behaviors`.\n")
+			}
+			if len(spec.Packages) > 1 {
+				fmt.Fprintf(&b, "- Also exported by %s.\n", codeList(spec.Packages[1:]))
 			}
 		}
 
@@ -555,4 +523,17 @@ func codeList(items []string) string {
 		quoted[i] = "`" + s + "`"
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// compactJSON is raw on one line as a code span, its fence widened when
+// the JSON holds a backtick.
+func compactJSON(raw json.RawMessage) (string, error) {
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		return "", err
+	}
+	if strings.Contains(b.String(), "`") {
+		return "`` " + b.String() + " ``", nil
+	}
+	return "`" + b.String() + "`", nil
 }
