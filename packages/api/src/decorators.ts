@@ -145,14 +145,17 @@ const noopMethodDecorator: MethodDecorator = () => {};
 const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrMethodDecorator: ClassDecorator & MethodDecorator = () => {};
 
+/** The route's HTTP method and path, under `/api`. */
 export function rest(_method: HttpMethod, _path?: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The operation's documentation. */
 export function docs(_config: DocsConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** Publishes the operation as an MCP tool, or says why it is not one. */
 export function mcp(_config: MCPConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -162,16 +165,29 @@ export function icon(_name: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The route needs a caller holding one of the permissions. */
 export function requirePermission(_perms: readonly string[]): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The route needs a caller; the implementation checks that the caller owns what it touches. */
 export const requireOwnership: MethodDecorator = noopMethodDecorator;
+/** The route needs a caller. */
 export const auth: MethodDecorator = noopMethodDecorator;
+/** The route's request body travels as an encrypted envelope. */
 export const encrypted: MethodDecorator = noopMethodDecorator;
+/**
+ * Anyone may call the route, in an `Authenticated` set too. Refused with
+ * `@auth`, `@requirePermission` or `@requireOwnership`.
+ */
 export const publicRoute: MethodDecorator = noopMethodDecorator;
+/** An operation a third party calls: no SDK has a method or a tool for it. */
 export const webhook: MethodDecorator = noopMethodDecorator;
 
+/**
+ * Every server checks the request's signature with the provider's verifier
+ * first, before the rate limit, the body limit and the permission check.
+ */
 export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -214,18 +230,22 @@ export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & Meth
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds a route's requests per minute; on a class, each route of the set's. */
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds the size of a route's request body; on a class, each route of the set's. */
 export function bodyLimit(_cfg: BodyLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds how long a route's request may take; on a class, each route of the set's. */
 export function timeout(_cfg: TimeoutConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** The class is a view of a table: its fields are checked against the table's. */
 export function source(_target: unknown): ClassDecorator {
   return noopClassDecorator;
 }
@@ -364,6 +384,13 @@ export function deriver(_options?: DeriverOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
+/**
+ * Each router gates the route and hands it to a handler the implementation
+ * writes: TypeScript's from `manualRoutes`, Go's from `Config.ManualRoutes`,
+ * Rust's from `build_router_with_manual_routes`.
+ */
 export const manualRouteRegistration: MethodDecorator = noopMethodDecorator;

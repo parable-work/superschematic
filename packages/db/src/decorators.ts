@@ -179,6 +179,7 @@ export interface IndexOptions {
   readonly name?: string;
 }
 
+/** An index over the listed fields, unique when asked; the engine keeps it too. */
 export function index<T>(
   _keys: readonly (keyof T)[],
   _uniqueOrOptions?: boolean | IndexOptions,
@@ -186,6 +187,7 @@ export function index<T>(
   return noopClassDecorator;
 }
 
+/** Keeps every version of a row: a history table, and writes fenced by version. */
 export function versioned<TFunction extends Function>(target: TFunction): void;
 export function versioned(_options?: VersionedOptions): ClassDecorator;
 export function versioned<TFunction extends Function>(_arg?: VersionedOptions | TFunction): ClassDecorator | void {
@@ -309,9 +311,13 @@ export function conflictUnit(_strategy: ConflictUnitStrategy): PropertyDecorator
   return noopPropertyDecorator;
 }
 
+/** The table's primary key; in the engine, a unique field. */
 export const key: PropertyDecorator = noopPropertyDecorator;
+/** A unique constraint on the column; in the engine, unique within a namespace, which lookup reads by. */
 export const unique: PropertyDecorator = noopPropertyDecorator;
+/** Joins the field into the table's trigram-indexed `search_text` column. */
 export const searchField: PropertyDecorator = noopPropertyDecorator;
+/** Stores the field as JSONB. */
 export const jsonField: PropertyDecorator = noopPropertyDecorator;
 
 /**

@@ -1,4 +1,6 @@
+/** Read the argument from the query string. */
 export type QueryParam<T> = T & { readonly __queryParam: true };
+/** The operation's request body travels as an encrypted envelope. */
 export type EncryptedField<T> = T & { readonly __encrypted: true };
 
 /** Which operation lists a reference's targets, and which of their fields it holds and shows (D61). */

@@ -122,7 +122,7 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		schema.Name, schema.Kind, len(schema.Types), len(schema.Enums), len(schema.Scalars), len(schema.OperationSets))
 
 	if err := prof.Measure("build.service-sentinel", func() error {
-		if _, err := os.Stat(filepath.Join(opts.ServicePath, "tsconfig.json")); err != nil || sentinel.Skips(opts.Registry, cfg.Kind) {
+		if !hasServiceSentinel(opts.ServicePath, cfg, opts.Registry) {
 			return nil
 		}
 		changed, err := sentinel.EmitHandle(opts.ServicePath, cfg, opts.Registry, sentinel.HandleTypesOf(schema))
@@ -141,6 +141,16 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 	}
 
 	return generateService(opts, schema, cfg)
+}
+
+// hasServiceSentinel reports whether the service at servicePath has a
+// sentinel, the handle other configs import (D34), which a build or a check
+// writes from its loaded schema: a TypeScript service whose kind has one.
+func hasServiceSentinel(servicePath string, cfg *schemaconfig.SchemaConfig, reg *registry.Registry) bool {
+	if _, err := os.Stat(filepath.Join(servicePath, "tsconfig.json")); err != nil {
+		return false
+	}
+	return !sentinel.Skips(reg, cfg.Kind)
 }
 
 // generateService runs the generators of opts.Stage on a loaded service.

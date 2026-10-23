@@ -75,6 +75,9 @@ type loadOptions struct {
 	// runModule runs a sidecar document's module (registry.LoadContext's
 	// RunModule); nil runs it with the document harness.
 	runModule ModuleRunner
+	// warn receives the verification pass's warnings (WithWarnings); nil
+	// prints them to WarningWriter.
+	warn func(*verify.Diagnostic)
 }
 
 // ModuleRunner runs the TypeScript module file of the service at
@@ -90,6 +93,15 @@ type ModuleRunner func(servicePath, file string) (json.RawMessage, []string, err
 func WithModuleRunner(run ModuleRunner) Option {
 	return func(o *loadOptions) {
 		o.runModule = run
+	}
+}
+
+// WithWarnings hands each warning the verification pass finds to warn
+// instead of printing it to [WarningWriter]: `check` reports them with the
+// errors, by file and line.
+func WithWarnings(warn func(*verify.Diagnostic)) Option {
+	return func(o *loadOptions) {
+		o.warn = warn
 	}
 }
 
@@ -236,7 +248,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			var verified *ir.Schema
 			err = o.profile.Measure("loader.verify", func() error {
 				var err error
-				verified, err = runVerify(schema, vin)
+				verified, err = o.runVerify(schema, vin)
 				return err
 			})
 			return verified, cfg, err
@@ -341,7 +353,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	var verified *ir.Schema
 	err = o.profile.Measure("loader.verify", func() error {
 		var err error
-		verified, err = runVerify(schema, vin)
+		verified, err = o.runVerify(schema, vin)
 		return err
 	})
 	return verified, cfg, err
@@ -472,15 +484,20 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 }
 
 // runVerify executes the format-agnostic verification pass on the assembled
-// schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, the
+// schema: warnings go to WithWarnings's function or print to
+// [WarningWriter], errors fail the load. A schema that verifies has its
+// version graphs expanded into ordinary types, the
 // tables its User and UserRole traits own added and its user model route
 // sets filled from its authDb (D50), any scalar only the generated fields
 // use is hydrated from the registry, and the services its stack
 // declarations name join its references (D41).
-func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
+func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
+		if o.warn != nil {
+			o.warn(warning)
+			continue
+		}
 		_, _ = fmt.Fprintf(WarningWriter, "warning: %s\n", warning.Error())
 	}
 	if err := res.Err(); err != nil {

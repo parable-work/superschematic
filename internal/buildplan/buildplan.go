@@ -411,6 +411,45 @@ func Closure(services []Service, root string) ([]Service, error) {
 	return closure, nil
 }
 
+// Dependents returns the services named in changed and every service that
+// transitively depends on one of them, in the order services already
+// carries: what an edit to those services can change the load of. A
+// service depends on each service its config names (declared dependencies,
+// authDb, calls and buckets) and on each service also lists for it, which
+// lets a caller add the edges only a load finds, such as the services a
+// schema's decorator arguments name (D41). A name in changed that is not
+// among services is ignored.
+func Dependents(services []Service, changed []string, also func(Service) []string) []Service {
+	dependents := make(map[string][]string, len(services))
+	for _, service := range services {
+		names := service.dependencyNames()
+		if also != nil {
+			names = append(names, also(service)...)
+		}
+		for _, name := range names {
+			dependents[name] = append(dependents[name], service.Name)
+		}
+	}
+	affected := make(map[string]bool, len(changed))
+	pending := append([]string(nil), changed...)
+	for len(pending) > 0 {
+		name := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if affected[name] {
+			continue
+		}
+		affected[name] = true
+		pending = append(pending, dependents[name]...)
+	}
+	out := make([]Service, 0, len(affected))
+	for _, service := range services {
+		if affected[service.Name] {
+			out = append(out, service)
+		}
+	}
+	return out
+}
+
 // Stage is the part of one service's build a step runs.
 type Stage string
 

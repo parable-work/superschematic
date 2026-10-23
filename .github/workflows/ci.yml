@@ -360,6 +360,13 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/scalarcatalog -check
 
+      - name: Agent catalog drift (the skill's scalar, decorator and behavior catalogs match the registry, packages and superscalar)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          go run ./internal/tools/agentcatalog -check
+
       - name: Schema-file types drift (ir/typescript JSON Schema + TypeScript types match the IR)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
