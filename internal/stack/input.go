@@ -119,6 +119,11 @@ type Service struct {
 	// ir.Schema.Workers holds them. Each is a deployable of the stack.
 	Workers []ir.Worker
 
+	// Derivers are an API service's derivers, its `@deriver` classes
+	// (D74), as ir.Schema.Derivers holds them. Each is a deployable of the
+	// stack.
+	Derivers []ir.Deriver
+
 	// Queues are the names of a DB service's queues, its `@queue` classes
 	// (D53), sorted. A worker's queue is one of its API's database.
 	Queues []string
@@ -128,6 +133,11 @@ type Service struct {
 	// open the engine on its database, and the stack runs the engine's
 	// runner over it, a deployable of its own.
 	Engine bool
+
+	// Derived are the names of a DB service's engine types that compose
+	// Derived (D73), sorted. A deriver's schemas are among those of its
+	// API's database (D74).
+	Derived []string
 }
 
 // Operation is what admits a caller to one operation of an API service.

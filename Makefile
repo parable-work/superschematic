@@ -459,9 +459,9 @@ docs:
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json, fixture-workqueue-json and fixture-commerce-json,
-# whose types compose the core's behaviors (D10): --emit-ir carries all
-# twenty-six and json-schema admits them; fixture-commerce-currency-json
+# fixture-timers-json, fixture-workqueue-json, fixture-commerce-json and
+# fixture-derived-json, whose types compose the core's behaviors (D10):
+# --emit-ir carries all twenty-eight and json-schema admits them; fixture-commerce-currency-json
 # holds a commerce currency in a Finance.Currency own field (D70). The
 # engine runs the first eleven documents with its own behaviors in
 # runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
@@ -508,12 +508,14 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-derived-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
 	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
 		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Derived Provenance \
 		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done

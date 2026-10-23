@@ -156,6 +156,10 @@ type RustInput struct {
 	// APIs (D65): Server is then the worker's deployable.
 	Worker *WorkerInput
 
+	// Deriver, when set, plans the entrypoint of a deriver of the one API
+	// in APIs (D74): Server is then the deriver's deployable.
+	Deriver *DeriverInput
+
 	// EngineTypes are the directories of the Rust types crate of each
 	// engine database an API connects to, which holds its engine document
 	// (D58), by service.
@@ -173,12 +177,16 @@ type RustServer struct {
 	Stack string
 	Name  string
 
-	// Kind is "server", "job", "worker" or "runner".
+	// Kind is "server", "job", "worker", "runner" or "deriver".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
 	// (D65).
 	Job *Job
+
+	// Deriver is what a deriver's entrypoint runs, nil for every other
+	// (D74).
+	Deriver *RustDeriver
 
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D65).
@@ -261,6 +269,17 @@ type RustWorker struct {
 	// message type and its descriptor constant by, through the API crate.
 	Message    string
 	Descriptor string
+}
+
+// RustDeriver is the deriver a Rust deriver's entrypoint runs (D74): its
+// @deriver class, the field of the API's Derivers that holds it, and the
+// engine it pulls from and settles to, the API's Deps' engine, as the
+// principal Subject and Permissions name.
+type RustDeriver struct {
+	rustrestgen.DeriverInfo
+
+	// Engine is the engine of the API's engine database, which Deps holds.
+	Engine *RustEngine
 }
 
 // RustAPI is a served API in main.rs.
@@ -443,6 +462,9 @@ var rustReserved = []string{
 	"jobs", "workers", "worker", "queue", "shutdown", "started", "definition", "concurrency", "options",
 	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
 	"token", "headers",
+	// A deriver's (D74).
+	"derive", "derivers", "deriver", "answer", "derived", "item", "schema", "schemas", "principal", "engine",
+	"unread", "derivation_answer",
 }
 
 // rustNames hands out snake_case identifiers no other declaration of
@@ -532,6 +554,18 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			GraceSeconds: grace,
 		}
 		s.Package = n.RustWorkerCrate(in.Stack, in.Server)
+	case in.Deriver != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		d := o.Deriver(in.Deriver.Name)
+		if d == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
+		}
+		s.Kind = "deriver"
+		s.Deriver = &RustDeriver{DeriverInfo: *d}
+		s.Package = n.RustDeriverCrate(in.Stack, in.Server)
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -696,6 +730,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	}
 	if err := s.planRustEngines(in, taken); err != nil {
 		return nil, err
+	}
+	if s.Deriver != nil {
+		if s.APIs[0].Engine == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine, whose Derived fields it fills (D74)", in.Stack, in.Server, s.APIs[0].Service)
+		}
+		s.Deriver.Engine = s.APIs[0].Engine
 	}
 	s.planLoopback(taken)
 	for _, a := range in.APIs {
@@ -1051,7 +1091,7 @@ func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplement
 // engine runner's, which serves no request: it mounts no routes, listens on
 // no port, and verifies no end user or caller.
 func (s *RustServer) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
 }
 
 // Sections are the sections of docs/stack-model.md the entrypoint's
@@ -1064,6 +1104,8 @@ func (s *RustServer) Sections() string {
 		return "sections 8.6 and 8.8"
 	case s.Runner != nil:
 		return "sections 3.1 and 8.6"
+	case s.Deriver != nil:
+		return "section 8.6"
 	}
 	return "sections 8.1 and 8.6"
 }
@@ -1151,6 +1193,10 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
 	if s.Worker != nil {
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
+	}
+	if s.Deriver != nil {
+		// The deriver reads its concurrency as a worker does (D74).
+		uses = append(uses, "use "+runtime+"::worker;")
 	}
 	return append(uses, "use "+runtime+"::Shutdown;")
 }
@@ -1251,6 +1297,8 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:
 		main = "runner.rs.tmpl"
+	case s.Deriver != nil:
+		main = "deriver.rs.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, RustMainFile},

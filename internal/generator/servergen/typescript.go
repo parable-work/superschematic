@@ -217,6 +217,10 @@ type TypeScriptInput struct {
 	// APIs is empty, and Server is the runner's deployable.
 	Runner *TypeScriptRunnerInput
 
+	// Deriver, when set, plans the entrypoint of a deriver of the one API
+	// in APIs (D74): Server is then the deriver's deployable.
+	Deriver *DeriverInput
+
 	// EngineProject is the project's engine crate the entrypoint's engine
 	// loads its addon from, nil when the core's addon runs every behavior
 	// its engine database composes (D58): one that composes an extension's
@@ -233,12 +237,16 @@ type TypeScriptServer struct {
 	Package string
 	Naming  naming.Naming
 
-	// Kind is "server", "job", "worker" or "runner".
+	// Kind is "server", "job", "worker", "runner" or "deriver".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
 	// (D52).
 	Job *Job
+
+	// Deriver is what a deriver's entrypoint runs, nil for every other
+	// (D74).
+	Deriver *TypeScriptDeriver
 
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D53).
@@ -326,11 +334,22 @@ type TypeScriptWorker struct {
 	Package    string
 }
 
-// Background reports whether the entrypoint is a job's, a worker's or an
-// engine's runner's, which serves no request: it mounts no routes, listens
-// on no port, and verifies no end user or caller.
+// TypeScriptDeriver is the deriver a TypeScript deriver's entrypoint runs
+// (D74): its @deriver class, the member of the API's Derivers that holds
+// its methods, and the engine it pulls from and settles to, the API's
+// Deps' engine, as the principal Subject and Permissions name.
+type TypeScriptDeriver struct {
+	tsrestgen.DeriverInfo
+
+	// Engine is the engine of the API's engine database, which Deps holds.
+	Engine *TypeScriptEngine
+}
+
+// Background reports whether the entrypoint is a job's, a worker's, a
+// deriver's or an engine's runner's, which serves no request: it mounts no
+// routes, listens on no port, and verifies no end user or caller.
 func (s *TypeScriptServer) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
 }
 
 // NpmDependency is a package.json dependency.
@@ -562,6 +581,8 @@ var tsReserved = []string{
 	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
 	"EngineDocumentOf", "OpenedEngine", "EngineSetup", "EngineCallers", "ENGINE_TIMEOUT_SECONDS", "principal", "alive",
 	"stopped", "closeEngines",
+	// A deriver's (D74).
+	"derivers", "deriver", "runDeriver", "inProcess", "DerivationAnswer", "DerivationItem", "answer", "engine", "item",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -627,6 +648,17 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
+	case in.Deriver != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		d := o.Deriver(in.Deriver.Name)
+		if d == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
+		}
+		s.Kind = "deriver"
+		s.Deriver = &TypeScriptDeriver{DeriverInfo: *d}
 	case in.Runner != nil:
 		if len(in.APIs) != 0 {
 			return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s and serves no API", in.Stack, in.Server, in.Runner.Database)
@@ -649,7 +681,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		// A server's Workers entrypoint is fetch.ts and a job's
 		// scheduled.ts; a worker is a process that claims until it is
 		// stopped, which no Worker runs (D53, amended, D64).
-		if s.Worker != nil {
+		if s.Worker != nil || s.Deriver != nil {
 			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server or a job alone (D64)", in.Stack, s.Kind, in.Server)
 		}
 		s.Workers = true
@@ -776,6 +808,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// A sqlite-first database's worker claims on its SQLite file
 			// with sqliteQueue (D53, amended).
 			s.Worker.Database = api.Database
+		}
+		if s.Deriver != nil {
+			if api.Engine == nil {
+				return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine on %s, whose Derived fields it fills (D74)", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
+			}
+			s.Deriver.Engine = api.Engine
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
@@ -1370,6 +1408,8 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		main = "worker.ts.tmpl"
 	case s.Runner != nil:
 		main = "runner.ts.tmpl"
+	case s.Deriver != nil:
+		main = "deriver.ts.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, TypeScriptMainFile},

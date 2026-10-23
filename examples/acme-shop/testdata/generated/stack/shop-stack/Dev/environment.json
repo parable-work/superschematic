@@ -25,15 +25,15 @@
       "artifact": "image",
       "exposed": true,
       "resourceName": "shop-api",
-      "address": "http://127.0.0.1:22125",
-      "publicAddress": "http://127.0.0.1:22125",
+      "address": "http://127.0.0.1:21162",
+      "publicAddress": "http://127.0.0.1:21162",
       "bindings": [
         {
           "field": "SHOP_API_CORS",
           "source": "derived",
           "value": {
             "origins": [
-              "http://127.0.0.1:22339"
+              "http://127.0.0.1:21376"
             ]
           },
           "corsOf": "shop-api",
@@ -52,7 +52,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-api->shop-db"
         },
@@ -60,7 +60,7 @@
           "field": "SHOP_MEDIA_BUCKET",
           "source": "derived",
           "value": {
-            "endpoint": "http://127.0.0.1:24960",
+            "endpoint": "http://127.0.0.1:23997",
             "name": "shop-media"
           },
           "edge": "bucket:shop-api->shop-media"
@@ -81,8 +81,8 @@
       "artifact": "image",
       "exposed": true,
       "resourceName": "shop-cart",
-      "address": "http://127.0.0.1:20747",
-      "publicAddress": "http://127.0.0.1:20747",
+      "address": "http://127.0.0.1:22552",
+      "publicAddress": "http://127.0.0.1:22552",
       "bindings": [
         {
           "field": "SHOP_CART_IDENTITY",
@@ -95,9 +95,44 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-cart->shop-db"
+        }
+      ]
+    },
+    {
+      "name": "shop-cart-triage-tickets",
+      "kind": "deriver",
+      "platform": "local.deriver",
+      "services": [
+        {
+          "name": "shop-cart",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "deriver": {
+        "api": "shop-cart",
+        "name": "TriageTickets",
+        "database": "shop-db",
+        "schemas": [
+          "Ticket"
+        ],
+        "instances": 1,
+        "concurrency": 4,
+        "batchSize": 50
+      },
+      "resourceName": "shop-cart-triage-tickets",
+      "bindings": [
+        {
+          "field": "SHOP_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
+          },
+          "edge": "sql:shop-cart-triage-tickets->shop-db"
         }
       ]
     },
@@ -113,7 +148,7 @@
       ],
       "dialect": "postgres",
       "resourceName": "shop-db",
-      "address": "127.0.0.1:31960"
+      "address": "127.0.0.1:30997"
     },
     {
       "name": "shop-db-engine-runner",
@@ -138,7 +173,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-db-engine-runner->shop-db"
         }
@@ -155,7 +190,7 @@
         }
       ],
       "resourceName": "shop-media",
-      "address": "http://127.0.0.1:24960"
+      "address": "http://127.0.0.1:23997"
     },
     {
       "name": "shop-orders",
@@ -177,8 +212,8 @@
       "artifact": "image",
       "exposed": true,
       "resourceName": "shop-orders",
-      "address": "http://127.0.0.1:21454",
-      "publicAddress": "http://127.0.0.1:21454",
+      "address": "http://127.0.0.1:20491",
+      "publicAddress": "http://127.0.0.1:20491",
       "bindings": [
         {
           "field": "ACMEPAY_API_KEY",
@@ -200,7 +235,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders->shop-db"
         },
@@ -226,7 +261,7 @@
               },
               "source": "signed-token"
             },
-            "url": "http://127.0.0.1:21083"
+            "url": "http://127.0.0.1:20120"
           },
           "edge": "http:shop-orders->shop-stock"
         }
@@ -281,7 +316,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders-fulfil-orders->shop-db"
         },
@@ -300,7 +335,7 @@
               },
               "source": "signed-token"
             },
-            "url": "http://127.0.0.1:21083"
+            "url": "http://127.0.0.1:20120"
           },
           "edge": "http:shop-orders-fulfil-orders->shop-stock"
         }
@@ -354,7 +389,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders-settle-payments->shop-db"
         },
@@ -373,7 +408,7 @@
               },
               "source": "signed-token"
             },
-            "url": "http://127.0.0.1:21083"
+            "url": "http://127.0.0.1:20120"
           },
           "edge": "http:shop-orders-settle-payments->shop-stock"
         }
@@ -427,7 +462,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-orders-ship-orders->shop-db"
         },
@@ -446,7 +481,7 @@
               },
               "source": "signed-token"
             },
-            "url": "http://127.0.0.1:21083"
+            "url": "http://127.0.0.1:20120"
           },
           "edge": "http:shop-orders-ship-orders->shop-stock"
         }
@@ -466,14 +501,14 @@
       "artifact": "image",
       "exposed": true,
       "resourceName": "shop-stock",
-      "address": "http://127.0.0.1:21083",
-      "publicAddress": "http://127.0.0.1:21083",
+      "address": "http://127.0.0.1:20120",
+      "publicAddress": "http://127.0.0.1:20120",
       "bindings": [
         {
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-stock->shop-db"
         },
@@ -634,7 +669,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-stock-order-restocks->shop-db"
         }
@@ -667,7 +702,7 @@
           "field": "SHOP_DB_DATABASE",
           "source": "derived",
           "value": {
-            "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+            "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
           },
           "edge": "sql:shop-stock-reorder-stock->shop-db"
         }
@@ -687,8 +722,8 @@
       "artifact": "image",
       "exposed": true,
       "resourceName": "shop-storefront",
-      "address": "http://127.0.0.1:22121",
-      "publicAddress": "http://127.0.0.1:22121"
+      "address": "http://127.0.0.1:21158",
+      "publicAddress": "http://127.0.0.1:21158"
     },
     {
       "name": "shop-web",
@@ -714,14 +749,14 @@
       },
       "exposed": true,
       "resourceName": "shop-web",
-      "address": "http://127.0.0.1:22339",
-      "publicAddress": "http://127.0.0.1:22339",
+      "address": "http://127.0.0.1:21376",
+      "publicAddress": "http://127.0.0.1:21376",
       "bindings": [
         {
           "field": "shop-api",
           "source": "derived",
           "value": {
-            "url": "http://127.0.0.1:22125"
+            "url": "http://127.0.0.1:21162"
           },
           "edge": "site:shop-web->shop-api"
         }
@@ -823,6 +858,18 @@
         "kind": "DB"
       },
       "connector": "local.process-postgres",
+      "field": "SHOP_DB_DATABASE"
+    },
+    {
+      "id": "sql:shop-cart-triage-tickets->shop-db",
+      "kind": "sql",
+      "from": "shop-cart-triage-tickets",
+      "to": "shop-db",
+      "service": {
+        "name": "shop-db",
+        "kind": "DB"
+      },
+      "connector": "local.deriver-postgres",
       "field": "SHOP_DB_DATABASE"
     },
     {
@@ -960,16 +1007,16 @@
           ],
           "image": "postgres:16-alpine",
           "labels": {
-            "superschematic.checkout": "0530c5",
+            "superschematic.checkout": "697cb2",
             "superschematic.environment": "Dev",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-dev-0530c5-postgres",
+          "name": "superschematic-shop-stack-dev-697cb2-postgres",
           "ports": [
             {
               "containerPort": 5432,
               "host": "127.0.0.1",
-              "hostPort": 31960
+              "hostPort": 30997
             }
           ],
           "readiness": {
@@ -997,7 +1044,7 @@
           "env": [
             {
               "name": "SHOP_API_CORS_ORIGINS",
-              "value": "http://127.0.0.1:22339"
+              "value": "http://127.0.0.1:21376"
             },
             {
               "name": "SHOP_API_IDENTITY",
@@ -1005,11 +1052,11 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
-              "value": "http://127.0.0.1:24960"
+              "value": "http://127.0.0.1:23997"
             },
             {
               "name": "SHOP_MEDIA_BUCKET_NAME",
@@ -1019,12 +1066,37 @@
           "language": "go",
           "module": "server/shop-stack/shop-api",
           "name": "shop-api",
-          "port": 22125,
+          "port": 21162,
           "readiness": "/readyz"
         },
         "phase": "rollout",
         "owners": [
           "shop-api"
+        ]
+      },
+      {
+        "id": "shop-cart-triage-tickets.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "SHOP_DB_DATABASE_URL",
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
+            },
+            {
+              "name": "WORKER_CONCURRENCY",
+              "value": "4"
+            }
+          ],
+          "kind": "deriver",
+          "language": "typescript",
+          "module": "server/shop-stack/shop-cart-triage-tickets",
+          "name": "shop-cart-triage-tickets",
+          "readiness": "started"
+        },
+        "phase": "rollout",
+        "owners": [
+          "shop-cart-triage-tickets"
         ]
       },
       {
@@ -1038,13 +1110,13 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             }
           ],
           "language": "typescript",
           "module": "server/shop-stack/shop-cart",
           "name": "shop-cart",
-          "port": 20747,
+          "port": 22552,
           "readiness": "/readyz"
         },
         "phase": "rollout",
@@ -1059,7 +1131,7 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             }
           ],
           "kind": "runner",
@@ -1085,7 +1157,7 @@
           },
           "name": "shop_db",
           "service": "shop-db",
-          "url": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+          "url": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
         },
         "dependsOn": [
           "postgres.container"
@@ -1105,7 +1177,7 @@
               "name": "name"
             }
           },
-          "endpoint": "http://127.0.0.1:24960",
+          "endpoint": "http://127.0.0.1:23997",
           "name": "shop-media",
           "service": "shop-media"
         },
@@ -1149,7 +1221,7 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
@@ -1174,7 +1246,7 @@
             },
             {
               "name": "SHOP_STOCK_SERVICE_URL",
-              "value": "http://127.0.0.1:21083"
+              "value": "http://127.0.0.1:20120"
             },
             {
               "name": "WORKER_CONCURRENCY",
@@ -1228,7 +1300,7 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
@@ -1253,7 +1325,7 @@
             },
             {
               "name": "SHOP_STOCK_SERVICE_URL",
-              "value": "http://127.0.0.1:21083"
+              "value": "http://127.0.0.1:20120"
             }
           ],
           "job": "SettlePayments",
@@ -1306,7 +1378,7 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_STOCK_SERVICE_CREDENTIAL_AUDIENCE",
@@ -1331,7 +1403,7 @@
             },
             {
               "name": "SHOP_STOCK_SERVICE_URL",
-              "value": "http://127.0.0.1:21083"
+              "value": "http://127.0.0.1:20120"
             }
           ],
           "job": "ShipOrders",
@@ -1383,7 +1455,7 @@
             },
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_ORDERS_IDENTITY",
@@ -1412,13 +1484,13 @@
             },
             {
               "name": "SHOP_STOCK_SERVICE_URL",
-              "value": "http://127.0.0.1:21083"
+              "value": "http://127.0.0.1:20120"
             }
           ],
           "language": "go",
           "module": "server/shop-stack/shop-orders",
           "name": "shop-orders",
-          "port": 21454,
+          "port": 20491,
           "readiness": "/readyz"
         },
         "dependsOn": [
@@ -1437,7 +1509,7 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             }
           ],
           "job": "OrderRestocks",
@@ -1460,7 +1532,7 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "WORKER_CONCURRENCY",
@@ -1485,7 +1557,7 @@
           "env": [
             {
               "name": "SHOP_DB_DATABASE_URL",
-              "value": "postgres://postgres@127.0.0.1:31960/shop_db?sslmode=disable"
+              "value": "postgres://postgres@127.0.0.1:30997/shop_db?sslmode=disable"
             },
             {
               "name": "SHOP_STOCK_CALLERS_ISSUERS",
@@ -1679,7 +1751,7 @@
           "language": "rust",
           "module": "server/shop-stack/shop-stock",
           "name": "shop-stock",
-          "port": 21083,
+          "port": 20120,
           "readiness": "/readyz"
         },
         "dependsOn": [
@@ -1700,7 +1772,7 @@
           "language": "typescript",
           "module": "server/shop-stack/shop-storefront",
           "name": "shop-storefront",
-          "port": 22121,
+          "port": 21158,
           "readiness": "/readyz"
         },
         "phase": "rollout",
@@ -1716,7 +1788,7 @@
           "config": {
             "apis": {
               "shop-api": {
-                "url": "http://127.0.0.1:22125"
+                "url": "http://127.0.0.1:21162"
               }
             }
           },
@@ -1724,7 +1796,7 @@
           "fallback": "index.html",
           "name": "shop-web",
           "output": "dist",
-          "port": 22339
+          "port": 21376
         },
         "phase": "rollout",
         "owners": [
@@ -1747,22 +1819,22 @@
             "-filesystem-root",
             "/storage",
             "-public-host",
-            "127.0.0.1:24960",
+            "127.0.0.1:23997",
             "-external-url",
-            "http://127.0.0.1:24960"
+            "http://127.0.0.1:23997"
           ],
           "image": "fsouza/fake-gcs-server:1.56.1",
           "labels": {
-            "superschematic.checkout": "0530c5",
+            "superschematic.checkout": "697cb2",
             "superschematic.environment": "Dev",
             "superschematic.stack": "shop-stack"
           },
-          "name": "superschematic-shop-stack-dev-0530c5-storage",
+          "name": "superschematic-shop-stack-dev-697cb2-storage",
           "ports": [
             {
               "containerPort": 4443,
               "host": "127.0.0.1",
-              "hostPort": 24960
+              "hostPort": 23997
             }
           ],
           "readiness": {
@@ -1803,6 +1875,7 @@
       "deployables": [
         "shop-api",
         "shop-cart",
+        "shop-cart-triage-tickets",
         "shop-db-engine-runner",
         "shop-stock",
         "shop-stock-order-restocks",
@@ -1811,6 +1884,7 @@
       ],
       "resources": [
         "shop-api.process",
+        "shop-cart-triage-tickets.process",
         "shop-cart.process",
         "shop-db-engine-runner.process",
         "shop-stock-order-restocks.job",

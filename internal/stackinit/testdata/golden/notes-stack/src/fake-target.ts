@@ -15,6 +15,7 @@ declare module "@superschematic/stack" {
       bucket: { versioning?: boolean };
       worker: { memory?: string };
       runner: {};
+      deriver: {};
     };
   }
 }

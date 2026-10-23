@@ -580,22 +580,6 @@ export interface DerivedConfig {
   readonly maxAttempts: number;
 }
 
-/** One item of staleDerivations: what a deriver computes. */
-export interface DerivationItem {
-  readonly id: string;
-  readonly field: string;
-  /** The hash a settle presents. */
-  readonly sourceHash: string;
-  /** Which attempt this is, from 1. */
-  readonly attempt: number;
-  readonly instruction: string;
-  readonly model: string;
-  /** The inputs that hold a value, by field name. */
-  readonly inputs: Readonly<Record<string, unknown>>;
-  /** The derived field's JSON Schema: what the value must be. */
-  readonly output: unknown;
-}
-
 /** Provenance's review, parsed. */
 export interface ProvenanceReview {
   /** The behaviors whose writes enter review. */

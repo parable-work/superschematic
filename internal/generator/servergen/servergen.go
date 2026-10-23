@@ -240,6 +240,12 @@ type WorkerInput struct {
 	GraceSeconds int
 }
 
+// DeriverInput is the deriver a deriver's entrypoint runs (D74).
+type DeriverInput struct {
+	// Name is the deriver's @deriver class.
+	Name string
+}
+
 // ServerDir is where the entrypoint of server in stack is written; a job's
 // is beside the servers', under the job's deployable name.
 func ServerDir(outputRoot, stack, server string) string {

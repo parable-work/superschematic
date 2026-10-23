@@ -105,6 +105,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// workers, which handle them (core_queues.go, D53).
 	specs = append(specs, queueDecorator(), workerDecorator())
 
+	// An API service's derivers, which fill the Derived fields of its
+	// engine database's types (core_derivers.go, D74).
+	specs = append(specs, deriverDecorator())
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })

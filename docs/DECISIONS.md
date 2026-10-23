@@ -9809,3 +9809,66 @@ composes them for the cli smoke, the generators' narrowing, inputs from
 linked instances, a stack worker that runs a deriver, and a check of
 sensitive fields as inputs. The rule is reversible until the first
 release.
+
+## D74. A stack runs the derivers its engine types need, as deployables of their own over the project's typed answers
+
+D73 left a gap: nothing in a stack ran a deriver, so a type that composed
+Derived got fields that never filled. Search's embedder had the same gap.
+The only long-running deployable for project code was the worker, which
+cannot exist without a queue, and no server runs the engine's runner
+(D58, amended).
+
+This entry adds:
+- a reference loop, `runDeriver` in `@superschematic/engine` and
+  `derive::run_deriver` in the Rust engine's `background` feature;
+- a deployable kind, `deriver`, declared with `@deriver` on an API;
+- typed answers: a generated `Derivers` type the project implements;
+- the refusal of a `Secret<T>` input;
+- narrowed types for Derived's and Provenance's fields and operations.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A deriver is a long-running deployable of its own, woken by the engine's commit notifier, with a poll as the fallback | a job on a schedule, which lands a value up to a minute late; a worker over a queue Derived feeds, which couples a core behavior to the queue runtime and duplicates Derived's stale queue |
+| The project answers each derived field through a generated method typed by the field: inputs typed by its `from` fields, the answer's value by the field's own type, and the item's `output` the field's JSON Schema | generated provider adapters configured in the stack, which put a vendor in superschematic and take prompts, retries and cost controls out of project code |
+| A model label maps to a provider's model in project code, through the API's own config | a stack construct mapping labels per environment, which can follow if projects repeat the mapping |
+| The deriver's principal is the deployable's name, holding each derived type's name and each Derived `permission`; with a `{ rules }` policy, the build refuses a stack with no rule that names its subject and allows | a generated policy rule, which would take the policy out of the project's hands; an HTTP deriver, whose service caller holds no permission (D37) |
+| TypeScript and Rust now, Go refused with a message saying it follows | all three now |
+| A `Secret<T>` field is refused as a Derived input, by the build and by the engine at define, with no override | a personal-data marker refused unless allowed, which belongs to a later Sensitive behavior that also covers the log, search and MCP output |
+| The narrowing types field names and values: `Derived.fields`, `Derived.stale` and `Provenance.fields` are keyed by the config's fields, the operations take them as enums, and `applyDerived`'s values and `reject`'s patch take the fields' own types | names only, so a wrong value fails at run time as `invalid` and not at compile time |
+| `schemas` names engine types as strings | class references, which would import engine types into an API, which the build refuses |
+
+Two answers to the design questions changed while building:
+- acme's example answers with keyword rules only. The stack has no
+  optional secret, and a required model key would stop `stack dev` and
+  CI without one. The method gets the model label and the output schema,
+  so a project puts its model call there.
+- `schemas` names types by string, as the last row says.
+
+Status: built.
+- **The reference loops:** `runtime/engine/typescript/test/deriver.test.ts`
+  and `runtime/engine/rust/testkit/tests/deriver.rs` show each fills a
+  schema's stale fields, settles a throw or a panic as a failure, wakes
+  on a commit and stops on its signal.
+- **The secret rule:** `core_derived.rs` and
+  `internal/loader/verify/behaviors_test.go` hold it.
+- **The deriver kind:**
+  - `internal/stack/derivers_test.go` holds the deployable, its settings
+    and its refusals.
+  - `internal/generator/servergen/derivers_test.go` holds the
+    entrypoints' goldens and the build's refusals: no engine database,
+    a type without Derived, a Go API, and a rules policy without the
+    deriver's rule.
+  - It also builds a generated TypeScript and Rust deriver and its
+    scaffold with `tsc`, `cargo clippy` and `rustfmt`.
+  - The local, gcp and cloudflare targets' tests hold the process, the
+    worker pool and the refusal.
+- **The narrowing:** `fixture-behavior-types` and the engine client's
+  fixture (`Request`) carry it into the goldens, and the engine's
+  TypeScript suite typechecks the typed operations.
+- **acme-shop:** shop-db's `Ticket` runs D73's recipe. shop-cart opens
+  tickets, and its deriver `TriageTickets` fills them, in
+  `TestStackDevRunsTheShop`.
+
+Left: Go derivers, a deriver over an HTTP engine, a model-label
+construct, a cost cap, and evaluating every `{ rules }` policy rule in
+order at build. The rule is reversible until the first release.
