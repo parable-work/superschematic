@@ -1,9 +1,9 @@
-package main
+package agentcatalog
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -56,10 +56,10 @@ func (d export) names() []string {
 	return out
 }
 
-// readPackage reads the exports of every source file in dir, tests and
-// type-check fixtures left out, in file order.
-func readPackage(dir string) ([]export, error) {
-	entries, err := os.ReadDir(dir)
+// readPackage reads the exports of every source file in dir of fsys, tests
+// and type-check fixtures left out, in file order.
+func readPackage(fsys fs.FS, dir string) ([]export, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func readPackage(dir string) ([]export, error) {
 	sort.Strings(files)
 	var out []export
 	for _, name := range files {
-		src, err := os.ReadFile(filepath.Join(dir, name))
+		src, err := fs.ReadFile(fsys, path.Join(dir, name))
 		if err != nil {
 			return nil, err
 		}

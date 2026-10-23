@@ -302,12 +302,13 @@ HTTP runtime for [Go](runtime/http/go/README.md),
 [Rust engine](runtime/versiongraph/rust-engine/README.md) and
 [Python](runtime/versiongraph/python/README.md) packages).
 
-**For coding agents.** [`skills/superschematic/`](skills/superschematic/SKILL.md)
-is an agent skill for building with superschematic: what to declare
-instead of write, the build loop, and catalogs of the scalars, decorators
-and engine behaviors generated from the compiler itself
-(`go run ./internal/tools/agentcatalog`). Copy the directory into an
-agent's skills directory, such as `.claude/skills/` in a project.
+**For coding agents.** `superschematic catalog scalars`, `decorators`,
+`behaviors` and `capabilities` print Markdown references of what the
+binary you run knows, its extensions included, so an agent reads a
+reference that matches the compiler it builds with. The agent skill for
+building with superschematic is kept apart from this repository, which is
+for building superschematic itself, and reads these references through
+the command.
 
 **Design.** [`docs/extension-model.md`](docs/extension-model.md) is the
 design of the extension seam, [`docs/stack-model.md`](docs/stack-model.md)
@@ -360,7 +361,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `new`, `stack`, `identity` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
@@ -374,7 +375,6 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
-| [`skills/`](skills/) | The agent skill for building with superschematic, with its generated catalogs |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
 The repository has twelve Go modules: the root (the compiler), `ir`,

@@ -10,6 +10,9 @@ thing a backend needs to the schema construct that provides it, what
 `superschematic build` generates from it, and the code that is still
 yours. It is the place to start when you know what you want and not yet
 how to say it. Each row links the guide that covers it.
+`superschematic catalog capabilities` prints this page, and
+`superschematic catalog scalars`, `decorators` and `behaviors` print the
+exact constructs the binary you run accepts.
 
 ## What you never write
 
