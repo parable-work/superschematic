@@ -9701,3 +9701,83 @@ when `columns().set()` keeps the row), and that a call in a host's
 transaction sees what the host's statements wrote since the call before.
 The engine's suites, the scenario and HTTP corpora, the Go binding's
 replay, the TypeScript suite and the servers' tests pass unchanged.
+
+## D71. `init` writes a schemas root and `new service` writes a service, refusing every file that exists
+
+No command wrote a schemas root or a service. A person, or a coding agent
+following the agent skill, wrote about six files per service by hand from
+`examples/acme-shop`: the naming file, the base tsconfig whose `paths`
+reach a checkout's authoring packages, the output root's ignore rules, and
+per service a config, a package name, a tsconfig, an index and a schema
+file. The tsconfig paths and the `outputs` block were what came out wrong:
+a DB without Go types, an SDK without types in its language. D59 turned
+scaffolding a project down for `stack init`, which starts from a tree that
+already has APIs; these are the commands that start the tree.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic init [<schemas-root>]`, `./schemas` without one, writes `superschematic.toml` with `go_module_root`, `npm_scope` and a `[paths]` table, `tsconfig.base.json`, a `.gitignore` and an empty `services/`. The naming file's `[paths]` names each of acme-shop's keys whose directory the checkout has, relative to the parent of the schemas root as the naming file requires, and `build_context` only when the checkout holds the project, saying in a comment what to set otherwise. | A minimal naming file with no `[paths]`, whose generated `go.mod` files then require versions no proxy serves (a checkout-built binary pins nothing). `stack init`'s covering-`.gitignore` edit, which writes into a repository's own file; init owns the schemas root it creates. |
+| The base tsconfig is acme-shop's options with three `paths`: `@superschematic/*` to `<checkout>/packages/*/src/index.ts`, `superscalar` to the checkout's `third_party/superscalar/bindings/typescript/src/index.ts`, and `<npm_scope>/*` to `./services/*/src/index.ts`. | One entry per authoring package, as acme-shop lists them, which the next package outdates. Absolute paths, which differ per machine. |
+| The checkout is `--superschematic`, else the checkout that holds the schemas root, else, at a terminal, an answer. It must have `packages/schema-config/src/index.ts` and superscalar's TypeScript entry, which `make setup` checks out. Without one, init refuses: nothing is published, so a schemas root with no checkout does not build. `--go-module-root` and `--npm-scope` default to `example.com/<project>` and `@<project>`, the project being the directory that holds the schemas root. At a terminal init asks for each value no flag gives, with the line prompter `stack init` asks with (D59); without one, it takes the defaults. | Paths to `node_modules`, for packages no registry serves yet. The core defaults, `example.com/schemas` and `@schemas`, which every project would then share. |
+| `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site [--root <schemas-root>]` writes `services/<name>/`: `schema.config.ts`, `package.json` naming `<npm_scope>/<name>`, `tsconfig.json` extending the base, `src/index.ts`, and for DB, API and General `src/<name>.schema.ts`, a starter to rename: a table with a `@key`, a GET operation returning a view, an object type. A Bucket and a Site declare nothing in schema files, so they get none. `--root` defaults to the working directory when it holds the naming file, else `./schemas`. A Stack service is `stack init`'s, which reads the tree. | A starter per kind with more in it (an authDb, a calls list), which names services the tree may not have. One command for a whole project, a DB and an API wired together, whose shape fits one example. |
+| The outputs block loads: a DB has Go and TypeScript types, the Go types every DB needs; an API has Go and TypeScript types, a Go server and Go and TypeScript SDKs, each with its language's types; a General schema has Go and TypeScript types; a Bucket has `outputs: {}`; a Site has none. | Go alone, which leaves a TypeScript caller or a TypeScript server to edit the config before its first use. Every language, which the first build pays for and Python and Rust need toolchains for. |
+| `new service` then builds the service once, as `build` does, into `<schemas-root>/dist`, which writes `src/service.generated.ts`, the handle other configs import (D34). A build that fails leaves the files written and says so. A Site's build writes its code's mirror under `web/<name>` as every build of a Site does. | Writing the sentinel alone, which leaves the starter schema unchecked until the next build. |
+| Neither command replaces a file. Each checks every file it would write first, refuses naming each that exists and writes nothing, then creates each file exclusively. `new service` also refuses a name another service's config has, and a directory with a config in another form. There is no `--force`. | `--force`, which for a schemas root or a service is deleting a person's files; they move them aside. |
+
+Status: built. `cli/init.go` and `cli/new.go` are the commands, and
+`cli/init_test.go` drives them: init into a temporary directory against
+this checkout, its defaults in and outside a checkout and from a scripted
+terminal, its refusals; `new service` of each kind, whose files and first
+build it checks, then a `build-all` of the whole tree after the API's
+config imports the DB's and the bucket's handles; the root found from the
+working directory and from `--root`; and its refusals.
+
+Not built: a template per scenario (an API with its DB and sign-in). The
+check and watch loop that gives an agent each edit's errors without a
+build is D72. Once the authoring packages and runtimes are published, init
+writes `paths` to them and no `[paths]` table.
+
+The commands are reversible until the first release.
+
+## D72. `check` loads and verifies without generating, and `check --watch` re-checks only what an edit affects
+
+A person or a coding agent learned whether a schema edit held only from a
+build: `build-all` loads every service and then runs every generator,
+formats the output and writes the output root, seconds to minutes for a
+tree. The load alone, the part that finds a schema's mistakes, takes tens
+of milliseconds: one shared TypeScript program over the tree, a walk and
+the verification pass. Its errors came back as one joined error whose
+lines a reader had to split, and its warnings went to standard error. A
+runtime server that created schemas on the fly was weighed and turned down:
+the schema files stay the source of truth, since review, git and the
+migration planner need a fixed before and after, so the loop makes reading
+the files fast instead.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic check [<service-dir>\|<services-root>]` runs what a build runs before its generators: the naming file, the registry, every sentinel a config may import, discovery, then each service's load through the loader with the schema catalog, the shared TypeScript program and the dependency loader, in build order. It writes nothing under the output root. It writes each service's sentinel as a build does, since the next service's config imports it (D34). A service directory checks its closure, as `build --with-deps` builds it; a services root, or a schemas root, every service; no argument, the working directory if it is a service, else `./schemas/services`. | Running the generators into a temporary root, which costs the build it was meant to avoid. A check that writes no sentinel, under which a new service's dependents fail to import its handle until a build. `--emit-ir` per service, which stops at the first service and prints the IR, not the errors. |
+| Each finding is a diagnostic: service, file, line, column, severity, message. The loader's own located errors (`tsreader.SchemaError`, `verify.Diagnostic`) keep their location, a data-form reader's `path: message` is parsed for its file, and the rest keep their message with no file. The verification pass's warnings come back through `loader.WithWarnings` instead of `WarningWriter`. A finding in another service's file belongs to that service. A service whose load fails only through a dependency it reads (an `authDb` for the user model's routes, a `RefersTo` target) is `blocked` by it and repeats none of its errors. | A new error type threaded through every reader, which touches each check the loader has for a location most already carry. Reporting each service's whole error, which repeats a DB's errors under every API that reads it. |
+| Text prints `file:line:col: severity: message`, as compilers do, then a one-line summary. `--json` writes one document: `ok`, `servicesRoot`, `checked`, `errors`, `warnings`, `durationMs`, each service's `status` (`ok`, `error`, `blocked`) with `blockedBy`, and a flat `diagnostics` list. The command exits 1 on any error. | `--format text\|json`, as `stack queue` has, for a command with one machine form. SARIF, whose envelope an agent reads past for the same five fields. |
+| The watch is `check --watch`, not `build-all --watch`. An edit's question is whether the schema holds, which a check answers in about 10ms for the services an edit reaches; a build per keystroke would rewrite the output root under a running `stack dev` and spend seconds on generators a half-made schema fails anyway. Builds stay a deliberate step. | `build-all --watch`, which answers a different question at a hundred times the cost. Both, which doubles the surface before anyone has asked for the second. |
+| On each edit the watch re-checks the services the edited files belong to and every service that depends on them, transitively (`buildplan.Dependents`): the configs' edges (`dependencies`, `authDb`, `calls`, `buckets`) and the services each schema's decorator arguments name (D41), from its last clean load. The other services keep their last result, and every result reports all of them. An edit to a config, a service's `package.json` or `tsconfig.json`, the naming file, the base tsconfig or a new service discovers the tree again and re-checks it all. When a check rewrites a sentinel, its dependents are checked again in the same result, since they read the old handle from the shared program. | Re-checking the whole tree on each edit, which is simple and still fast today, but grows with the tree. Re-checking the edited service alone, which misses the API that a DB edit breaks. |
+| The watch polls each service's `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files every `--interval` (200ms), leaving out sentinels, `node_modules`, `dist`, `target` and hidden directories. With `--json` it writes one document per line, with `changed` naming the files. | fsnotify, a new dependency of every module that links the CLI, whose events miss edits in a container's bind mount or on a network file system and need a debounce of their own. |
+| `stack dev` does not watch. It builds once, so a schema edit reaches its servers only through another `stack dev`; `check --watch` runs beside it. | Rebuilding the closure of each edited service and restarting the servers, workers and jobs that serve it, in dependency order, with the migration an edited DB needs: the right next step, and a change to dev's process supervision that is its own decision. |
+
+Status: built. `cli/check.go` is the command and its report,
+`cli/check_watch.go` the watch, `buildplan.Dependents` the reverse
+closure and `loader.WithWarnings` the warnings' hook. `cli/check_test.go`
+drives a clean tree with nothing written under the output root, located
+errors in text and JSON with exit status 1, a service directory's
+closure, a blocked API over a broken data-form DB, warnings that leave the
+check ok, the target's resolution, the error tree's split, and a watch
+that re-checks an edited service and its dependents, keeps the rest, and
+stops when its context ends. `buildplan`'s
+`TestDependentsFollowsEveryEdgeBackwards` and the loader's
+`TestWithWarningsTakesTheWarnings` cover the two seams.
+
+Not built: `stack dev` rebuilding and restarting what an edit affects; a
+check of what only a generator finds, such as a worker whose queue is no
+`@queue` class of its API's database; and an editor integration over the
+JSON form.
+
+The command is reversible until the first release.

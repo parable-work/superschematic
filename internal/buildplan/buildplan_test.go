@@ -348,6 +348,43 @@ func TestClosureRejectsUnknownRootAndUndiscoveredDependency(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing")
 }
 
+// TestDependentsFollowsEveryEdgeBackwards: an edit to a service can change
+// the load of each service that names it, through any config field or an
+// edge the caller adds, transitively, and of no other.
+func TestDependentsFollowsEveryEdgeBackwards(t *testing.T) {
+	general := func(name string, deps ...string) Service {
+		cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindGeneral}
+		for _, dep := range deps {
+			cfg.Dependencies = append(cfg.Dependencies, schemaconfig.ServiceDependency{Name: dep, Kind: ir.SchemaKindGeneral})
+		}
+		return Service{Name: name, Dir: "/services/" + name, Config: cfg}
+	}
+	db := general("db", "base")
+	db.Config.Kind = ir.SchemaKindDB
+	api := general("api")
+	api.Config.Kind = ir.SchemaKindAPI
+	api.Config.AuthDB = "db"
+	caller := general("caller")
+	caller.Config.Kind = ir.SchemaKindAPI
+	caller.Config.Calls = []schemaconfig.ServiceDependency{{Name: "api", Kind: ir.SchemaKindAPI}}
+	stack := general("stack")
+	stack.Config.Kind = ir.SchemaKindStack
+	services := []Service{general("base"), db, api, caller, general("other"), stack}
+
+	assert.Equal(t, []string{"base", "db", "api", "caller"}, serviceNames(Dependents(services, []string{"base"}, nil)),
+		"dependencies, authDb and calls, transitively, in the given order")
+	assert.Equal(t, []string{"other"}, serviceNames(Dependents(services, []string{"other", "missing"}, nil)))
+
+	references := func(s Service) []string {
+		if s.Name == "stack" {
+			return []string{"caller"}
+		}
+		return nil
+	}
+	assert.Equal(t, []string{"api", "caller", "stack"}, serviceNames(Dependents(services, []string{"api"}, references)),
+		"an edge the caller adds is followed too")
+}
+
 func stepNames(steps []Step) []string {
 	names := make([]string, 0, len(steps))
 	for _, step := range steps {

@@ -2,6 +2,7 @@ const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrPropertyDecorator: ClassDecorator &
   PropertyDecorator = () => {};
 
+/** Marks the field as dispatch metadata, such as a union member's discriminator, rather than user-facing data. */
 export const internalMetadata: PropertyDecorator = noopPropertyDecorator;
 export const jsonField: ClassDecorator & PropertyDecorator =
   noopClassOrPropertyDecorator;
@@ -16,6 +17,7 @@ export const denyUnknownFields: ClassDecorator = () => {};
 // or null. Applies to this object only: a nested object type opts in on its
 // own.
 export const strictJSON: ClassDecorator = () => {};
+/** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 
 // Field presentation. None of these changes the wire format or validation.
@@ -63,13 +65,16 @@ export type UIControl =
   | 'input'
   | 'textarea';
 
+/** The control a schema form draws for the field, in place of the one it picks (UIControl). */
 export function uiControl(_control: UIControl): PropertyDecorator {
   return noopPropertyDecorator;
 }
 
+/** The class is a view of a table: its fields are checked against the table's. */
 export function source(_target: unknown): ClassDecorator {
   return () => {};
 }
+/** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 
 // Wire encodings for @temporalFormat: the epoch units. ISO text is the

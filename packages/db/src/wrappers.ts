@@ -11,7 +11,10 @@ export type RelationOptions = { onDelete?: OnDeleteAction };
 // loader reads the actual value from the second type-argument node (mirroring
 // Validate<T, C>). No embed is added because nothing reads a `__relationOpts`.
 export type Relation<T, Opts extends RelationOptions = {}> = T & { readonly __relation: true };
+// The rows of T whose relation points at this row.
 export type HasMany<T> = T[] & { readonly __hasMany: true };
 export type ManyToMany<T> = T[] & { readonly __manyToMany: true };
+// The database generates the value on insert.
 export type AutoGenerate<T> = T & { readonly __autogen: true };
+// The field is stored as JSONB.
 export type JsonField<T> = T & { readonly __jsonField: true };
