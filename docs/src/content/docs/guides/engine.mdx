@@ -714,7 +714,10 @@ A page is `{events, next, more}`; read on with `after` set to `next`.
 not read are left out. An event's `change` is the instance for a create,
 `{data, behaviors}`, a merge patch of that for an update, and `{behavior,
 operation, params, patch}` for an operation, its `patch` the same, so
-applying the changes in order gives the note as a read returns it. A define's is `{hash}`, the draft's hash: a reviewer
+applying the changes in order gives the note as a read returns it. An
+operation whose behavior said where the values it wrote came from adds
+`attribution`, by field: the behavior and the confidence and source it
+gave. A define's is `{hash}`, the draft's hash: a reviewer
 watching the log learns a draft waits, and reads it from the draft route.
 A member of a change longer than 64 KiB is a ref to the value store, and
 the event lists the pointers to its refs in `valueRefs`, so the log never

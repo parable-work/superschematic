@@ -74,6 +74,12 @@ export interface OperationChange {
    * the call did not change is absent.
    */
   patch: Record<string, unknown>;
+  /**
+   * Where the values of the own fields the operation changed came from, by
+   * field: the behavior whose update() wrote each, and the confidence and
+   * source it gave. Absent when the operation attributed none (D16, amended).
+   */
+  attribution?: Record<string, { behavior: string; confidence?: number; source?: string }>;
 }
 
 /** The change of a define event: the draft's hash, not its document, which the draft route serves. */

@@ -25,7 +25,7 @@
       "name": "the core's behaviors with no extension (node) > an engine registers the core's behaviors when it opens, and no one else can take their names",
       "steps": [
         {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","ids":"seeded","clock":"wall"}]},
-        {"engine":"e1","call":"behaviors.names","expect":["Approvals","Branches","Comments","Constants","Dependencies","Links","Numbering","Reactions","Revisions","Rollups","Search","StateRules","Timers","Variants","Workflow"]},
+        {"engine":"e1","call":"behaviors.names","expect":["Approvals","Branches","Comments","Constants","Dependencies","Derived","Links","Numbering","Provenance","Reactions","Revisions","Rollups","Search","StateRules","Timers","Variants","Workflow"]},
         {"engine":"e1","call":"behaviors.declaration","args":["Workflow"],"expect":{"$shared":"s1"}},
         {"engine":"e1","call":"behaviors.register","args":[{"behavior":"Workflow"}],"error":{"class":"TypeError","message":"behavior Workflow is already registered with this engine"}},
         {"call":"open","as":"e2","args":[{"path":"{{dir:2}}/engine.db","policy":"allowAll","behaviors":["Workflow"],"ids":"seeded","clock":"wall"}],"error":{"class":"TypeError","message":"behavior Workflow is already registered with this engine"}}

@@ -63,7 +63,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Calendar, Clearance, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Pallet, Payments, Presence, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Timers, Variants, Workflow)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Calendar, Clearance, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Pallet, Payments, Presence, Provenance, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Timers, Variants, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
 			[]string{"src/item.schema.json: type Item: behavior Pallet config: "}},
 		{"config missing", []ir.BehaviorRef{{Name: "Pallet"}},
@@ -131,7 +131,7 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 	}
 
 	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Pallet"}), Input{Registry: core})
-	if want := `type Item: behavior "Pallet" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)`; !hasError(r, want) {
+	if want := `type Item: behavior "Pallet" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)`; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
 	}
 

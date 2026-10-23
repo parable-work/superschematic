@@ -830,11 +830,20 @@ pub(crate) fn run_operation(
             Some(_) => Some(execution.data()?),
             None => None,
         };
+        let own_patch = match (&own, &own_after) {
+            (Some(own), Some(own_after)) => Some(diff_patch(own, own_after)),
+            _ => None,
+        };
+        // Only the fields the call changed keep their attribution.
+        let attribution = own_patch
+            .as_ref()
+            .and_then(|changed| execution.attribution(changed));
         let change = InstanceChange::Operation {
             behavior: &bound.behavior.name,
             operation: &spec.name,
             params: checked,
             before: own.as_deref(),
+            attribution: attribution.as_ref(),
         };
         execution.after_change(&change)?;
         let after = execution.fields(None)?;
@@ -862,10 +871,6 @@ pub(crate) fn run_operation(
             &BTreeSet::new(),
             &BTreeSet::new(),
         )?;
-        let own_patch = match (&own, &own_after) {
-            (Some(own), Some(own_after)) => Some(diff_patch(own, own_after)),
-            _ => None,
-        };
         let patch = values.stow_change(
             reach.tx,
             "/patch",
@@ -877,10 +882,15 @@ pub(crate) fn run_operation(
         let mut base = Map::new();
         base.insert("behavior".into(), Value::from(bound.behavior.name.as_str()));
         base.insert("operation".into(), Value::from(spec.name.as_str()));
-        let logged = Stowed::join(
+        let mut logged = Stowed::join(
             base,
             vec![("params".to_owned(), params), ("patch".to_owned(), patch)],
         );
+        if let Some(attribution) = &attribution {
+            logged
+                .value
+                .insert("attribution".into(), Value::Object(attribution.clone()));
+        }
         append_event(
             reach.tx,
             &NewEvent {

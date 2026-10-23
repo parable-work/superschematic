@@ -733,8 +733,12 @@ export class Bridge {
       context.call = (behavior: string, operation: string, params?: unknown) => deepFreeze(invoke('call', [String(behavior), String(operation), params ?? {}]));
     }
     if (kind === 'operation') {
-      context.update = (patch: unknown) => {
-        const value = deepFreeze(invoke('update', [updatePatch(name, patch)]));
+      context.update = (patch: unknown, options?: { attribution?: unknown }) => {
+        const args = [updatePatch(name, patch)];
+        if (options?.attribution !== undefined) {
+          args.push(updateAttribution(name, options.attribution));
+        }
+        const value = deepFreeze(invoke('update', args));
         data = value;
         return value;
       };
@@ -896,6 +900,16 @@ function updatePatch(behavior: string, patch: unknown): unknown {
   const copied = jsonCopy(patch);
   if (!('value' in copied)) {
     throw new BehaviorError(behavior, `update() takes a JSON merge patch: it is not JSON${copied.path ? ` at ${copied.path}` : ''}: ${copied.problem}`);
+  }
+  return copied.value;
+}
+
+// updateAttribution copies update()'s attribution as JSON; the engine
+// holds it to its shape.
+function updateAttribution(behavior: string, attribution: unknown): unknown {
+  const copied = jsonCopy(attribution);
+  if (!('value' in copied)) {
+    throw new BehaviorError(behavior, `update()'s attribution is not JSON${copied.path ? ` at ${copied.path}` : ''}: ${copied.problem}`);
   }
   return copied.value;
 }

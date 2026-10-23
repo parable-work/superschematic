@@ -1,0 +1,110 @@
+{
+  "name": "Provenance",
+  "description": "Who set each own field last, and through what (D73): a caller's create or update, or the behavior whose operation wrote it, with the confidence that operation attributed (D16, amended). With review, a write from the sources it names is proposed until a reviewer holding its permission accepts or rejects it, unless its confidence reaches below; a caller's write over a proposal makes it edited. A gate refuses a move of the type's Workflow into its state while a field it lists is proposed. Deleting the instance deletes its records.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "fields": {
+        "description": "The own top-level fields it records; every one when absent.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "review": {
+        "description": "Which writes enter review, and who reviews them.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "permission"],
+        "properties": {
+          "sources": {
+            "description": "The behaviors whose writes enter review, each one the type composes.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "below": { "description": "A confidence at or above which a write is accepted with no reviewer; every write from a source is proposed when absent.", "type": "number", "minimum": 0, "maximum": 1 },
+          "permission": { "description": "The permission a reviewer needs to accept or reject.", "type": "string", "minLength": 1 }
+        }
+      },
+      "gates": {
+        "description": "By state of the type's Workflow, the fields a move into it requires out of review.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reviewed"],
+          "properties": {
+            "reviewed": {
+              "description": "The recorded fields that must not be proposed, or all.",
+              "oneOf": [
+                { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+                { "const": "all" }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "fields": [
+    { "name": "fields", "description": "By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited." },
+    { "name": "inReview", "description": "Whether any recorded field is proposed. A list filters on it." }
+  ],
+  "operations": [
+    {
+      "name": "accept",
+      "description": "Accepts proposed fields as they are, as the caller. Needs the review's permission.",
+      "writes": true,
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fields"],
+        "properties": {
+          "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accepted", "inReview"],
+        "properties": {
+          "accepted": { "type": "array", "items": { "type": "string" } },
+          "inReview": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "reject",
+      "description": "Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission.",
+      "writes": true,
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fields"],
+        "properties": {
+          "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "patch": { "description": "Replacement values, by field of fields; a field it leaves out is cleared.", "type": "object" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rejected", "inReview"],
+        "properties": {
+          "rejected": { "type": "array", "items": { "type": "string" } },
+          "inReview": { "type": "boolean" }
+        }
+      }
+    }
+  ],
+  "vetoes": [
+    { "code": "not_recorded", "description": "accept or reject of a field Provenance does not record, or a reject patch that sets another field." },
+    { "code": "not_in_review", "description": "accept or reject of a field that is not proposed." },
+    { "code": "unreviewed_fields", "description": "A transition into a gated state while a field the gate lists is proposed." }
+  ]
+}

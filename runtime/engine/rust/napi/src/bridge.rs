@@ -1593,7 +1593,13 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
         let operation = &*operation;
         match method {
             "update" => Ok(Some(Value::Object(
-                (*operation.update(arg(args, 0))?).clone(),
+                (*match args.get(1) {
+                    Some(attribution) if !attribution.is_null() => {
+                        operation.update_attributed(arg(args, 0), attribution)?
+                    }
+                    _ => operation.update(arg(args, 0))?,
+                })
+                .clone(),
             ))),
             "validateUpdate" => to_json(serde_json::to_value(
                 operation.validate_update(arg(args, 0))?,

@@ -153,6 +153,12 @@ export interface OperationChange {
   params: JSONObject;
   /** A merge patch of the instance's `{ data, behaviors }`: a part it does not change is absent. */
   patch: JSONObject;
+  /**
+   * Where the values of the own fields the operation changed came from, by
+   * field: the behavior whose update() wrote each, and the confidence and
+   * source it gave. Absent when the operation attributed none (D16, amended).
+   */
+  attribution?: Record<string, { behavior: string; confidence?: number; source?: string }>;
 }
 
 /** A page of the event log: read on from `next`; `more` is false once the page reached the head. */

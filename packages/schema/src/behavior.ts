@@ -54,6 +54,10 @@ export interface BehaviorConfigs {
   Numbering: NumberingConfig;
   /** Named deadlines that start at the create, at an entry into a state of the type's Workflow or at a date-time field, and fire once due, moving the status. */
   Timers: TimersConfig;
+  /** Own fields a model outside the engine fills from other own fields, which a deriver pulls and settles by hash. */
+  Derived: DerivedConfig;
+  /** Who set each own field last and through what, with an optional review that gates states of the type's Workflow. */
+  Provenance: ProvenanceConfig;
   /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
@@ -439,6 +443,48 @@ export interface ApprovalsGate {
   readonly from?: readonly string[];
   /** Whether the principal who created the instance is refused a sign-off; true when absent. */
   readonly excludeCreator?: boolean;
+}
+
+/** Derived's config. */
+export interface DerivedConfig {
+  /** The derived fields, by own top-level field: 1 to 16. */
+  readonly fields: Readonly<Record<string, DerivedField>>;
+  /** The permission a deriver needs to pull, settle and apply values. */
+  readonly permission: string;
+  /** How many failed attempts a field takes before it waits for its inputs to move: 1 to 10, 3 when absent. */
+  readonly maxAttempts?: number;
+}
+
+/** One derived field of a Derived config. */
+export interface DerivedField {
+  /** The own top-level fields the value is derived from, never the field itself or another derived field. */
+  readonly from: readonly string[];
+  /** What the model is asked, given the inputs: at most 4000 characters. */
+  readonly instruction: string;
+  /** A label the deployment maps to a provider's model, which the engine only compares. */
+  readonly model: string;
+  /** The states of the type's Workflow in which the field is derived; every state when absent. */
+  readonly states?: readonly string[];
+}
+
+/** Provenance's config. */
+export interface ProvenanceConfig {
+  /** The own top-level fields it records; every one when absent. */
+  readonly fields?: readonly string[];
+  /** Which writes enter review, and who reviews them. */
+  readonly review?: ProvenanceReview;
+  /** By state of the type's Workflow, the fields a move into it requires out of review. */
+  readonly gates?: Readonly<Record<string, { readonly reviewed: readonly string[] | "all" }>>;
+}
+
+/** The review of a Provenance config. */
+export interface ProvenanceReview {
+  /** The behaviors whose writes enter review, each one the type composes. */
+  readonly sources: readonly string[];
+  /** A confidence from 0 to 1 at or above which a write is accepted with no reviewer; every write from a source is proposed when absent. */
+  readonly below?: number;
+  /** The permission a reviewer needs to accept or reject. */
+  readonly permission: string;
 }
 
 /** Numbering's config. */

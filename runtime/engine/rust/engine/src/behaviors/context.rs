@@ -163,7 +163,11 @@ pub(crate) trait Core {
     fn call(&self, _behavior: &str, _operation: &str, _params: &Value) -> Result<Value> {
         Err(unreachable_here("call()"))
     }
-    fn update(&self, _patch: &Value) -> Result<Arc<Map<String, Value>>> {
+    fn update(
+        &self,
+        _patch: &Value,
+        _attribution: Option<&Value>,
+    ) -> Result<Arc<Map<String, Value>>> {
         Err(unreachable_here("update()"))
     }
     fn validate_update(&self, _patch: &Value) -> Result<Vec<ValidationIssue>> {
@@ -794,7 +798,23 @@ impl<C> OperationCx<'_, C> {
     /// caller is this behavior, and returns the fields after it. No event
     /// is appended: the operation's carries the change.
     pub fn update(&self, patch: &Value) -> Result<Arc<Map<String, Value>>> {
-        self.cx.view.scope.core.update(patch)
+        self.cx.view.scope.core.update(patch, None)
+    }
+
+    /// `update(patch)`, saying where the values of the fields it writes
+    /// came from (D16, amended): `attribution` is an object of entries by
+    /// top-level own field, each `{ confidence?, source? }`, and names
+    /// only fields the patch writes. `confidence` is a finite number from
+    /// 0 to 1; `source` a string of at most 200 characters. The engine
+    /// adds this behavior's name to each entry, and the operation's change
+    /// and event carry the entries of the fields the call changed. A
+    /// malformed attribution is a `BehaviorError`.
+    pub fn update_attributed(
+        &self,
+        patch: &Value,
+        attribution: &Value,
+    ) -> Result<Arc<Map<String, Value>>> {
+        self.cx.view.scope.core.update(patch, Some(attribution))
     }
 
     /// What `update(patch)` would refuse the patch for, without writing or

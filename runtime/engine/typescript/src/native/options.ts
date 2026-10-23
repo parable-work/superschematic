@@ -103,7 +103,8 @@ export interface EngineOptions {
   /**
    * The behaviors this engine runs besides the core's (Workflow, Comments,
    * Revisions, Dependencies, Links, Rollups, Search, Reactions, Constants,
-   * Variants, Branches, StateRules, Approvals, Numbering and Timers, which
+   * Variants, Branches, StateRules, Approvals, Numbering, Timers, Derived
+   * and Provenance, which
    * it registers first), by name: one the addon is built with, the work
    * queue's (Lease, Assignment, Queue, Presence, Blueprint, Budget and
    * Retries) in the core's addon, a project's own in the addon its engine

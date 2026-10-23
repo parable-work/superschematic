@@ -17,6 +17,7 @@ export { BehaviorConfigError } from '../errors.js';
 export { MAX_BATCH_READ, MAX_CALL_DEPTH, MIN_SCHEDULE_MS, RELATION_COLUMNS, defineBehavior } from './behavior.js';
 export type {
   AnyBehaviorImplementation,
+  AttributionEntry,
   BehaviorFilter,
   BehaviorGuidance,
   BehaviorImplementation,
@@ -37,6 +38,7 @@ export type {
   CreateInstanceOptions,
   DescribeTarget,
   DescribedTypeOperation,
+  FieldAttribution,
   FieldReader,
   FrozenJSON,
   GuardAnswer,
@@ -71,6 +73,7 @@ export type {
   TableWriter,
   TypeCheck,
   TypeSchema,
+  UpdateOptions,
   ValidationContext,
   ValidationRequest,
   ValueReader,

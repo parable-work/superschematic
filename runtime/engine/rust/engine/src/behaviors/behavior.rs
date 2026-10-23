@@ -246,6 +246,11 @@ pub enum InstanceChange<'a> {
         /// The own fields before the operation, when it changed them with
         /// update(); `None` when they did not change.
         before: Option<&'a Map<String, Value>>,
+        /// Where the values of the own fields it changed came from, by
+        /// field, as its update()s attributed them (D16, amended): each
+        /// `{ behavior, confidence?, source? }`. `None` when it attributed
+        /// none.
+        attribution: Option<&'a Map<String, Value>>,
     },
 }
 
@@ -274,12 +279,16 @@ impl InstanceChange<'_> {
                 operation,
                 params,
                 before,
+                attribution,
             } => {
                 out.insert("behavior".into(), Value::from(*behavior));
                 out.insert("operation".into(), Value::from(*operation));
                 out.insert("params".into(), (*params).clone());
                 if let Some(before) = before {
                     out.insert("before".into(), Value::Object((*before).clone()));
+                }
+                if let Some(attribution) = attribution {
+                    out.insert("attribution".into(), Value::Object((*attribution).clone()));
                 }
             }
             InstanceChange::Create | InstanceChange::Delete => {}

@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors.
 sidebar:
   order: 7
 ---
@@ -20,9 +20,9 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-six behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. Seven are claimable work, the work
+The core declares twenty-eight behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements seventeen
+itself and registers them when it opens. Seven are claimable work, the work
 queue's Rust behaviors, which the engine's addon is built with; the
 engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
@@ -50,6 +50,8 @@ server does.
 | `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
+| `Derived` | own fields a model outside the engine fills from other own fields, under an instruction the schema holds, which a deriver pulls and settles by hash; a person's write wins | `Workflow` for a field that names states | [Derived](#derived) |
+| `Provenance` | who set each own field last and through what, with the confidence the writer gave, and a review that holds a source's writes until a person accepts them | `Workflow` for a gate | [Provenance](#provenance) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 | `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
 
@@ -1701,6 +1703,179 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 - **Lease.** On a leased type, list `"Timers.fireTimer"` in `Lease`'s
   `exempt`, or the holder's lease refuses the runner's fire
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## Derived
+
+Own fields that a model outside the engine fills from other own fields:
+a ticket's category and priority, an article's summary, a document's
+extracted dates. The engine calls no model, as it calls no embedder for
+[vectors](#vectors). A deriver, a worker holding the config's
+permission, pulls what is stale, asks its model, and settles the answers
+with the hash it pulled.
+
+```ts
+import { behavior } from "@superschematic/schema";
+
+export enum Category { Billing = "billing", Bug = "bug", Other = "other" }
+
+@behavior("Derived", {
+  fields: {
+    category: { from: ["subject", "body"], instruction: "Classify the request.", model: "standard" },
+    summary: { from: ["body"], instruction: "Summarize it in one sentence.", model: "simple" },
+  },
+  permission: "tickets.derive",
+})
+export abstract class Ticket {
+  subject: string;
+  body?: string;
+  category?: Category;
+  summary?: string;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `fields` (required, 1 to 16): by own top-level field, `{ from, instruction, model, states? }`: the own fields the value is derived from (never itself or another derived field), what the model is asked (at most 4000 characters), a model label the deployment maps to a provider's model, and the states of the type's Workflow it is derived in (every state when absent). `permission` (required), what a deriver needs; `maxAttempts`, 3 by default, from 1 to 10 |
+| Fields | `fields`: by derived field, the last value settled, `{ sourceHash, model, settledAt, settledBy, confidence? }`, and `overridden: { by, at }` once a write overrode it. `stale` (volatile): the derived fields to compute again, in the config's order |
+| Operations | schema-level, for the deriver: `staleDerivations({ field?, limit?, cursor? })` and `failedDerivations({ limit?, cursor? })`, read-only, and `settleDerivations({ items })`. On the instance: `applyDerived({ fields })`, which a settle invokes, and `rederive({ fields? })` |
+| Vetoes | `not_derived`, a field the config does not derive; `moved`, a hash the field's inputs, instruction, model or type no longer give; `out_of_state`; `overridden`. A caller without `permission` is `forbidden` (403) to pull, settle and apply |
+| Refusals at define | a derived field or an input the type lacks, a field derived from itself or from another derived field, `states` on a type without Workflow or naming a state it lacks, and a derived field that `Constants` keeps |
+
+```ts
+const deriver: Principal = { subject: "deriver", permissions: ["tickets.derive"] };
+const page = engine.instances.invokeSchema(deriver, "tickets", "staleDerivations", { limit: 50 });
+// { items: [{ id: "t1", field: "category", sourceHash: "4be0...", attempt: 1,
+//             instruction: "Classify the request.", model: "standard",
+//             inputs: { subject: "Card declined", body: "..." },
+//             output: { enum: ["billing", "bug", "other", null], ... } }, ...],
+//   next: null }
+engine.instances.invokeSchema(deriver, "tickets", "settleDerivations", {
+  items: [{ id: "t1", field: "category", sourceHash: page.items[0].sourceHash, value: "billing", confidence: 0.9 }],
+});
+// { settled: 1, failed: 0, skipped: [] }
+```
+
+- **The output is the field's type.** An item's `output` is the derived
+  field's JSON Schema, as the describe document writes it: an enum field
+  is a pick, a boolean a yes or no, an integer with bounds a score, a
+  string text, an object an extraction. A value the type refuses is not
+  written.
+- **The hash.** `sourceHash` is the SHA-256 of the model label, the
+  instruction, the output schema and the inputs that hold a value. A
+  write of an input, or a version that changes the instruction, the model
+  or the field's type, moves it. The field is then stale, and its last
+  value stays until a new one settles. A field whose inputs all hold
+  nothing wants no value.
+- **Settling.** `settleDerivations` takes at most 100 items, each a
+  `value` (with an optional `confidence` from 0 to 1 and `usage`, which
+  the event's parameters keep for cost reports) or a `failure`
+  (`{ class?, message }`). It writes each instance's values through
+  `applyDerived`, one event per instance, in a savepoint, so a refusal
+  skips that instance's items alone: `skipped` gives each one's reason,
+  `not_found`, `not_derived`, `overridden`, `moved`, `out_of_state`,
+  `invalid` (with the type's `issues`) or `vetoed` (with the vetoing
+  `behavior` and its `code`). An item given twice, or with both a value
+  and a failure, refuses the whole call (`invalid_argument`).
+- **What the event holds.** `applyDerived` writes through the operation's
+  `update()`, so every `validate` and every guard on the type judges the
+  values, as they judge a caller's update: StateRules' frozen fields skip
+  a late settle as `vetoed`. Its event attributes each value to `Derived`
+  with its confidence (D16, amended).
+- **Failures append no event.** A failure, an `invalid` value and a
+  `vetoed` one count an attempt, beside the queue, as a vector settle
+  appends no event. After `maxAttempts` the field leaves the queue, and
+  `failedDerivations` lists it with its last failure, until its hash
+  moves or `rederive` asks for it again.
+- **A person's write wins.** When a caller's create or update, or another
+  behavior's operation, writes a derived field, Derived records the
+  override and stops deriving it: `staleDerivations` leaves it out and
+  `applyDerived` refuses it (`overridden`). `rederive` clears the
+  override, the attempts and the last value's hash, and keeps the value
+  until a new one settles.
+- **States.** A field with `states` is listed and applied only while the
+  status is one of them, so a resolved ticket's body can change without
+  its category being derived again.
+- **New versions.** Any config may change, and `Derived` can be added to
+  and removed from a schema with instances. A field an instance already
+  holds when Derived first keeps a row for it counts as overridden, by
+  `existing`, so adding Derived never writes over a value a person gave.
+  Removing it leaves the values as own fields.
+- **Lease.** On a leased type, list `"Derived.applyDerived"` in Lease's
+  `exempt`.
+
+## Provenance
+
+Who set each own field last and through what, and a review that holds
+some writes until a person accepts them.
+
+```json
+{ "name": "Provenance", "config": {
+    "review": { "sources": ["Derived"], "below": 0.8, "permission": "tickets.review" },
+    "gates": { "assigned": { "reviewed": ["category", "priority"] } } } }
+```
+
+| | |
+| --- | --- |
+| Config | `fields`: the own top-level fields it records, every one when absent. `review`, optional: `sources`, the other behaviors the type composes whose writes enter review; `below`, a confidence at or above which a write is accepted with no reviewer (every write from a source is proposed when absent); `permission`, what a reviewer needs. `gates`, optional: by state of the type's Workflow, `{ reviewed }`, the recorded fields or `"all"` that a move into it requires out of review |
+| Fields | `fields`: by recorded field, its last write, `{ source, by, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
+| Operations | `accept({ fields })`; `reject({ fields, patch? })`, which clears each field, or sets it to the patch's value, through its own `update()` |
+| Guard | a transition into a gated state while a field its gate lists is proposed is `vetoed` (`unreviewed_fields`), with `{ state, fields }` in `details.details` |
+| Vetoes | `not_recorded`; `not_in_review`, an accept or a reject of a field that is not proposed; `unreviewed_fields`. A caller without the review's `permission` is `forbidden` (403) to accept and to reject |
+
+- **The source.** A change's own fields are compared before and after it.
+  An operation's change names its behavior and carries the attribution
+  its `update()`s gave (D16, amended): an entry names the behavior that
+  wrote the field, from a `call()` too, and its confidence. Provenance's
+  fields move in the change's own event.
+- **Review.** A write from a source the review names is `proposed`, or
+  `accepted` with no `by` when its confidence reaches `below`. A
+  reviewer's `accept` keeps the value and records who accepted it.
+  `reject` writes the field as the reviewer, source `Provenance`, which
+  Derived records as an override, so the model does not propose a
+  rejected value again. A caller's write over a proposal makes it
+  `edited`.
+- **New versions.** Any config may change, and `Provenance` can be added
+  to and removed from a schema with instances. A field written before it
+  was added has no record until its next write.
+- **Lease.** List `"Provenance.accept"` and `"Provenance.reject"` in
+  Lease's `exempt`.
+
+### A model triages, a person confirms
+
+The two compose with StateRules and Reactions into a ticket that a
+model triages and a person confirms when the model is unsure:
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": { "states": ["new", "triage", "assigned", "resolved"],
+      "transitions": [{ "from": "new", "to": "triage" }, { "from": "new", "to": "assigned" },
+                      { "from": "triage", "to": "assigned" }, { "from": "assigned", "to": "resolved" }] } },
+  { "name": "Derived", "config": { "permission": "tickets.derive", "fields": {
+      "category": { "from": ["subject", "body"], "instruction": "Classify the request.", "model": "standard", "states": ["new", "triage"] },
+      "priority": { "from": ["subject", "body"], "instruction": "How urgent is this?", "model": "standard", "states": ["new", "triage"] } } } },
+  { "name": "Provenance", "config": {
+      "review": { "sources": ["Derived"], "below": 0.8, "permission": "tickets.review" },
+      "gates": { "assigned": { "reviewed": ["category", "priority"] } } } },
+  { "name": "StateRules", "config": { "states": { "assigned": { "required": ["category", "priority"] } } } },
+  { "name": "Reactions", "config": { "rules": [
+      { "when": { "changes": { "field": "Derived.fields.category.settledAt" } }, "then": { "transition": "assigned" } },
+      { "when": { "changes": { "field": "Derived.fields.priority.settledAt" } }, "then": { "transition": "assigned" } },
+      { "when": { "changes": { "field": "Provenance.inReview", "to": true } }, "then": { "transition": "triage" } },
+      { "when": { "changes": { "field": "Provenance.inReview", "to": false } }, "then": { "transition": "assigned" } } ] } }
+]
+```
+
+A settle whose priority comes back at 0.6 puts it in review: the third
+rule moves the ticket to `triage`, and the gate holds the first two.
+Once a reviewer accepts it, the fourth rule assigns the ticket. When the
+model is sure of both fields, the `settledAt` rules assign it with no
+person, the first one held by StateRules until both fields are there.
+
+A `changes` rule fires once, on the event that moves its field, and
+acts only where a transition exists and every guard allows it. So key a
+rule on a derived value only when the record is sure to be in a state
+the rule's move leaves from; otherwise move on the gate's own signals,
+as here.
 
 ## Where to go next
 
