@@ -874,6 +874,25 @@ Bounds the size of a route's request body; on a class, each route of the set's.
 
 - On an operation set or an operation.
 
+### `@deriver`
+
+```ts
+function deriver(options?: DeriverOptions): ClassDecorator
+```
+
+Declares a deriver of the API service: a deployable that fills the
+Derived fields of the engine types of the API's database (D74). It pulls
+the stale fields, calls the project's generated Derivers for each, which
+asks a model, and settles the answers. The class's name is the
+deriver's, and the class holds nothing:
+
+```ts
+@deriver({ schemas: ["Ticket"], concurrency: 4 })
+export abstract class TriageTickets {}
+```
+
+- On a type declaration, only in API schemas.
+
 ### `@docs`
 
 ```ts
@@ -1448,6 +1467,19 @@ type WorkerOptions = {
 The options of a worker: the queue it handles, and how.
 
 ```ts
+type DeriverOptions = {
+  /** The names of the engine types of the API's database whose Derived fields the deriver fills; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
+  readonly schemas?: readonly string[];
+  /** How many answers an instance runs at a time; four unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How many stale fields a pull asks for, 1 to 100; fifty unless set. */
+  readonly batchSize?: number;
+}
+```
+
+The options of a deriver: the engine types whose Derived fields it fills, and how.
+
+```ts
 enum HttpMethod {
   GET = "GET",
   POST = "POST",
@@ -1562,6 +1594,8 @@ interface LocalTarget {
   worker: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   runner: {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  deriver: {};
 }
 ```
 
@@ -1569,7 +1603,8 @@ The core's `local` target, which `superschematic stack dev` runs
 (docs/stack-model.md, section 8.3). Its values set the image and the host
 port of the environment's Postgres container and of its storage emulator
 (D54), a server's and a site's settings its port, and a database, a job,
-a worker, a bucket and an engine's runner (D58) take no settings. A port
+a worker, a bucket, an engine's runner (D58) and a deriver (D74) take no
+settings. A port
 left out is derived from the stack, the environment and the deployable.
 
 ```ts
@@ -1602,18 +1637,20 @@ type SettingsElement<T, E> = E extends { readonly of: infer Of }
         ? JobElementOf<E extends { readonly platform: string } ? undefined : T, Of>
         : E extends { readonly worker: unknown }
           ? WorkerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-          : E extends { readonly runner: unknown }
-            ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-            : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+          : E extends { readonly deriver: unknown }
+            ? DeriverElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+            : E extends { readonly runner: unknown }
+              ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+              : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
   : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket"> | DeployableClass }
 ```
 
-One settings element checked: its `of` picks the settings type, a `job`
-or a `worker` beside an API's handle makes it the element of that job or
-worker, and `runner: true` beside a DB's handle that of the engine's
+One settings element checked: its `of` picks the settings type, a `job`,
+a `worker` or a `deriver` beside an API's handle makes it the element of
+that job, worker or deriver, and `runner: true` beside a DB's handle that of the engine's
 runner of the database; its env is the config's fields, and a key none
 takes is refused. An element that names a platform, which may be another
 target's, takes any settings key; the loader checks it against that
@@ -1627,7 +1664,7 @@ type EnvironmentOptions<T extends TargetName | undefined, S extends readonly unk
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker` or `runner: true` beside a handle for a job, a worker or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker`, `deriver` or `runner: true` beside a handle for a job, a worker, a deriver or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
