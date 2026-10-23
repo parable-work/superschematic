@@ -30,7 +30,9 @@ export abstract class Shop {}
 // shop-stock's worker ReorderStock, a Rust process, files a restock request
 // for each product a sale runs low, and its job OrderRestocks runs only
 // when `superschematic stack run` asks, so each request stays open until
-// then. acmepay's keys are this environment's secrets
+// then. shop-cart's deriver TriageTickets, a Bun process, fills in each
+// support ticket's category, priority and summary seconds after it is
+// opened (D74). acmepay's keys are this environment's secrets
 // (`superschematic stack secrets set Dev`), and acmepay itself is go/acmepay's
 // command, at the address shop-orders' ACMEPAY_URL defaults to.
 @environment({

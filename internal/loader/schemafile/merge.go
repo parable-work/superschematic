@@ -216,6 +216,17 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		schema.Workers = append(schema.Workers, worker)
 	}
 
+	for _, deriver := range doc.Derivers {
+		if deriver == nil {
+			continue
+		}
+		if schema.Deriver(deriver.Name) != nil {
+			fail("duplicate deriver %q", deriver.Name)
+			continue
+		}
+		schema.Derivers = append(schema.Derivers, deriver)
+	}
+
 	errs = append(errs, applyDocumentDecorators(doc, schema, owner, reg)...)
 	return errs
 }

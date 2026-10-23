@@ -1,0 +1,25 @@
+name: triage-ts-api
+kind: API
+types:
+  Summary:
+    name: Summary
+    role: APIView
+    fields:
+      - name: open
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: TriageQueries
+    operations:
+      - name: summary
+        typeRef: { name: Summary }
+        required: true
+        httpMethod: GET
+        restPath: summary
+derivers:
+  - name: TriageTickets
+    comment: Triages each ticket, eight answers at a time.
+    schemas: ["Ticket"]
+    concurrency: 8
+    batchSize: 20
+  - name: FillAll

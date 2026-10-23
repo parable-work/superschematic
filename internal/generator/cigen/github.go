@@ -954,21 +954,22 @@ func (g github) stackCommand(command, environment string, flags ...string) strin
 	return strings.Join(args, " ")
 }
 
-// deployable is a server, job, worker or engine runner of the stack whose
-// entrypoint the build writes at server/<stack>/<name> under the output root: a Go
-// module, a package of the output root's Bun workspace (D51, D52, D53),
-// or a crate of its Cargo workspace (D57, D65). It is its kind and name.
+// deployable is a server, job, worker, deriver or engine runner of the
+// stack whose entrypoint the build writes at server/<stack>/<name> under
+// the output root: a Go module, a package of the output root's Bun
+// workspace (D51, D52, D53, D74), or a crate of its Cargo workspace (D57,
+// D65). It is its kind and name.
 type deployable struct {
 	kind ir.DeployableKind
 	name string
 }
 
 // deployables are the stack's servers in language, then its jobs, then
-// its workers, then its engine runners (D58), each sorted by name. No
-// environment changes them.
+// its workers, then its derivers (D74), then its engine runners (D58),
+// each sorted by name. No environment changes them.
 func (g github) deployables(language string) []deployable {
 	var out []deployable
-	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner} {
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableRunner} {
 		for _, name := range g.deployablesIn(kind, language) {
 			out = append(out, deployable{kind, name})
 		}

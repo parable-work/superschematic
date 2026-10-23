@@ -110,3 +110,40 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}})
 	return out, nil
 }
+
+// lowerDeriver lowers a deriver (D74) to what lowerWorkload makes of it and
+// a worker pool of its own, named after the deployable, with manual
+// scaling to the deriver's instances: one, or none when the environment
+// turns it off, which leaves its fields stale. Its concurrency, how many
+// answers it runs at a time, reaches the entrypoint as
+// ir.WorkerConcurrencyVariable, as a worker's does. A worker pool's CPU is
+// always allocated, which a loop that waits for commits needs.
+func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	v := valuesOf(ctx.Environment)
+	run := d.Deriver
+	if run == nil {
+		return registry.Lowered{}, fmt.Errorf("deriver %s has no run", d.Name)
+	}
+	out, w, err := lowerWorkload(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	container := w.container
+	envs, _ := container["envs"].([]any)
+	container["envs"] = append(envs, map[string]any{"name": ir.WorkerConcurrencyVariable, "value": strconv.Itoa(run.Concurrency)})
+	template := w.template
+	template["containers"] = []any{container}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: map[string]any{
+		"project":            v.project,
+		"location":           v.region,
+		"name":               d.ResourceName,
+		"deletionProtection": false,
+		"scaling": map[string]any{
+			"scalingMode":         "MANUAL",
+			"manualInstanceCount": run.Instances,
+		},
+		"template": template,
+	}})
+	return out, nil
+}

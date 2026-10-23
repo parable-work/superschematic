@@ -227,6 +227,33 @@ func (r run) generateServers() error {
 		}
 	}
 
+	derivers, err := stack.Derivers(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	if err := r.checkDerivers(st.Name, derivers, services, tsScaffolding, rustScaffolding); err != nil {
+		return err
+	}
+	for _, d := range derivers {
+		switch d.Language {
+		case APILanguageTypeScript:
+			deriver, _, err := r.planTypeScriptServer(st.Name, d, cloudSQL[d.Name], nil, facts.bundles[d.Name])
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, deriver)
+		case APILanguageRust:
+			deriver, _, err := r.planRustServer(st.Name, d, nil)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, deriver)
+		default:
+			// stack.Derivers refuses a Go API's deriver.
+			return fmt.Errorf("stack %s: deriver %s is a %s deriver; %s (D74)", st.Name, d.Name, d.Language, stack.DeriverLanguages)
+		}
+	}
+
 	for _, p := range plans {
 		for _, sc := range p.scaffold {
 			if err := sc.write(r); err != nil {
@@ -649,6 +676,69 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 	return nil
 }
 
+// checkDerivers refuses a stack one of whose TypeScript APIs declares
+// derivers while its implementation exports no createDerivers, or one of
+// whose Rust APIs does while its implementation declares no
+// create_derivers (D74), as checkWorkers refuses one without its workers:
+// the implementation is the engineer's, and the build writes into it no
+// more.
+func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, services []stack.Service, tsScaffolding, rustScaffolding map[string]bool) error {
+	checked := map[string]bool{}
+	for _, d := range derivers {
+		api := d.Deriver.API
+		if checked[api] {
+			continue
+		}
+		checked[api] = true
+		var names []string
+		for _, svc := range services {
+			if svc.Name == api {
+				for _, deriver := range svc.Derivers {
+					names = append(names, deriver.Name)
+				}
+			}
+		}
+		switch d.Language {
+		case APILanguageTypeScript:
+			if tsScaffolding[api] {
+				continue
+			}
+			var members []string
+			for _, name := range names {
+				members = append(members, fmt.Sprintf("    %s: {\n      // a method per derived field it fills, which answers it\n    },", tsutil.ToCamelCase(name)))
+			}
+			if err := r.checkTypeScriptExport(stackName, api, "derivers", tsrestgen.DeriversFunc, "DeriversConstructor", members, "8.6 and D74"); err != nil {
+				return err
+			}
+		case APILanguageRust:
+			if rustScaffolding[api] {
+				continue
+			}
+			dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, api)
+			exists, err := rustrestgen.ImplementationExists(dir)
+			if err != nil || !exists {
+				return err
+			}
+			declares, err := rustrestgen.DeclaresFunc(dir, rustrestgen.DeriversFunc)
+			if err != nil || declares {
+				return err
+			}
+			var fields []string
+			for _, name := range names {
+				fields = append(fields, fmt.Sprintf("          %s: Arc::new(...), // implements %sDeriver", rustutil.ToSnakeCase(name), rustutil.ToPascalCase(name)))
+			}
+			crate := strings.ReplaceAll(r.Options.Naming.RustAPICrate(api), "-", "_")
+			return fmt.Errorf("stack %s: %s declares derivers, and its implementation at %s, which the build no longer writes into, declares no %s in %s; add\n\n"+
+				"  pub async fn %s(deps: Deps) -> Result<Derivers, BoxError>\n\n"+
+				"returning the derivers, each a value that implements its trait, with a method per derived field it fills:\n\n"+
+				"  Ok(Derivers {\n%s\n  })\n\n"+
+				"where Deps, Derivers, each deriver's trait and BoxError are %s's (D74)",
+				stackName, api, dir, rustrestgen.DeriversFunc, rustrestgen.ImplementationLib, rustrestgen.DeriversFunc, strings.Join(fields, "\n"), crate)
+		}
+	}
+	return nil
+}
+
 // checkTypeScriptExport refuses a TypeScript API whose implementation
 // exists and exports no fn, of the API package's type typ, while the API
 // declares what, its jobs or its workers, each a method of methods: the
@@ -1010,6 +1100,9 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
+	if s.Deriver != nil {
+		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
+	}
 	var scaffolds []*tsrestgen.APIOutput
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
@@ -1107,6 +1200,9 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 	}
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
+	}
+	if s.Deriver != nil {
+		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
 	}
 	var scaffolds []*rustrestgen.APIOutput
 	for _, ref := range s.Services {

@@ -81,6 +81,7 @@ export interface DatabaseDecl {
 
 export interface DeployableRef {
   deployable?: string;
+  deriver?: string;
   job?: string;
   runner?: boolean;
   service?: ServiceRef;
@@ -101,6 +102,14 @@ export interface DeployableSettings {
   values?: { [key: string]: unknown };
 }
 
+export interface Deriver {
+  batchSize?: number;
+  comment?: string;
+  concurrency?: number;
+  name: string;
+  schemas?: string[];
+}
+
 /**
  * How a UI shows one Workflow state: its label, the present-progressive form
  * it shows while an instance is in the state, and a tone, what the state means
@@ -114,6 +123,7 @@ export interface DisplayState {
 
 export interface Document {
   comment?: string;
+  derivers?: Deriver[];
   description?: string;
   documents?: Documents;
   enums?: { [key: string]: EnumDef };

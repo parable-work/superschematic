@@ -128,14 +128,17 @@ func checkLength(what string, name any, min, max int, rename string) error {
 
 // renameOf is what names a deployable anew, for checkLength: a job's name
 // is its API's and its class's (ir.JobDeployableName), as a worker's is
-// (ir.WorkerDeployableName, D53), an engine's runner's its database's
-// (ir.RunnerDeployableName, D58), every other deployable's its own.
+// (ir.WorkerDeployableName, D53) and a deriver's (ir.DeriverDeployableName,
+// D74), an engine's runner's its database's (ir.RunnerDeployableName,
+// D58), every other deployable's its own.
 func renameOf(d ir.ResolvedDeployable) string {
 	switch d.Kind {
 	case ir.DeployableJob:
 		return "the job's class or its API"
 	case ir.DeployableWorker:
 		return "the worker's class or its API"
+	case ir.DeployableDeriver:
+		return "the deriver's class or its API"
 	case ir.DeployableRunner:
 		return "the engine database the runner is named after"
 	}

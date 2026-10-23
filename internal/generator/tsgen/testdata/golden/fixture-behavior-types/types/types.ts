@@ -33,6 +33,16 @@ export interface Person {
 }
 
 /**
+ * Request - A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
+ */
+export interface Request {
+  subject: string;
+  body?: string | null;
+  category?: string | null;
+  summary?: string | null;
+}
+
+/**
  * Ticket - A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
  */
 export interface Ticket {

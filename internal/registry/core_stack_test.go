@@ -287,13 +287,26 @@ func TestVerifyStack(t *testing.T) {
 		}, "names the runner of shop-api, a API service; an engine's runner belongs to a DB service"},
 		{"a runner and a worker", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true, Worker: "FulfilOrders"}}
-		}, "names the runner and a job or a worker; an element names one"},
+		}, "names the runner and a job, a worker or a deriver; an element names one"},
 		{"instances on a runner", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Instances: new(int)}
-		}, "sets instances, which only a worker takes"},
+		}, "sets instances, which only a worker or a deriver takes"},
 		{"a schedule on a runner", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Schedule: "0 * * * *"}
 		}, "sets schedule, which only a job takes"},
+		{"two instances of a deriver", func(s *ir.Schema) {
+			two := 2
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets"}, Instances: &two}
+		}, "@environment class Staging settings[0] instances is 2; a deriver runs zero instances or one"},
+		{"a schedule on a deriver", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets"}, Schedule: "0 * * * *"}
+		}, "sets a schedule or a time zone on deriver TriageTickets, which runs until it is stopped"},
+		{"a deriver and a worker", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets", Worker: "FulfilOrders"}}
+		}, "names deriver TriageTickets and a job or a worker; an element names one"},
+		{"an exposed deriver", func(s *ir.Schema) {
+			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Deriver: "TriageTickets"}}
+		}, "@stack class Shop expose[0] names deriver TriageTickets; only a server is exposed"},
 		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
 		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},
 	} {

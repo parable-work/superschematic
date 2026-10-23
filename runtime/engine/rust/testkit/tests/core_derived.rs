@@ -613,6 +613,22 @@ fn define_refuses_a_field_or_input_the_type_lacks_a_derived_input_states_without
             with(json!({"summary": {"from": ["body"], "instruction": "i", "model": "m"}}));
         constant.push(json!({"name": "Constants", "config": {"fields": ["summary"]}}));
         assert!(refused(constant).contains("Constants keeps"));
+        // A secret never goes to a model (D74).
+        let mut secret = ticket_document(&with(
+            json!({"summary": {"from": ["body", "apiKey"], "instruction": "i", "model": "m"}}),
+        ));
+        secret["types"]["Ticket"]["fields"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "apiKey", "typeRef": {"name": "string"}, "secret": true}));
+        let refusal = engine
+            .schemas()
+            .define(&alice(), secret, DefineOptions::default())
+            .expect_err("a secret input");
+        assert!(
+            refusal.to_string().contains("apiKey, which is secret"),
+            "{refusal}"
+        );
     }
 }
 

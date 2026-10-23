@@ -3246,6 +3246,10 @@
           "default": "",
           "type": "string"
         },
+        "deriver": {
+          "default": "",
+          "type": "string"
+        },
         "job": {
           "default": "",
           "type": "string"
@@ -3314,6 +3318,37 @@
       ],
       "type": "object"
     },
+    "Deriver": {
+      "additionalProperties": false,
+      "properties": {
+        "batchSize": {
+          "default": 0,
+          "type": "integer"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "concurrency": {
+          "default": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schemas": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "DisplayState": {
       "additionalProperties": false,
       "description": "How a UI shows one Workflow state: its label, the present-progressive form it shows while an instance is in the state, and a tone, what the state means to a reader.",
@@ -3349,6 +3384,13 @@
         "comment": {
           "default": "",
           "type": "string"
+        },
+        "derivers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Deriver"
+          },
+          "type": "array"
         },
         "description": {
           "default": "",

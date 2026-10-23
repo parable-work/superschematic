@@ -169,13 +169,14 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
+// or whose engine types the Derivers interface's methods fill (D74),
 // then the engine's package, when Deps holds the engine (D58).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
 		out = append(out, call.Package)
 	}
-	if o.HasWorkers() && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
+	if (o.HasWorkers() || o.HasDerivers()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
 	}
 	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
