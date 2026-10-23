@@ -1,3 +1,9 @@
+/**
+ * The rules `Validate<T, C>` adds, which every generated decoder checks:
+ * `min` and `max` bound a number, `minLength` and `maxLength` a text,
+ * `listMin` and `listMax` a list's length, and `pattern` is a regular
+ * expression a text must match.
+ */
 export type ValidateConfig = {
   readonly min?: number;
   readonly max?: number;
@@ -20,8 +26,12 @@ export type ValidateConfig = {
  */
 export type Wrapped<T> = { readonly __wrapped: T };
 
+/** The decoders fill in `V` when a payload leaves the field out. */
 export type Default<T, V> = T & Wrapped<T> & { readonly __default: V };
 export type PlatformDefault<T> = T & Wrapped<T> & { readonly __platformDefault: true };
+/** The field may be absent or null; `name?: T` means the same. */
 export type Nullable<T> = T | null;
+/** `T` with the rules of `C` (ValidateConfig), which every generated decoder checks. */
 export type Validate<T, C extends ValidateConfig> = T & Wrapped<T> & { readonly __validate: C };
+/** A value kept out of logs: mask helpers clear it, and an `@envVars` loader marks it secret. */
 export type Secret<T> = T & Wrapped<T> & { readonly __secret: true };

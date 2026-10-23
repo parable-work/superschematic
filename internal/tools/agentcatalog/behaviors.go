@@ -1,0 +1,134 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/parable-work/superschematic/internal/registry"
+)
+
+// behaviorConfigs is the interface of @superschematic/schema that maps
+// each core behavior's name to the type of the config a type gives it.
+const behaviorConfigs = "BehaviorConfigs"
+
+// configMember is one `Name: ConfigType;` member of BehaviorConfigs.
+var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??:\s*([A-Za-z_$][\w$]*)`)
+
+// renderBehaviors is the behavior catalog: each core behavior as the
+// registry declares it, what it adds to a type and the name of its config
+// type, then every config type, from @superschematic/schema.
+func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
+	configTypes := map[string]string{}
+	for _, d := range typeDecls(exports) {
+		if d.name != behaviorConfigs {
+			continue
+		}
+		for _, m := range configMember.FindAllStringSubmatch(stripCommentsAndStrings(d.text), -1) {
+			configTypes[m[1]] = m[2]
+		}
+	}
+	if len(configTypes) == 0 {
+		return nil, fmt.Errorf("%s: no %s interface with members", schemaPackage, behaviorConfigs)
+	}
+
+	var b bytes.Buffer
+	b.WriteString(generatedHeader("<!--", " -->"))
+	b.WriteString("# Engine behaviors\n\n")
+	b.WriteString("A behavior adds fields, operations, checks and storage to a type that an\n")
+	b.WriteString("engine runs (`@superschematic/engine`, in TypeScript or Rust): an engine\n")
+	b.WriteString("type, which keeps no table and gets no ORM. A type composes one with\n")
+	b.WriteString("`@behavior(\"Workflow\", { ... })` from `@superschematic/schema`, once per\n")
+	b.WriteString("behavior, and the config is checked against the behavior's declaration\n")
+	b.WriteString("when the schema loads. A read returns a behavior's fields under\n")
+	b.WriteString("`behaviors.<Behavior>`, beside the type's own data; elsewhere a field is\n")
+	b.WriteString("named by its qualified name, `Workflow.status`.\n\n")
+	b.WriteString("Every type an engine runs also has the create, get, list, update and\n")
+	b.WriteString("delete operations, which the lists below leave out. An extension's\n")
+	b.WriteString("behaviors are named `<extension>.<Name>`; `superschematic behaviors`\n")
+	b.WriteString("prints the declaration of every behavior the binary you run knows.\n")
+
+	for _, beh := range reg.Behaviors() {
+		if beh.Extension != "" {
+			continue
+		}
+		fmt.Fprintf(&b, "\n## `%s`\n\n", beh.Name)
+		if beh.Description != "" {
+			b.WriteString(cell(beh.Description) + "\n\n")
+		}
+		switch config, ok := configTypes[beh.Name]; {
+		case len(beh.ConfigSchema) == 0:
+			b.WriteString("- Takes no config.\n")
+		case !ok:
+			return nil, fmt.Errorf("behavior %s takes a config, but %s names no type for it", beh.Name, behaviorConfigs)
+		case beh.ConfigRequired():
+			fmt.Fprintf(&b, "- Config: `%s`, required.\n", config)
+		default:
+			fmt.Fprintf(&b, "- Config: `%s`, optional.\n", config)
+		}
+		if len(beh.Requires) > 0 {
+			fmt.Fprintf(&b, "- Requires %s on the same type.\n", codeList(beh.Requires))
+		}
+		if len(beh.Conflicts) > 0 {
+			fmt.Fprintf(&b, "- Cannot be composed with %s.\n", codeList(beh.Conflicts))
+		}
+		if beh.Package != "" {
+			fmt.Fprintf(&b, "- Implemented by `%s`.\n", beh.Package)
+		}
+		if len(beh.Fields) > 0 {
+			b.WriteString("\nFields:\n\n")
+			for _, f := range beh.Fields {
+				fmt.Fprintf(&b, "- `%s`", registry.BehaviorFieldPath(beh.Name, f.Name))
+				if f.Volatile {
+					b.WriteString(" (volatile: computed when read)")
+				}
+				if f.Description != "" {
+					b.WriteString(": " + cell(f.Description))
+				}
+				b.WriteString("\n")
+			}
+		}
+		if len(beh.Operations) > 0 {
+			b.WriteString("\nOperations:\n\n")
+			for _, op := range beh.Operations {
+				var traits []string
+				if op.Writes {
+					traits = append(traits, "writes")
+				} else {
+					traits = append(traits, "reads")
+				}
+				if op.Scope == "schema" {
+					traits = append(traits, "on the schema")
+				} else {
+					traits = append(traits, "on an instance")
+				}
+				fmt.Fprintf(&b, "- `%s` (%s)", op.Name, strings.Join(traits, ", "))
+				if op.Description != "" {
+					b.WriteString(": " + cell(op.Description))
+				}
+				b.WriteString("\n")
+			}
+		}
+		if len(beh.Vetoes) > 0 {
+			codes := make([]string, len(beh.Vetoes))
+			for i, v := range beh.Vetoes {
+				codes[i] = v.Code
+			}
+			fmt.Fprintf(&b, "\nRefusals carry the codes %s.\n", codeList(codes))
+		}
+	}
+
+	b.WriteString("\n## Config types\n")
+	include := closure(exports, []string{behaviorConfigs})
+	for _, d := range typeDecls(exports) {
+		if !include[d.name] {
+			continue
+		}
+		fmt.Fprintf(&b, "\n```ts\n%s\n```\n", d.signature())
+		if d.comment != "" {
+			b.WriteString("\n" + d.comment + "\n")
+		}
+	}
+	return b.Bytes(), nil
+}

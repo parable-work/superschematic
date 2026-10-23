@@ -21,9 +21,9 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has ten commands: `build`, `build-all`, `migrate`,
+The core has thirteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
-`stack` and `identity` groups, beside cobra's own `help` and
+`new`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
 target, and the Pulumi provisioner), which add none. The migration runner,
@@ -31,6 +31,188 @@ target, and the Pulumi provisioner), which add none. The migration runner,
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
 database drivers, which stay out of the compiler.
+
+## `init [<schemas-root>]`
+
+Write a schemas root, the directory every other command reads, so no one
+writes its boilerplate by hand (D71). Without a directory, it writes
+`./schemas`.
+
+| File | What it holds |
+| --- | --- |
+| `superschematic.toml` | `go_module_root` and `npm_scope`, and a [`[paths]`](/superschematic/reference/naming/#paths) table pointing the generated packages' path dependencies at a superschematic checkout, relative to the parent of the schemas root; `build_context` too when the checkout holds the project |
+| `tsconfig.base.json` | `strict`, `experimentalDecorators` and the options acme-shop's has, with `paths` mapping `@superschematic/*` and `superscalar` to the checkout's sources and `<npm_scope>/*` to `./services/*/src/index.ts` |
+| `.gitignore` | the output root's contents, but for the lockfiles of its Bun and Cargo workspaces: `!/dist/`, `/dist/*`, `!/dist/bun.lock`, `!/dist/Cargo.lock` (D51) |
+| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsite) adds each service |
+
+Nothing of superschematic is published yet, so the schema files compile
+against a checkout that `make setup` has prepared: `--superschematic`
+names it, and without the flag init takes the checkout that holds the
+schemas root. Outside one, it asks at a terminal and otherwise refuses.
+At a terminal it asks for each value no flag gives, each with its
+default. Without one, the module root is `example.com/<project>` and the
+scope `@<project>`, the project being the directory that holds the
+schemas root, in lower case.
+
+init writes no file that exists: when any of the three does, it names
+each and writes nothing. It ends with the next command, `superschematic
+new service`.
+
+```
+superschematic init --superschematic ~/src/superschematic
+superschematic init ./schemas --go-module-root example.com/acme --npm-scope @acme
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--go-module-root` | `example.com/<project>` | the prefix of every generated Go module path |
+| `--npm-scope` | `@<project>` | the npm scope of the generated packages and of the services' own |
+| `--superschematic` | the checkout that holds the schemas root | the superschematic checkout the schema files and generated packages build against |
+
+## `new service <name> --kind DB|API|General|Bucket|Site`
+
+Write a service into a schemas root and build it once (D71). The name is
+lower-case words joined by hyphens, such as `shop-db`; `--kind` takes the
+kind in any case. A Stack service is [`stack init`](#stack-init-services-root)'s.
+
+It writes `<schemas-root>/services/<name>/`:
+
+| File | What it holds |
+| --- | --- |
+| `schema.config.ts` | `defineConfig` with the name, the kind and an `outputs` block that loads |
+| `package.json` | `{ "name": "<npm_scope>/<name>", "private": true }`, the package other services import |
+| `tsconfig.json` | extends `../../tsconfig.base.json`; includes `schema.config.ts` and `src/**/*.ts` |
+| `src/index.ts` | re-exports the starter's declarations and `./service.generated` |
+| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General |
+
+| Kind | `outputs` |
+| --- | --- |
+| `DB` | Go and TypeScript types; a DB always needs Go types |
+| `API` | Go and TypeScript types, a Go server (`api`), Go and TypeScript SDKs |
+| `General` | Go and TypeScript types |
+| `Bucket` | `{}` |
+| `Site` | none |
+
+A Bucket and a Site declare nothing in schema files, so they get no
+starter schema: an API lists a bucket in its `buckets`, and a site's
+config lists the APIs its browser code calls in `calls`.
+
+Last, it builds the service as [`build`](#build-service-dir) does, into
+`<schemas-root>/dist`, which writes `src/service.generated.ts`, the
+handle other services' configs import. A Site's build also writes its
+code's mirror under `web/<name>`, as every build of a Site does. A build
+that fails leaves the files written and says so.
+
+It writes no file that exists: when any does, or a config in another
+form, it names each and writes nothing. It refuses a name another
+service's config has, and a schemas root with no `tsconfig.base.json`.
+
+```
+superschematic new service shop-db --kind DB
+superschematic new service shop-api --kind API --root ./schemas
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket` or `Site` |
+| `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
+| `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
+
+## `check [<service-dir>|<services-root>]`
+
+Load and verify schema services without generating code, so a schema
+edit's verdict comes back in tens of milliseconds instead of a build's
+seconds (D72). Check reads each service through the loader every build
+command uses: the TypeScript compiler's diagnostics, the data forms' schema
+checks, the config rules (D34), the registry's kind, decorator and check
+rules, and the verification pass, warnings included. It writes nothing
+under the output root. Like a build it writes each service's sentinel,
+`src/service.generated.ts`, the handle other services' configs import,
+when it is missing or stale.
+
+Given a service directory, it checks that service and every service it
+depends on (`dependencies`, `authDb`, `calls` and `buckets`), as `build
+--with-deps` would build them; given a services root, or a schemas root
+holding `services/`, every service under it. Without an argument it
+checks the working directory when it is a service, else
+`./schemas/services` when there is one, else the working directory as a
+services root.
+
+Each finding is printed as a compiler prints one, then a summary:
+
+```
+schemas/services/shop-db/src/shop-db.schema.ts:12:3: error: Cannot find name 'Money'.
+Checked 3 schema services in 41ms: 1 error; failed: shop-db; blocked: shop-api (by shop-db)
+```
+
+A service whose load fails only because a service it reads failed, such
+as an API whose user model reads its `authDb`, is `blocked` by that
+service rather than reported with the same errors again. A finding in a
+dependency's file is the dependency's. The command exits 1 when any
+finding is an error; warnings, such as a view that omits a
+`@sourceMustProject` field, leave it at 0.
+
+`--json` writes one document instead, for a coding agent or an editor to
+read:
+
+```json
+{
+  "ok": false,
+  "servicesRoot": "schemas/services",
+  "checked": ["shop-db", "shop-api"],
+  "errors": 1,
+  "warnings": 0,
+  "durationMs": 41,
+  "services": [
+    { "name": "shop-db", "kind": "DB", "dir": "schemas/services/shop-db", "status": "error" },
+    { "name": "shop-api", "kind": "API", "dir": "schemas/services/shop-api", "status": "blocked", "blockedBy": ["shop-db"] }
+  ],
+  "diagnostics": [
+    { "service": "shop-db", "file": "schemas/services/shop-db/src/shop-db.schema.ts", "line": 12, "column": 3, "severity": "error", "message": "Cannot find name 'Money'." }
+  ]
+}
+```
+
+Paths are relative to the working directory when they are under it, else
+absolute. A diagnostic has no `line` and `column` when its finding names a
+file and no position, as the JSON and YAML readers' findings do, and no
+`file` when it names none.
+
+### `check --watch`
+
+With `--watch`, check runs once, then looks for edits every `--interval`
+and, on each, re-checks the services the edited files belong to and every
+service that depends on them, transitively, through the configs' edges and
+the services a schema's decorator arguments name (D41). It prints each
+result as it lands, with the files that changed; with `--json`, one
+document per line, with `changed` listing them. An edit to a config, a
+service's `package.json` or `tsconfig.json`, the naming file, the base
+tsconfig or a new service directory discovers the services again and
+re-checks them all. It never exits on errors, and stops at Ctrl-C.
+
+It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files of each
+service outside `node_modules`, `dist`, `target` and hidden directories,
+the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
+file `--naming` names. It polls rather than subscribing to file events: a
+schema tree is small, the poll costs less than the check it starts, and it
+sees edits in a container or on a network file system that events miss.
+
+Watch checks; it does not build. Run `build-all` or `build --with-deps`
+when the schemas check clean and you want the generated code, and see
+[`stack dev`](#stack-dev-stack-service-dir) for a running stack.
+
+```
+superschematic check
+superschematic check ./schemas/services/shop-api --json
+superschematic check --watch ./schemas/services
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--json` | false | write the result as one JSON document; with `--watch`, one per line |
+| `--watch` | false | check, then re-check the services each edit affects until Ctrl-C |
+| `--interval` | `200ms` | with `--watch`, how often to look for edits |
+| `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 
 ## `build <service-dir>`
 
@@ -719,6 +901,13 @@ with; no secret and no private key reaches the output root.
 Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under `./schemas/services`. It needs
 Docker and Go.
+
+Dev builds once. A schema edit while it runs reaches the servers only
+through another `stack dev`, which rebuilds the stack's services and
+migrates the databases again; dev does not watch the tree or restart the
+servers an edit affects (D72). Run [`check --watch`](#check---watch) beside
+it to see each edit's verdict as you make it, and restart dev once the
+schemas check clean.
 
 ```
 superschematic stack dev ./schemas/services/shop-stack
