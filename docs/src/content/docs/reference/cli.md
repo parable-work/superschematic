@@ -21,7 +21,7 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has thirteen commands: `init`, `build`, `build-all`, `migrate`,
+The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
 `new`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. The
@@ -117,6 +117,102 @@ superschematic new service shop-api --kind API --root ./schemas
 | `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket` or `Site` |
 | `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
 | `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
+
+## `check [<service-dir>|<services-root>]`
+
+Load and verify schema services without generating code, so a schema
+edit's verdict comes back in tens of milliseconds instead of a build's
+seconds (D72). Check reads each service through the loader every build
+command uses: the TypeScript compiler's diagnostics, the data forms' schema
+checks, the config rules (D34), the registry's kind, decorator and check
+rules, and the verification pass, warnings included. It writes nothing
+under the output root. Like a build it writes each service's sentinel,
+`src/service.generated.ts`, the handle other services' configs import,
+when it is missing or stale.
+
+Given a service directory, it checks that service and every service it
+depends on (`dependencies`, `authDb`, `calls` and `buckets`), as `build
+--with-deps` would build them; given a services root, or a schemas root
+holding `services/`, every service under it. Without an argument it
+checks the working directory when it is a service, else
+`./schemas/services` when there is one, else the working directory as a
+services root.
+
+Each finding is printed as a compiler prints one, then a summary:
+
+```
+schemas/services/shop-db/src/shop-db.schema.ts:12:3: error: Cannot find name 'Money'.
+Checked 3 schema services in 41ms: 1 error; failed: shop-db; blocked: shop-api (by shop-db)
+```
+
+A service whose load fails only because a service it reads failed, such
+as an API whose user model reads its `authDb`, is `blocked` by that
+service rather than reported with the same errors again. A finding in a
+dependency's file is the dependency's. The command exits 1 when any
+finding is an error; warnings, such as a view that omits a
+`@sourceMustProject` field, leave it at 0.
+
+`--json` writes one document instead, for a coding agent or an editor to
+read:
+
+```json
+{
+  "ok": false,
+  "servicesRoot": "schemas/services",
+  "checked": ["shop-db", "shop-api"],
+  "errors": 1,
+  "warnings": 0,
+  "durationMs": 41,
+  "services": [
+    { "name": "shop-db", "kind": "DB", "dir": "schemas/services/shop-db", "status": "error" },
+    { "name": "shop-api", "kind": "API", "dir": "schemas/services/shop-api", "status": "blocked", "blockedBy": ["shop-db"] }
+  ],
+  "diagnostics": [
+    { "service": "shop-db", "file": "schemas/services/shop-db/src/shop-db.schema.ts", "line": 12, "column": 3, "severity": "error", "message": "Cannot find name 'Money'." }
+  ]
+}
+```
+
+Paths are relative to the working directory when they are under it, else
+absolute. A diagnostic has no `line` and `column` when its finding names a
+file and no position, as the JSON and YAML readers' findings do, and no
+`file` when it names none.
+
+### `check --watch`
+
+With `--watch`, check runs once, then looks for edits every `--interval`
+and, on each, re-checks the services the edited files belong to and every
+service that depends on them, transitively, through the configs' edges and
+the services a schema's decorator arguments name (D41). It prints each
+result as it lands, with the files that changed; with `--json`, one
+document per line, with `changed` listing them. An edit to a config, a
+service's `package.json` or `tsconfig.json`, the naming file, the base
+tsconfig or a new service directory discovers the services again and
+re-checks them all. It never exits on errors, and stops at Ctrl-C.
+
+It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files of each
+service outside `node_modules`, `dist`, `target` and hidden directories,
+the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
+file `--naming` names. It polls rather than subscribing to file events: a
+schema tree is small, the poll costs less than the check it starts, and it
+sees edits in a container or on a network file system that events miss.
+
+Watch checks; it does not build. Run `build-all` or `build --with-deps`
+when the schemas check clean and you want the generated code, and see
+[`stack dev`](#stack-dev-stack-service-dir) for a running stack.
+
+```
+superschematic check
+superschematic check ./schemas/services/shop-api --json
+superschematic check --watch ./schemas/services
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--json` | false | write the result as one JSON document; with `--watch`, one per line |
+| `--watch` | false | check, then re-check the services each edit affects until Ctrl-C |
+| `--interval` | `200ms` | with `--watch`, how often to look for edits |
+| `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 
 ## `build <service-dir>`
 
@@ -805,6 +901,13 @@ with; no secret and no private key reaches the output root.
 Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under `./schemas/services`. It needs
 Docker and Go.
+
+Dev builds once. A schema edit while it runs reaches the servers only
+through another `stack dev`, which rebuilds the stack's services and
+migrates the databases again; dev does not watch the tree or restart the
+servers an edit affects (D72). Run [`check --watch`](#check---watch) beside
+it to see each edit's verdict as you make it, and restart dev once the
+schemas check clean.
 
 ```
 superschematic stack dev ./schemas/services/shop-stack

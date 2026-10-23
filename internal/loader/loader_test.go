@@ -13,6 +13,7 @@ import (
 
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -781,6 +782,49 @@ types:
 	}
 	if !strings.Contains(err.Error(), "TenantView.mystery is not in source type temp-api.Tenant and is not marked @virtual") {
 		t.Errorf("error %q does not report the @virtual violation", err.Error())
+	}
+}
+
+// TestWithWarningsTakesTheWarnings: a load given WithWarnings hands each
+// warning to its function, with the file it points at, and prints none.
+func TestWithWarningsTakesTheWarnings(t *testing.T) {
+	dir := writeService(t, map[string]string{
+		"schema.config.json": `{"name": "temp-api", "kind": "API", "outputs": {}}`,
+		"src/a.schema.json": `{
+			"types": {
+				"Tenant": {
+					"name": "Tenant",
+					"role": "EmbeddedStruct",
+					"fields": [
+						{"name": "id", "typeRef": {"name": "string"}, "required": true},
+						{"name": "name", "typeRef": {"name": "string"}, "required": true, "sourceMustProject": true}
+					]
+				},
+				"TenantView": {
+					"name": "TenantView",
+					"role": "APIView",
+					"source": {"target": "temp-api.Tenant"},
+					"fields": [{"name": "id", "typeRef": {"name": "string"}, "required": true}]
+				}
+			}
+		}`,
+	})
+
+	var printed bytes.Buffer
+	prev := WarningWriter
+	WarningWriter = &printed
+	defer func() { WarningWriter = prev }()
+
+	var taken []*verify.Diagnostic
+	if _, err := LoadService(dir, WithWarnings(func(d *verify.Diagnostic) { taken = append(taken, d) })); err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	if printed.Len() != 0 {
+		t.Errorf("printed %q, want nothing", printed.String())
+	}
+	if len(taken) != 1 || taken[0].Severity != verify.SeverityWarning || taken[0].File != "src/a.schema.json" ||
+		!strings.Contains(taken[0].Msg, "TenantView omits temp-api.Tenant.name") {
+		t.Errorf("warnings = %+v, want the must-project omission in src/a.schema.json", taken)
 	}
 }
 
