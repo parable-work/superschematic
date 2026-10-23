@@ -1,0 +1,506 @@
+{
+  "name": "Derived",
+  "description": "Own fields a model outside the engine fills from other own fields, under an instruction the schema holds (D73). The engine calls no model: a deriver holding the config's permission pulls the stale fields with staleDerivations (each one's inputs, instruction, model label and the field's JSON Schema, which is the output's) and settles its answers with settleDerivations, presenting the hash it pulled. A value is written with the operation's update(), so the type's validation and every guard judge it, and its event attributes it to Derived with the confidence given. A field is stale when its inputs, instruction, model or type moved since its last value; that value stays until a new one settles. Once a caller, or another behavior's operation, writes a derived field, Derived stops deriving it until rederive. A failure appends no event; after maxAttempts the field waits until its inputs move. Deleting the instance deletes what Derived keeps of it.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "fields": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "description": "The own top-level fields the value is derived from, never the field itself or another derived field.",
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "instruction": {
+              "description": "What the model is asked, given the inputs.",
+              "maxLength": 4000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "model": {
+              "description": "A label the deployment maps to a provider's model, which the engine only compares.",
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "states": {
+              "description": "The states of the type's Workflow in which the field is derived; every state when absent.",
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "from",
+            "instruction",
+            "model"
+          ],
+          "type": "object"
+        },
+        "description": "The derived fields, by own top-level field.",
+        "maxProperties": 16,
+        "minProperties": 1,
+        "propertyNames": {
+          "maxLength": 64,
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "maxAttempts": {
+        "description": "How many failed attempts a field takes before it waits for its inputs to move; 3 when absent.",
+        "maximum": 10,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "permission": {
+        "description": "The permission a deriver needs to pull, settle and apply values.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "fields",
+      "permission"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "fields",
+      "description": "The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent."
+    },
+    {
+      "name": "stale",
+      "description": "The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order.",
+      "volatile": true
+    }
+  ],
+  "operations": [
+    {
+      "name": "staleDerivations",
+      "description": "Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "field": {
+            "description": "Only this derived field.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "attempt": {
+                  "description": "Which attempt this is, from 1.",
+                  "type": "integer"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "inputs": {
+                  "description": "The inputs that hold a value, by field name.",
+                  "type": "object"
+                },
+                "instruction": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "output": {
+                  "description": "The derived field's JSON Schema: what the value must be.",
+                  "type": [
+                    "object",
+                    "boolean"
+                  ]
+                },
+                "sourceHash": {
+                  "description": "The hash of the inputs, instruction, model and output, which a settle presents.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "field",
+                "sourceHash",
+                "attempt",
+                "instruction",
+                "model",
+                "inputs",
+                "output"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null on the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    },
+    {
+      "name": "settleDerivations",
+      "description": "Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "description": "How sure the model is, from 0 to 1.",
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "failure": {
+                  "additionalProperties": false,
+                  "description": "Why no value came back.",
+                  "properties": {
+                    "class": {
+                      "maxLength": 64,
+                      "type": "string"
+                    },
+                    "message": {
+                      "maxLength": 2000,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "field": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sourceHash": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "usage": {
+                  "additionalProperties": false,
+                  "description": "What the call cost, kept in the event's parameters for reports.",
+                  "properties": {
+                    "costMicros": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "inputTokens": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "modelId": {
+                      "maxLength": 200,
+                      "type": "string"
+                    },
+                    "outputTokens": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "value": {
+                  "description": "The value, which the derived field's type must accept."
+                }
+              },
+              "required": [
+                "id",
+                "field",
+                "sourceHash"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "description": "How many failures were counted.",
+            "type": "integer"
+          },
+          "settled": {
+            "description": "How many values were written.",
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "behavior": {
+                  "description": "For vetoed, the behavior that vetoed.",
+                  "type": "string"
+                },
+                "code": {
+                  "description": "For vetoed, its veto code.",
+                  "type": "string"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "issues": {
+                  "description": "For invalid, what the type refuses.",
+                  "type": "array"
+                },
+                "reason": {
+                  "description": "not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "field",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled",
+          "failed",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "writes": true,
+      "scope": "schema"
+    },
+    {
+      "name": "failedDerivations",
+      "description": "Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many, 50 when absent.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "attempts": {
+                  "type": "integer"
+                },
+                "failure": {
+                  "type": "object"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "field",
+                "attempts"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    },
+    {
+      "name": "applyDerived",
+      "description": "Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "confidence": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "sourceHash": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "usage": {
+                  "type": "object"
+                },
+                "value": {}
+              },
+              "required": [
+                "sourceHash",
+                "value"
+              ],
+              "type": "object"
+            },
+            "minProperties": 1,
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "settled": {
+            "description": "The fields written, in the order given.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "rederive",
+      "description": "Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "stale": {
+            "description": "The derived fields stale after it.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "stale"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "not_derived",
+      "description": "applyDerived or rederive of a field the config does not derive."
+    },
+    {
+      "code": "moved",
+      "description": "applyDerived with a hash its field's inputs, instruction, model or type no longer give."
+    },
+    {
+      "code": "out_of_state",
+      "description": "applyDerived while the status is outside the field's states."
+    },
+    {
+      "code": "overridden",
+      "description": "applyDerived of a field a caller or another behavior's operation wrote; rederive lets Derived write it again."
+    }
+  ]
+}
