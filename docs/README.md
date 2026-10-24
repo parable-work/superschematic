@@ -37,7 +37,8 @@ docs/
   src/content.config.ts   Starlight content collection
   src/content/docs/       one Markdown or MDX file per page
     index.md              overview
-    start/                prerequisites, getting started, how it works
+    start/                prerequisites, getting started, how it works,
+                          the capability map, examples
     first-project/        the tutorial over examples/acme-shop
     guides/               one guide per area: types, tables, routes, auth, SDKs, stacks, the engine, its behaviors, work queues and Topcoat
     install/              per-language pages (the "Languages" group)
