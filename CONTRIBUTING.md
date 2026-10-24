@@ -1,8 +1,8 @@
 # Contributing to superschematic
 
 This file covers what you need before opening a pull request: the sign-off
-requirement, the toolchain, the gates CI runs, and the rules that keep generated
-output stable across releases.
+requirement, the repository's layout, the toolchain, the gates CI runs, and the
+rules that keep generated output stable across releases.
 
 ## Sign your commits (DCO)
 
@@ -62,6 +62,63 @@ By making a contribution to this project, I certify that:
     maintained indefinitely and may be redistributed consistent with
     this project or the open source license(s) involved.
 ```
+
+## Repository layout
+
+| Path | What it is |
+| --- | --- |
+| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
+| [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
+| [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
+| [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
+| [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack}` |
+| [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
+| [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
+| [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
+| [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
+| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
+| [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
+| [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
+| [`docs/`](docs/) | The docs site, the decision log and the design documents |
+| [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
+
+The repository has twelve Go modules: the root (the compiler), `ir`,
+`runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
+`runtime/engine/go` (the engine's binding),
+`runtime/migrate/go` (the migration runner), `extensions/gcp`,
+`extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
+`cmd/superschematic` (the installed binary). Generated code imports the
+runtimes and the IR, never the compiler, and the root module never imports
+an extension.
+
+A binary is the core plus the extensions it links, through one call:
+
+```go
+func main() {
+	root := cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+```
+
+`cmd/superschematic` is that call with the official extensions, and
+`internal/cmd/superschematic-core` is the call with none. `go install
+github.com/parable-work/superschematic/cmd/superschematic@<version>` does
+not work, because the Go modules carry `replace` directives and `go
+install` at a version refuses them; build from a checkout, or download a
+release's `superschematic_<version>_<platform>.tar.gz`.
+
+[`docs/extension-model.md`](docs/extension-model.md) is the design of the
+extension seam, [`docs/stack-model.md`](docs/stack-model.md) the design of
+stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) records
+every design decision (cited as D1, D2, ... in code and commits).
+[`docs/README.md`](docs/README.md) covers writing docs pages.
 
 ## Toolchain
 
