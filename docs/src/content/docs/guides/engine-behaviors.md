@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; a reply streamed as it is written (`begin`, `appendDraft`, `finish`), and the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft` | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -174,8 +174,8 @@ same.
   instance keep, moves with no event of its own instance:
   `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
   `Lease.active`, `Budget.meters`, and Comments' `messages`,
-  `lastMessageAt` and `threads`. Its declaration says `"volatile": true`,
-  and so does the describe document.
+  `lastMessageAt`, `threads` and `composing`. Its declaration says
+  `"volatile": true`, and so does the describe document.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`. An operation beside the
@@ -183,6 +183,13 @@ same.
   tables: its event has no `seq`, carries `beside: true` and the
   operation's `result` in place of a patch, and leaves the instance's
   ETag where it was.
+- **Signals.** What a behavior says about an instance without storing it,
+  a typing indicator or a draft's next chunk, is a signal, not a field:
+  the engine hands it to the event streams opened with signals and keeps
+  nowhere ([signals](/superschematic/guides/engine/#signals)). A read
+  never returns one, and the generated types below hold none; the
+  [typed client](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)
+  types their data.
 
 ### In the generated types
 

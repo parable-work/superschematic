@@ -2,14 +2,14 @@
 //
 // Typed wrappers over the engine's client: each schema's instances, create
 // input and patches, and its behaviors' create parameters, preconditions,
-// operations and veto codes, as their configs narrow them.
+// operations, signals and veto codes, as their configs narrow them.
 //
 // Schema Project: ProjectClient, projectClient.
 // Schema Spec: SpecClient, specClient.
 // Schema Task: TaskClient, taskClient.
 
 import { isVeto } from '@superschematic/engine/client';
-import type { CallOptions, CreateOptions, EngineClient, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, WriteOptions } from '@superschematic/engine/client';
+import type { CallOptions, CreateOptions, EngineClient, EngineSignal, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, SignalMessage, StreamMessage, WriteOptions } from '@superschematic/engine/client';
 
 // The Project schema.
 
@@ -717,12 +717,14 @@ export type TaskBehaviors = {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted. */
+    /** How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted. */
     readonly messages: number;
-    /** When the latest posted message was posted, in epoch milliseconds; absent while there is none. */
+    /** The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none. */
     readonly lastMessageAt?: number;
-    /** The posted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    /** The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
     readonly threads: { open: number; resolved: number };
+    /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
+    readonly composing: string[];
   };
   readonly Links: {
     /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
@@ -816,13 +818,13 @@ export type TaskCommentBlock = {
 
 /** A message of a Task's Comments, as every operation that returns one gives it. */
 export type TaskCommentMessage = {
-  /** The subject of the caller who posted it. */
+  /** The subject of the caller who posted or began it. */
   author: string;
   /** The structured parts a client renders beside the body, as posted or last edited; none once deleted. */
   blocks: TaskCommentBlock[];
-  /** The text, Markdown; empty once deleted. */
+  /** The text, Markdown: the draft so far while composing; empty once deleted. */
   body: string;
-  /** When it was posted, in epoch milliseconds. */
+  /** When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes. */
   createdAt: number;
   /** When it was last edited, in epoch milliseconds; absent when it never was, or once deleted. */
   editedAt?: number;
@@ -830,13 +832,15 @@ export type TaskCommentMessage = {
   edits: number;
   /** The message's number on the instance: 1, 2, 3, ...; never reused. */
   id: number;
-  /** On a top-level message: when its thread's latest posted reply was posted; absent while it has none. */
+  /** On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none. */
   lastReplyAt?: number;
   /** The subjects the message names for someone to hear of it; none once deleted. */
   mentions: string[];
-  /** On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10. */
+  /** On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10. */
   participants?: string[];
   pinned: boolean;
+  /** When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing. */
+  postedAt?: number;
   /** The id of the message of the thread the reply quotes. */
   quotes?: number;
   /** The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted. */
@@ -845,7 +849,7 @@ export type TaskCommentMessage = {
     /** Whether the caller reacted with the emoji. */
     mine: boolean;
   } };
-  /** On a top-level message: how many posted replies its thread has. */
+  /** On a top-level message: how many posted or interrupted replies its thread has. */
   replies?: number;
   /** On a top-level message whose thread is resolved: who resolved it and when. */
   resolved?: {
@@ -853,11 +857,11 @@ export type TaskCommentMessage = {
     at: number;
     by: string;
   };
-  /** posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text. */
-  state: 'posted' | 'deleted';
+  /** composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text. */
+  state: 'composing' | 'posted' | 'interrupted' | 'deleted';
   /** For a reply, the id of the top-level message whose thread it is in; absent on a top-level message. */
   thread?: number;
-  /** The deployable of the service whose call posted it (D37). */
+  /** The deployable of the service whose call posted or began it (D37). */
   via?: string;
 };
 
@@ -916,7 +920,7 @@ export type TaskTransitionResult = {
   to: TaskState;
 };
 
-/** The parameters of Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing. */
+/** The parameters of Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted or began returns that message and posts nothing. */
 export type TaskPostParams = {
   /** Structured parts beside the body, each of a kind the config allows. */
   blocks?: Array<{
@@ -943,7 +947,70 @@ export type TaskPostParams = {
 /** The message. */
 export type TaskPostResult = TaskCommentMessage;
 
-/** The parameters of Comments' edit: Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
+/** The parameters of Comments' begin: Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A retry with the clientId of a message the caller posted or began returns that message and begins nothing. */
+export type TaskBeginParams = {
+  /** The caller's key for the message, so a retry returns the message it began. */
+  clientId?: string;
+  /** The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread. */
+  quotes?: number;
+  /** The id of the top-level message to reply in; a top-level message when absent. */
+  thread?: number;
+};
+
+/** The message: composing, its draft empty; for a retry, the message as it is now. */
+export type TaskBeginResult = TaskCommentMessage;
+
+/** The parameters of Comments' appendDraft: Appends text to the draft of the caller's composing message, and once the call commits sends the draft signal, { message, offset, text }, to the streams open on the instance. A reader that opens the conversation midway reads the draft so far as the message's body and follows the signals from its length. Its author only; the draft holds at most the config's maxBodyLength code points. An empty text appends nothing and sends nothing, and still counts as an append, so an author at work with nothing to show keeps its message from being interrupted. It appends no event. */
+export type TaskAppendDraftParams = {
+  /** The id of the composing message. */
+  message: number;
+  /** The text to append, at most 4000 bytes written as a JSON string, its quotes included, so that the draft signal fits a signal's 4096 bytes. */
+  text: string;
+};
+
+/** Where the text went. */
+export type TaskAppendDraftResult = {
+  /** The draft's length after the append, in code points. */
+  length: number;
+  /** The id of the message. */
+  message: number;
+  /** The draft's length before the append, in code points: where the text starts. */
+  offset: number;
+};
+
+/** The parameters of Comments' finish: Posts the caller's composing message: its body is body, or the draft when body is absent, checked as a post's body is, and its blocks and mentions are as a post gives them. Its author only. The message keeps its id, its place and the createdAt its begin gave it, and is counted from now. */
+export type TaskFinishParams = {
+  /** Structured parts beside the body, each of a kind the config allows; none when absent. */
+  blocks?: Array<{
+    /** What a client shows with it, at most 8192 bytes as compact JSON. */
+    data?: JSONObject;
+    kind: 'action';
+    /** Where it stands. */
+    status: 'running' | 'succeeded' | 'failed';
+    /** What was done. */
+    title: string;
+  }>;
+  /** The text, Markdown, at most the config's maxBodyLength code points, in place of the draft; the draft when absent. */
+  body?: string;
+  /** The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed. */
+  mentions?: string[];
+  /** The id of the composing message. */
+  message: number;
+};
+
+/** The message, posted. */
+export type TaskFinishResult = TaskCommentMessage;
+
+/** The parameters of Comments' interrupt: Stops a composing message: it becomes interrupted, its draft its body, or deleted when its draft holds no text. Its author may at any time, and so may a caller holding moderatePermission; any caller the policy lets write may once the author has appended nothing for the config's composeTimeoutMs, which is how the engine's runner interrupts a message whose author has stopped, on its schedule. An interrupted message is counted from now. */
+export type TaskInterruptParams = {
+  /** The id of the composing message. */
+  message: number;
+};
+
+/** The message, interrupted, or deleted when its draft held no text. */
+export type TaskInterruptResult = TaskCommentMessage;
+
+/** The parameters of Comments' edit: Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
 export type TaskEditParams = {
   /** The blocks, in place of the message's; it keeps them when absent. */
   blocks?: Array<{
@@ -966,7 +1033,7 @@ export type TaskEditParams = {
 /** The message after the edit. */
 export type TaskEditResult = TaskCommentMessage;
 
-/** The parameters of Comments' deleteMessage: Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+/** The parameters of Comments' deleteMessage: Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
 export type TaskDeleteMessageParams = {
   /** The id of the message. */
   message: number;
@@ -989,7 +1056,7 @@ export type TaskPurgeResult = {
   purged: number[];
 };
 
-/** The parameters of Comments' react: Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji. */
+/** The parameters of Comments' react: Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji. */
 export type TaskReactParams = {
   /** The reaction: an emoji's name or the character itself, at most 32 code points. */
   emoji: string;
@@ -1000,7 +1067,7 @@ export type TaskReactParams = {
 /** The message after the reaction. */
 export type TaskReactResult = TaskCommentMessage;
 
-/** The parameters of Comments' unreact: Removes the caller's reaction from a posted message. */
+/** The parameters of Comments' unreact: Removes the caller's reaction from a posted or interrupted message. */
 export type TaskUnreactParams = {
   /** The reaction: an emoji's name or the character itself, at most 32 code points. */
   emoji: string;
@@ -1011,7 +1078,7 @@ export type TaskUnreactParams = {
 /** The message after the reaction is removed. */
 export type TaskUnreactResult = TaskCommentMessage;
 
-/** The parameters of Comments' pin: Pins a posted message, top-level or a reply. Needs pinPermission when the config names one. */
+/** The parameters of Comments' pin: Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one. */
 export type TaskPinParams = {
   /** The id of the message. */
   message: number;
@@ -1029,7 +1096,7 @@ export type TaskUnpinParams = {
 /** The message, unpinned. */
 export type TaskUnpinResult = TaskCommentMessage;
 
-/** The parameters of Comments' resolve: Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+/** The parameters of Comments' resolve: Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
 export type TaskResolveParams = {
   /** The id of the thread's top-level message. */
   thread: number;
@@ -1047,7 +1114,7 @@ export type TaskReopenParams = {
 /** The top-level message, open. */
 export type TaskReopenResult = TaskCommentMessage;
 
-/** The parameters of Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+/** The parameters of Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
 export type TaskListMessagesParams = {
   /** The page is the earliest messages with a higher id. */
   after?: number;
@@ -1072,7 +1139,7 @@ export type TaskListMessagesResult = {
   root?: TaskCommentMessage;
 };
 
-/** The parameters of Comments' getMessage: Reads one message of the conversation, a deleted one included. */
+/** The parameters of Comments' getMessage: Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals. */
 export type TaskGetMessageParams = {
   /** The id of the message. */
   message: number;
@@ -1328,6 +1395,10 @@ export type TaskListDependentsResult = {
 export type TaskOperations = {
   transition: { scope: 'instance'; params: TaskTransitionParams; result: TaskTransitionResult };
   post: { scope: 'instance'; params: TaskPostParams; result: TaskPostResult };
+  begin: { scope: 'instance'; params: TaskBeginParams; result: TaskBeginResult };
+  appendDraft: { scope: 'instance'; params: TaskAppendDraftParams; result: TaskAppendDraftResult };
+  finish: { scope: 'instance'; params: TaskFinishParams; result: TaskFinishResult };
+  interrupt: { scope: 'instance'; params: TaskInterruptParams; result: TaskInterruptResult };
   edit: { scope: 'instance'; params: TaskEditParams; result: TaskEditResult };
   deleteMessage: { scope: 'instance'; params: TaskDeleteMessageParams; result: TaskDeleteMessageResult };
   purge: { scope: 'instance'; params: TaskPurgeParams; result: TaskPurgeResult };
@@ -1355,12 +1426,12 @@ export type TaskOperations = {
 };
 
 /** The name of an operation on one Task. */
-export type TaskInstanceOperation = 'transition' | 'post' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type TaskInstanceOperation = 'transition' | 'post' | 'begin' | 'appendDraft' | 'finish' | 'interrupt' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Task's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
-  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_configured';
+  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured';
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Numbering: never;
   Timers: 'no_deadline' | 'not_armed';
@@ -1368,6 +1439,36 @@ export type TaskVetoes = {
   Constants: never;
   Variants: never;
 };
+
+/** The data of Comments' typing signal: The sender is typing a message: top-level, or with thread a reply in that thread. A client sends it every few seconds while its person types, and a reader shows the sender as typing for a few seconds after the last; the engine keeps none. Comments does not check that thread names a message. */
+export type TaskTypingSignal = {
+  /** The id of the top-level message whose thread the sender is typing in; absent for a top-level message. */
+  thread?: number;
+};
+
+/** The data of Comments' viewing signal: The sender has the conversation open. A client sends it every few seconds while it shows the conversation, and a reader shows the sender as looking for a few seconds after the last; the engine keeps none. */
+export type TaskViewingSignal = Record<string, never>;
+
+/** The data of Comments' draft signal: Text appendDraft added to a composing message's draft, sent once its call commits; from is the message's author. A reader that holds offset code points of the draft appends text; one that holds fewer missed a signal and reads the message again with getMessage; one that holds more ignores it. A reader opens the stream with signals before it reads, counts what it holds in code points (Array.from(body).length), and drops a draft at its message's finish, interrupt, deleteMessage or purge event; a draft signal may arrive after that event, and is then ignored. */
+export type TaskDraftSignal = {
+  /** The id of the composing message. */
+  message: number;
+  /** The draft's length before the text, in code points. */
+  offset: number;
+  /** The text appended, never empty. */
+  text: string;
+};
+
+/** The data of the signals of a Task's behaviors, by behavior, then signal name: what a signal's data holds. */
+export type TaskSignals = {
+  Comments: { typing: TaskTypingSignal; viewing: TaskViewingSignal; draft: TaskDraftSignal };
+};
+
+/** A signal of a Task, as a stream opened with signals hands it out: its behavior, its name and its data, typed. */
+export type TaskSignalMessage =
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'typing'; readonly data: TaskTypingSignal } }
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'viewing'; readonly data: TaskViewingSignal } }
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'draft'; readonly data: TaskDraftSignal } };
 
 /** A Task create's options: its id, and each behavior's create parameters. */
 export type TaskCreateOptions = Omit<CreateOptions, 'behaviors'> & { readonly behaviors: TaskCreateParams };
@@ -1378,6 +1479,20 @@ export type TaskWriteOptions = Omit<WriteOptions, 'preconditions'>;
 /** isTaskVeto is isVeto with the behaviors of a Task and their codes. */
 export function isTaskVeto<B extends keyof TaskVetoes>(error: unknown, behavior?: B, codes?: TaskVetoes[B] | ReadonlyArray<TaskVetoes[B]>): error is EngineVeto {
   return isVeto(error, behavior, codes);
+}
+
+/** isTaskSignal reports whether a message of a stream opened with signals is a signal of the Task schema, of the behavior and with the name when they are given, and types its data. */
+export function isTaskSignal<B extends keyof TaskSignals = keyof TaskSignals, N extends (B extends keyof TaskSignals ? keyof TaskSignals[B] : never) = B extends keyof TaskSignals ? keyof TaskSignals[B] : never>(
+  message: StreamMessage | SignalMessage,
+  behavior?: B,
+  name?: N
+): message is Extract<TaskSignalMessage, { readonly signal: { readonly behavior: B; readonly name: N } }> {
+  return (
+    message.type === 'signal' &&
+    message.signal.schema === 'Task' &&
+    (behavior === undefined || message.signal.behavior === behavior) &&
+    (name === undefined || message.signal.name === name)
+  );
 }
 
 /** The Task schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
@@ -1396,29 +1511,37 @@ export interface TaskClient {
   operate<K extends TaskInstanceOperation>(id: string, operation: K, params: TaskOperations[K]['params'], options?: TaskWriteOptions): Promise<OperationOutcome<TaskOperations[K]['result']>>;
   /** Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
   transition(id: string, params: TaskTransitionParams, options?: TaskWriteOptions): Promise<TaskTransitionResult>;
-  /** Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing. */
+  /** Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted or began returns that message and posts nothing. */
   post(id: string, params: TaskPostParams, options?: TaskWriteOptions): Promise<TaskPostResult>;
-  /** Comments' edit: Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
+  /** Comments' begin: Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A retry with the clientId of a message the caller posted or began returns that message and begins nothing. */
+  begin(id: string, params?: TaskBeginParams, options?: TaskWriteOptions): Promise<TaskBeginResult>;
+  /** Comments' appendDraft: Appends text to the draft of the caller's composing message, and once the call commits sends the draft signal, { message, offset, text }, to the streams open on the instance. A reader that opens the conversation midway reads the draft so far as the message's body and follows the signals from its length. Its author only; the draft holds at most the config's maxBodyLength code points. An empty text appends nothing and sends nothing, and still counts as an append, so an author at work with nothing to show keeps its message from being interrupted. It appends no event. */
+  appendDraft(id: string, params: TaskAppendDraftParams, options?: TaskWriteOptions): Promise<TaskAppendDraftResult>;
+  /** Comments' finish: Posts the caller's composing message: its body is body, or the draft when body is absent, checked as a post's body is, and its blocks and mentions are as a post gives them. Its author only. The message keeps its id, its place and the createdAt its begin gave it, and is counted from now. */
+  finish(id: string, params: TaskFinishParams, options?: TaskWriteOptions): Promise<TaskFinishResult>;
+  /** Comments' interrupt: Stops a composing message: it becomes interrupted, its draft its body, or deleted when its draft holds no text. Its author may at any time, and so may a caller holding moderatePermission; any caller the policy lets write may once the author has appended nothing for the config's composeTimeoutMs, which is how the engine's runner interrupts a message whose author has stopped, on its schedule. An interrupted message is counted from now. */
+  interrupt(id: string, params: TaskInterruptParams, options?: TaskWriteOptions): Promise<TaskInterruptResult>;
+  /** Comments' edit: Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
   edit(id: string, params: TaskEditParams, options?: TaskWriteOptions): Promise<TaskEditResult>;
-  /** Comments' deleteMessage: Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+  /** Comments' deleteMessage: Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
   deleteMessage(id: string, params: TaskDeleteMessageParams, options?: TaskWriteOptions): Promise<TaskDeleteMessageResult>;
   /** Comments' purge: Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them. */
   purge(id: string, params: TaskPurgeParams, options?: TaskWriteOptions): Promise<TaskPurgeResult>;
-  /** Comments' react: Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji. */
+  /** Comments' react: Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji. */
   react(id: string, params: TaskReactParams, options?: TaskWriteOptions): Promise<TaskReactResult>;
-  /** Comments' unreact: Removes the caller's reaction from a posted message. */
+  /** Comments' unreact: Removes the caller's reaction from a posted or interrupted message. */
   unreact(id: string, params: TaskUnreactParams, options?: TaskWriteOptions): Promise<TaskUnreactResult>;
-  /** Comments' pin: Pins a posted message, top-level or a reply. Needs pinPermission when the config names one. */
+  /** Comments' pin: Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one. */
   pin(id: string, params: TaskPinParams, options?: TaskWriteOptions): Promise<TaskPinResult>;
   /** Comments' unpin: Unpins a pinned message. Needs pinPermission when the config names one. */
   unpin(id: string, params: TaskUnpinParams, options?: TaskWriteOptions): Promise<TaskUnpinResult>;
-  /** Comments' resolve: Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+  /** Comments' resolve: Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
   resolve(id: string, params: TaskResolveParams, options?: TaskWriteOptions): Promise<TaskResolveResult>;
   /** Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
   reopen(id: string, params: TaskReopenParams, options?: TaskWriteOptions): Promise<TaskReopenResult>;
-  /** Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+  /** Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
   listMessages(id: string, params?: TaskListMessagesParams, options?: TaskWriteOptions): Promise<TaskListMessagesResult>;
-  /** Comments' getMessage: Reads one message of the conversation, a deleted one included. */
+  /** Comments' getMessage: Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals. TaskDraftSignal says how a reader follows a draft. */
   getMessage(id: string, params: TaskGetMessageParams, options?: TaskWriteOptions): Promise<TaskGetMessageResult>;
   /** Comments' listEdits: Lists what a message held before each of its edits, oldest first, one page at a time. */
   listEdits(id: string, params: TaskListEditsParams, options?: TaskWriteOptions): Promise<TaskListEditsResult>;
@@ -1446,6 +1569,10 @@ export interface TaskClient {
   listBlockers(id: string, params?: TaskListBlockersParams, options?: TaskWriteOptions): Promise<TaskListBlockersResult>;
   /** Dependencies' listDependents: Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time. */
   listDependents(id: string, params?: TaskListDependentsParams, options?: TaskWriteOptions): Promise<TaskListDependentsResult>;
+  /** sendTyping sends Comments' typing signal to the streams open on a Task, as the policy lets its caller read; nothing is stored, and past the engine's rate it is 429 rate_limited. The sender is typing a message: top-level, or with thread a reply in that thread. A client sends it every few seconds while its person types, and a reader shows the sender as typing for a few seconds after the last; the engine keeps none. Comments does not check that thread names a message. */
+  sendTyping(id: string, data?: TaskTypingSignal, options?: CallOptions): Promise<void>;
+  /** sendViewing sends Comments' viewing signal to the streams open on a Task, as the policy lets its caller read; nothing is stored, and past the engine's rate it is 429 rate_limited. The sender has the conversation open. A client sends it every few seconds while it shows the conversation, and a reader shows the sender as looking for a few seconds after the last; the engine keeps none. */
+  sendViewing(id: string, data?: TaskViewingSignal, options?: CallOptions): Promise<void>;
 }
 
 /** taskClient wraps an EngineClient with the Task schema's types. */
@@ -1474,6 +1601,18 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     post(id, params, options) {
       return client.instances.invoke<TaskPostResult>('Task', id, 'post', params, options);
+    },
+    begin(id, params, options) {
+      return client.instances.invoke<TaskBeginResult>('Task', id, 'begin', params ?? {}, options);
+    },
+    appendDraft(id, params, options) {
+      return client.instances.invoke<TaskAppendDraftResult>('Task', id, 'appendDraft', params, options);
+    },
+    finish(id, params, options) {
+      return client.instances.invoke<TaskFinishResult>('Task', id, 'finish', params, options);
+    },
+    interrupt(id, params, options) {
+      return client.instances.invoke<TaskInterruptResult>('Task', id, 'interrupt', params, options);
     },
     edit(id, params, options) {
       return client.instances.invoke<TaskEditResult>('Task', id, 'edit', params, options);
@@ -1546,6 +1685,12 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     listDependents(id, params, options) {
       return client.instances.invoke<TaskListDependentsResult>('Task', id, 'listDependents', params ?? {}, options);
+    },
+    sendTyping(id, data, options) {
+      return client.signals.send({ schema: 'Task', instanceId: id, behavior: 'Comments', name: 'typing', data: data ?? {} }, options);
+    },
+    sendViewing(id, data, options) {
+      return client.signals.send({ schema: 'Task', instanceId: id, behavior: 'Comments', name: 'viewing', data: data ?? {} }, options);
     },
   };
 }

@@ -708,14 +708,15 @@ exports:
 | `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
 | `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
 | `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |
-| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate` and a method per behavior operation |
+| `<T><Signal>Signal`, `<T>Signals`, `<T>SignalMessage`, `is<T>Signal` | where a behavior declares signals (D77): each signal's data, `<T><Behavior><Signal>Signal` when two behaviors declare its name; the data by behavior and name; a stream's signal message narrowed to them; and a guard that tells the type's signals from a stream's other messages, by behavior and name when given, and types their data |
+| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate`, a method per behavior operation, and `send<Signal>(id, data?, options?)` per signal a caller may send (access `read` or `write`; `send<Behavior><Signal>` when an operation or another signal takes the name) |
 
 `<T>` is the instance type's name, the type named like the schema or its
 only type, and `<Schema>` the schema's name in PascalCase. A behavior's
 config narrows its declaration's shapes for the core's behaviors:
 `Workflow`'s states, `Links`' names and targets, `Dependencies`' blocker
 schemas, `Rollups`' values, `Revisions`' patches, the kinds of block
-`Comments` lets a post give and `Variants`' types.
+`Comments` lets a post or a finish give and `Variants`' types.
 Another behavior, an extension's among them, is typed by its declaration,
 and its fields hold any JSON. A scalar is typed by the JSON its values
 are on the wire (`Temporal.DateTime` a string), not by its scalar

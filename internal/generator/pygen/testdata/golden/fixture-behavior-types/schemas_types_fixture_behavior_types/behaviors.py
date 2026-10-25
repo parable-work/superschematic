@@ -705,12 +705,14 @@ class TicketComments(BaseModel):
         populate_by_name=True,
     )
 
-    # How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    # How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
     messages: int = Field(..., alias="messages", serialization_alias="messages")
-    # When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    # The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
     last_message_at: Optional[int] = Field(default=None, alias="lastMessageAt", serialization_alias="lastMessageAt")
-    # The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    # The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
     threads: TicketCommentsThreads = Field(..., alias="threads", serialization_alias="threads")
+    # The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    composing: List[str] = Field(..., alias="composing", serialization_alias="composing")
 
 class TicketWorkflow(BaseModel):
     """

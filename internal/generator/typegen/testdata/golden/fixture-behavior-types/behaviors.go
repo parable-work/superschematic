@@ -200,12 +200,14 @@ type TicketWorkflow struct {
 
 // TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 type TicketComments struct {
-	// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+	// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
 	Messages int64 `json:"messages"`
-	// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+	// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
 	LastMessageAt *int64 `json:"lastMessageAt,omitempty"`
-	// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+	// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
 	Threads TicketCommentsThreads `json:"threads"`
+	// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+	Composing []string `json:"composing"`
 }
 
 // TicketCommentsThreads types TicketComments.threads.

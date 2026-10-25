@@ -5,9 +5,11 @@
 // (-update) and fails when one is stale. Here the generator's create
 // parameters are held to the describe document's, the behavior fields it
 // types, by behavior, to the describe document's and to what reads return,
-// and the wrappers run against an engine over HTTP. typos() is never
-// called: each of its lines must fail to compile, which tsc -p
-// tsconfig.test.json checks.
+// and the wrappers run against an engine over HTTP: a streamed reply
+// through begin, appendDraft and finish, and the signals a subscription
+// hands out, typed by the module's guard (D77). typos() is never called:
+// each of its lines must fail to compile, which tsc -p tsconfig.test.json
+// checks.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
@@ -16,12 +18,21 @@ import type { Authenticator } from '@superschematic/http-runtime';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { Hono } from 'hono';
 
-import { EngineClient, EngineProblem } from '../dist/client/index.js';
+import { EngineClient, EngineProblem, type SignalMessage, type StreamMessage } from '../dist/client/index.js';
 import { engineApp } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
 import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
-import { isNoteVeto, notesClient, type NoteCommentMessage, type NotesClient } from './generated/notes.ts';
+import {
+  isNoteSignal,
+  isNoteVeto,
+  notesClient,
+  type NoteAppendDraftResult,
+  type NoteCommentMessage,
+  type NoteDraftSignal,
+  type NotesClient,
+  type NoteSignalMessage,
+} from './generated/notes.ts';
 import { cleanup, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -63,6 +74,21 @@ function serve(engine: Engine): EngineClient {
   app.route('/api', engineApp(engine, { authenticate }));
   const fetch = async (input: string, init: RequestInit): Promise<Response> => app.fetch(new Request(input, init));
   return new EngineClient({ baseUrl: 'http://engine.test/api', fetch, auth: { token: 'editor' } });
+}
+
+// next takes a subscription's next message, failing after a while.
+async function next(messages: AsyncIterator<StreamMessage | SignalMessage>, timeoutMs = 10_000): Promise<StreamMessage | SignalMessage> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('no message in time')), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([messages.next(), timeout]);
+    assert.ok(!result.done, 'the subscription ended');
+    return result.value;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** withoutDescriptions copies a JSON value without its schemas' descriptions, which each side words itself. */
@@ -159,7 +185,7 @@ describe('the generated client', () => {
     assert.deepEqual([tidy.Comments.messages, tidy.Comments.threads, typeof tidy.Comments.lastMessageAt], [1, { open: 0, resolved: 1 }, 'number']);
     const launch = engine.instances.get(editor, 'notes', 'n1')?.behaviors as Record<string, any>;
     assert.deepEqual([launch.Comments.messages, launch.Comments.threads], [2, { open: 1, resolved: 0 }]);
-    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 } });
+    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
     assert.deepEqual(tidy.Timers.deadlines, { overdue: { dueAt: Date.UTC(2026, 10, 2, 9), fired: false } });
     const started = engine.instances.get(editor, 'Task', 't2')?.behaviors as Record<string, any>;
     assert.deepEqual(Object.keys(started.Timers.deadlines), ['stuck']);
@@ -179,7 +205,7 @@ describe('the generated client', () => {
 
     const note = await notes.create({ title: 'Launch', tags: ['plan'] }, { id: 'launch' });
     assert.equal(note.behaviors.Workflow.status, 'draft');
-    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 } });
+    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
     assert.deepEqual(await notes.transition('launch', { to: 'review' }), { from: 'draft', to: 'review' });
     const reviewing = await notes.get('launch');
     const posted = await notes.operate('launch', 'post', { body: 'Looks good', blocks: [{ kind: 'ref', schema: 'notes', id: 'launch' }] });
@@ -229,6 +255,63 @@ describe('the generated client', () => {
     await tasks.delete('t2');
     assert.equal((await tasks.list()).items.length, 1);
   });
+
+  test('streams a reply through begin, appendDraft and finish, and types the signals a subscription hands out', async () => {
+    const engine = open();
+    const client = serve(engine);
+    const notes = notesClient(client);
+    await notes.create({ title: 'Launch' }, { id: 'launch' });
+    const subscription = client.events.subscribe({ after: 'head', signals: true, schema: 'notes', instanceId: 'launch' });
+    const messages = subscription[Symbol.asyncIterator]();
+    assert.equal((await next(messages)).type, 'ready');
+
+    const begun: NoteCommentMessage = await notes.begin('launch', { clientId: 'reply-1' });
+    assert.deepEqual([begun.state, begun.body, begun.postedAt], ['composing', '', undefined]);
+    assert.deepEqual((await notes.get('launch')).behaviors.Comments.composing, ['editor']);
+    const appended: NoteAppendDraftResult = await notes.appendDraft('launch', { message: begun.id, text: 'Ships ' });
+    assert.deepEqual(appended, { message: begun.id, offset: 0, length: 6 });
+    await notes.appendDraft('launch', { message: begun.id, text: 'in the fall ✓' });
+    assert.equal((await notes.getMessage('launch', { message: begun.id })).body, 'Ships in the fall ✓');
+    assert.equal(await notes.sendTyping('launch'), undefined);
+    await notes.sendViewing('launch', {});
+    const finished: NoteCommentMessage = await notes.finish('launch', { message: begun.id });
+    assert.deepEqual([finished.id, finished.state, finished.body, finished.createdAt], [begun.id, 'posted', 'Ships in the fall ✓', begun.createdAt]);
+    assert.equal(typeof finished.postedAt, 'number');
+    const after = (await notes.get('launch')).behaviors.Comments;
+    assert.deepEqual([after.messages, after.composing], [1, []]);
+
+    // Two events (begin, finish) and four signals, in no order between the
+    // two; each sender's signals in order.
+    const drafts: NoteDraftSignal[] = [];
+    const seen: string[] = [];
+    while (seen.length < 6) {
+      const message = await next(messages);
+      if (isNoteSignal(message, 'Comments', 'draft')) {
+        const offset: number = message.signal.data.offset;
+        drafts.push({ ...message.signal.data, offset });
+        seen.push(`draft ${message.signal.from}`);
+      } else if (isNoteSignal(message)) {
+        const signal: NoteSignalMessage['signal'] = message.signal;
+        seen.push(`${signal.name} ${JSON.stringify(signal.data)} ${signal.from}`);
+      } else if (message.type === 'event') {
+        seen.push(`event ${(message.event.change as { operation: string }).operation}`);
+      }
+    }
+    assert.deepEqual(seen.sort(), ['draft editor', 'draft editor', 'event begin', 'event finish', 'typing {} editor', 'viewing {} editor']);
+    // A draft's offset is the draft's length before it in code points: ✓ is one.
+    assert.deepEqual(drafts, [
+      { message: begun.id, offset: 0, text: 'Ships ' },
+      { message: begun.id, offset: 6, text: 'in the fall ✓' },
+    ]);
+
+    // An author who stops keeps what it wrote: interrupt returns the record.
+    const second = await notes.begin('launch', { thread: begun.id });
+    await notes.appendDraft('launch', { message: second.id, text: 'And then' });
+    const stopped: NoteCommentMessage = await notes.interrupt('launch', { message: second.id });
+    assert.deepEqual([stopped.state, stopped.body, stopped.thread], ['interrupted', 'And then', begun.id]);
+    await assert.rejects(notes.appendDraft('launch', { message: second.id, text: '.' }), (error) => isNoteVeto(error, 'Comments', 'not_composing'));
+    subscription.close();
+  });
 });
 
 /**
@@ -236,7 +319,7 @@ describe('the generated client', () => {
  * it (@ts-expect-error fails the typecheck when it does not), where the
  * untyped client takes it and the engine refuses it at run time.
  */
-export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, jobs: JobsClient, workers: WorkersClient): void {
+export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, jobs: JobsClient, workers: WorkersClient, message: StreamMessage | SignalMessage): void {
   // @ts-expect-error titel is not a field of a Note
   void notes.create({ titel: 'Launch' });
   // @ts-expect-error status is not an own field: it is Workflow's, which transition moves
@@ -287,4 +370,25 @@ export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, 
   void specs.signOff('s1', { state: 'draft' });
   // @ts-expect-error late is not a deadline of a Task's Timers
   void tasks.snoozeTimer('t1', { deadline: 'late', dueAt: 1 });
+  // @ts-expect-error appendDraft alone sends draft (access operation): there is no send helper
+  void notes.sendDraft('launch', { message: 1, offset: 0, text: 'Hi' });
+  // @ts-expect-error typing's thread is a message's id, a number
+  void notes.sendTyping('launch', { thread: '1' });
+  // @ts-expect-error typing's data holds a thread alone
+  void notes.sendTyping('launch', { text: 'Hi' });
+  // @ts-expect-error finish names the composing message
+  void notes.finish('launch', { body: 'Done.' });
+  // @ts-expect-error a Task's Comments allow only action blocks, in a finish as in a post
+  void tasks.finish('t1', { message: 1, blocks: [{ kind: 'ref', schema: 'Spec', id: 's1' }] });
+  // @ts-expect-error whisper is not a signal of Comments
+  void isNoteSignal(message, 'Comments', 'whisper');
+  if (isNoteSignal(message, 'Comments', 'draft')) {
+    // @ts-expect-error a draft's data holds message, offset and text
+    void message.signal.data.thread;
+  }
+  if (isNoteSignal(message, 'Comments', 'typing')) {
+    // @ts-expect-error a typing signal's thread is a number
+    const thread: string | undefined = message.signal.data.thread;
+    void thread;
+  }
 }

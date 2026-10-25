@@ -50,6 +50,9 @@ type Narrowing struct {
 	// Params and Results are each operation's, by name.
 	Params  map[string]any
 	Results map[string]any
+	// Signals are each signal's data, its paramsSchema, by name (D77): a
+	// config narrows none.
+	Signals map[string]any
 	// CreateParams is the create parameters' schema, as the config
 	// narrows it; nil when the declaration takes none.
 	CreateParams any
@@ -115,7 +118,7 @@ func NarrowerNames() []string {
 // Narrow starts from the declaration's shapes and applies the behavior's
 // core narrowing, when it has one.
 func Narrow(declaration registry.Behavior, config json.RawMessage, target Target) (Narrowing, error) {
-	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}}
+	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}, Signals: map[string]any{}}
 	for _, field := range declaration.Fields {
 		n.Fields[field.Name] = FieldShape{Schema: map[string]any{"description": field.Description}}
 	}
@@ -130,6 +133,13 @@ func Narrow(declaration registry.Behavior, config json.RawMessage, target Target
 		}
 		n.Params[op.Name] = params
 		n.Results[op.Name] = result
+	}
+	for _, signal := range declaration.Signals {
+		data, err := decodeSchema(signal.ParamsSchema)
+		if err != nil {
+			return n, fmt.Errorf("signal %s paramsSchema: %w", signal.Name, err)
+		}
+		n.Signals[signal.Name] = data
 	}
 	var err error
 	if n.CreateParams, err = decodeSchema(declaration.CreateParamsSchema); err != nil {
@@ -275,18 +285,24 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 
 // commentsMessageResults are Comments' operations whose result is one
 // message's record.
-var commentsMessageResults = []string{"post", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "getMessage"}
+var commentsMessageResults = []string{"post", "begin", "finish", "interrupt", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "getMessage"}
 
-// Comments (D77): the count of messages and the threads' counts are always
-// there, every instance starting with an empty conversation; when the
-// latest message was posted is absent while there is none. A block is one
-// of the kinds post's parameters declare, and a message's record is
-// post's result with its blocks typed so: <Base>CommentBlock and
-// <Base>CommentMessage, which every operation that returns a record
-// returns and listMessages' page holds. A record keeps every kind of
-// block, since narrowing the config leaves posted blocks as they are;
-// what post and edit give is of the kinds the config's blocks allow, and
-// with none allowed they take no blocks.
+// commentsBlocksGiven are Comments' operations whose parameters give a
+// message's blocks: post and finish, which take none when the config
+// allows none, and edit.
+var commentsBlocksGiven = []string{"post", "finish", "edit"}
+
+// Comments (D77): the count of messages, the threads' counts and who is
+// composing are always there, every instance starting with an empty
+// conversation; when the latest message stood is absent while none has.
+// A block is one of the kinds post's parameters declare, and a message's
+// record is post's result with its blocks typed so: <Base>CommentBlock
+// and <Base>CommentMessage, which every operation that returns a record
+// (begin, finish and interrupt among them) returns and listMessages' page
+// holds. A record keeps every kind of block, since narrowing the config
+// leaves posted blocks as they are; what post, finish and edit give is of
+// the kinds the config's blocks allow, and with none allowed post and
+// finish take no blocks.
 func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 	given, err := at(n.Params["post"], "properties", "blocks", "items")
 	if err != nil {
@@ -346,8 +362,8 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 			}
 		}
 	}
-	for _, op := range []string{"post", "edit"} {
-		if len(allowed) == 0 && op == "post" {
+	for _, op := range commentsBlocksGiven {
+		if len(allowed) == 0 && op != "edit" {
 			if err := deleteProperty(n.Params[op], "blocks"); err != nil {
 				return fmt.Errorf("operation %s: %w", op, err)
 			}
@@ -379,6 +395,7 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 			"type": "object", "additionalProperties": false, "required": []any{"open", "resolved"},
 			"properties": map[string]any{"open": integer(), "resolved": integer()},
 		}, true},
+		typedField{"composing", map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, true},
 	)
 }
 
