@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,15 @@ func RateLimitRef(service, operation string, windowStart int64, clientKey string
 		return Ref{}, err
 	}
 	return Ref{Declaration: RateLimitDeclaration, Name: name}, nil
+}
+
+// ClientKey is the client's key in the key httprate gives its counter:
+// httprate joins its key functions' keys, each followed by ':', so the
+// one key of a limiter keyed by the client's address, `203.0.113.7`,
+// reaches the counter as `203.0.113.7:`. The shared counters hash the
+// address alone, as every language's limiter does.
+func ClientKey(httprateKey string) string {
+	return strings.TrimSuffix(httprateKey, ":")
 }
 
 // RateLimitTTL is the TTL of a window's counter: two windows and five
@@ -156,7 +166,7 @@ func (c *RateLimitCounter) ref(key string, start time.Time, window time.Duration
 	if window <= 0 || ttl > RateLimitMaxTTL {
 		return Ref{}, 0, false
 	}
-	ref, err := RateLimitRef(c.service, c.operation, start.Unix(), key)
+	ref, err := RateLimitRef(c.service, c.operation, start.Unix(), ClientKey(key))
 	if err != nil {
 		return Ref{}, 0, false
 	}

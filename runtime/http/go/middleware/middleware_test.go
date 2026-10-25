@@ -233,6 +233,13 @@ func TestRateLimitWithStore(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, last.Code)
 		assert.Equal(t, "60", last.Header().Get("Retry-After"))
 		assert.Contains(t, last.Body.String(), `"code":"too_many_requests"`)
+		// The store counts the client's address, hashed, as every
+		// language's limiter keys it.
+		ref, err := memorystore.RateLimitRef("shop-api", "ProductQueries.getProduct", start.Unix(), "10.0.0.97")
+		require.NoError(t, err)
+		n, err := store.Count(context.Background(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), n)
 		break
 	}
 
