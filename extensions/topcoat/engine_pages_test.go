@@ -18,8 +18,8 @@ import (
 // shows the types and the nav's link to a reader and none to a caller
 // without a permission, pages a list forward and back, shows an instance's
 // own fields and its Comments in the generic panel, and runs its
-// operations' forms: a comment posted (303), a stale expectedSeq refused
-// (409), a parameter the form or the engine refuses at its control (422), a
+// operations' forms: a message posted (303), beside the note so its seq
+// stays, a stale expectedSeq refused (409), a parameter the form or the engine refuses at its control (422), a
 // read's result on the page, a write sent by GET (405), and a missing
 // instance or operation (404). A panel's form from operation_form fills in
 // its values and holds its hidden ones, and posts without a seq. With
@@ -137,17 +137,17 @@ func engineCopy(t *testing.T, edit func(schema string) string) string {
 }
 
 // panelFormPage is a page a panel could be, appended to engine_pages.rs:
-// it renders Comments' comment form with operation_form, its body filled
-// in and its replyTo a hidden input.
+// it renders Comments' post form with operation_form, its body filled
+// in and its thread a hidden input.
 const panelFormPage = `
 #[page("/console/engine/Note/{engine_id}/panel-form")]
 pub async fn panel_form_page(cx: &Cx) -> topcoat::Result<impl View> {
     let id = path_param::<EngineId>(cx).to_owned();
     let describe = described(cx, "Note").await.map_err(|_| topcoat::router::error::not_found())?.clone();
-    let comment = operations(cx, &describe).await.into_iter().find(|operation| operation.name == "comment").expect("comment");
-    let values = vec![("body".to_owned(), "Filled".to_owned()), ("replyTo".to_owned(), "1".to_owned())];
+    let post = operations(cx, &describe).await.into_iter().find(|operation| operation.name == "post").expect("post");
+    let values = vec![("body".to_owned(), "Filled".to_owned()), ("thread".to_owned(), "1".to_owned())];
     Ok(view! {
-        operation_form(schema: "Note".to_owned(), id: Some(id), seq: None, operation: comment, values: values, hidden: vec!["replyTo".to_owned()])
+        operation_form(schema: "Note".to_owned(), id: Some(id), seq: None, operation: post, values: values, hidden: vec!["thread".to_owned()])
     })
 }
 `
@@ -340,7 +340,7 @@ async fn send_with(router: &Router, method: &str, uri: &str, bearer: Option<&str
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
-    if !body.is_empty() {
+    if !body.is_empty() && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-type")) {
         let kind = if uri.starts_with("/console") { "application/x-www-form-urlencoded" } else { "application/json" };
         request = request.header(header::CONTENT_TYPE, kind);
     }
@@ -375,7 +375,7 @@ fn seq(html: &str) -> i64 {
 
 const NOTES: &str = "/engine/namespaces/fixture-engine-db/schemas/Note/instances";
 const NOTE: &str = "/console/engine/Note/n1";
-const COMMENT: &str = "/console/engine/Note/n1/operations/comment";
+const POST: &str = "/console/engine/Note/n1/operations/post";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_console_pages_the_engine() {
@@ -428,59 +428,68 @@ async fn the_console_pages_the_engine() {
         "<span aria-current=\"page\">Note n1</span>",
         "<div data-field=\"title\"><dt>Title</dt><dd>Hello</dd></div>",
         "<section class=\"ss-panel\" data-behavior=\"Comments\">",
-        "<div data-field=\"Comments.commentCount\"><dt>Comment count</dt><dd>0</dd></div>",
-        "<form method=\"post\" action=\"/console/engine/Note/n1/operations/comment\" class=\"ss-form\">",
-        "<form method=\"get\" action=\"/console/engine/Note/n1/operations/listComments\" class=\"ss-form\">",
-        "<input id=\"engine-comment-replyTo\" name=\"replyTo\" type=\"number\" step=\"1\" min=\"1\"",
+        "<div data-field=\"Comments.messages\"><dt>Messages</dt><dd>0</dd></div>",
+        "<form method=\"post\" action=\"/console/engine/Note/n1/operations/post\" class=\"ss-form\">",
+        "<form method=\"get\" action=\"/console/engine/Note/n1/operations/listMessages\" class=\"ss-form\">",
+        "<input id=\"engine-post-thread\" name=\"thread\" type=\"number\" step=\"1\" min=\"1\"",
     ] {
         assert!(note.contains(want), "{want}:\n{note}");
     }
     let read_at = seq(&note);
 
-    // A comment posted goes back to the note, which counts it.
-    let answer = send(&router, "POST", COMMENT, Some("ada"), &format!("body=First+comment&expectedSeq={read_at}")).await;
+    // A message posted goes back to the note, which counts it. A post is
+    // beside the note (D77), so the note keeps its seq.
+    let answer = send(&router, "POST", POST, Some("ada"), &format!("body=First+comment&expectedSeq={read_at}")).await;
     assert_eq!(answer.status, StatusCode::SEE_OTHER, "{}", answer.body);
     assert_eq!(answer.location.as_deref(), Some(NOTE));
     let note = page(&router, NOTE, Some("ada"), StatusCode::OK).await;
-    assert!(note.contains("<dt>Comment count</dt><dd>1</dd>"), "{note}");
-    let now = seq(&note);
-    assert!(now > read_at, "{now} {read_at}");
+    assert!(note.contains("<dt>Messages</dt><dd>1</dd>"), "{note}");
+    assert_eq!(seq(&note), read_at);
 
-    // A form sent from a page read before is refused, its message the
-    // form's, and the form keeps what was sent.
-    let answer = send(&router, "POST", COMMENT, Some("ada"), &format!("body=Late&expectedSeq={read_at}")).await;
+    // A form sent from a page read before the note changed is refused, its
+    // message the form's, and the form keeps what was sent.
+    let merge = [("content-type", "application/merge-patch+json")];
+    let edit = send_with(&router, "PATCH", &format!("{NOTES}/n1"), Some("ada"), &merge, r#"{"title": "Hello again"}"#).await;
+    assert_eq!(edit.status, StatusCode::OK, "{}", edit.body);
+    let now = seq(&page(&router, NOTE, Some("ada"), StatusCode::OK).await);
+    assert!(now > read_at, "{now} {read_at}");
+    let answer = send(&router, "POST", POST, Some("ada"), &format!("body=Late&expectedSeq={read_at}")).await;
     assert_eq!(answer.status, StatusCode::CONFLICT, "{}", answer.body);
     assert!(answer.body.contains("<p class=\"form-error\">") && answer.body.contains("value=\"Late\""), "{}", answer.body);
 
-    // What the form or the engine refuses is at its control.
+    // What the form refuses is at its control; what Comments vetoes, a
+    // thread that is not there, is the form's message (409).
+    let answer = send(&router, "POST", POST, Some("ada"), &format!("body=Reply&thread=99&expectedSeq={now}")).await;
+    assert_eq!(answer.status, StatusCode::CONFLICT, "{}", answer.body);
+    assert!(answer.body.contains("<p class=\"form-error\">no_message: Note n1 has no message 99</p>"), "{}", answer.body);
     for (sent, want) in [
-        ("body=Reply&replyTo=99", "Note n1 has no comment 99"),
-        ("body=&replyTo=1", "Enter a value"),
-        ("body=Reply&replyTo=first", "Enter a whole number"),
+        ("body=&thread=1", "Enter a value"),
+        ("body=Reply&thread=first", "Enter a whole number"),
     ] {
-        let answer = send(&router, "POST", COMMENT, Some("ada"), &format!("{sent}&expectedSeq={now}")).await;
+        let answer = send(&router, "POST", POST, Some("ada"), &format!("{sent}&expectedSeq={now}")).await;
         assert_eq!(answer.status, StatusCode::UNPROCESSABLE_ENTITY, "{sent}: {}", answer.body);
         assert!(answer.body.contains(&format!("<p class=\"field-error\">{want}</p>")), "{sent}: {}", answer.body);
         assert!(answer.body.contains("aria-invalid=\"true\""), "{sent}: {}", answer.body);
     }
 
     // A read runs from its GET form, its result on the page.
-    let read = page(&router, "/console/engine/Note/n1/operations/listComments?limit=10", Some("ada"), StatusCode::OK).await;
+    let read = page(&router, "/console/engine/Note/n1/operations/listMessages?limit=10", Some("ada"), StatusCode::OK).await;
     assert!(read.contains("<section class=\"ss-result\" aria-label=\"Result\">") && read.contains("<td>First comment</td>"), "{read}");
-    assert!(read.contains("<span aria-current=\"page\">List comments</span>"), "{read}");
-    page(&router, "/console/engine/Note/n1/operations/comment?body=x", Some("ada"), StatusCode::METHOD_NOT_ALLOWED).await;
+    assert!(read.contains("<span aria-current=\"page\">List messages</span>"), "{read}");
+    page(&router, "/console/engine/Note/n1/operations/post?body=x", Some("ada"), StatusCode::METHOD_NOT_ALLOWED).await;
 
     // A panel's form fills in its values, and holds the hidden ones.
     let form = page(&router, "/console/engine/Note/n1/panel-form", Some("ada"), StatusCode::OK).await;
     for want in [
-        "<form method=\"post\" action=\"/console/engine/Note/n1/operations/comment\" class=\"ss-form\">",
-        "name=\"body\" type=\"text\" required=\"\" minlength=\"1\" maxlength=\"10000\" value=\"Filled\"",
-        "<input type=\"hidden\" name=\"replyTo\" value=\"1\">",
+        "<form method=\"post\" action=\"/console/engine/Note/n1/operations/post\" class=\"ss-form\">",
+        "name=\"body\" type=\"text\" required=\"\" minlength=\"1\" maxlength=\"40000\"",
+        "value=\"Filled\"",
+        "<input type=\"hidden\" name=\"thread\" value=\"1\">",
     ] {
         assert!(form.contains(want), "{want}:\n{form}");
     }
     assert!(!form.contains("expectedSeq"), "{form}");
-    let answer = send(&router, "POST", COMMENT, Some("ada"), "body=Without+a+seq").await;
+    let answer = send(&router, "POST", POST, Some("ada"), "body=Without+a+seq").await;
     assert_eq!(answer.status, StatusCode::SEE_OTHER, "{}", answer.body);
 
     // What is not there is 404.
@@ -498,14 +507,14 @@ async fn the_console_offers_what_the_deployment_and_the_policy_allow() {
     let answer = send(&router, "POST", NOTES, Some("ada"), r#"{"id": "n1", "data": {"title": "Hello"}}"#).await;
     assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
 
-    // A reader of notes lists a note's comments and has no comment form;
-    // the comment they post anyway is the policy's refusal (403), while an
+    // A reader of notes lists a note's messages and has no post form; the
+    // message they post anyway is the policy's refusal (403), while an
     // operation there is not stays 404.
     let note = page(&router, NOTE, Some("reader"), StatusCode::OK).await;
-    assert!(note.contains("/operations/listComments") && !note.contains("/operations/comment\""), "{note}");
-    let answer = send(&router, "POST", COMMENT, Some("reader"), "body=Hi").await;
+    assert!(note.contains("/operations/listMessages") && !note.contains("/operations/post\""), "{note}");
+    let answer = send(&router, "POST", POST, Some("reader"), "body=Hi").await;
     assert_eq!(answer.status, StatusCode::FORBIDDEN, "{}", answer.body);
-    assert!(answer.body.contains("the access policy refuses reader write on Note (comment)"), "{}", answer.body);
+    assert!(answer.body.contains("the access policy refuses reader write on Note (post)"), "{}", answer.body);
     let answer = send(&router, "POST", "/console/engine/Note/n1/operations/nothing", Some("reader"), "body=x").await;
     assert_eq!(answer.status, StatusCode::NOT_FOUND, "{}", answer.body);
 
@@ -542,21 +551,21 @@ async fn a_write_another_site_sent_is_refused() {
         [("origin", "https://evil.example"), ("host", "console.example")],
         [("origin", "null"), ("host", "console.example")],
     ] {
-        let answer = send_with(&router, "POST", COMMENT, Some("ada"), &headers, "body=Forged").await;
+        let answer = send_with(&router, "POST", POST, Some("ada"), &headers, "body=Forged").await;
         assert_eq!(answer.status, StatusCode::FORBIDDEN, "{headers:?}: {}", answer.body);
     }
     // A read is no write, and a post from the page's own origin passes.
-    let read = send_with(&router, "GET", "/console/engine/Note/n1/operations/listComments", Some("ada"), &[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")], "").await;
+    let read = send_with(&router, "GET", "/console/engine/Note/n1/operations/listMessages", Some("ada"), &[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")], "").await;
     assert_eq!(read.status, StatusCode::OK, "{}", read.body);
     for headers in [
         [("sec-fetch-site", "same-origin"), ("origin", "https://console.example")],
         [("origin", "https://console.example"), ("host", "console.example")],
     ] {
-        let answer = send_with(&router, "POST", COMMENT, Some("ada"), &headers, "body=Mine").await;
+        let answer = send_with(&router, "POST", POST, Some("ada"), &headers, "body=Mine").await;
         assert_eq!(answer.status, StatusCode::SEE_OTHER, "{headers:?}: {}", answer.body);
     }
     let note = page(&router, NOTE, Some("ada"), StatusCode::OK).await;
-    assert!(note.contains("<dt>Comment count</dt><dd>2</dd>"), "{note}");
+    assert!(note.contains("<dt>Messages</dt><dd>2</dd>"), "{note}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
