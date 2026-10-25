@@ -132,6 +132,12 @@ async fn run() -> Result<(), Failure> {
     .await;
     // The engine closes once the deriver stops, off the runtime.
     {{ $engine.Var }}.shutdown().await;
+{{- if .MemoryStores }}
+    // Each memory store closes once the deriver stops.
+{{- range .MemoryStores }}
+    {{ .Var }}.close().await;
+{{- end }}
+{{- end }}
     derived?;
     Ok(())
 }

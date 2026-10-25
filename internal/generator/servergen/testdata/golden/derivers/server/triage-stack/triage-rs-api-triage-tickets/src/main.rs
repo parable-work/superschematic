@@ -37,6 +37,7 @@ use std::sync::Arc;
 use superschematic_engine::derive::{self, DerivationAnswer, DerivationItem, DeriverOptions};
 use superschematic_engine::Principal;
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::memorystore;
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::Database;
 use superschematic_http_runtime::telemetry::{self, Defaults};
@@ -129,11 +130,21 @@ async fn run() -> Result<(), Failure> {
         None,
     )?;
 
+    // One memory store per MemoryStore service (D75), disabled while its
+    // field is unset or its connection refused.
+    let triage_cache_store = memorystore::redis::open_or_disabled(
+        "triage-cache",
+        "TRIAGE_CACHE_MEMORY_STORE",
+        triage_rs_api_config.triage_cache_memory_store.as_ref(),
+    )
+    .await;
+
     // triage-rs-api: its derivers, built from its Deps.
     let triage_rs_api_deps = triage_rs_api_api::Deps {
         config: triage_rs_api_config,
         db: triage_db_pool,
         engine: triage_db_engine.clone(),
+        triage_cache: Arc::clone(&triage_cache_store),
         span: logging::api_span("triage-rs-api"),
     };
     let derivers = triage_rs_api_impl::create_derivers(triage_rs_api_deps)
@@ -170,6 +181,8 @@ async fn run() -> Result<(), Failure> {
     .await;
     // The engine closes once the deriver stops, off the runtime.
     triage_db_engine.shutdown().await;
+    // Each memory store closes once the deriver stops.
+    triage_cache_store.close().await;
     derived?;
     Ok(())
 }

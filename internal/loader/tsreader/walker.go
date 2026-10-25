@@ -620,6 +620,17 @@ func findDecorators(decorators []decoratorRef, name string) []decoratorRef {
 	return out
 }
 
+// hasMemoryStoreDecorator reports whether a class carries @channel or
+// @key from the memory store's authoring package (D75).
+func hasMemoryStoreDecorator(decorators []decoratorRef) bool {
+	for _, d := range decorators {
+		if registry.IsMemoryStoreDecorator(d.id.pkg, d.id.name) {
+			return true
+		}
+	}
+	return false
+}
+
 func findDecorator(decorators []decoratorRef, name string) *decoratorRef {
 	for i := range decorators {
 		if decorators[i].id.name == name {
@@ -773,8 +784,9 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 	// either: @worker's Apply recorded it in Schema.Workers (D53), nor is
 	// a @deriver class: @deriver's Apply recorded it in Schema.Derivers
 	// (D74), nor an @app class: @app's Apply recorded it in Schema.Apps
-	// (D78).
-	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil {
+	// (D78). Nor is an @channel or @key class of a MemoryStore schema,
+	// which their Apply recorded in Schema.MemoryStoreDeclarations (D75).
+	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
 		return
 	}
 

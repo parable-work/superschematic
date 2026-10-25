@@ -202,10 +202,12 @@ type workload struct {
 //     mounted at /cloudsql, where Cloud Run puts each instance's socket:
 //     a Rust entrypoint, whose language has no Cloud SQL connector, dials
 //     it there as its IAM database user (section 7.4, D57);
-//   - for a deployable that calls a server other than itself, Direct VPC
-//     egress through the environment's network (networkNodes): a call to
-//     the callee's run.app URL from the VPC counts as internal, which an
-//     internal server's ingress requires.
+//   - for a deployable that calls a server other than itself, or reaches a
+//     memory store, Direct VPC egress through the environment's network
+//     (networkNodes): a call to the callee's run.app URL from the VPC
+//     counts as internal, which an internal server's ingress requires, and
+//     a memory store's Private Service Connect endpoint is an address on
+//     that network (D75).
 func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
@@ -303,7 +305,7 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 		}}
 		w.container["volumeMounts"] = []any{map[string]any{"name": "cloudsql", "mountPath": "/cloudsql"}}
 	}
-	if callsAnother(d) {
+	if callsAnother(d) || len(d.MemoryStores) > 0 {
 		add(networkNodes(env, v)...)
 		w.template["vpcAccess"] = map[string]any{
 			"egress": "ALL_TRAFFIC",

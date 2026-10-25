@@ -89,6 +89,9 @@ Its entry points:
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
   emulator that serves its API, over a derived bucket connection (below).
   It is the only entry that imports `@google-cloud/storage`.
+- `@superschematic/http-runtime/redis`, a `MemoryStore` on Redis or
+  Valkey over a derived memory store connection (D75, below). It is the
+  only entry that imports `@redis/client`.
 - `@superschematic/http-runtime/worker`, the claim loop of a stack's
   worker (D53, below). It imports nothing.
 - `@superschematic/http-runtime/telemetry`, OpenTelemetry trace export
@@ -429,6 +432,49 @@ process makes, which fake-gcs-server takes without checking; on GCS the
 client takes the application default credentials and signs as the
 workload's account through IAM's `signBlob`. `src/gcs.test.ts` runs
 against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
+
+`MemoryStore`, from the main entry, is what `Deps` holds per memory store
+an API lists in its `memoryStores` (D75): `available`, `publish` and
+`subscribe` on a channel, and `increment`, `count`, `claim` and `delete`
+on a key, each by a `Ref` that the store's generated definitions build
+(`shopCache.stockChanged.for(productId)` returns a `Channel<Signal>`, and
+a key's `for` or `forTTL` a `Key`). A disabled, closed or unreachable
+store throws `MemoryStoreUnavailableError` at once, and the caller takes
+its fallback path. `memoryStoreName` joins a declaration and its parts,
+each one segment, and throws `MemoryStoreNameError` for one that is not.
+`disabledMemoryStore(name)` refuses every call, and
+`InProcessMemoryStore` keeps keys and channels in the process, with TTLs
+against a clock a test sets. `Channel<T>` drops and counts a message that
+does not decode; a `Signal` encodes as `{}`. `MemoryStoreRateLimitStore`
+is the shared rate limit of an API whose config names a
+`rateLimitStore`: httprate's sliding window over the reserved
+`rate-limit` counters, falling back to an in-process `MemoryRateLimitStore`
+while the store is unavailable or a call fails.
+`openRedisMemoryStore(connection, { logger })`, from
+`@superschematic/http-runtime/redis`, opens one with `@redis/client`
+(node-redis), an optional peer dependency that a server installs only when
+its APIs list a store. Bun's own `RedisClient` takes a password only in
+its URL and reuses it on reconnect, which an IAM token per connection
+rules out. Open never fails for a server that is down: it pings once
+within a second, then reconnects with jittered backoff from 100 ms to 5 s
+while a health ping every 2 s keeps `available` true to the connection.
+A call takes at most 500 ms with one retry, the client sends no `CLIENT`
+command and asks for no maintenance notifications, `rediss://` verifies
+the server against the connection's CA over TLS 1.2 or later, trusting
+the CA as an anchor even when it is an intermediate (gcp gives the first
+certificate of Memorystore's managed server CA chain), and with
+`auth: iam` each new connection authenticates as `default` with an access
+token from the metadata server (`GCE_METADATA_HOST` overrides its host).
+The store has one subscriber connection, refuses a message over 64 KiB
+before sending it, and logs no URL, token or part. `src/redis.test.ts`
+runs against the server `SUPERSCHEMATIC_TEST_MEMORY_STORE` names, a
+loopback `redis://` URL whose database is not 0, and the TLS and IAM cases
+against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS`, its CA file
+`SUPERSCHEMATIC_TEST_MEMORY_STORE_CA` and its password
+`SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD`, and the intermediate CA case
+against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN` and the intermediate's
+PEM file `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA`. The runtime records no
+OpenTelemetry metrics, so the store records none.
 
 ## On Cloudflare Workers
 

@@ -242,7 +242,10 @@ impl RouteControls {
 }
 
 async fn admit(limiter: Arc<RateLimiter>, request: Request, next: Next) -> Response {
-    match limiter.take(&crate::client_key(request.extensions())) {
+    match limiter
+        .admit(&crate::client_key(request.extensions()))
+        .await
+    {
         Ok(()) => next.run(request).await,
         Err(retry_after) => {
             let mut response =

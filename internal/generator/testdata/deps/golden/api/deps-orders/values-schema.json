@@ -5,6 +5,26 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "DEPS_CACHE_MEMORY_STORE_AUTH": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_CA": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_MEMBER": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_STORE": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_URL": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
     "DEPS_CATALOG_SERVICE_BINDING_NAME": {
       "type": "string",
       "description": "Derived: a member of DEPS_CATALOG_SERVICE, the service endpoint of deps-catalog, which the platform sets."
@@ -102,6 +122,23 @@
     "schemaName": "deps-orders",
     "typeName": "OrdersConfig",
     "envVars": [
+      {
+        "name": "DEPS_CACHE_MEMORY_STORE",
+        "irType": "MemoryStoreConnection",
+        "primitive": "object",
+        "required": false,
+        "hasDefault": false,
+        "description": "The memory store connection of deps-cache (memoryStores), one variable per member.",
+        "derived": "memoryStore",
+        "service": "deps-cache",
+        "variables": [
+          "DEPS_CACHE_MEMORY_STORE_STORE",
+          "DEPS_CACHE_MEMORY_STORE_URL",
+          "DEPS_CACHE_MEMORY_STORE_CA",
+          "DEPS_CACHE_MEMORY_STORE_AUTH",
+          "DEPS_CACHE_MEMORY_STORE_MEMBER"
+        ]
+      },
       {
         "name": "DEPS_CATALOG_SERVICE",
         "irType": "ServiceEndpoint",

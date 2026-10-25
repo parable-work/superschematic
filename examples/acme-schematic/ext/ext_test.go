@@ -40,7 +40,7 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	if got := reg.Extensions(); strings.Join(got, ",") != "acme" {
 		t.Fatalf("Extensions = %v, want acme", got)
 	}
-	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,Catalog,DB,General,Site,Stack" {
+	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,Catalog,DB,General,MemoryStore,Site,Stack" {
 		t.Fatalf("Kinds = %v, want the core kinds plus Catalog", got)
 	}
 
@@ -154,7 +154,7 @@ func TestCoreRegistryHasNoAcmeSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Assemble core: %v", err)
 	}
-	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,DB,General,Site,Stack" {
+	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,DB,General,MemoryStore,Site,Stack" {
 		t.Fatalf("core Kinds = %v, want no Catalog", got)
 	}
 	if len(reg.Documents()) != 0 {

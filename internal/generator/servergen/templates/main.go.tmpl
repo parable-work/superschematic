@@ -163,6 +163,9 @@ func run(logger *zap.Logger) error {
 {{- if .ManualRoutes }}
 		ManualRoutes: &{{ .Var }}ManualRoutes,
 {{- end }}
+{{- if .RateLimitStore }}
+		RateLimitStore: {{ .RateLimitStore.Var }},
+{{- end }}
 		Logger:          {{ .Var }}Logger,
 		Implementations: {{ .Var }}Implementations,
 	})

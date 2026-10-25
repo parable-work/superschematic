@@ -67,6 +67,13 @@ const (
 	// queue.
 	DeployableDeriver DeployableKind = "deriver"
 
+	// DeployableMemoryStore is one MemoryStore service: a Redis or Valkey
+	// server, which needs nothing. The server, jobs and workers of each API
+	// that lists it reach it over a memoryStore edge (D75). An environment
+	// whose settings turn it off (`enabled: false`) places no deployable
+	// for it, and lists it in ResolvedEnvironment.Disabled.
+	DeployableMemoryStore DeployableKind = "memoryStore"
+
 	// DeployableApp runs one `@app` of an API schema: the project's own
 	// HTTP program over the API's Deps, implementations, identity and
 	// engine, which serves requests as a server does (D78). Its needs are
@@ -76,7 +83,7 @@ const (
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableApp
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableMemoryStore || k == DeployableApp
 }
 
 // RunsCode reports whether a deployable of kind k runs code the stack's
@@ -98,7 +105,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableApp}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableMemoryStore, DeployableApp}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -123,11 +130,16 @@ const (
 	// EdgeBucket runs from a server, and from a job, to each bucket an API
 	// it serves lists in its config's buckets (D54).
 	EdgeBucket EdgeKind = "bucket"
+
+	// EdgeMemoryStore runs from a server, a job and a worker to each
+	// memory store an API it serves lists in its config's memoryStores, or
+	// names its rateLimitStore (D75).
+	EdgeMemoryStore EdgeKind = "memoryStore"
 )
 
 // Valid reports whether k is an edge kind v1 knows.
 func (k EdgeKind) Valid() bool {
-	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket
+	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket || k == EdgeMemoryStore
 }
 
 // A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`
