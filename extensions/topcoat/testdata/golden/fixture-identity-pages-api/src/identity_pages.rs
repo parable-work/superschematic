@@ -184,8 +184,10 @@ fn allowed(service: &Service, caller: &IdentityPrincipal, name: &str) -> Result<
 
 /// A refusal of the service's as a form shows it (`Refusal::from_api`),
 /// but for one that names permissions (`details.permissions`): a role's
-/// that are malformed (422), or that the caller does not hold and so may
-/// not give (403). Its message lists them, at the control `at`.
+/// that are malformed (422), that the caller does not hold and so may not
+/// give (403), or that a user holds and the caller does not, so may not
+/// set their password, disable or enable them (403). Its message lists
+/// them, at the control `at`.
 fn refusal_of(err: &ApiError, at: &str) -> Refusal {
     let named: Vec<&str> = err
         .details
@@ -804,7 +806,8 @@ async fn user_answer(id: String, shown: UserShown) -> topcoat::Result<impl View>
 }
 
 /// Disables the user, which ends their sessions, then goes back to their
-/// page (303).
+/// page (303); a user who holds a permission the caller does not is
+/// refused (403) at the form.
 #[page(POST "/console/users/{user_id}/disable")]
 pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -813,7 +816,8 @@ pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { user_answer(id: id, shown: shown) })
 }
 
-/// Enables the user, then goes back to their page (303).
+/// Enables the user, then goes back to their page (303); a user who holds
+/// a permission the caller does not is refused (403) at the form.
 #[page(POST "/console/users/{user_id}/enable")]
 pub async fn identity_enable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -826,7 +830,7 @@ async fn set_disabled(cx: &Cx, id: &str, disabled: bool) -> Result<(), Refusal> 
     let caller = needs_caller(cx).await?;
     let service = service(cx)?;
     let done = if disabled { service.disable_user(&caller, id).await } else { service.enable_user(&caller, id).await };
-    done.map(drop).map_err(|err| Refusal::from_api(&err))
+    done.map(drop).map_err(|err| refusal_of(&err, "access"))
 }
 
 /// The set-password form as a browser sends it.
@@ -837,7 +841,8 @@ pub struct SetPasswordForm {
 }
 
 /// Sets the user's password, which ends their sessions, then goes back to
-/// their page (303).
+/// their page (303); a user who holds a permission the caller does not is
+/// refused (403) at the password.
 #[page(POST "/console/users/{user_id}/password")]
 pub async fn identity_set_password_page(cx: &Cx, Form(form): Form<SetPasswordForm>) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -852,7 +857,7 @@ async fn set_password(cx: &Cx, id: &str, form: &SetPasswordForm) -> Result<(), R
     require_password(&mut errors, "password", &form.password);
     parsed(errors)?;
     let input = SetPasswordInput { password: form.password.clone() };
-    service(cx)?.set_user_password(&caller, id, &input).await.map_err(|err| Refusal::from_api(&err))
+    service(cx)?.set_user_password(&caller, id, &input).await.map_err(|err| refusal_of(&err, "password"))
 }
 
 /// The grant and revoke forms as a browser sends them: the role's id.
@@ -907,7 +912,9 @@ async fn user_details(page: UserPage, failed: Failed) -> topcoat::Result<impl Vi
     let held: Vec<(String, String)> = user.roles.iter().map(|role| (role.id.clone(), role.name.clone())).collect();
     let grantable: Vec<(String, String)> = grantable.into_iter().map(|role| (role.id, role.name)).collect();
     let (access, password, granting, revoking) = (failed.of("access"), failed.of("password"), failed.of("grant"), failed.of("revoke"));
-    let (access_messages, password_messages) = (unshown(&access, &[]), unshown(&password, &["password"]));
+    let mut access_messages = unshown(&access, &["access"]);
+    access_messages.extend(access.of("access"));
+    let password_messages = unshown(&password, &["password"]);
     let (grant_messages, revoke_messages) = (unshown(&granting, &["role"]), unshown(&revoking, &[]));
     Ok(view! {
         <h1>(heading)</h1>

@@ -140,8 +140,10 @@ func TestTheIdentityPagesAreWrittenAsDeclared(t *testing.T) {
 // with the flag, a taken login 409; an admin adds users and roles, grants
 // and revokes a role, disables, enables and sets a password, and edits
 // and deletes a role, a malformed permission 422 and one the admin does
-// not hold 403 at the form; a member is refused the users and roles
-// pages (403), whose links their nav does not show; and the 11th sign-in
+// not hold 403 at the form; a helpdesk holding identity.users is refused
+// the admin's password and access (403) at the form; a member is refused
+// the users and roles pages (403), whose links their nav does not show;
+// and the 11th sign-in
 // or password change in a minute, or the 6th sign-up, is refused 429 with
 // Retry-After. The crate with sign-up is built over a copy of the fixture
 // whose @userSessions has login: false, so its pages take their own
@@ -634,6 +636,43 @@ async fn an_admin_administers_users_and_roles() {
     let reply = send(&router, "GET", "/console/roles", admin, &[]).await;
     assert!(!reply.body.contains("editors"), "{}", reply.body);
     assert_eq!(send(&router, "GET", &page, admin, &[]).await.status, StatusCode::NOT_FOUND);
+}
+
+// A helpdesk holding identity.users may set a member's password, and not
+// the admin's, whose role carries identity and notes, nor disable them:
+// 403 at the form, naming what the helpdesk does not hold (D50, amended).
+#[tokio::test]
+async fn a_helpdesk_may_not_take_over_the_admin() {
+    let router = app().await;
+    let admin = sign_in(&router, "admin@example.com", PASSWORD).await;
+    let admin = Some(admin.as_str());
+    let reply = send(&router, "POST", "/console/roles/new", admin, &[("name", "helpdesk"), ("permissions", "identity.users")]).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    let roles = send(&router, "GET", "/console/roles", admin, &[]).await;
+    let role = href_of(&roles.body, "helpdesk").strip_prefix("/console/roles/").unwrap().to_string();
+    let reply = send(&router, "POST", "/console/users/new", admin, &[("login", "helpdesk@example.com"), ("name", "Helpdesk"), ("password", PASSWORD)]).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    let user = reply.location.clone().unwrap();
+    assert_eq!(send(&router, "POST", &format!("{user}/grant"), admin, &[("role", &role)]).await.status, StatusCode::SEE_OTHER);
+    let users = send(&router, "GET", "/console/users", admin, &[]).await;
+    let (admin_page, member_page) = (href_of(&users.body, "admin@example.com").to_string(), href_of(&users.body, "member@example.com").to_string());
+
+    let helpdesk = sign_in(&router, "helpdesk@example.com", PASSWORD).await;
+    let helpdesk = Some(helpdesk.as_str());
+    let refused = "No one administers a user holding a permission they do not hold: identity, notes";
+    let reply = send(&router, "POST", &format!("{admin_page}/password"), helpdesk, &[("password", "taken over at last")]).await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert!(reply.body.contains("<h1>Admin</h1>") && reply.body.contains(&format!(r#"<p class="field-error">{refused}</p>"#)), "{}", reply.body);
+    assert!(!reply.body.contains("taken over at last"), "{}", reply.body);
+    let reply = send(&router, "POST", &format!("{admin_page}/disable"), helpdesk, &[]).await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert!(reply.body.contains(&format!(r#"<p class="form-error">{refused}</p>"#)), "{}", reply.body);
+    assert_eq!(send(&router, "GET", "/console/account", admin, &[]).await.status, StatusCode::OK);
+    sign_in(&router, "admin@example.com", PASSWORD).await;
+
+    let reply = send(&router, "POST", &format!("{member_page}/password"), helpdesk, &[("password", "another password")]).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    sign_in(&router, "member@example.com", "another password").await;
 }
 
 #[tokio::test]
