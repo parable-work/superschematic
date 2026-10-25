@@ -31,13 +31,17 @@
 //! and a write to an instance that changed since its page was read, as the
 //! form's message (409). The API's `@rateLimit` and `@timeout` do not apply.
 //! What a page reads of the engine is rendered here, on the server: no
-//! procedure hands it to the browser.
+//! procedure hands it to the browser. An instance's own amount shows as
+//! money (`views::money_text`) in the currency its field's `@display`
+//! names, a code or a field of the type's, else in the type's one
+//! `Finance.Currency` field's, as the API's views show it (D48, amended).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use crate::forms::{FormErrors, Refusal};
 use crate::pages::{Back, NavLink, current, decode, encode, pager, pager_query, refused};
+use crate::views::money_text;
 use serde_json::{Map, Value};
 use topcoat::context::{Cx, memoize};
 use topcoat::router::content::Form;
@@ -412,6 +416,8 @@ enum Shown {
     Text(String),
     Table(Vec<String>, Vec<Vec<String>>),
     Json(String),
+    /// An amount in minor units, and its text in its currency.
+    Money(i64, String),
 }
 
 fn shown(value: &Value) -> Shown {
@@ -433,6 +439,84 @@ fn shown(value: &Value) -> Shown {
 
 /// A field shown: its key, its label and its value.
 type Field = (String, String, Shown);
+
+/// Where an own field's amount takes its currency (D48, amended): a code,
+/// or the own field that holds one, by its key.
+#[derive(Debug, Clone, PartialEq)]
+enum Currency {
+    Code(String),
+    Field(String),
+}
+
+/// The scalar of an amount in minor units, and of a currency code.
+const MONEY: &str = "Finance.Money";
+const CURRENCY: &str = "Finance.Currency";
+
+/// The currencies of a type's own amounts, by field key, as the API's
+/// views find them: the currency its field's `@display` names, a code or
+/// another own field (by its name or its key), else, for a
+/// `Finance.Money` field, the type's one `Finance.Currency` field. The
+/// describe document gives each own field's scalar, in its `instance`
+/// schema under the tools' scalar key, but not its `@display`, which the
+/// type's live schema document holds; none when the caller may not read
+/// it.
+async fn currencies(cx: &Cx, schema: &str, describe: &Value) -> HashMap<String, Currency> {
+    let schema = schema.to_owned();
+    let read = call(cx, move |engine, principal| {
+        let live = engine.schemas().live(principal, &schema, SchemaTarget { namespace: Some(NAMESPACE) })?;
+        Ok(live.map(|live| (live.document["types"][live.instance_type.as_str()]["fields"].clone(), engine.tools().keys().scalar.clone())))
+    })
+    .await;
+    match read {
+        Ok(Some((fields, scalar_key))) => currencies_of(&fields, &describe["instance"]["properties"], &scalar_key),
+        _ => HashMap::new(),
+    }
+}
+
+/// `currencies` of a type's own fields in its schema document, each
+/// field's scalar read from `properties`, its instance schema's, under
+/// `scalar_key`.
+fn currencies_of(fields: &Value, properties: &Value, scalar_key: &str) -> HashMap<String, Currency> {
+    let fields: Vec<&Value> = fields.as_array().into_iter().flatten().collect();
+    let key = |field: &Value| field["jsonTag"].as_str().filter(|tag| !tag.is_empty()).or_else(|| field["name"].as_str()).unwrap_or_default().to_owned();
+    let scalar = |field: &Value| properties[key(field).as_str()][scalar_key].as_str().map(str::to_owned);
+    let codes: Vec<String> = fields.iter().filter(|field| scalar(field).as_deref() == Some(CURRENCY)).map(|field| key(field)).collect();
+    let mut out = HashMap::new();
+    for field in &fields {
+        let currency = match &field["display"]["currency"] {
+            Value::String(code) => Some(Currency::Code(code.clone())),
+            Value::Object(named) => named
+                .get("field")
+                .and_then(Value::as_str)
+                .and_then(|name| fields.iter().find(|other| other["name"] == name || key(other) == name))
+                .map(|other| Currency::Field(key(other))),
+            _ if scalar(field).as_deref() == Some(MONEY) && codes.len() == 1 => Some(Currency::Field(codes[0].clone())),
+            _ => None,
+        };
+        if let Some(currency) = currency {
+            out.insert(key(field), currency);
+        }
+    }
+    out
+}
+
+/// An own field's value as a page shows it: an amount with a currency as
+/// money, its text in the currency (`money_text`), which is the plain
+/// number when the currency field holds no code; anything else as
+/// `shown` shows it.
+fn own_shown(data: &Map<String, Value>, field: &str, currencies: &HashMap<String, Currency>) -> Shown {
+    let value = data.get(field).unwrap_or(&Value::Null);
+    match (currencies.get(field), value.as_i64()) {
+        (Some(currency), Some(amount)) => {
+            let code = match currency {
+                Currency::Code(code) => code.as_str(),
+                Currency::Field(other) => data.get(other).and_then(Value::as_str).unwrap_or_default(),
+            };
+            Shown::Money(amount, money_text(amount, code))
+        }
+        _ => shown(value),
+    }
+}
 
 /// The values a detail lists, each in a `<div>` with its `data-field`.
 #[component]
@@ -458,6 +542,7 @@ async fn shown_view(shown: Shown) -> topcoat::Result<impl View> {
         match shown {
             Shown::Text(text) => (text),
             Shown::Json(json) => <pre class="ss-json">(json)</pre>,
+            Shown::Money(amount, text) => <data value=(amount.to_string())>(text)</data>,
             Shown::Table(columns, rows) => {
                 <table class="ss-table">
                     <thead>
@@ -1314,10 +1399,9 @@ async fn engine_instance(cx: &Cx, schema: String, id: String, sent: Option<Sent>
             let mut own: Vec<String> =
                 describe["fields"].as_array().into_iter().flatten().filter_map(|field| field["name"].as_str()).map(str::to_owned).collect();
             own.extend(record.data.keys().filter(|key| !own.contains(key)).cloned().collect::<Vec<_>>());
-            let fields: Vec<Field> = own
-                .iter()
-                .map(|field| (field.clone(), field_label(&describe, field), shown(record.data.get(field).unwrap_or(&Value::Null))))
-                .collect();
+            let currencies = currencies(cx, &schema, &describe).await;
+            let fields: Vec<Field> =
+                own.iter().map(|field| (field.clone(), field_label(&describe, field), own_shown(&record.data, field, &currencies))).collect();
             let mut sent_alone = sent.as_ref().and_then(|sent| operations.iter().find(|operation| operation.name == sent.operation && !operation.schema_scope));
             let mut sections = Vec::new();
             let mut others = Vec::new();

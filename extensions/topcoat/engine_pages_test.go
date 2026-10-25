@@ -198,11 +198,13 @@ mod panel_shows_tests {
 // nothing.
 // Each app's engine also holds SupplierContractAmendmentRequest, Request
 // under a name that makes the MCP handles of its Approvals tools too long,
-// and its engine document hides Approvals.listSignOffs. A second test
+// and Invoice, whose amounts name their currencies (D48, amended); its
+// engine document hides Approvals.listSignOffs. A second test
 // checks that an operation the engine hides from MCP for its handle alone
 // is offered, one the deployment hides is not there (404), and one the
 // policy refuses is refused (403); a third, with the app's origin policy
-// off, that a write another site sent is refused (403).
+// off, that a write another site sent is refused (403); a fourth that an
+// instance's own amounts show as money in their currencies.
 const enginePagesAppTest = `use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -210,7 +212,7 @@ use async_trait::async_trait;
 use http::request::Parts;
 use schemas_fixture_engine_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
 use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation, NotesListNotesArgs};
-use schemas_fixture_engine_api_topcoat::{engine, PageAuthenticator, RouterBuilderFixtureEngineApiExt};
+use schemas_fixture_engine_api_topcoat::{engine, views, PageAuthenticator, RouterBuilderFixtureEngineApiExt};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{header, to_bytes, Body, OriginPolicy, Router, RouterBuilderDiscoverExt, StatusCode};
@@ -234,7 +236,7 @@ impl Authenticator for Bearer {
             let permissions: Vec<&str> = match subject {
                 "nobody" => vec![],
                 "reader" => vec!["Note.read"],
-                "clerk" | "boss" => vec!["SupplierContractAmendmentRequest", "Request", "requests.approve"],
+                "clerk" | "boss" => vec!["SupplierContractAmendmentRequest", "Request", "requests.approve", "Invoice"],
                 _ => vec!["Note"],
             };
             Principal::new(subject, permissions)
@@ -277,9 +279,34 @@ fn app_with(origins: OriginPolicy) -> Router {
     let path = std::env::temp_dir().join(format!("topcoat-engine-pages-{}-{n}.db", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let engine = engine::open(&path).expect("open the engine");
-    engine.deploy(&[long_type()], Some("fixture-engine-db")).expect("deploy SupplierContractAmendmentRequest");
+    engine.deploy(&[long_type(), invoice_type()], Some("fixture-engine-db")).expect("deploy SupplierContractAmendmentRequest and Invoice");
     let implementations = Implementations { notes: Arc::new(Notes), authenticator: Arc::new(Bearer) };
     Router::builder().origin_policy(origins).discover().fixture_engine_api(implementations, Pages, engine).build()
+}
+
+// Invoice: an amount in a literal currency (total), one in its currency
+// field's (tip), and one whose currency is the type's one Finance.Currency
+// field's (due).
+fn invoice_type() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "General",
+        "name": "Invoice",
+        "scalars": {
+            "Finance.Currency": { "name": "Finance.Currency", "languagePrimitive": "string" },
+            "Finance.Money": { "name": "Finance.Money", "languagePrimitive": "number" }
+        },
+        "types": { "Invoice": {
+            "name": "Invoice",
+            "role": "EmbeddedStruct",
+            "fields": [
+                { "name": "title", "typeRef": { "name": "string" }, "required": true },
+                { "name": "totalCents", "typeRef": { "name": "Finance.Money" }, "display": { "currency": "GBP" } },
+                { "name": "tipCents", "typeRef": { "name": "Finance.Money" }, "display": { "currency": { "field": "currency" } } },
+                { "name": "dueCents", "typeRef": { "name": "Finance.Money" } },
+                { "name": "currency", "typeRef": { "name": "Finance.Currency" } }
+            ]
+        } }
+    })
 }
 
 // Request's schema document as SupplierContractAmendmentRequest: the MCP
@@ -530,5 +557,32 @@ async fn a_write_another_site_sent_is_refused() {
     }
     let note = page(&router, NOTE, Some("ada"), StatusCode::OK).await;
     assert!(note.contains("<dt>Comment count</dt><dd>2</dd>"), "{note}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_instances_amounts_show_as_money() {
+    let router = app();
+    const INVOICES: &str = "/engine/namespaces/fixture-engine-db/schemas/Invoice/instances";
+    for body in [
+        r#"{"id": "i1", "data": {"title": "Tea", "totalCents": 1250, "tipCents": 300, "dueCents": 500, "currency": "JPY"}}"#,
+        r#"{"id": "i2", "data": {"title": "Jam", "totalCents": 99, "tipCents": 300}}"#,
+    ] {
+        let answer = send(&router, "POST", INVOICES, Some("clerk"), body).await;
+        assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
+    }
+    let shown = |field: &str, label: &str, amount: i64, currency: &str| {
+        format!(r#"<div data-field="{field}"><dt>{label}</dt><dd><data value="{amount}">{}</data></dd></div>"#, views::money_text(amount, currency))
+    };
+    // A literal currency, a currency field's, and the type's one currency
+    // field's for an amount that names none.
+    let invoice = page(&router, "/console/engine/Invoice/i1", Some("clerk"), StatusCode::OK).await;
+    for want in [shown("totalCents", "Total cents", 1250, "GBP"), shown("tipCents", "Tip cents", 300, "JPY"), shown("dueCents", "Due cents", 500, "JPY")] {
+        assert!(invoice.contains(&want), "{want}:\n{invoice}");
+    }
+    assert!(invoice.contains("GBP 12.50") && invoice.contains("<dd>JPY</dd>"), "{invoice}");
+    // An amount whose currency field holds none shows the number.
+    let invoice = page(&router, "/console/engine/Invoice/i2", Some("clerk"), StatusCode::OK).await;
+    assert!(invoice.contains(&shown("totalCents", "Total cents", 99, "GBP")), "{invoice}");
+    assert!(invoice.contains(r#"<div data-field="tipCents"><dt>Tip cents</dt><dd><data value="300">300</data></dd></div>"#), "{invoice}");
 }
 `
