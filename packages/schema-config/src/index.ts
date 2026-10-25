@@ -98,7 +98,16 @@ export type ApiOutputConfig = {
 /**
  * The client SDK in each language. An SDK imports the service's types in its language, so each enabled SDK language needs the same language enabled in types.
  */
-export type SdkOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
+export type SdkOutputConfig = Partial<Record<Exclude<TargetLanguage, TargetLanguage.TypeScript>, TargetOutputConfig>> & {
+  readonly [TargetLanguage.TypeScript]?: TypeScriptSdkOutputConfig;
+};
+
+/**
+ * The TypeScript SDK. With lazyValidation, the SDK loads its types package's validators and parsers, and with them superscalar's WebAssembly core, on its first call rather than when it is imported (D82): a browser bundle that splits code (Vite, bun build --splitting) carries them in a chunk of its own, out of the page's first load.
+ */
+export type TypeScriptSdkOutputConfig = TargetOutputConfig & {
+  readonly lazyValidation?: boolean;
+};
 
 /**
  * A database the DB kind's sql output is built for.

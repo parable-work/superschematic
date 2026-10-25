@@ -345,7 +345,7 @@
           "$ref": "#/definitions/TargetOutputConfig"
         },
         "typescript": {
-          "$ref": "#/definitions/TargetOutputConfig"
+          "$ref": "#/definitions/TypeScriptSdkOutputConfig"
         }
       },
       "type": "object"
@@ -443,6 +443,22 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "TypeScriptSdkOutputConfig": {
+      "additionalProperties": false,
+      "description": "The TypeScript SDK. With lazyValidation, the SDK loads its types package's validators and parsers, and with them superscalar's WebAssembly core, on its first call rather than when it is imported (D82): a browser bundle that splits code (Vite, bun build --splitting) carries them in a chunk of its own, out of the page's first load.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lazyValidation": {
           "type": "boolean"
         }
       },

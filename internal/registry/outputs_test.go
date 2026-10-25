@@ -278,3 +278,41 @@ func TestParseOutputsRefusesAnAPIWithoutItsTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestParseOutputsReadsTheSDKsLazyValidation: outputs.sdk.typescript's
+// lazyValidation reaches SDKLazyValidation (D82), and another language's
+// SDK, or a value that is not a boolean, is refused.
+func TestParseOutputsReadsTheSDKsLazyValidation(t *testing.T) {
+	reg := coreOutputRegistry(t)
+	block := func(sdk map[string]any) map[string]any {
+		return map[string]any{
+			"types": map[string]any{"go": map[string]any{"enabled": true}, "typescript": map[string]any{"enabled": true}},
+			"sdk":   sdk,
+		}
+	}
+	for _, tc := range []struct {
+		sdk  map[string]any
+		lazy bool
+		err  string
+	}{
+		{map[string]any{"typescript": map[string]any{"enabled": true, "lazyValidation": true}}, true, ""},
+		{map[string]any{"typescript": map[string]any{"enabled": true, "lazyValidation": false}}, false, ""},
+		{map[string]any{"typescript": map[string]any{"enabled": true}}, false, ""},
+		{map[string]any{"go": map[string]any{"enabled": true, "lazyValidation": true}}, false, "outputs.sdk.go sets lazyValidation, which only the TypeScript SDK takes"},
+		{map[string]any{"typescript": map[string]any{"enabled": true, "lazyValidation": "yes"}}, false, "outputs.sdk.typescript.lazyValidation must be true or false"},
+	} {
+		outputs, err := ParseOutputs(block(tc.sdk), reg)
+		if tc.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("ParseOutputs(%v) = %v, want %q", tc.sdk, err, tc.err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ParseOutputs(%v): %v", tc.sdk, err)
+		}
+		if got := outputs.SDKLazyValidation(); got != tc.lazy {
+			t.Errorf("SDKLazyValidation(%v) = %v, want %v", tc.sdk, got, tc.lazy)
+		}
+	}
+}
