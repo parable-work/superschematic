@@ -102,13 +102,13 @@ func derivedSchema(td *ir.TypeDef) (apigen.DerivedSchema, error) {
 	for _, f := range config.Fields {
 		field := fields[f.Name]
 		if field == nil {
-			return apigen.DerivedSchema{}, fmt.Errorf("Derived of %s derives %s, which is no field of %s", td.Name, f.Name, td.Name)
+			return apigen.DerivedSchema{}, fmt.Errorf("behavior Derived of %s derives %s, which is no field of %s", td.Name, f.Name, td.Name)
 		}
 		out := apigen.DerivedField{Name: f.Name, Field: field, Instruction: f.Instruction, Model: f.Model}
 		for _, from := range f.From {
 			input := fields[from]
 			if input == nil {
-				return apigen.DerivedSchema{}, fmt.Errorf("Derived of %s derives %s from %s, which is no field of %s", td.Name, f.Name, from, td.Name)
+				return apigen.DerivedSchema{}, fmt.Errorf("behavior Derived of %s derives %s from %s, which is no field of %s", td.Name, f.Name, from, td.Name)
 			}
 			out.From = append(out.From, input)
 		}

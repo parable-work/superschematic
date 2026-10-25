@@ -305,7 +305,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types for an API with workers, nil without one or when the crate
 // depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if !(o.HasWorkers() || o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
+	if (!o.HasWorkers() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
