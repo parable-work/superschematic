@@ -218,10 +218,12 @@ While the store is unavailable, every call fails at once:
 TypeScript and `MemoryStoreError::Unavailable` in Rust. The caller takes
 its fallback path. A process has one subscriber connection per store, and
 one subscription per channel, which wakes every local handler. A handler
-runs on the store's delivery path, so it returns quickly. Go's
-`Subscribe` returns `ErrUnavailable` while the store is down; the
-TypeScript and Rust stores keep the subscription and subscribe again when
-they reconnect. Either way, a waiter polls as it did before.
+runs on the store's delivery path, so it returns quickly. A subscribe is
+the one call that does not fail while the store is down: it returns at
+once and subscribes when the store reconnects, so a waiter that starts
+during an outage hears the wake-ups once the store is back. Only a
+disabled or closed store refuses it. A waiter still polls as it did
+before.
 
 The acme shop's `shop-api` takes a claim so that one upload of a
 product's image is signed at a time, on every replica, and gives it back
@@ -315,7 +317,8 @@ sliding window of httprate, the Go runtime's limiter, in every language:
 The counters are keys of the reserved `rate-limit` declaration, one per
 service, operation, window start in Unix seconds and client:
 `shop-cache:rate-limit:shop-api:<operation>:<window>:<client>`. The
-client part is the lowercase hex SHA-256 of the limiter's client key, so
+operation part is the operation's kebab namespace and its name, as
+`product.getProduct`, the same in every language. The client part is the lowercase hex SHA-256 of the limiter's client key, so
 an IP address is not in the store. While the store is unavailable, or a
 call to it fails, each route falls back to the in-process limiter it had
 before, with each replica on its own budget. In Go the counter plugs into

@@ -92,7 +92,7 @@ It writes `<schemas-root>/services/<name>/`:
 | `General` | Go and TypeScript types |
 | `Bucket` | `{}` |
 | `Site` | none |
-| `MemoryStore` | `{}`: add `types` with a line per language its definitions are written in ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
+| `MemoryStore` | Go and TypeScript `types`, its definitions in each ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
 
 A Bucket and a Site declare nothing in schema files, so they get no
 starter schema: an API lists a bucket in its `buckets`, and a site's
@@ -930,7 +930,7 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the memory store's container, instead of stopping them; `--remove-database` is its earlier name |
+| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way); `--remove-database` is its earlier name |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its

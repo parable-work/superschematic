@@ -4023,7 +4023,8 @@ never waits for it.
   `Delete` and `Close`, each by a `Ref` the definitions build. While it is
   unavailable each call returns `ErrUnavailable`
   (`MemoryStoreUnavailableError`, `MemoryStoreError::Unavailable`) at
-  once. Each runtime has `Disabled` and an in-process store for tests.
+  once, except a subscribe, which is held until the store reconnects;
+  only a disabled or closed store refuses it. Each runtime has `Disabled` and an in-process store for tests.
 - **Redis.** Each generated entrypoint opens each store once, hands it to
   every API that lists it, and closes it on shutdown; a field that is
   unset, or that the client cannot use, opens a disabled store after one
