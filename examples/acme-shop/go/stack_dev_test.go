@@ -1,9 +1,12 @@
 package shop_test
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +15,12 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -42,7 +47,9 @@ import (
 // (section 14) on this example. `superschematic stack dev` runs
 // shop-stack's Dev environment from examples/acme-shop, as the tutorial
 // does: Postgres in a container with shop-db migrated; fake-gcs-server in a
-// container with shop-media, the bucket shop-api lists (D54); shop-api and
+// container with shop-media, the bucket shop-api lists (D54); Valkey in a
+// container, shop-cache, the memory store shop-api lists and counts its
+// rate limits in (D75); shop-api and
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; shop-stock on its
 // generated Rust entrypoint, which cargo builds with the implementation in
@@ -58,7 +65,11 @@ import (
 // and Rust API through its generated Go SDK with the session and the
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
-// would, and reads back from shop-media. Anyone lists shop-stock's stock,
+// would, and reads back from shop-media. A request waiting for another
+// product's image is woken through shop-cache's channel once its upload is
+// signed; a claim another replica holds refuses an upload 409; and
+// getProduct's requests count in shop-cache, so the counts other replicas
+// add there refuse it 429 (D75). Anyone lists shop-stock's stock,
 // and staff count the product's shelf, which gives it an Inventory in
 // shop-db's engine (D70). Staff open a collection point through the
 // engine's routes; a cart on shop-cart takes two units and a pickup slot
@@ -209,6 +220,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil || back.StatusCode != http.StatusOK || !bytes.Equal(stored, image) || back.Header.Get("Content-Type") != "image/png" {
 		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
+
+	// shop-cache, the memory store shop-api lists (D75), on stack dev's
+	// Valkey container.
+	checkTheMemoryStore(ctx, t, env, products, token, n)
 
 	// shop-stock, on its Rust server (D57), over shop-db's Inventory, which
 	// the engine keeps (D70): anyone reads the stock, which holds none of
@@ -1048,8 +1063,8 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 	path := filepath.Join(outputRoot, "stack", stack, "Dev", "environment.json")
 	env := readEnvironment(t, path)
 	dev.containers = env.containers
-	if stack == "shop-stack" && (env.database == "" || env.bucket == "" || len(env.containers) != 2) {
-		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
+	if stack == "shop-stack" && (env.database == "" || env.bucket == "" || env.memoryStore == "" || len(env.containers) != 3) {
+		t.Fatalf("%s names no shop-db database, no shop-media bucket, no shop-cache store, or not three containers", path)
 	}
 	for _, server := range servers {
 		if env.servers[server] == "" {
@@ -1066,7 +1081,7 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 
 // stop stops stack dev as Ctrl-C does, which stops the servers, then
 // removes the containers and their data, Postgres's and the storage
-// emulator's.
+// emulator's, and Valkey's, which keeps none.
 func (dev *stackDev) stop(t *testing.T) {
 	t.Helper()
 	dev.stopped = true
@@ -1262,14 +1277,16 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 
 // environment is what the test reads from the environment the build
 // resolved: each server's URL, the site's origin, shop-db's connection
-// string, shop-media's URL on the storage emulator, and the names of the
-// containers, Postgres's and the emulator's.
+// string, shop-media's URL on the storage emulator, shop-cache's redis URL
+// on the Valkey container, and the names of the containers, Postgres's,
+// the emulator's and Valkey's.
 type environment struct {
-	servers    map[string]string
-	site       string
-	database   string
-	bucket     string
-	containers []string
+	servers     map[string]string
+	site        string
+	database    string
+	bucket      string
+	memoryStore string
+	containers  []string
 }
 
 func readEnvironment(t *testing.T, path string) environment {
@@ -1302,6 +1319,8 @@ func readEnvironment(t *testing.T, path string) environment {
 			env.servers[d.Name] = d.Address
 		case d.Kind == "site" && d.Name == "shop-web":
 			env.site = d.PublicAddress
+		case d.Kind == "memoryStore" && d.Name == "shop-cache":
+			env.memoryStore = d.Address
 		}
 	}
 	for _, r := range resolved.Resources.Resources {
@@ -1574,4 +1593,189 @@ func waitForRefund(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrde
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// checkTheMemoryStore checks shop-cache under stack dev (D75), talking to
+// its Valkey container directly as another replica of shop-api would:
+//   - a request waiting for a product's image subscribes to the product's
+//     channel on the server, and the upload's signing wakes it, well before
+//     its ten-second poll;
+//   - an upload whose claim another replica holds is refused 409, and
+//     signed once the claim is gone;
+//   - getProduct's requests count in the store, under the reserved
+//     rate-limit key of shop-api, the operation, the minute and the
+//     client's address, hashed, so the counts other replicas add there
+//     refuse it 429, with httprate's Retry-After.
+func checkTheMemoryStore(ctx context.Context, t *testing.T, env environment, products *apisdk.ShopApiSDK, token string, n int64) {
+	t.Helper()
+	store, err := url.Parse(env.memoryStore)
+	if err != nil || store.Scheme != "redis" {
+		t.Fatalf("shop-cache's address %q is no redis URL", env.memoryStore)
+	}
+	valkey := store.Host
+	product, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku:        apitypes.IdentitySlug(fmt.Sprintf("oolong-%d", n)),
+		Name:       "Oolong",
+		PriceCents: 520,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	// A UUID part is its wire form, the compact string the API's JSON holds.
+	id := product.Id.String()
+	shopAPI := env.servers["shop-api"]
+
+	type waited struct {
+		status int
+		body   []byte
+		took   time.Duration
+	}
+	done := make(chan waited, 1)
+	go func() {
+		start := time.Now()
+		status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id+"/image?waitSeconds=25", token, "")
+		done <- waited{status, body, time.Since(start)}
+	}()
+	channel := "shop-cache:product-changed:" + id
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if reply := valkeyCommand(t, valkey, "PUBSUB", "NUMSUB", channel); len(reply) == 2 && reply[1] == "1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the waiter did not subscribe to %s in 10s", channel)
+		}
+	}
+	signed := time.Now()
+	if _, err := products.ProductNamespace.CreateProductImageUpload(ctx, id, apitypes.ProductImageUploadInput{ContentType: "image/png"}); err != nil {
+		t.Fatalf("CreateProductImageUpload: %v", err)
+	}
+	select {
+	case w := <-done:
+		var view struct {
+			Data struct {
+				ImageObject string `json:"imageObject"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.body, &view)
+		if w.status != http.StatusOK || view.Data.ImageObject == "" {
+			t.Fatalf("the waiter answered %d %s", w.status, w.body)
+		}
+		if woke := time.Since(signed); woke > 5*time.Second {
+			t.Fatalf("the waiter answered %s after the upload was signed, by its poll, not the channel", woke)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the waiter did not answer")
+	}
+
+	// Another replica's claim on the product's upload refuses this one.
+	claim := "shop-cache:image-upload-signing:" + id
+	valkeyCommand(t, valkey, "SET", claim, "another-replica", "PX", "10000")
+	if status, body := call(t, http.MethodPost, shopAPI+"/api/products/"+id+"/image-upload", token, `{"contentType": "image/png"}`); status != http.StatusConflict {
+		t.Fatalf("an upload another replica is signing: %d %s, want 409", status, body)
+	}
+	valkeyCommand(t, valkey, "DEL", claim)
+	if status, body := call(t, http.MethodPost, shopAPI+"/api/products/"+id+"/image-upload", token, `{"contentType": "image/png"}`); status != http.StatusOK {
+		t.Fatalf("an upload once the claim is gone: %d %s", status, body)
+	}
+
+	// getProduct counts in the store. The test reaches shop-api from
+	// loopback, the address the limiter keys the client by.
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(strings.TrimPrefix(shopAPI, "http://"), "https://"))
+	sum := sha256.Sum256([]byte(host))
+	client := hex.EncodeToString(sum[:])
+	for attempt := 0; ; attempt++ {
+		window := time.Now().UTC().Truncate(time.Minute)
+		key := fmt.Sprintf("shop-cache:rate-limit:shop-api:product.getProduct:%d:%s", window.Unix(), client)
+		before := valkeyCount(t, valkey, key)
+		if status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id, token, ""); status != http.StatusOK {
+			t.Fatalf("getProduct: %d %s", status, body)
+		}
+		after := valkeyCount(t, valkey, key)
+		// The other replicas' requests this minute fill the budget.
+		valkeyCommand(t, valkey, "SET", key, "120", "PX", "125000")
+		status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id, token, "")
+		valkeyCommand(t, valkey, "DEL", key)
+		if time.Now().UTC().Truncate(time.Minute) != window && attempt == 0 {
+			continue // the minute turned; count again in the next one
+		}
+		if after != before+1 {
+			t.Fatalf("shop-cache counted getProduct %d to %d under %s, want one more", before, after, key)
+		}
+		if status != http.StatusTooManyRequests || !strings.Contains(string(body), "too_many_requests") {
+			t.Fatalf("getProduct over the shared budget: %d %s, want 429", status, body)
+		}
+		break
+	}
+}
+
+// valkeyCount is the counter key holds on the Valkey server at addr, 0
+// when there is none.
+func valkeyCount(t *testing.T, addr, key string) int64 {
+	t.Helper()
+	reply := valkeyCommand(t, addr, "GET", key)
+	if len(reply) == 0 || reply[0] == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(reply[0], 10, 64)
+	if err != nil {
+		t.Fatalf("%s holds %q, no count", key, reply[0])
+	}
+	return n
+}
+
+// valkeyCommand sends one command to the Valkey server at addr over a
+// connection of its own and returns its reply: a simple string, an
+// integer or a bulk string as one element, "" for a null, and an array's
+// elements; an error reply fails the test.
+func valkeyCommand(t *testing.T, addr string, args ...string) []string {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	var b strings.Builder
+	fmt.Fprintf(&b, "*%d\r\n", len(args))
+	for _, a := range args {
+		fmt.Fprintf(&b, "$%d\r\n%s\r\n", len(a), a)
+	}
+	if _, err := io.WriteString(conn, b.String()); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(conn)
+	var read func() []string
+	read = func() []string {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		switch line[0] {
+		case '+', ':':
+			return []string{line[1:]}
+		case '-':
+			t.Fatalf("%v: %s", args, line[1:])
+		case '$':
+			size, _ := strconv.Atoi(line[1:])
+			if size < 0 {
+				return []string{""}
+			}
+			buf := make([]byte, size+2)
+			if _, err := io.ReadFull(r, buf); err != nil {
+				t.Fatal(err)
+			}
+			return []string{string(buf[:size])}
+		case '*':
+			count, _ := strconv.Atoi(line[1:])
+			var out []string
+			for range count {
+				out = append(out, read()...)
+			}
+			return out
+		}
+		t.Fatalf("%v: a reply %q", args, line)
+		return nil
+	}
+	return read()
 }
