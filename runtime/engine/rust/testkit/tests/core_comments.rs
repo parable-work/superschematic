@@ -1345,8 +1345,10 @@ fn the_policy_is_asked_for_write_to_post_and_for_read_to_list() {
     }
 }
 
+// A re-created instance numbers its messages on from the deleted one's,
+// so no id is reused across the lives the instance's events span.
 #[test]
-fn deleting_the_instance_deletes_its_conversation() {
+fn deleting_the_instance_deletes_its_conversation_and_keeps_its_numbering() {
     for target in targets("comments_delete_instance") {
         let world = world(&target, json!({}));
         world.say(&alice(), "Hello.");
@@ -1367,12 +1369,21 @@ fn deleting_the_instance_deletes_its_conversation() {
             world.ok(&alice(), "listMessages", json!({})),
             json!({"items": [], "before": null, "after": null})
         );
-        assert_eq!(world.say(&alice(), "Fresh."), 1);
-        assert_eq!(world.message(1)["reactions"], json!({}));
         assert_eq!(
-            world.ok(&alice(), "listEdits", json!({"message": 1}))["items"],
+            vetoed(world.call(&alice(), "getMessage", json!({"message": 1}))),
+            ("no_message".to_owned(), json!({"message": 1}))
+        );
+        assert_eq!(world.say(&alice(), "Fresh."), 3);
+        assert_eq!(
+            world.fields(),
+            json!({"messages": 1, "lastMessageAt": 1000, "threads": {"open": 1, "resolved": 0}})
+        );
+        assert_eq!(world.message(3)["reactions"], json!({}));
+        assert_eq!(
+            world.ok(&alice(), "listEdits", json!({"message": 3}))["items"],
             json!([])
         );
+        assert_eq!(ids(&world.ok(&alice(), "listMessages", json!({}))), vec![3]);
         assert_eq!(
             world.on(&alice(), "r2", "listMessages", json!({})).unwrap()["items"],
             json!([])

@@ -607,16 +607,27 @@ pub(super) fn reopen(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     after(cx, OP, top.id)
 }
 
-/// Deletes the instance's rows from Comments' four tables.
+/// Deletes the instance's messages, edits and reactions, and empties its
+/// conversation row but for its high-water marks: an instance re-created
+/// with the id numbers its messages and reactions on from them, so no id
+/// is reused across the lives one instance's events span.
 pub(super) fn delete_conversation(
     cx: &superschematic_engine::behaviors::InstanceCx<'_, CommentsConfig>,
 ) -> Result<()> {
-    for table in [MESSAGES, EDITS, REACTIONS, CONVERSATIONS] {
+    for table in [MESSAGES, EDITS, REACTIONS] {
         let table = cx.sql().table(table)?;
         cx.sql().run(
             format!("DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ?"),
             &key(cx),
         )?;
     }
+    let table = cx.sql().table(CONVERSATIONS)?;
+    cx.sql().run(
+        format!(
+            "UPDATE {table} SET last_message_at = NULL, open_threads = 0, resolved_threads = 0
+             WHERE namespace = ? AND schema = ? AND id = ?"
+        ),
+        &key(cx),
+    )?;
     Ok(())
 }

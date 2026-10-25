@@ -489,8 +489,14 @@ the same in SQL on both dialects, if the implementation prefers.
 
 ### Deleting the instance
 
-`afterChange` on `Delete` removes the instance's rows from all four
-tables.
+`afterChange` on `Delete` removes the instance's rows from
+`comment_messages`, `comment_edits` and `comment_reactions`, and keeps
+its `comment_conversations` row with `last_message` and `last_reaction`
+as they were, `last_message_at = NULL` and both thread counts 0. An
+instance re-created with the id numbers its messages and reactions on
+from those high-water marks, so an id is never reused across the lives
+one instance's events span, which a client that rebuilds from them sees
+whole.
 
 ## What a client derives from the stream
 
