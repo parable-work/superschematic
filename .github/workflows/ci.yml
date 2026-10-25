@@ -958,7 +958,9 @@ jobs:
       # here, logging, and the two at once, as a worker runs, whose loop's
       # log lines a test reads (D65); gcs, a bucket on GCS (D54), whose
       # tests run against fakes, the fake-gcs-server run skipping here, and
-      # beside a worker's two, as a worker with a bucket builds; and otel, a
+      # beside a worker's two, as a worker with a bucket builds;
+      # memorystore-redis, a memory store on Redis (D75), whose Valkey tests
+      # skip here, alone and beside a worker's two; and otel, a
       # deployable's trace export, alone and with postgres, as a worker
       # builds it, whose message spans a test reads (D67).
       - name: fmt / clippy / test
@@ -984,6 +986,9 @@ jobs:
           cargo clippy --all-targets --features gcs -- -D warnings
           cargo test --features gcs
           cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
+          cargo clippy --all-targets --features memorystore-redis -- -D warnings
+          cargo test --features memorystore-redis
+          cargo clippy --all-targets --features memorystore-redis,postgres,logging -- -D warnings
           cargo clippy --all-targets --features otel -- -D warnings
           cargo test --features otel
           cargo clippy --all-targets --features postgres,otel -- -D warnings

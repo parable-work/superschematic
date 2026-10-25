@@ -66,8 +66,8 @@ const (
 // rustOrder is the order a build-all builds the Rust fixture in: rs-stock
 // calls rs-pricing, so it builds after rs-pricing's SDK, and rs-orders
 // calls rs-stock. rs-media, the bucket rs-stock lists, builds nothing
-// (D54). rs-web, the site, is loaded, not built.
-var rustOrder = []string{"rs-db", "rs-media", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
+// (D54), nor does rs-cache, its memory store (D75). rs-web, the site, is loaded, not built.
+var rustOrder = []string{"rs-db", "rs-media", "rs-cache", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
 
 // rustMediaVariables are the variables of rs-stock's bucket field holding
 // rs-media on an emulator at port 9, which discards: opening the bucket

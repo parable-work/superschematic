@@ -32,6 +32,10 @@ pub mod identity;
 mod jws;
 mod jwt;
 mod loopback;
+// The memory store an API lists (D75): the interface, a disabled and an
+// in-process store and the typed channels and keys, and with the
+// `memorystore-redis` feature the Redis client.
+pub mod memorystore;
 // A stack server's JSON-line log (D57), with the `logging` feature.
 #[cfg(feature = "logging")]
 pub mod logging;
