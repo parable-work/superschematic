@@ -43,6 +43,13 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
     }
 }
 
+/// An amount of `currency`'s minor units as a reader reads it: the code, a
+/// space, then the amount. Each currency's minor units are not applied yet,
+/// so it shows the whole number of them.
+pub fn money_text(amount: i64, currency: &str) -> String {
+    format!("{currency} {amount}")
+}
+
 /// `NoteCountRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
