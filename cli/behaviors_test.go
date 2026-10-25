@@ -279,7 +279,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		{"from": "draft", "to": "review"}, {"from": "review", "to": "draft"},
 		{"from": "review", "to": "published", "permission": "documents.publish"}, {"from": "published", "to": "archived"}]}`, string(behaviors[0].Config))
 	assert.Equal(t, "Comments", behaviors[1].Name)
-	assert.Empty(t, behaviors[1].Config)
+	assert.JSONEq(t, `{"editWindowMs": 900000, "moderatePermission": "documents.moderate"}`, string(behaviors[1].Config))
 	assert.Equal(t, "Revisions", behaviors[2].Name)
 	assert.JSONEq(t, `{"review": {"permission": "documents.review"}}`, string(behaviors[2].Config))
 	assert.Equal(t, fromJSON.Types["Document"], load(filepath.Join(tsreaderTestdata, "fixture-behaviors")).Types["Document"])

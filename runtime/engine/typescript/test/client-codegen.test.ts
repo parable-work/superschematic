@@ -21,7 +21,7 @@ import { engineApp } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
 import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
-import { isNoteVeto, notesClient, type NotesClient } from './generated/notes.ts';
+import { isNoteVeto, notesClient, type NoteCommentMessage, type NotesClient } from './generated/notes.ts';
 import { cleanup, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -117,12 +117,14 @@ describe('the generated client', () => {
     engine.instances.create(editor, 'Task', { title: 'Review', kind: 'review', detail: { pullRequest: 7 } }, { id: 't2', behaviors: { Links: { project: 'p1', parent: 't1' } } });
     engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore', due: '2026-11-02T09:00:00Z' }, { id: 't3', behaviors: { Links: { project: 'p1', related: ['t1', 't2'] } } });
     engine.instances.invoke(editor, 'Task', 't2', 'transition', { to: 'doing' });
-    engine.instances.invoke(editor, 'Task', 't3', 'comment', { body: 'Soon' });
+    engine.instances.invoke(editor, 'Task', 't3', 'post', { body: 'Soon', blocks: [{ kind: 'action', title: 'Ran the tests', status: 'succeeded' }] });
+    engine.instances.invoke(editor, 'Task', 't3', 'resolve', { thread: 1 });
     engine.instances.create(editor, 'Spec', { title: 'Ranking' }, { id: 's2', behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } });
     engine.instances.update(editor, 'Spec', 's1', { body: 'Words and vectors.' });
     engine.instances.invoke(approver, 'Spec', 's1', 'signOff', { state: 'final' });
     engine.instances.create(editor, 'notes', { title: 'Launch' }, { id: 'n1' });
-    engine.instances.invoke(editor, 'notes', 'n1', 'comment', { body: 'Ship it' });
+    engine.instances.invoke(editor, 'notes', 'n1', 'post', { body: 'Ship it' });
+    engine.instances.invoke(editor, 'notes', 'n1', 'post', { body: 'Agreed.', thread: 1 });
 
     const ajv = new Ajv2020({ strict: false, validateFormats: false });
     let checked = 0;
@@ -154,6 +156,10 @@ describe('the generated client', () => {
     const spec = engine.instances.get(editor, 'Spec', 's1')?.behaviors as Record<string, any>;
     assert.deepEqual(spec.Approvals.gates, { final: { signedBy: ['ada'] } });
     const tidy = engine.instances.get(editor, 'Task', 't3')?.behaviors as Record<string, any>;
+    assert.deepEqual([tidy.Comments.messages, tidy.Comments.threads, typeof tidy.Comments.lastMessageAt], [1, { open: 0, resolved: 1 }, 'number']);
+    const launch = engine.instances.get(editor, 'notes', 'n1')?.behaviors as Record<string, any>;
+    assert.deepEqual([launch.Comments.messages, launch.Comments.threads], [2, { open: 1, resolved: 0 }]);
+    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 } });
     assert.deepEqual(tidy.Timers.deadlines, { overdue: { dueAt: Date.UTC(2026, 10, 2, 9), fired: false } });
     const started = engine.instances.get(editor, 'Task', 't2')?.behaviors as Record<string, any>;
     assert.deepEqual(Object.keys(started.Timers.deadlines), ['stuck']);
@@ -173,13 +179,23 @@ describe('the generated client', () => {
 
     const note = await notes.create({ title: 'Launch', tags: ['plan'] }, { id: 'launch' });
     assert.equal(note.behaviors.Workflow.status, 'draft');
-    assert.equal(note.behaviors.Comments.commentCount, 0);
+    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 } });
     assert.deepEqual(await notes.transition('launch', { to: 'review' }), { from: 'draft', to: 'review' });
-    const commented = await notes.operate('launch', 'comment', { body: 'Looks good' });
-    assert.equal(commented.result.body, 'Looks good');
-    const updated = await notes.update('launch', { body: 'Ships in the fall.', tags: null }, { expectedSeq: commented.seq });
+    const reviewing = await notes.get('launch');
+    const posted = await notes.operate('launch', 'post', { body: 'Looks good', blocks: [{ kind: 'ref', schema: 'notes', id: 'launch' }] });
+    assert.deepEqual([posted.result.id, posted.result.body, posted.result.state, posted.result.blocks], [1, 'Looks good', 'posted', [{ kind: 'ref', schema: 'notes', id: 'launch' }]]);
+    // A post is beside the note: its sequence stays where the transition left it.
+    assert.equal(posted.seq, reviewing.seq);
+    const reply: NoteCommentMessage = await notes.post('launch', { body: 'Agreed.', thread: posted.result.id, mentions: ['ada'] });
+    assert.deepEqual([reply.thread, reply.mentions], [1, ['ada']]);
+    assert.deepEqual((await notes.react('launch', { message: 1, emoji: ':+1:' })).reactions, { ':+1:': { count: 1, mine: true } });
+    assert.equal((await notes.resolve('launch', { thread: 1 })).resolved?.by, 'editor');
+    const updated = await notes.update('launch', { body: 'Ships in the fall.', tags: null }, { expectedSeq: posted.seq });
     assert.deepEqual([updated.data.body, 'tags' in updated.data], ['Ships in the fall.', false]);
-    assert.equal((await notes.listComments('launch')).items.length, 1);
+    assert.deepEqual([updated.behaviors.Comments.messages, updated.behaviors.Comments.threads], [2, { open: 0, resolved: 1 }]);
+    const page = await notes.listMessages('launch');
+    assert.deepEqual([page.items.map((message) => message.id), page.items[0]?.replies, page.before, page.after], [[1], 1, null, null]);
+    assert.deepEqual((await notes.listMessages('launch', { thread: 1 })).root?.participants, ['editor']);
     const proposal = await notes.propose('launch', { patch: { title: 'Launch day' } });
     assert.equal((await notes.approve('launch', { proposal: proposal.id })).state, 'approved');
     assert.equal((await notes.get('launch')).data.title, 'Launch day');
@@ -227,12 +243,18 @@ export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, 
   void notes.update('launch', { status: 'published' });
   // @ts-expect-error a note's status is under its Workflow, not in its data
   void notes.get('launch').then((note) => note.data.status);
-  // @ts-expect-error commentCount is Comments' field, not Workflow's
-  void notes.get('launch').then((note) => note.behaviors.Workflow.commentCount);
+  // @ts-expect-error messages is Comments' field, not Workflow's
+  void notes.get('launch').then((note) => note.behaviors.Workflow.messages);
   // @ts-expect-error publshed is not a state of a Note's Workflow
   void notes.transition('launch', { to: 'publshed' });
-  // @ts-expect-error comment takes body, not text
-  void notes.comment('launch', { text: 'Looks good' });
+  // @ts-expect-error post takes body, not text
+  void notes.post('launch', { text: 'Looks good' });
+  // @ts-expect-error a message's id is a number
+  void notes.edit('launch', { message: '1', body: 'Looks better' });
+  // @ts-expect-error a Task's Comments allow only action blocks
+  void tasks.post('t1', { body: 'See the spec.', blocks: [{ kind: 'ref', schema: 'Spec', id: 's1' }] });
+  // @ts-expect-error an action block's status is running, succeeded or failed
+  void tasks.post('t1', { body: 'Ran the tests.', blocks: [{ kind: 'action', title: 'Tests', status: 'passed' }] });
   // @ts-expect-error a note's writes take no preconditions: none of its behaviors declares one
   void notes.update('launch', { title: 'Launch' }, { preconditions: { Lease: { token: 1 } } });
   // @ts-expect-error lapsed is not a code of Workflow's vetoes

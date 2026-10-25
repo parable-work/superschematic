@@ -399,13 +399,22 @@ impl<'t, 'db> Reach<'t, 'db> {
     /// The instance of an event as the log had it just before the event,
     /// `{ data, behaviors }`, folded from its events before it (from the
     /// base retention kept, when it pruned some); asks read on its schema.
+    /// A beside operation's event (D77) has no sequence, and the instance
+    /// before it is the one its sequenced events before it in the log
+    /// leave.
     pub fn before(&self, from: &str, event: &EngineEvent) -> Result<Option<InstanceFields>> {
-        let (Some(instance_id), Some(seq)) = (&event.instance_id, event.seq) else {
+        let Some(instance_id) = &event.instance_id else {
             return Err(Error::behavior(
                 from,
                 "before() takes an instance event of the log",
             ));
         };
+        if event.seq.is_none() && !event.beside {
+            return Err(Error::behavior(
+                from,
+                "before() takes an instance event of the log",
+            ));
+        }
         let namespace = self.namespace();
         if event.namespace != namespace {
             return Err(Error::behavior(
@@ -434,7 +443,11 @@ impl<'t, 'db> Reach<'t, 'db> {
         )?;
         let mut data: Option<Value> = None;
         if let Some(base) = &base {
-            if seq <= base.i64("seq")? {
+            let pruned = match event.seq {
+                Some(seq) => seq <= base.i64("seq")?,
+                None => event.cursor <= log_floor(self.tx, self.view, namespace, false)?,
+            };
+            if pruned {
                 let floor = log_floor(self.tx, self.view, namespace, false)?;
                 return Err(EngineError::cursor_expired(
                     namespace,
@@ -456,16 +469,32 @@ impl<'t, 'db> Reach<'t, 'db> {
             }
         }
         let mut params = key.to_vec();
-        params.push(SqlValue::Integer(seq));
-        let rows = self.tx.all(
-            Sql::per(
-                "SELECT kind, change, value_refs FROM engine_events INDEXED BY engine_events_instance
+        let rows = match event.seq {
+            Some(seq) => {
+                params.push(SqlValue::Integer(seq));
+                self.tx.all(
+                    Sql::per(
+                        "SELECT kind, change, value_refs FROM engine_events INDEXED BY engine_events_instance
                  WHERE namespace = ? AND schema = ? AND instance_id = ? AND seq < ? ORDER BY seq",
-                "SELECT kind, change, value_refs FROM engine_events
+                        "SELECT kind, change, value_refs FROM engine_events
                  WHERE namespace = ? AND schema = ? AND instance_id = ? AND seq < ? ORDER BY seq",
-            ),
-            &params,
-        )?;
+                    ),
+                    &params,
+                )?
+            }
+            None => {
+                params.push(SqlValue::Integer(event.cursor));
+                self.tx.all(
+                    Sql::per(
+                        "SELECT kind, change, value_refs FROM engine_events INDEXED BY engine_events_instance_cursor
+                 WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor < ? AND seq IS NOT NULL ORDER BY cursor",
+                        "SELECT kind, change, value_refs FROM engine_events
+                 WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor < ? AND seq IS NOT NULL ORDER BY cursor",
+                    ),
+                    &params,
+                )?
+            }
+        };
         for row in rows {
             let change = match row.opt_text("change")? {
                 None => Value::Null,

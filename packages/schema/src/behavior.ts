@@ -26,8 +26,8 @@
 export interface BehaviorConfigs {
   /** A state machine on the instance's status. */
   Workflow: WorkflowConfig;
-  /** Comments on the instance; it takes no config. */
-  Comments: undefined;
+  /** A conversation on the instance: messages and their threads, which their authors edit and delete, and others react to, pin and resolve. */
+  Comments: CommentsConfig;
   /** Immutable revisions of the instance's own fields, with an optional review step. */
   Revisions: RevisionsConfig;
   /** Blockers between instances, which hold up the type's Workflow; it requires Workflow. */
@@ -107,6 +107,25 @@ export interface WorkflowTransition {
   /** The permission a caller needs to make it; absent, any caller who may write the instance can. */
   readonly permission?: string;
 }
+
+/** Comments' config; every member is optional. */
+export interface CommentsConfig {
+  /** The longest body a post or an edit may give, in code points, 1 to 40000; 40000 when absent. */
+  readonly maxBodyLength?: number;
+  /** How long after posting its author may edit a message, in milliseconds, at least 1000; no limit when absent. A caller holding moderatePermission is not held to it. */
+  readonly editWindowMs?: number;
+  /** The block kinds a post or an edit may give; every kind when absent, none when empty. */
+  readonly blocks?: readonly CommentsBlockKind[];
+  /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
+  readonly moderatePermission?: string;
+  /** The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may. */
+  readonly pinPermission?: string;
+  /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
+  readonly resolvePermission?: string;
+}
+
+/** A kind of block a Comments message may hold: a reference to another instance, or an action card. */
+export type CommentsBlockKind = "ref" | "action";
 
 /** Revisions' config. */
 export interface RevisionsConfig {

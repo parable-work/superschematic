@@ -37,7 +37,7 @@ use support::{alice, code, count, order_document, refusal, schema_document, targ
 
 const ANY: SchemaTarget<'static> = SchemaTarget { namespace: None };
 
-const LATEST: usize = 12;
+const LATEST: usize = 13;
 
 fn note_document() -> Value {
     schema_document(
@@ -220,6 +220,32 @@ fn seed(tx: &Tx<'_>, version: usize) {
             );
             run(tx, INSERT_EVENT, &row(json!(["publish", "beta", "Order", null, null, 1, "alice", 170, order])));
         }
+        // Version 12 pruned the log: every event of o1 went, into its
+        // base, and the floor moved past the last cursor drawn.
+        12 => {
+            run(tx, INSERT_SCHEMA, &order_row());
+            run(tx, "UPDATE engine_schemas SET published_cursor = 1 WHERE name = 'Order'", &[]);
+            run(
+                tx,
+                INSERT_INSTANCE,
+                &row(json!(["default", "Order", "o1", "default", 1, 3, "{\"title\":\"Lamp\"}", 300, "alice", 500, "alice"])),
+            );
+            run(
+                tx,
+                "INSERT INTO engine_log_floors (namespace, floor, publish_floor, pruned) VALUES (?, ?, ?, ?)",
+                &[json!("default"), json!(4), json!(1), json!(4)],
+            );
+            run(tx, INSERT_EVENT, &row(json!(["publish", "default", "Order", null, null, 1, "alice", 200, order])));
+            run(tx, INSERT_EVENT, &row(json!(["create", "default", "Order", "o1", 1, 1, "alice", 300, "{\"data\":{\"title\":\"Desk\"},\"behaviors\":{}}"])));
+            run(tx, INSERT_EVENT, &row(json!(["update", "default", "Order", "o1", 2, 1, "alice", 400, "{\"data\":{\"title\":\"Shelf\"}}"])));
+            run(tx, INSERT_EVENT, &row(json!(["update", "default", "Order", "o1", 3, 1, "alice", 500, "{\"data\":{\"title\":\"Lamp\"}}"])));
+            run(
+                tx,
+                "INSERT INTO engine_event_bases (namespace, schema, instance_id, seq, data) VALUES (?, ?, ?, ?, ?)",
+                &row(json!(["default", "Order", "o1", 3, "{\"data\":{\"title\":\"Lamp\"},\"behaviors\":{}}"])),
+            );
+            run(tx, "DELETE FROM engine_events WHERE namespace = 'default' AND cursor <= 4", &[]);
+        }
         _ => panic!("add a seed for engine storage version {version}"),
     }
 }
@@ -371,6 +397,7 @@ fn check(engine: &Engine, version: usize) {
         9 => check_version_9(engine),
         10 => check_version_10(engine),
         11 => check_version_11(engine),
+        12 => check_version_12(engine),
         _ => panic!("add a check for engine storage version {version}"),
     }
 }
@@ -796,6 +823,22 @@ fn check_version_11(engine: &Engine) {
     );
 }
 
+// The pruned log reads from its floor, the instance's next write takes the
+// sequence after its base's, and its event a cursor past every one drawn
+// before migration 13 rebuilt the log.
+fn check_version_12(engine: &Engine) {
+    assert!(read_all(engine).is_empty());
+    assert_eq!(engine.events().floor(None).unwrap(), 4);
+    assert_eq!(update_at(engine, json!({"title": "Desk"}), 3).seq, 4);
+    assert_eq!(
+        read_all(engine)
+            .iter()
+            .map(|event| (event.cursor, event.kind.as_str(), event.seq))
+            .collect::<Vec<_>>(),
+        [(5, "update", Some(4))]
+    );
+}
+
 fn unique_indexes(db: &Db) -> i64 {
     db.read(|tx| {
         let row = tx.get(
@@ -821,8 +864,9 @@ fn event_log_objects(db: &Db) -> Vec<String> {
     texts(db, sql)
 }
 
-const EVENT_LOG_OBJECTS: [&str; 6] = [
+const EVENT_LOG_OBJECTS: [&str; 7] = [
     "index engine_events_instance",
+    "index engine_events_instance_cursor",
     "index engine_events_namespace",
     "index engine_events_publish",
     "index engine_events_schema",
@@ -854,7 +898,7 @@ fn from_each_earlier_version() {
             let engine = target.open();
             assert_eq!(
                 ledger(engine.db()),
-                (1..=12).collect::<Vec<u32>>(),
+                (1..=13).collect::<Vec<u32>>(),
                 "from {from}"
             );
             check(&engine, from);
@@ -930,7 +974,7 @@ fn from_each_earlier_version() {
 fn from_an_empty_storage_every_migration_runs_and_reopening_runs_none() {
     for target in targets("from_an_empty_storage_every_migration_runs_and_reopening_runs_none") {
         let engine = target.open_with(|options| options.clock = Clock::Manual(42));
-        assert_eq!(ledger(engine.db()), (1..=12).collect::<Vec<u32>>());
+        assert_eq!(ledger(engine.db()), (1..=13).collect::<Vec<u32>>());
         let stamps = engine.db().applied_migrations(ENGINE_OWNER).unwrap();
         assert!(stamps.iter().all(|row| row.applied_at == 42));
         drop(engine);
@@ -979,7 +1023,7 @@ fn an_engine_whose_storage_is_newer_than_the_build_refuses_to_open_it() {
             let mut later = engine_migrations(|_| Ok(()));
             later
                 .migrations
-                .push(Migration::new(13, "from a later build", |_| Ok(())));
+                .push(Migration::new(14, "from a later build", |_| Ok(())));
             db.migrate(&later, 0).unwrap();
         }
         let refused = Engine::open(target.options()).unwrap_err();
@@ -1052,7 +1096,7 @@ fn an_engine_opens_on_a_storage_the_host_opened() {
         options.policy = Some(superschematic_engine::Policy::allow_all());
         let engine = Engine::open(options).unwrap();
         assert_eq!(engine.dialect(), target.dialect);
-        assert_eq!(ledger(engine.db()), (1..=12).collect::<Vec<u32>>());
+        assert_eq!(ledger(engine.db()), (1..=13).collect::<Vec<u32>>());
     }
 }
 

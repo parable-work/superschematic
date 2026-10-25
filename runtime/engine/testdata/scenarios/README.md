@@ -157,7 +157,7 @@ with, and a refund instance asked, approved and settled.
 ```json
 {
   "name": "core-comments",
-  "description": "Comments, the core's comments on an instance: ...",
+  "description": "Comments, the core's conversation on an instance (D77, batch 1): ...",
   "source": "runtime/engine/typescript/test/core-comments.test.ts",
   "omitted": ["..."],
   "shared": {"s1": {...}},
@@ -236,8 +236,8 @@ recorder to this.
 
 ```json
 {"call": "open", "as": "e1", "args": [{"path": "{{dir:1}}/engine.db", "policy": "allowAll", "ids": "seeded", "clock": "fixed"}], "now": 1000},
-{"call": "instances.invoke", "principal": "alice", "args": ["Review", "r1", "comment", {"body": "Looks right."}], "expect": {"id": 1, "body": "Looks right.", "createdBy": "alice", "createdAt": 1000}},
-{"call": "instances.invoke", "principal": "bob", "args": ["Review", "r9", "comment", {}], "error": {"class": "EngineError", "code": "not_found", "message": "..."}}
+{"call": "instances.invoke", "principal": "alice", "args": ["Review", "r1", "getMessage", {"message": 1}], "expect": {"id": 1, "author": "alice", "state": "posted", "body": "Looks right.", ...}},
+{"call": "instances.invoke", "principal": "bob", "args": ["Review", "r9", "post", {"body": "x"}], "error": {"class": "EngineError", "code": "not_found", "message": "..."}}
 ```
 
 | Member | What it holds |

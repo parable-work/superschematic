@@ -619,7 +619,7 @@ fn a_change_of_the_own_fields_consumes_every_gates_sign_offs_and_nothing_else_do
 
         // An operation that changes no own field, and an update that changes
         // nothing, leave them.
-        invoke(&engine, &wes(), "comment", json!({"body": "Looks close."})).expect("comment");
+        invoke(&engine, &wes(), "post", json!({"body": "Looks close."})).expect("post");
         engine
             .instances()
             .update(

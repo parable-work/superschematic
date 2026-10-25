@@ -742,7 +742,7 @@ fn an_operation_that_changes_no_own_field_records_no_revision_and_one_that_does_
             json!([{"name": "Revisions", "config": review()}, {"name": "Comments"}]),
             |_| {},
         );
-        invoke(&engine, &alice(), "d1", "comment", json!({"body": "Nice."})).expect("comment");
+        invoke(&engine, &alice(), "d1", "post", json!({"body": "Nice."})).expect("post");
         assert_eq!(revisions_of(&engine, "d1").len(), 1);
         propose(&engine, json!({"body": "Proposed."})).expect("propose");
         invoke(

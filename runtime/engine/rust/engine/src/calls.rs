@@ -693,6 +693,7 @@ struct ReadArgs {
     kinds: Option<Vec<String>>,
     behaviors: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    beside: Option<bool>,
 }
 
 impl ReadArgs {
@@ -713,6 +714,14 @@ impl ReadArgs {
         };
         let [kinds, behaviors, exclude] =
             check_filters([member("kinds"), member("behaviors"), member("exclude")])?;
+        let beside = match member("beside") {
+            None => None,
+            Some(Value::Bool(beside)) => Some(*beside),
+            Some(_) => return Err(EngineError::invalid_argument(
+                "beside is a boolean: false drops beside operations' events, true keeps only them",
+            )
+            .into()),
+        };
         Ok(ReadArgs {
             namespace: text_member(options, "namespace"),
             schema: text_member(options, "schema"),
@@ -722,6 +731,7 @@ impl ReadArgs {
             kinds,
             behaviors,
             exclude,
+            beside,
         })
     }
 
@@ -735,6 +745,7 @@ impl ReadArgs {
             kinds: self.kinds.clone(),
             behaviors: self.behaviors.clone(),
             exclude: self.exclude.clone(),
+            beside: self.beside,
         }
     }
 }

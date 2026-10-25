@@ -200,8 +200,18 @@ type TicketWorkflow struct {
 
 // TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 type TicketComments struct {
-	// How many comments the instance has.
-	CommentCount int64 `json:"commentCount"`
+	// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+	Messages int64 `json:"messages"`
+	// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+	LastMessageAt *int64 `json:"lastMessageAt,omitempty"`
+	// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+	Threads TicketCommentsThreads `json:"threads"`
+}
+
+// TicketCommentsThreads types TicketComments.threads.
+type TicketCommentsThreads struct {
+	Open     int64 `json:"open"`
+	Resolved int64 `json:"resolved"`
 }
 
 // TicketRevisions holds the fields a Ticket's Revisions adds, as a read returns them: a field with no value is absent.

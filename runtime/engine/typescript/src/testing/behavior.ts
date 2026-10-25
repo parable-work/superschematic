@@ -1066,6 +1066,8 @@ export interface DescribedTypeOperation {
   /** The behavior that adds it; absent for create, get, list, update, delete and lookup. */
   readonly behavior?: string;
   readonly writes: boolean;
+  /** True for an operation beside the instance (D77), which moves no seq and asks no other behavior's guard. */
+  readonly beside?: boolean;
   readonly scope: OperationScope;
 }
 
