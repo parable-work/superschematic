@@ -115,7 +115,9 @@ DB `dependencies` entry or `@source`; another API through `calls`.
   `@userSessions` on an API class) instead of writing auth.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
-  transaction as the change that causes them.
+  transaction as the change that causes them; `key` with `onDuplicate` or
+  `serialize` for one waiting or one running message per key, and
+  `@enqueueOnChange` on a table to enqueue whatever writes its rows.
 - **No server at all?** If the data's shape is defined at run time, or
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors

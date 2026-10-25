@@ -331,6 +331,17 @@ That changes no table, so it gets a step of its own in `expand`,
 `changeGraphContent`, with no statements: the step carries the hazard,
 which names the columns, and the runner logs it like any other.
 
+## Queues and the triggers that enqueue
+
+A queue's table migrates as any table. A [key](/superschematic/guides/queues/#one-message-per-key)
+and what a trigger enqueues add these (D80):
+
+| Change | Plan |
+| --- | --- |
+| a queue keeps one waiting message per key (`onDuplicate` `replace` or `skip`) | the partial unique index of its ready messages by key, built after one statement marks `done` every ready message of a key but the one `onDuplicate` keeps (`destructive`). A server built from the previous version enqueues without `ON CONFLICT`, so its enqueue of a waiting key fails once the index is built (`compat`), and a duplicate it enqueues between the two statements fails the build (`data-dependent`) |
+| a queue serializes its keys | the partial unique index of its claimed messages by key, which fails while two claims hold one key (`data-dependent`) |
+| a table gains, changes or loses an [`@enqueueOnChange`](/superschematic/guides/queues/#enqueue-on-a-change) | on Postgres its function is created or replaced in `expand`, and its trigger created, or replaced when `on` changes; both are dropped in `contract`. On SQLite each trigger is created, replaced (dropped and created) or dropped, and a rebuild of the table creates its triggers again |
+
 ## SQLite
 
 A DB service is built for Postgres, and for SQLite too when its
@@ -460,7 +471,8 @@ references it, directly or through another table, in one step:
    element](#a-lists-element));
 4. drop the old tables, referencing tables first;
 5. rename each new table, which rewrites the foreign keys that name it;
-6. create the unique indexes and indexes again.
+6. create the unique indexes and indexes again, and the triggers the phase
+   leaves on each table, which SQLite drops with the old one.
 
 A table that references the rebuilt one and does not change is copied as
 it is. Every change the phase makes to the tables of a rebuild shares it:
