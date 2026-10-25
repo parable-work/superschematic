@@ -156,8 +156,8 @@ func newRustCrate(in Input) (*rustCrate, error) {
 			params[p.ident] = true
 			d.parts = append(d.parts, p)
 		}
-		switch {
-		case decl.Kind == ir.MemoryStoreChannel:
+		switch decl.Kind {
+		case ir.MemoryStoreChannel:
 			payload, ok := in.PayloadOf(decl)
 			if !ok {
 				d.result = "Channel<Signal>"
