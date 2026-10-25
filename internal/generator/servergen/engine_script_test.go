@@ -743,7 +743,7 @@ func runEngineScript(t *testing.T, server *scriptServer, key ed25519.PrivateKey,
 	}
 
 	// The workflow: a transition at the sequence it expects, one at a stale
-	// sequence, one the workflow does not allow, and comments.
+	// sequence, one the workflow does not allow, and a post beside it.
 	transition := corpus("operations.json", "the core's behaviors over HTTP > a Workflow transition runs through the operation route", http.MethodPost, http.StatusOK, "/operations/transition")
 	as("member", call{step: "move the ticket to waiting", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/transition",
 		headers: map[string]string{"If-Match": `"1"`}, body: `{"to": "waiting"}`, status: http.StatusOK, corpus: transition})
@@ -778,7 +778,9 @@ func runEngineScript(t *testing.T, server *scriptServer, key ed25519.PrivateKey,
 		corpus: corpus("http.json", "instances > a list filters by a where query parameter", http.MethodGet, http.StatusBadRequest, "/instances").at(2)})
 
 	// The event log as JSON, then as an event stream from the head, which a
-	// comment's event reaches, resumed from its Last-Event-ID.
+	// patch's event reaches, resumed from its Last-Event-ID. The patch is at
+	// the sequence the transition left: the post beside the ticket moved
+	// none (D77).
 	t1Events := "&schema=Ticket&instanceId=" + url.QueryEscape(t1)
 	as("member", call{step: "the ticket's events", method: http.MethodGet, path: engineNamespace + "/events?after=" + after + t1Events, status: http.StatusOK,
 		corpus: corpus("http.json", "events as JSON > pages from a cursor, filtered by schema and instance", http.MethodGet, http.StatusOK, "/events")})
@@ -786,8 +788,8 @@ func runEngineScript(t *testing.T, server *scriptServer, key ed25519.PrivateKey,
 	stream := sc.openStreamAs(creds["member"], call{step: "an event stream from the head", method: http.MethodGet, path: engineNamespace + "/events?after=head" + t1Events,
 		as: "member", headers: map[string]string{"Accept": "text/event-stream"}, status: http.StatusOK, corpus: streamCase})
 	ready := stream.lastID()
-	as("member", call{step: "comment while the stream is open", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/comment",
-		body: `{"body": "It arrived."}`, status: http.StatusOK})
+	as("member", call{step: "patch the ticket while the stream is open", method: http.MethodPatch, path: tickets + "/" + t1,
+		headers: map[string]string{"Content-Type": "application/merge-patch+json", "If-Match": `"2"`}, body: `{"tags": ["printer", "toner"]}`, status: http.StatusOK})
 	stream.take(func(f sseFrame) bool { return f.Data != nil && f.Event == "" })
 	stream.close()
 	resumed := sc.openStreamAs(creds["member"], call{step: "resume the stream from its last event id", method: http.MethodGet, path: engineNamespace + "/events?after=head" + t1Events,
@@ -1272,8 +1274,8 @@ func checkInterop(t *testing.T, servers []*scriptServer) {
 				break
 			}
 		}
-		comment := fmt.Sprintf(`{"body": "Seen from the %s server."}`, reader.language)
-		creq, err := http.NewRequest(http.MethodPost, writer.s.base+tickets+"/"+ticket+"/operations/comment", strings.NewReader(comment))
+		post := fmt.Sprintf(`{"body": "Seen from the %s server."}`, reader.language)
+		creq, err := http.NewRequest(http.MethodPost, writer.s.base+tickets+"/"+ticket+"/operations/post", strings.NewReader(post))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1285,12 +1287,12 @@ func checkInterop(t *testing.T, servers []*scriptServer) {
 		}
 		cresp.Body.Close()
 		if cresp.StatusCode != http.StatusOK {
-			t.Fatalf("a comment on the %s server = %d", writer.language, cresp.StatusCode)
+			t.Fatalf("a post on the %s server = %d", writer.language, cresp.StatusCode)
 		}
 		frame, ok := frames.next(10 * time.Second)
 		resp.Body.Close()
 		if !ok || member(frame.Data, "instanceId") != ticket || member(frame.Data, "kind") != "operation" {
-			t.Errorf("the %s server's stream did not carry the comment the %s server committed: %+v", reader.language, writer.language, frame)
+			t.Errorf("the %s server's stream did not carry the post the %s server committed: %+v", reader.language, writer.language, frame)
 			continue
 		}
 		// The writer's own log holds the event the reader's stream sent.
