@@ -1,8 +1,8 @@
-# Comments v2, batch 1: the contract
+# Comments v2, batches 1 and 2: the contract
 
 This note is the contract the Rust behavior (`comments.rs`), the Go
-generators and the corpora implement for batch 1 of D77 ("Comments,
-rebuilt", step 1 of its build order). The declaration is
+generators and the corpora implement for batches 1 and 2 of D77
+("Comments, rebuilt", steps 1 and 2 of its build order). The declaration is
 `declarations/Comments.behavior.json`, the canonical copy of
 `internal/registry/behaviors/comments.behavior.json`; where this note and
 the declaration disagree, the declaration's schemas win and this note is
@@ -10,7 +10,10 @@ the bug.
 
 Batch 1 is posts, edits, deletes, purge, reactions, pins, threads and
 resolve, every writing operation beside the instance (D77 primitive 1,
-`"beside": true`, logged). What batch 1 leaves out is listed at the end.
+`"beside": true`, logged). Batch 2, streamed replies over signals (D77
+primitive 2), is "Batch 2" below: where it amends a rule of batch 1 it
+says so, and the amended rule holds. What both leave out is listed at the
+end.
 
 ## Terms
 
@@ -64,8 +67,8 @@ members in this order, absent members left out:
 | `quotes` | integer | when given | the id of the message of the thread the reply quotes; may name a message since purged |
 | `author` | string | always | the poster's subject |
 | `via` | string | when posted through a service | the calling service's deployable (D37) |
-| `state` | `"posted"` or `"deleted"` | always | batch 2 adds `composing` and `interrupted` |
-| `body` | string | always | Markdown; `""` once deleted |
+| `state` | `"posted"` or `"deleted"` | always | batch 2 adds `composing` and `interrupted` ("Batch 2", "The record") |
+| `body` | string | always | Markdown; `""` once deleted; a composing message's draft so far (batch 2) |
 | `blocks` | array | always | as posted or last edited, in order; `[]` once deleted |
 | `mentions` | array of strings | always | as posted or last edited, in order; `[]` once deleted |
 | `reactions` | object | always | by emoji, `{ count, mine }`; `{}` once deleted (see below) |
@@ -509,13 +512,444 @@ becomes the reply's `createdAt` and its author moves to the front of
 client that needs the top-level message's members exactly reads it with
 `getMessage`.
 
+## Batch 2: streamed replies and signals
+
+Batch 2 is D77's step 2 on Comments' side: a message streamed as it is
+written (`begin`, `appendDraft`, `finish`, and `interrupt` for one whose
+author stopped), the `composing` and `interrupted` states, the
+`composing` field, `composeTimeoutMs`, and the signals `typing`,
+`viewing` and `draft` (D77 primitive 2). The engine's side of signals,
+their route, their stream message, their limits and `cx.signal`, is the
+signals work's; this section says only what Comments declares and does
+with them.
+
+### Terms
+
+- A message is *composing* from its `begin` until its `finish`, its
+  `interrupt`, its `deleteMessage` or its purge. A composing message holds
+  its id and its place in the listing, and its *draft*, the text its
+  `appendDraft`s added, in order.
+- A message *stands* while it is `posted` or `interrupted`: it holds text
+  its author wrote, and the counts count it.
+- Lengths are in Unicode code points, as `maxBodyLength` is: a draft's
+  length, an `offset`, the result's `length`. A JavaScript client counts
+  them with `Array.from(text).length`, never `text.length`.
+- A message is *idle* when it is composing and
+  `now - lastAppendAt >= composeTimeoutMs`, `lastAppendAt` being its
+  `last_append_at` ("Migration 3").
+- A text *has no text* when it is empty or every code point of it is
+  white space: when it fails the `pattern` `\S` that post's `body` member
+  declares, decided as the engine decides that pattern, so a draft
+  `finish` accepts is a body `post` accepts.
+
+### Config
+
+| Member | Type | When absent | Meaning |
+|--------|------|-------------|---------|
+| `composeTimeoutMs` | integer 5000..3600000 | 60000 | how long a composing message's author may append nothing before the runner interrupts it ("The schedule") |
+
+`maxBodyLength` also bounds the draft: an `appendDraft` that would make it
+longer is refused, and `finish` checks the body it posts against it. A
+config narrowed while a message is composing leaves its draft as it is;
+`finish` without `body` then refuses it, and `interrupt` keeps it whole.
+
+### The record
+
+Amends batch 1's table:
+
+| Member | Batch 2 |
+|--------|---------|
+| `state` | `"composing"`, `"posted"`, `"interrupted"` or `"deleted"` |
+| `author` | the subject that posted or began it |
+| `body` | while composing, the draft so far: its chunks concatenated in `chunk_offset` order; `""` right after `begin` |
+| `blocks`, `mentions` | `[]` while composing and once interrupted, until an edit gives them |
+| `reactions` | `{}` while composing (nothing can react to it) |
+| `createdAt` | for a message `begin` started, the `begin`'s `now`; it never changes, so the message keeps its place |
+| `editedAt`, `edits` | absent and 0 while composing |
+| `pinned` | false while composing |
+| `replies` | how many replies of the thread *stand* |
+| `lastReplyAt` | the greatest `createdAt` of the thread's standing replies |
+| `participants` | the distinct `author`s of the thread's *standing* messages, ordered as batch 1 orders them |
+
+The SQL of "participants" and every count of batch 1 read
+`state IN ('posted', 'interrupted')` where batch 1 reads
+`state = 'posted'`. A composing top-level record has `replies: 0`, no
+`lastReplyAt`, `participants: []` (its own author is in them once it
+stands) and no `resolved`. The record carries no draft length and no
+`lastAppendAt`: a reader counts the body's code points.
+
+The members are in batch 1's order; batch 2 adds none.
+
+### Signals
+
+Comments declares three, each `{ name, description, paramsSchema,
+access }`:
+
+| Signal | Data | Access | Sent by |
+|--------|------|--------|---------|
+| `typing` | `{ thread? }`: `thread` an integer >= 1 | `read` | a client, every few seconds while its person types; `thread` the top-level message whose thread the reply is for, absent for a top-level message |
+| `viewing` | `{}` | `read` | a client, every few seconds while it shows the conversation |
+| `draft` | `{ message, offset, text }`: `message` integer >= 1, `offset` integer >= 0, `text` a string of 1..4000 code points | `operation` | `appendDraft` alone, through `cx.signal("draft", data)`, when its call commits |
+
+- Comments has no handler for `typing` and `viewing`: the engine checks
+  their data against the `paramsSchema` and the policy (`read`, operation
+  `signal:typing` or `signal:viewing`), and delivers them. `typing`'s
+  `thread` is not checked against the conversation. A client shows a
+  sender as typing or looking for a few seconds after its last signal;
+  the engine holds no presence.
+- `draft`'s data members are in the order `message`, `offset`, `text`.
+  `offset` is the draft's length before `text`. The engine stamps `from`,
+  the author's subject, and `at`.
+- Every `draft` fits the engine's 4096 bytes of data: `appendDraft`
+  refuses a `text` of more than 4000 bytes written as a JSON string, its
+  quotes included (`serde_json::to_vec(&Value::String(text))` in Rust,
+  `JSON.stringify(text)` in TypeScript, which write a string's bytes
+  alike), and the rest of the data, `{"message":<at most 19
+  digits>,"offset":<at most 5 digits>,"text":` and `}`, is at most 54
+  bytes. So `cx.signal` is never refused for its size.
+
+What a reader does with `draft` (the generators' docs and the client
+tests follow this):
+
+1. Open the stream with `signals=1` before reading, then read
+   (`listMessages`, `getMessage`), and keep the signals that arrive
+   during the read for after it.
+2. For each composing message, hold its draft and its length `held`.
+3. On a `draft` of a message the reader holds as composing: when
+   `offset == held`, append `text`; when `offset < held`, ignore it (it
+   is one the read already held); when `offset > held`, a signal was
+   lost: read the message with `getMessage` and hold its `body`.
+4. On a `draft` of a message the reader does not hold, or holds as not
+   composing: read it with `getMessage` when it does not hold it, and
+   ignore the signal otherwise. Delivery is at most once and in no order
+   with the events, so a `draft` can arrive after the `finish` event of
+   its message.
+5. On a `finish`, `interrupt`, `deleteMessage` or `purge` event, take the
+   record (or the purge) from the event and drop the held draft.
+
+### The schedule
+
+Comments declares one schedule, `interrupt`:
+
+- `every`: from the config, `min(composeTimeoutMs / 4, 15000)`
+  milliseconds (integer division), 15000 under the default; always at
+  least 1250, above the engine's minimum.
+- Each run reads the idle messages of the run's namespace and schema,
+  oldest `last_append_at` first, a keyset of `(last_append_at, id,
+  message)` past each page of 100, at most 1000 a run, through the index
+  `comment_messages_idle` ("Migration 3"), as Timers' `fire` sweeps its
+  deadlines:
+
+  ```sql
+  SELECT id, message, last_append_at FROM <comment_messages>
+   WHERE namespace = ? AND schema = ? AND last_append_at IS NOT NULL
+     AND last_append_at <= ?                -- now - composeTimeoutMs
+     [AND (last_append_at, id, message) > (?, ?, ?)]
+   ORDER BY last_append_at, id, message LIMIT ?
+  ```
+
+- For each row it invokes `interrupt({ message })` on the instance as
+  the runner's principal (`cx.instances().invoke(schema, id, "interrupt",
+  {"message": message}, None)`). A veto leaves the row (the author
+  appended or finished in between) and the keyset moves past it; any
+  other error fails the run, so a runner principal the policy does not
+  let write the schema shows in `engine.runner.status()`, as Timers'
+  does.
+- Each interrupt is a logged beside event of its own, whose actor is the
+  runner's principal. The schedule writes nothing itself.
+
+The engine side must let a schedule invoke a beside operation; batch 1's
+testkit covers beside operations called by a principal only.
+
+### Operations
+
+Each new writing operation is `"writes": true, "beside": true`, as batch
+1's are; `begin`, `finish` and `interrupt` are logged, and `appendDraft`
+is `"log": false` and appends no event.
+
+#### `begin({ thread?, quotes?, clientId? })`
+
+Begins a message as the caller, composing. Result and event `result`: the
+record.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | (retry) | as post's 1: `clientId` is given and a present message of the instance, in any state, has `author` = the caller's subject and that `client_id`; it returns that message's record as it is now and calls `cx.unchanged()`. `post` and `begin` share a caller's `clientId`s (one unique index): a `post` retried as a `begin`, or the reverse, returns the message the first made |
+| 2 | `invalid_argument` `/quotes` `needs thread` | `quotes` without `thread` |
+| 3 | `no_message` | `thread` names no present message |
+| 4 | `not_a_thread` | `thread` names a reply |
+| 5 | `composing` `{ message: thread }` | `thread` names a composing message |
+| 6 | `no_message` | `quotes` names no present message |
+| 7 | `not_in_thread` | as post's |
+| 8 | `deleted` | `quotes` names a deleted message |
+| 9 | `composing` `{ message: quotes }` | `quotes` names a composing message |
+
+Writes: `message` = the conversation's `last_message + 1`, which becomes
+`last_message` (the conversation row inserted when absent, as `post`
+does); the row with `thread`, `quotes`, `author` = subject, `via`,
+`state = 'composing'`, `body = ''`, `blocks = '[]'`, `mentions = '[]'`,
+`created_at = now`, `edited_at` NULL, `edits = 0`, `pinned = 0`,
+`client_id`, `resolved_*` NULL, `draft_length = 0`,
+`last_append_at = now`. No count moves: `messages`, `lastMessageAt` and
+`threads` stay; `composing` gains the caller when it held no composing
+message.
+
+#### `appendDraft({ message, text })`
+
+`text` is a string of 0..4000 code points (`paramsSchema`). Result
+`{ message, offset, length }`: `offset` the draft's length before the
+append, `length` after; both equal for an empty `text`. No event.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/text` `is more than 4000 bytes as a JSON string` | `text`, written as a JSON string with its quotes ("Signals"), is more than 4000 bytes |
+| 2 | `no_message` | |
+| 3 | `not_composing` `{ message, state }` | the message is `posted`, `interrupted` or `deleted`; `state` is its state |
+| 4 | `not_author` `{ message, author }` | the caller's subject is not the author; no permission lets another write a draft |
+| 5 | `draft_too_long` `{ message, length, append, maxBodyLength }` | `length` (the draft's) + `append` (the text's length) > `maxBodyLength` |
+
+An idle message not yet interrupted is still composing: an append to it is
+allowed and makes it not idle.
+
+Writes, when `text` is not empty: a `comment_drafts` row with
+`chunk_offset` = `draft_length` and `text`; `draft_length` +=
+the text's length. Always: `last_append_at = now`. Nothing else moves.
+Then, when `text` is not empty, `cx.signal("draft", { message, offset,
+text })`, delivered after the commit and dropped with a rollback. An
+empty `text` writes no chunk and sends no signal: it keeps the message
+from being idle, for an author at work with nothing to show (an agent
+running a tool, say). A refused append writes nothing and moves no
+`last_append_at`.
+
+#### `finish({ message, body?, blocks?, mentions? })`
+
+Posts a composing message. `body`, `blocks` and `mentions` have post's
+`paramsSchema`. Result and event `result`: the record, `state: "posted"`.
+The event carries the whole body, as a post's does.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/body` `must NOT have more than <maxBodyLength> characters` | `body` is given and is longer than `maxBodyLength` |
+| 2 | `invalid_argument` `/blocks/<i>/data` `is more than 8192 bytes of JSON` | as for post |
+| 3 | `no_message` | |
+| 4 | `not_composing` `{ message, state }` | as for appendDraft. A retry of a `finish` that committed meets this with `state: "posted"` |
+| 5 | `not_author` `{ message, author }` | as for appendDraft |
+| 6 | `invalid_argument` `/body` `is required: the draft has no text` | `body` is absent and the draft has no text |
+| 7 | `invalid_argument` `/body` `must NOT have more than <maxBodyLength> characters` | `body` is absent and the draft is longer than `maxBodyLength` (the config narrowed since the appends) |
+| 8 | `block_not_allowed` | as for post |
+| 9 | `ref_not_found` | each ref block, as for post: the message held none |
+
+`quotes` and `thread` were checked at `begin` and are not checked again:
+a quoted message deleted or purged since stays quoted, as a posted
+reply's does.
+
+Writes: `state = 'posted'`; `body` = `body` when given, else the draft;
+`blocks` and `mentions` as given (`'[]'` when absent); the message's
+`comment_drafts` rows deleted; `draft_length` and `last_append_at` NULL.
+`created_at` stays. A `body` given in place of the draft drops the draft;
+it is not an edit (`edits` stays 0). Then the counts, as a post of a
+message whose `createdAt` is the message's: `messages + 1`, `open + 1`
+for a top-level message, `last_message_at` the greater of itself and
+`created_at`.
+
+#### `interrupt({ message })`
+
+Stops a composing message. Result and event `result`: the record after,
+`state: "interrupted"`, or `"deleted"` when the draft had no text.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `no_message` | |
+| 2 | `not_composing` `{ message, state }` | as for appendDraft |
+| 3 | `not_idle` `{ message, author, lastAppendAt, composeTimeoutMs }` | the caller's subject is not the author, the message is not idle, and the caller does not moderate; `composeTimeoutMs` as the config gives it, 60000 when absent |
+
+Its author may at any time (to stop and keep what it wrote; it drops the
+draft with `deleteMessage`), a moderator may at any time, and anyone the
+policy lets write may once the message is idle, which is how the
+schedule calls it. Ask `cx.can(moderatePermission)` only when the first
+two conditions of refusal 3 hold.
+
+Writes, when the draft has text: `state = 'interrupted'`, `body` = the
+draft, whole, even past a narrowed `maxBodyLength`; `blocks` and
+`mentions` stay `'[]'`; then the counts as `finish` moves them. When the
+draft has no text: `state = 'deleted'`, `body = ''`, as `deleteMessage`
+leaves a message, and no count moves. Both: the message's
+`comment_drafts` rows deleted, `draft_length` and `last_append_at` NULL;
+`created_at` stays.
+
+#### Batch 1's operations, amended
+
+| Operation | Batch 2 |
+|-----------|---------|
+| `post` | refusals 1 to 13 below |
+| `edit` | after refusal 5 (`deleted`), `composing` `{ message }` for a composing message. An interrupted message is edited as a posted one, the window counted from its `createdAt`; an edit whose caller is its author also sets `state = 'posted'` (the author has said what it meant), and a moderator's edit of another's leaves it `interrupted`. No count moves: both stand |
+| `deleteMessage` | a composing message may be deleted, by its author or a moderator, as any message: the author's way to drop a draft. It also deletes the message's `comment_drafts` rows and sets `draft_length` and `last_append_at` NULL. No count moves for a composing message, which did not stand; an interrupted one leaves the counts as a posted one does |
+| `purge` | also deletes every purged message's `comment_drafts` rows; a top-level message's composing replies are purged with its thread |
+| `react`, `unreact` | after refusal 2 (`deleted`), `composing` `{ message }` |
+| `pin` | after refusal 3 (`deleted`), `composing` `{ message }`. `unpin` is unchanged: a composing message is not pinned, so `not_pinned` covers it |
+| `resolve`, `reopen` | after refusal 3 (`deleted`), `composing` `{ message: thread }` |
+| `listMessages` | composing and interrupted messages are in the listing, in their places; a composing one's `body` is its draft so far. `thread` may name a composing top-level message (its replies are none) |
+| `getMessage` | the record, a composing message's with its draft so far as `body` |
+| `listEdits`, `listReactions` | unchanged: a composing message has neither |
+
+`post`'s refusals in batch 2:
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | (retry) | as in batch 1, a message `begin` made included |
+| 2 | `invalid_argument` `/body` | as in batch 1 |
+| 3 | `invalid_argument` `/quotes` `needs thread` | |
+| 4 | `invalid_argument` `/blocks/<i>/data` | |
+| 5 | `no_message` | `thread` |
+| 6 | `not_a_thread` | |
+| 7 | `composing` `{ message: thread }` | `thread` names a composing message |
+| 8 | `no_message` | `quotes` |
+| 9 | `not_in_thread` | |
+| 10 | `deleted` | `quotes` names a deleted message |
+| 11 | `composing` `{ message: quotes }` | `quotes` names a composing message |
+| 12 | `block_not_allowed` | |
+| 13 | `ref_not_found` | |
+
+Replying in the thread of an interrupted message, and quoting one, are
+allowed, as for a posted one.
+
+### Refusals
+
+New veto codes:
+
+| Veto code | details |
+|-----------|---------|
+| `composing` | `{ message }`: the composing message an edit, reaction, pin, resolve or reopen named, or the `thread` or `quotes` of a post or begin |
+| `not_composing` | `{ message, state }`: `appendDraft`, `finish` or `interrupt` of a message that is not composing, and its state |
+| `not_idle` | `{ message, author, lastAppendAt, composeTimeoutMs }` |
+| `draft_too_long` | `{ message, length, append, maxBodyLength }` |
+
+`not_author` also covers `appendDraft` and `finish` of another's composing
+message, with batch 1's details `{ message, author }`.
+
+### Fields
+
+Batch 1's three now count the messages that *stand*:
+
+| Field | Value | Moved by |
+|-------|-------|----------|
+| `messages` | the standing messages, top-level and replies (the instance column `count`) | post, finish, interrupt (to `interrupted`), deleteMessage and purge of a standing message |
+| `lastMessageAt` | the greatest `createdAt` of a standing message | the same |
+| `threads` | `{ open, resolved }` of the standing top-level messages | post, finish and interrupt of a top-level message, deleteMessage and purge of a standing top-level one, resolve, reopen |
+| `composing` | an array of strings, always present: each subject with a composing message on the instance, once, ordered by the least id of its composing messages, ascending; `[]` while there is none | begin, finish, interrupt, deleteMessage and purge of a composing message |
+
+Nothing moves at `begin` but `composing`, and at `appendDraft` nothing
+does. `composing` is volatile like the rest and read at each read:
+
+```sql
+SELECT author, MIN(message) AS first FROM <comment_messages>
+ WHERE namespace = ? AND schema = ? AND id = ? AND last_append_at IS NOT NULL
+ GROUP BY author ORDER BY first
+```
+
+through `comment_messages_composing`. It lists an idle message's author
+until the schedule interrupts it. A client watching the stream derives it:
+a `begin` event adds its author, and a `finish`, `interrupt`,
+`deleteMessage` or `purge` event of a composing message removes the
+author unless the client holds another composing message of theirs.
+
+`Moves::leaving` and the recount of `last_message_at` read *stands* where
+batch 1 reads posted.
+
+### Migration 3, `drafts`
+
+`BehaviorMigration::new(3, "drafts")`. It creates one table and, in `up`,
+adds two columns and two indexes to `comment_messages`
+(`ALTER TABLE ... ADD COLUMN`, `CREATE INDEX ... WHERE`, each index named
+through `sql.table(name)` as Links names its own), the same on both
+dialects:
+
+| `comment_messages` column | Spec | Holds |
+|---------------------------|------|-------|
+| `draft_length` | integer | the draft's length in code points while composing; NULL otherwise |
+| `last_append_at` | integer | the `now` of the message's `begin` or latest `appendDraft` while composing; NULL otherwise |
+
+Exactly while a message is composing, `state = 'composing'`,
+`draft_length` is not NULL and `last_append_at` is not NULL; every write
+that moves a message out of composing sets both NULL in the same
+statement. Existing rows get NULL for both: no message composes before
+batch 2. `state` keeps no CHECK.
+
+| Index on `comment_messages` | Columns | Where | Read by |
+|-----------------------------|---------|-------|---------|
+| `comment_messages_composing` | `(namespace, schema, id, message)` | `last_append_at IS NOT NULL` | the `composing` field |
+| `comment_messages_idle` | `(namespace, schema, last_append_at, id, message)` | `last_append_at IS NOT NULL` | the schedule |
+
+Each statement that should use one of them names `last_append_at IS NOT
+NULL` itself, so both planners match the index's predicate.
+
+`comment_drafts`, primary key `(namespace, schema, id, message,
+chunk_offset)`: `namespace`, `schema`, `id` text not null; `message`
+integer not null; `chunk_offset` integer not null (the draft's length
+before the chunk: the `offset` of its `draft` signal; `offset` is
+reserved in Postgres); `text` text not null (never empty). One row per
+non-empty append, so an append inserts a row and never rewrites the
+draft; a read concatenates a message's rows in `chunk_offset` order, one
+statement for the composing messages of a page:
+
+```sql
+SELECT message, text FROM <comment_drafts>
+ WHERE namespace = ? AND schema = ? AND id = ? AND message IN (...)
+ ORDER BY message, chunk_offset
+```
+
+`afterChange` on `Delete` also removes the instance's `comment_drafts`
+rows; its composing messages go with its other messages.
+
+### What the generators expose
+
+For the engine client (`engineclientgen`, TypeScript) and the behavior
+types (`behaviortypes`, which typegen and rustgen render), from the
+declaration's `signals`:
+
+- **Comments' narrowing.** `begin`, `finish` and `interrupt` return the
+  message record: add them to `commentsMessageResults`, so each returns
+  `<Base>CommentMessage`. `finish`'s `blocks` narrow as `post`'s do
+  (dropped when the config allows none). `appendDraft`'s result is as
+  declared. The `composing` field is `string[]` (Go `[]string`, Rust
+  `Vec<String>`), always present, like `messages` and `threads`; the
+  record's `state` is the four-member union.
+- **Signal data types.** One type per declared signal, whatever its
+  access, from its `paramsSchema`: `<Base><Signal>Signal`, as
+  `NoteTypingSignal`, `NoteViewingSignal`, `NoteDraftSignal`, documented
+  "The data of Comments' typing signal: <description>". If two behaviors
+  of one type declare the same signal name (unless the registry refuses
+  that, as it refuses two operations of one name), both are qualified,
+  `<Base><Behavior><Signal>Signal`.
+- **`<Base>Signals`.** By behavior, by signal name, the data type:
+  `{ Comments: { typing: NoteTypingSignal; viewing: NoteViewingSignal;
+  draft: NoteDraftSignal } }`, beside `<Base>Vetoes`. A behavior with no
+  signal has no member.
+- **`<Base>SignalMessage`.** The engine client's stream signal message
+  (whatever the signals work names it, with `from`, `at` and the
+  instance) with `behavior`, `name` and `data` narrowed to a union over
+  every declared signal of the type, discriminated by `behavior` and
+  `name`; and `is<Base>Signal(message, behavior?, name?)`, a guard that
+  checks the message's schema, then the behavior and name when given, as
+  `is<Base>Veto` checks a veto's.
+- **Send helpers.** On `<Schema>Client`, one method per signal whose
+  access is `read` or `write`, none for `operation`:
+  `send<Signal>(id, data, options?)`, calling the engine client's signal
+  send with the schema, the id, the behavior and the name, and resolving
+  to `void`; `data` is optional when its schema requires no member:
+  `sendTyping(id, data?, options?)`, `sendViewing(id, data?, options?)`.
+  A send helper whose name an operation of the type already takes is
+  `send<Behavior><Signal>`. The doc comment is the signal's description.
+- **Draft following.** The client's docs for `getMessage` and
+  `NoteDraftSignal` point at "What a reader does with draft" above; a
+  helper that holds drafts is not generated.
+- Go and Rust types render behavior fields only: they gain `composing`
+  and nothing for signals.
+
 ## Left for later batches
 
-Not declared and not built in batch 1, each in D77's order:
+Not declared and not built in batches 1 and 2, each in D77's order:
 
-- Batch 2 (signals): `begin`, `appendDraft`, `finish`; the `composing`
-  and `interrupted` states; `composeTimeoutMs`; the `typing`, `viewing`
-  and `draft` signals; the `composing` field; `comment_drafts`.
 - Batch 3 (namespace operations): `markRead`, `follow`, the `unread`
   field, `inbox`, `claimDeliveries`, `settleDeliveries`,
   `deliverPermission`, `maxAttempts`; `comment_reads`, `comment_follows`,
@@ -525,5 +959,6 @@ Not declared and not built in batch 1, each in D77's order:
 - Batch 5: `searchMessages`; `code` and `attachment` blocks and the config
   kinds for them; `moveAnchor` and `anchorPermission`.
 
-Each later batch adds its own migration (3, 4, ...) rather than the single
-migration 2 D77 describes, since batch 1 ships alone.
+Each batch adds its own migration (batch 2 adds 3, and later ones 4,
+5, ...) rather than the single migration 2 D77 describes, since batch 1
+shipped alone.

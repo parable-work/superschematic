@@ -1,24 +1,30 @@
 {
   "name": "Comments",
-  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. Every operation is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation.",
+  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. A message may be streamed as it is written: begin holds its place as composing, appendDraft adds to its draft and sends the draft signal to the streams open on the instance, and finish posts it; one whose author stops appending for composeTimeoutMs is interrupted, keeping what was written. Readers send typing and viewing, signals the engine delivers and does not keep. Every writing operation is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "maxBodyLength": { "description": "The longest body a post or an edit may give, in code points; 40000 when absent.", "type": "integer", "minimum": 1, "maximum": 40000 },
+      "maxBodyLength": { "description": "The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points; 40000 when absent.", "type": "integer", "minimum": 1, "maximum": 40000 },
       "editWindowMs": {
         "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
         "type": "integer",
         "minimum": 1000
       },
+      "composeTimeoutMs": {
+        "description": "How long a composing message's author may append nothing before the engine's runner interrupts it, in milliseconds; 60000 when absent. The runner looks for such messages every quarter of it, or every 15 seconds when that is sooner.",
+        "type": "integer",
+        "minimum": 5000,
+        "maximum": 3600000
+      },
       "blocks": {
-        "description": "The block kinds a post or an edit may give; every kind when absent, none when empty.",
+        "description": "The block kinds a post, an edit or a finish may give; every kind when absent, none when empty.",
         "type": "array",
         "uniqueItems": true,
         "items": { "enum": ["ref", "action"] }
       },
       "moderatePermission": {
-        "description": "The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges.",
+        "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
         "type": "string",
         "minLength": 1
       },
@@ -27,14 +33,19 @@
     }
   },
   "fields": [
-    { "name": "messages", "description": "How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.", "volatile": true },
-    { "name": "lastMessageAt", "description": "When the latest posted message was posted, in epoch milliseconds; absent while there is none.", "volatile": true },
-    { "name": "threads", "description": "The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.", "volatile": true }
+    { "name": "messages", "description": "How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.", "volatile": true },
+    { "name": "lastMessageAt", "description": "The greatest createdAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.", "volatile": true },
+    { "name": "threads", "description": "The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.", "volatile": true },
+    {
+      "name": "composing",
+      "description": "The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.",
+      "volatile": true
+    }
   ],
   "operations": [
     {
       "name": "post",
-      "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing.",
+      "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -97,10 +108,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -129,14 +140,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -153,8 +164,305 @@
       "beside": true
     },
     {
+      "name": "begin",
+      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "description": "The id of the top-level message to reply in; a top-level message when absent.", "type": "integer", "minimum": 1 },
+          "quotes": { "description": "The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread.", "type": "integer", "minimum": 1 },
+          "clientId": { "description": "The caller's key for the message, so a retry returns the message it began.", "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "resultSchema": {
+        "description": "The message: composing, its draft empty; for a retry, the message as it is now.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "appendDraft",
+      "description": "Appends text to the draft of the caller's composing message, and once the call commits sends the draft signal, { message, offset, text }, to the streams open on the instance. A reader that opens the conversation midway reads the draft so far as the message's body and follows the signals from its length. Its author only; the draft holds at most the config's maxBodyLength code points. An empty text appends nothing and sends nothing, and still counts as an append, so an author at work with nothing to show keeps its message from being interrupted. It appends no event.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "text"],
+        "properties": {
+          "message": { "description": "The id of the composing message.", "type": "integer", "minimum": 1 },
+          "text": { "description": "The text to append, at most 4000 bytes written as a JSON string, its quotes included, so that the draft signal fits a signal's 4096 bytes.", "type": "string", "maxLength": 4000 }
+        }
+      },
+      "resultSchema": {
+        "description": "Where the text went.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "offset", "length"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer" },
+          "offset": { "description": "The draft's length before the append, in code points: where the text starts.", "type": "integer" },
+          "length": { "description": "The draft's length after the append, in code points.", "type": "integer" }
+        }
+      },
+      "writes": true,
+      "beside": true,
+      "log": false
+    },
+    {
+      "name": "finish",
+      "description": "Posts the caller's composing message: its body is body, or the draft when body is absent, checked as a post's body is, and its blocks and mentions are as a post gives them. Its author only. The message keeps its id, its place and the createdAt its begin gave it, and is counted from now.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": { "description": "The id of the composing message.", "type": "integer", "minimum": 1 },
+          "body": { "description": "The text, Markdown, at most the config's maxBodyLength code points, in place of the draft; the draft when absent.", "type": "string", "minLength": 1, "maxLength": 40000, "pattern": "\\S" },
+          "blocks": {
+            "description": "Structured parts beside the body, each of a kind the config allows; none when absent.",
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "description": "A block, checked against its kind.",
+              "type": "object",
+              "required": ["kind"],
+              "oneOf": [
+                {
+                  "description": "Another instance of the namespace, which the poster must be able to read when the block is posted; a reader's own read decides whether it opens.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "schema", "id"],
+                  "properties": {
+                    "kind": { "const": "ref" },
+                    "schema": { "description": "The instance's schema.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+                    "id": { "description": "The instance's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+                  }
+                },
+                {
+                  "description": "A card for something the poster did, \"ran the tests\" say; an edit moves its status.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "title", "status"],
+                  "properties": {
+                    "kind": { "const": "action" },
+                    "title": { "description": "What was done.", "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+                    "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
+                    "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
+                  }
+                }
+              ]
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed.",
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\S+$" }
+          }
+        }
+      },
+      "resultSchema": {
+        "description": "The message, posted.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "interrupt",
+      "description": "Stops a composing message: it becomes interrupted, its draft its body, or deleted when its draft holds no text. Its author may at any time, and so may a caller holding moderatePermission; any caller the policy lets write may once the author has appended nothing for the config's composeTimeoutMs, which is how the engine's runner interrupts a message whose author has stopped, on its schedule. An interrupted message is counted from now.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the composing message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The message, interrupted, or deleted when its draft held no text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+
+      "writes": true,
+      "beside": true
+    },
+    {
       "name": "edit",
-      "description": "Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
+      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -215,10 +523,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -247,14 +555,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -272,7 +580,7 @@
     },
     {
       "name": "deleteMessage",
-      "description": "Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.",
+      "description": "Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -288,10 +596,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -320,14 +628,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -371,7 +679,7 @@
     },
     {
       "name": "react",
-      "description": "Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji.",
+      "description": "Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -390,10 +698,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -422,14 +730,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -447,7 +755,7 @@
     },
     {
       "name": "unreact",
-      "description": "Removes the caller's reaction from a posted message.",
+      "description": "Removes the caller's reaction from a posted or interrupted message.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -466,10 +774,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -498,14 +806,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -523,7 +831,7 @@
     },
     {
       "name": "pin",
-      "description": "Pins a posted message, top-level or a reply. Needs pinPermission when the config names one.",
+      "description": "Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -539,10 +847,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -571,14 +879,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -612,10 +920,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -644,14 +952,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -669,7 +977,7 @@
     },
     {
       "name": "resolve",
-      "description": "Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.",
+      "description": "Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -685,10 +993,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -717,14 +1025,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -758,10 +1066,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -790,14 +1098,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -815,7 +1123,7 @@
     },
     {
       "name": "listMessages",
-      "description": "Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.",
+      "description": "Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -842,10 +1150,10 @@
                 "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
                 "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
                 "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-                "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-                "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-                "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-                "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+                "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+                "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+                "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+                "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
                 "blocks": {
                   "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
                   "type": "array",
@@ -874,14 +1182,14 @@
                     }
                   }
                 },
-                "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+                "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
                 "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
                 "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
                 "pinned": { "type": "boolean" },
-                "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-                "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+                "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+                "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
                 "participants": {
-                  "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+                  "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
                   "type": "array",
                   "items": { "type": "string" }
                 },
@@ -912,10 +1220,10 @@
               "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
               "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
               "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-              "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-              "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-              "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-              "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+              "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+              "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+              "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+              "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
               "blocks": {
                 "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
                 "type": "array",
@@ -944,14 +1252,14 @@
                   }
                 }
               },
-              "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+              "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
               "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
               "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
               "pinned": { "type": "boolean" },
-              "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-              "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+              "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+              "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
               "participants": {
-                "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+                "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
                 "type": "array",
                 "items": { "type": "string" }
               },
@@ -969,7 +1277,7 @@
     },
     {
       "name": "getMessage",
-      "description": "Reads one message of the conversation, a deleted one included.",
+      "description": "Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -985,10 +1293,10 @@
           "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
-          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
-          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
-          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
-          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
           "blocks": {
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
@@ -1017,14 +1325,14 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
-          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
-            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
             "items": { "type": "string" }
           },
@@ -1121,17 +1429,55 @@
       }
     }
   ],
+  "signals": [
+    {
+      "name": "typing",
+      "description": "The sender is typing a message: top-level, or with thread a reply in that thread. A client sends it every few seconds while its person types, and a reader shows the sender as typing for a few seconds after the last; the engine keeps none. Comments does not check that thread names a message.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "thread": { "description": "The id of the top-level message whose thread the sender is typing in; absent for a top-level message.", "type": "integer", "minimum": 1 } }
+      },
+      "access": "read"
+    },
+    {
+      "name": "viewing",
+      "description": "The sender has the conversation open. A client sends it every few seconds while it shows the conversation, and a reader shows the sender as looking for a few seconds after the last; the engine keeps none.",
+      "paramsSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "access": "read"
+    },
+    {
+      "name": "draft",
+      "description": "Text appendDraft added to a composing message's draft, sent once its call commits; from is the message's author. A reader that holds offset code points of the draft appends text; one that holds fewer missed a signal and reads the message again with getMessage; one that holds more ignores it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "offset", "text"],
+        "properties": {
+          "message": { "description": "The id of the composing message.", "type": "integer", "minimum": 1 },
+          "offset": { "description": "The draft's length before the text, in code points.", "type": "integer", "minimum": 0 },
+          "text": { "description": "The text appended, never empty.", "type": "string", "minLength": 1, "maxLength": 4000 }
+        }
+      },
+      "access": "operation"
+    }
+  ],
   "vetoes": [
     {
       "code": "no_message",
       "description": "The id a call names, as message, thread, quotes or around, is not a message of the conversation, or a purged one; or around names a message outside the listing. details: message."
     },
-    { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, listMessages, resolve and reopen. details: message, thread, the reply's thread." },
-    { "code": "not_in_thread", "description": "post with quotes naming a message outside the thread it replies in. details: message, thread." },
-    { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve or reopen of a deleted message, or a post quoting one. details: message." },
+    { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, begin, listMessages, resolve and reopen. details: message, thread, the reply's thread." },
+    { "code": "not_in_thread", "description": "post or begin with quotes naming a message outside the thread it replies in. details: message, thread." },
+    { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve or reopen of a deleted message, or a post or begin quoting one. details: message." },
+    {
+      "code": "composing",
+      "description": "An edit, reaction, pin, resolve or reopen of a composing message, a post or begin replying in the thread of a composing top-level message, or quoting a composing message. details: message."
+    },
+    { "code": "not_composing", "description": "appendDraft, finish or interrupt of a message that is posted, interrupted or deleted. details: message, state." },
     {
       "code": "not_author",
-      "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread). details: message, author."
+      "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread); or appendDraft or finish of another's composing message, which nobody but its author writes. details: message, author."
     },
     { "code": "edit_window_passed", "description": "An edit by the message's author more than the config's editWindowMs after it was posted. details: message, createdAt, editWindowMs." },
     { "code": "too_many_edits", "description": "An edit of a message that has been edited 500 times. details: message, max." },
@@ -1144,6 +1490,11 @@
     { "code": "not_resolved", "description": "reopen of a thread that is not resolved. details: thread." },
     { "code": "block_not_allowed", "description": "A block of a kind the config's blocks does not list. details: block, its index in blocks; kind; allowed." },
     { "code": "ref_not_found", "description": "A ref block whose instance does not exist or the caller may not read, the same refusal for both. details: block, schema, id." },
+    {
+      "code": "not_idle",
+      "description": "interrupt of another's composing message, by a caller without moderatePermission, whose author appended less than the config's composeTimeoutMs ago. details: message, author, lastAppendAt, composeTimeoutMs."
+    },
+    { "code": "draft_too_long", "description": "appendDraft whose text would make the draft longer than the config's maxBodyLength. details: message, length, append, maxBodyLength." },
     { "code": "not_configured", "description": "purge on a type whose config names no moderatePermission. details: permission, \"moderatePermission\"." }
   ]
 }
