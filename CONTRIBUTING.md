@@ -522,14 +522,17 @@ A release is three steps, each started by a person. For the first release,
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
    official extensions) for linux and darwin on x64 and arm64, each
    on a runner of that os/arch, linked against the superscalar archive built
-   from the pinned checkout, and the identity runner,
+   from the pinned checkout, `superschematic-topcoat`
+   (`extensions/topcoat/cmd/superschematic-topcoat`, the CLI with the
+   Topcoat extension linked too) the same way, and the identity runner,
    `superschematic-identity`, on the same runners, since it needs cgo too.
    It cross-compiles the migration runner, `superschematic-migrate`, for the
    same four on one runner, since it needs no cgo. Both runners' `version`
    commands print the version the build stamps with `-X main.version`. It
    refuses a set not built from the tag's commit, writes `SHA256SUMS` over
-   the three binaries' archives
+   the binaries' archives
    (`superschematic_<version>_<platform>.tar.gz`,
+   `superschematic-topcoat_<version>_<platform>.tar.gz`,
    `superschematic-identity_<version>_<platform>.tar.gz` and
    `superschematic-migrate_<version>_<platform>.tar.gz`), and packs the npm
    tarballs and the PyPI sdist and wheel. It creates the GitHub release with

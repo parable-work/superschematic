@@ -1032,11 +1032,11 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
-			return fmt.Errorf("local: server %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.Deployable, module)
+			return fmt.Errorf("local: %s %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.what(), s.Deployable, module)
 		}
 		env, err := serverEnv(s, secrets, req.Parameters, outputs)
 		if err != nil {
-			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
+			return fmt.Errorf("local: %s %s: %w", s.what(), s.Deployable, err)
 		}
 		engine, err := p.projectEngine(ctx, req, module, s.what(), s.Deployable, true)
 		if err != nil {
@@ -1068,7 +1068,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
 		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: engine.buildEnv(req)}); err != nil {
-			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
+			return fmt.Errorf("local: build %s %s: %w", s.what(), s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
 	}
@@ -1078,7 +1078,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 			return err
 		}
 		if b.server.Port != 0 && p.runner().PortInUse(b.server.Port) {
-			return fmt.Errorf("local: server %s: port %d is in use, by another program or a server an earlier run left behind; stop it, or give %s another port with its port setting", b.server.Deployable, b.server.Port, b.server.Deployable)
+			return fmt.Errorf("local: %s %s: port %d is in use, by another program or a server an earlier run left behind; stop it, or give %s another port with its port setting", b.server.what(), b.server.Deployable, b.server.Port, b.server.Deployable)
 		}
 		c := p.out()
 		stdout, stderr := c.writer(b.server.Deployable), c.writer(b.server.Deployable)
@@ -1086,7 +1086,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		proc, err := p.runner().Start(cmd)
 		if err != nil {
-			return fmt.Errorf("local: start server %s: %w", b.server.Deployable, err)
+			return fmt.Errorf("local: start %s %s: %w", b.server.what(), b.server.Deployable, err)
 		}
 		p.mu.Lock()
 		if p.running == nil {
@@ -1127,6 +1127,14 @@ func toolOf(language string) string {
 		return "cargo"
 	}
 	return "go"
+}
+
+// article is the indefinite article of what: "an app", "a worker".
+func article(what string) string {
+	if strings.HasPrefix(what, "a") {
+		return "an"
+	}
+	return "a"
 }
 
 // rustCrate is the crate of a Rust server, worker or job: its node's ID,
@@ -1223,7 +1231,7 @@ func rustBinary(dir, what string) (string, error) {
 	case 1:
 		name = manifest.Bin[0].Name
 	default:
-		return "", fmt.Errorf("%s declares %d binaries; a %s's crate builds one", path, len(manifest.Bin), what)
+		return "", fmt.Errorf("%s declares %d binaries; %s %s's crate builds one", path, len(manifest.Bin), article(what), what)
 	}
 	if !binaryNamePattern.MatchString(name) {
 		return "", fmt.Errorf("%s names no binary cargo builds: its [package] name, or its one [[bin]]'s, is %q", path, name)
@@ -1376,23 +1384,38 @@ func (p *Provisioner) waitReady(ctx context.Context, k string, s *Server) error 
 		}
 	}
 	url := s.URL + s.Readiness
+	if s.Readiness == ReadinessListening {
+		url = s.URL
+	}
 	deadline := time.Now().Add(p.readyTimeout())
 	for {
 		select {
 		case <-rs.proc.Done():
-			return fmt.Errorf("local: server %s exited before it was ready: %s", s.Deployable, exitReason(rs.proc.Err()))
+			return fmt.Errorf("local: %s %s exited before it was ready: %s", s.what(), s.Deployable, exitReason(rs.proc.Err()))
 		default:
 		}
-		code, err := p.runner().Get(ctx, url)
-		if err == nil && code == 200 {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			reason := fmt.Sprintf("status %d", code)
-			if err != nil {
-				reason = err.Error()
+		if s.Readiness == ReadinessListening {
+			// An app is ready once it listens on its port (D78): a dial
+			// alone, since a probe that listened could take the port from
+			// the app as it binds it.
+			if p.runner().Listens(s.Port) {
+				return nil
 			}
-			return fmt.Errorf("local: server %s is not ready at %s after %s: %s", s.Deployable, url, p.readyTimeout(), reason)
+			if time.Now().After(deadline) {
+				return fmt.Errorf("local: %s %s does not listen at %s after %s; it listens on the port in %s", s.what(), s.Deployable, url, p.readyTimeout(), PortVariable)
+			}
+		} else {
+			code, err := p.runner().Get(ctx, url)
+			if err == nil && code == 200 {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				reason := fmt.Sprintf("status %d", code)
+				if err != nil {
+					reason = err.Error()
+				}
+				return fmt.Errorf("local: %s %s is not ready at %s after %s: %s", s.what(), s.Deployable, url, p.readyTimeout(), reason)
+			}
 		}
 		select {
 		case <-rs.proc.Done():
@@ -1458,7 +1481,7 @@ func (p *Provisioner) stop(rs *runningServer) error {
 		w.Flush()
 	}
 	if err != nil {
-		return fmt.Errorf("local: stop server %s: %w", rs.server.Deployable, err)
+		return fmt.Errorf("local: stop %s %s: %w", rs.server.what(), rs.server.Deployable, err)
 	}
 	return nil
 }

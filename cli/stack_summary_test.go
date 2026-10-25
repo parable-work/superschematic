@@ -73,3 +73,23 @@ func TestPrintLocalSummaryNamesADevSite(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintLocalSummaryNamesTheApps: an app's line gives its address and
+// the app class and API it is, or says it is off when the environment
+// turns it off (D78).
+func TestPrintLocalSummaryNamesTheApps(t *testing.T) {
+	env := &ir.ResolvedEnvironment{Stack: "shop-stack", Environment: "Dev", Resources: &ir.ResourceGraph{}, Deployables: []*ir.ResolvedDeployable{
+		{Name: "shop-stock-backoffice", Kind: ir.DeployableApp, Address: "http://127.0.0.1:21211", App: &ir.ResolvedApp{API: "shop-stock", Name: "Backoffice", Enabled: true}},
+		{Name: "shop-orders-console", Kind: ir.DeployableApp, App: &ir.ResolvedApp{API: "shop-orders", Name: "Console"}},
+	}}
+	var out bytes.Buffer
+	printLocalSummary(&out, env, "/state", false)
+	for _, want := range []string{
+		"  app      shop-stock-backoffice    http://127.0.0.1:21211, Backoffice of shop-stock\n",
+		"  app      shop-orders-console      off\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the summary lacks %q:\n%s", want, out.String())
+		}
+	}
+}

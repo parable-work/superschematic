@@ -141,7 +141,7 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
-	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api",
+	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
@@ -228,6 +228,25 @@ func (e *emitter) emitDocument() {
 	for _, deriver := range e.doc.Derivers {
 		e.emitDeriver(deriver)
 	}
+	for _, app := range e.doc.Apps {
+		e.emitApp(app)
+	}
+}
+
+// emitApp renders an app as the class the reader reads it from (D78):
+// `@app({ extensions: ["<extension>", ...] })` on an abstract class with no
+// members, or `@app()` when it names no extension.
+func (e *emitter) emitApp(app *ir.App) {
+	if app == nil {
+		return
+	}
+	args := ""
+	if len(app.Extensions) > 0 {
+		args = objectLiteral([]string{"extensions: " + stringListLiteral(app.Extensions)})
+	}
+	e.body.WriteString("\n")
+	e.comment("", app.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("app"), args, e.ident(app.Name, "app"))
 }
 
 // emitDeriver renders a deriver as the class the reader reads it from

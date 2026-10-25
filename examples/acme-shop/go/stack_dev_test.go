@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,14 +114,26 @@ import (
 // project's own TypeScript packages keep the links the default output
 // root's install made.
 //
-// scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
+// shop-stock's app Backoffice (D78), a Topcoat app over shop-stock's
+// Topcoat crate in apps/backoffice, runs as a process of its own on its
+// generated entrypoint, over shop-db's Postgres and its engine: Ada signs
+// in through its sign-in page and receives stock through the engine
+// console's Inventory page, which shop-stock then counts. The app serves
+// its pages alone: neither shop-stock's JSON API nor the engine's routes
+// answer on its address. Its build needs
+// the Topcoat extension, which the core binary refuses to build without,
+// so the test runs superschematic-topcoat.
+//
+// scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC_TOPCOAT to
+// superschematic-topcoat, the installed binary with the Topcoat extension
+// linked too, and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
 // without Docker, or without cargo, which builds shop-stock's server, the
 // test skips.
 func TestStackDevRunsTheShop(t *testing.T) {
-	binary := os.Getenv("ACME_SHOP_SUPERSCHEMATIC")
+	binary := os.Getenv("ACME_SHOP_SUPERSCHEMATIC_TOPCOAT")
 	if binary == "" {
-		t.Skip("set ACME_SHOP_SUPERSCHEMATIC to the superschematic binary, as scripts/check.sh does, to run the stack")
+		t.Skip("set ACME_SHOP_SUPERSCHEMATIC_TOPCOAT to superschematic-topcoat, as scripts/check.sh does, to run the stack")
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skipf("Docker is not available: %v", err)
@@ -154,7 +167,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// Staff, who hold products, orders and stock, add and stock the
 	// products, and order them too.
 	ctx := context.Background()
-	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Ada Lovelace", "products", "orders", "stock", "calendar.manage")
+	ada := addUserOnTheStack(ctx, t, env.database, "Ada Lovelace", "products", "orders", "stock", "stock.write", "calendar.manage")
+	token := signInAs(ctx, t, env.servers["shop-api"], ada)
 	n := time.Now().UnixNano()
 
 	// shop-api: staff add a product, and it is listed.
@@ -552,13 +566,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if version := hotReloadVersion(t, site); version == "" {
 		t.Fatalf("the site's hot-reload socket sent no version")
 	}
-	shopperLogin, shopperPassword := createUser(ctx, t, env.database, "Grace Hopper", "products.read")
+	shopper := addUserOnTheStack(ctx, t, env.database, "Grace Hopper", "products.read")
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	browser := &http.Client{Jar: jar}
-	loginBody := fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, shopperLogin, shopperPassword)
+	loginBody := fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, shopper.login, shopper.password)
 	if status := browserPost(t, browser, site, site+"/api/shop-api/api/auth/login", "same-origin", loginBody); status != http.StatusOK {
 		t.Fatalf("a cookie login through the site's origin answered %d, want 200", status)
 	}
@@ -942,6 +956,12 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		}
 	}
 
+	// shop-stock's Backoffice (D78), on its generated entrypoint over
+	// shop-db's Postgres and engine: Ada signs in through its sign-in page,
+	// then receives a delivery of the product through the engine console's
+	// Inventory page, which shop-stock counts.
+	receiveThroughTheBackoffice(ctx, t, env.apps[backoffice], anyone, ada, product.Id)
+
 	// Ctrl-C stops the servers, then removes the containers and their data:
 	// Postgres's and the storage emulator's.
 	dev.stop(t)
@@ -963,6 +983,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	otherRoot := otherOutputRoot(t, outputRoot)
 	again := startStackDev(t, binary, shopStack, "--out", otherRoot, "--build-sites")
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
+	if status := get(t, againEnv.apps[backoffice]+"/stock/engine"); status != http.StatusUnauthorized {
+		t.Fatalf("the Backoffice built in %s answered GET /stock/engine %d, want 401", otherRoot, status)
+	}
 	for mirror, implementation := range map[string]string{
 		filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"):      filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs"),
 		filepath.Join(otherRoot, "impl", "shop-storefront", "index.ts"):      filepath.Join("..", "typescript", "shop-storefront", "index.ts"),
@@ -1028,6 +1051,10 @@ const (
 	reorderStock  = "shop-stock-reorder-stock"
 	orderRestocks = "shop-stock-order-restocks"
 )
+
+// backoffice is the deployable of shop-stock's app Backoffice, named as a
+// job's is (D78).
+const backoffice = "shop-stock-backoffice"
 
 // shopStack is shop-stack's service directory, relative to the example's.
 // The example holds two stacks, shop-stack and storefront-stack, so each
@@ -1109,6 +1136,9 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
 		}
+	}
+	if stack == "shop-stack" && env.apps[backoffice] == "" {
+		t.Fatalf("environment Dev has no app %s: %v", backoffice, env.apps)
 	}
 	for server, url := range env.servers {
 		if status := get(t, url+"/readyz"); status != http.StatusOK {
@@ -1315,11 +1345,12 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 }
 
 // environment is what the test reads from the environment the build
-// resolved: each server's URL, the site's origin, shop-db's connection
+// resolved: each server's URL and each app's, the site's origin, shop-db's connection
 // string, shop-media's URL on the storage emulator, and the names of the
 // containers, Postgres's and the emulator's.
 type environment struct {
 	servers    map[string]string
+	apps       map[string]string
 	site       string
 	database   string
 	bucket     string
@@ -1349,11 +1380,13 @@ func readEnvironment(t *testing.T, path string) environment {
 	if err := json.Unmarshal(data, &resolved); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
-	env := environment{servers: map[string]string{}}
+	env := environment{servers: map[string]string{}, apps: map[string]string{}}
 	for _, d := range resolved.Deployables {
 		switch {
 		case d.Kind == "server":
 			env.servers[d.Name] = d.Address
+		case d.Kind == "app":
+			env.apps[d.Name] = d.PublicAddress
 		case d.Kind == "site" && d.Name == "shop-web":
 			env.site = d.PublicAddress
 		}
@@ -1375,46 +1408,24 @@ func readEnvironment(t *testing.T, path string) environment {
 }
 
 // signInOnTheStack creates a user in shop-db named name, with a role of
-// their own that holds permissions, through the identity runtime's store
-// over the database, as staff would through shop-api's administration
-// routes; signs them in through shop-api's generated login with a bearer
-// session, and returns its token. It also signs in with a cookie session,
-// which the local target's servers, on plain HTTP, write as session
-// without Secure.
+// their own that holds permissions (addUserOnTheStack), signs them in
+// through shop-api's generated login (signInAs) and returns the bearer
+// session's token.
 func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI, name string, permissions ...string) string {
 	t.Helper()
-	login, password := createUser(ctx, t, databaseURL, name, permissions...)
-	client, err := apisdk.New(apisdk.SDKConfig{BaseURL: shopAPI})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := client.AccountNamespace.Login(ctx, apitypes.LoginInput{Login: apitypes.ContactEmail(login), Password: apitypes.AuthPassword(password)})
-	if err != nil || result.Token == "" {
-		t.Fatalf("login: %+v, %v", result, err)
-	}
-
-	request, err := http.NewRequest(http.MethodPost, shopAPI+"/api/auth/login",
-		strings.NewReader(fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, login, password)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Sec-Fetch-Site", "same-origin")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response.Body.Close()
-	if cookies := response.Cookies(); response.StatusCode != http.StatusOK || len(cookies) != 1 || cookies[0].Name != identity.PlainCookieName || cookies[0].Secure {
-		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
-	}
-	return result.Token
+	return signInAs(ctx, t, shopAPI, addUserOnTheStack(ctx, t, databaseURL, name, permissions...))
 }
 
-// createUser creates a user in shop-db with the identity runtime's store,
-// as staff would through the administration routes, with a role that holds
-// permissions, and returns the user's login and password.
-func createUser(ctx context.Context, t *testing.T, databaseURL, name string, permissions ...string) (string, string) {
+// stackUser is a user addUserOnTheStack created: their login and password.
+type stackUser struct {
+	login, password string
+}
+
+// addUserOnTheStack creates a user in shop-db named name, with a role of
+// their own that holds permissions, through the identity runtime's store
+// over the database, as staff would through shop-api's administration
+// routes.
+func addUserOnTheStack(ctx context.Context, t *testing.T, databaseURL, name string, permissions ...string) stackUser {
 	t.Helper()
 	config, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
@@ -1444,7 +1455,41 @@ func createUser(ctx context.Context, t *testing.T, databaseURL, name string, per
 	if err := store.GrantRole(ctx, user.ID, role.ID, time.Now()); err != nil {
 		t.Fatalf("grant the role: %v", err)
 	}
-	return login, password
+	return stackUser{login: login, password: password}
+}
+
+// signInAs signs user in through shop-api's generated login with a bearer
+// session, and returns its token. It also signs in with a cookie session,
+// which the local target's servers, on plain HTTP, write as session
+// without Secure.
+func signInAs(ctx context.Context, t *testing.T, shopAPI string, user stackUser) string {
+	t.Helper()
+	login, password := user.login, user.password
+	client, err := apisdk.New(apisdk.SDKConfig{BaseURL: shopAPI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.AccountNamespace.Login(ctx, apitypes.LoginInput{Login: apitypes.ContactEmail(login), Password: apitypes.AuthPassword(password)})
+	if err != nil || result.Token == "" {
+		t.Fatalf("login: %+v, %v", result, err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, shopAPI+"/api/auth/login",
+		strings.NewReader(fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, login, password)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if cookies := response.Cookies(); response.StatusCode != http.StatusOK || len(cookies) != 1 || cookies[0].Name != identity.PlainCookieName || cookies[0].Secure {
+		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
+	}
+	return result.Token
 }
 
 // browserPost posts body to url as JSON as a page on origin would, its
@@ -1500,6 +1545,95 @@ func hotReloadVersion(t *testing.T, site string) string {
 		t.Fatalf("the hot-reload socket opened with %q, not Bun's version", payload)
 	}
 	return string(payload)
+}
+
+// receiveThroughTheBackoffice receives a delivery of the product in
+// shop-stock's Backoffice at app (D78), as a member of staff would in a
+// browser: signed out, the product's Inventory page in the engine console
+// asks for a caller, and neither shop-stock's JSON API nor the engine's
+// routes are on the app's address; user signs in through the app's
+// sign-in page, which
+// sets the session cookie and goes on to the page; the page shows the
+// Stock panel, whose receiveStock form takes five, 303 back to the page,
+// which lists the delivery; and shop-stock, through stock, counts five
+// more on hand.
+func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, stock *stocksdk.ShopStockSDK, user stackUser, product apitypes.IdentityUUID) {
+	t.Helper()
+	page := "/stock/engine/Inventory/" + product.String()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	send := func(method, path, cookie string, form url.Values) (int, http.Header, string) {
+		t.Helper()
+		var body io.Reader
+		if form != nil {
+			body = strings.NewReader(form.Encode())
+		}
+		request, err := http.NewRequestWithContext(ctx, method, app+path, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if form != nil {
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", app)
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+		}
+		if cookie != "" {
+			request.Header.Set("Cookie", cookie)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		answer, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, response.Header, string(answer)
+	}
+
+	if status, _, body := send(http.MethodGet, page, "", nil); status != http.StatusUnauthorized {
+		t.Fatalf("the Backoffice's %s, signed out: %d %s", page, status, body)
+	}
+	for _, path := range []string{"/api/stock", "/engine/namespaces/shop-db/schemas/Inventory/instances"} {
+		if status, _, body := send(http.MethodGet, path, "", nil); status != http.StatusNotFound {
+			t.Fatalf("the Backoffice answered GET %s %d, want 404: it serves its pages alone %s", path, status, body)
+		}
+	}
+	before, err := stock.StockNamespace.GetStock(ctx, product.String())
+	if err != nil {
+		t.Fatalf("GetStock: %v", err)
+	}
+	status, header, body := send(http.MethodPost, "/stock/sign-in", "", url.Values{"login": {user.login}, "password": {user.password}, "next": {page}})
+	if status != http.StatusSeeOther || header.Get("Location") != page {
+		t.Fatalf("sign in to the Backoffice: %d to %q %s", status, header.Get("Location"), body)
+	}
+	var cookie string
+	for _, c := range (&http.Response{Header: header}).Cookies() {
+		if c.Name == identity.PlainCookieName && !c.Secure {
+			cookie = c.Name + "=" + c.Value
+		}
+	}
+	if cookie == "" {
+		t.Fatalf("the Backoffice's sign-in set no session cookie without Secure: %v", header.Values("Set-Cookie"))
+	}
+
+	status, _, body = send(http.MethodGet, page, cookie, nil)
+	receive := page + "/operations/receiveStock"
+	if status != http.StatusOK || !strings.Contains(body, `data-behavior="Stock"`) || !strings.Contains(body, `action="`+receive+`"`) {
+		t.Fatalf("the Backoffice's %s: %d %s", page, status, body)
+	}
+	reason := fmt.Sprintf("Delivery through the Backoffice %d", time.Now().UnixNano())
+	status, header, body = send(http.MethodPost, receive, cookie, url.Values{"quantity": {"5"}, "reason": {reason}})
+	if status != http.StatusSeeOther || header.Get("Location") != page {
+		t.Fatalf("receive stock through the Backoffice: %d to %q %s", status, header.Get("Location"), body)
+	}
+	if status, _, body = send(http.MethodGet, page, cookie, nil); status != http.StatusOK || !strings.Contains(body, reason) {
+		t.Fatalf("the Backoffice's %s after the delivery: %d %s", page, status, body)
+	}
+	after, err := stock.StockNamespace.GetStock(ctx, product.String())
+	if err != nil || after.OnHand != before.OnHand+5 {
+		t.Fatalf("GetStock after the Backoffice received five = %+v, %v; before %+v", after, err, before)
+	}
 }
 
 // stockOf is how many units of the product stock lists on hand, or -1

@@ -7,7 +7,7 @@
       "name": "superschematic",
       "source": "./agent",
       "description": "Declare types, tables, routes, permissions, jobs, queues and stacks in superschematic schemas instead of writing SQL, validation, servers and clients by hand.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }

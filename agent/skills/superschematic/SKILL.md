@@ -118,7 +118,20 @@ DB `dependencies` entry or `@source`; another API through `calls`.
   `@userSessions` on an API class) instead of writing auth.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
-  transaction as the change that causes them.
+  transaction as the change that causes them, and `@deriver` on an API
+  class to fill an engine type's Derived fields from a model.
+- **Your own HTTP program is an app.** Pages or a back office over a Rust
+  API is `@app` on an empty API class: the stack runs the crate at
+  `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`
+  gets the API's `Deps`, implementations and engine, beside the API's
+  servers. Expose it in `@stack`, or no one reaches it. An
+  `@app({ extensions: ["topcoat"] })` builds only with
+  `superschematic-topcoat`, which each release ships beside
+  `superschematic`: `superschematic` plans the stack and refuses
+  `build-all`, `stack dev` and deploys, and the generated CI of every
+  stack in that services root runs `superschematic-topcoat`. Topcoat's
+  `<service>_with_parts` serves the app's pages alone; the JSON API and
+  engine routes need `_with_parts_and_api`.
 - **No server at all?** If the data's shape is defined at run time, or
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors

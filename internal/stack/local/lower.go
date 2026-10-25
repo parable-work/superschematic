@@ -62,6 +62,11 @@ const (
 	// worker's: ready once it starts (D53).
 	ReadinessStarted = "started"
 
+	// ReadinessListening is the readiness of an app's process (D78): ready
+	// once its port accepts a connection. The app is the project's own
+	// program, which answers no readiness path of the entrypoint's.
+	ReadinessListening = "listening"
+
 	// WorkerConcurrencyVariable is the environment variable a worker reads
 	// its concurrency from, which the local platform sets.
 	WorkerConcurrencyVariable = ir.WorkerConcurrencyVariable
@@ -581,7 +586,7 @@ func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env, err := processEnv(d, func(name string) error {
 		if name == PortVariable {
-			return fmt.Errorf("config field %s is the variable the local platform sets to the server's port; set the port with the server's port setting instead", PortVariable)
+			return fmt.Errorf("config field %s is the variable the local platform sets to the %s's port; set the port with the %s's port setting instead", PortVariable, d.Kind, d.Kind)
 		}
 		return nil
 	})
@@ -755,6 +760,39 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"env":       env,
 		},
 	}}}, nil
+}
+
+// appAddress is an app's loopback URL, or none for an app the
+// environment turns off, which runs no process (D78).
+func appAddress(ctx registry.PlatformContext) any {
+	if app := ctx.Deployable.App; app == nil || !app.Enabled {
+		return nil
+	}
+	return processAddress(ctx)
+}
+
+// lowerApp lowers an app to its process (D78), as a Rust server is lowered
+// (lowerProcess): the entrypoint crate the build wrote at
+// `server/<stack>/<app>`, its environment as its API's server's, and the
+// port its settings give it or one derived as a server's is. It is ready
+// once it listens there (ReadinessListening). stack dev runs none for an
+// app the environment turns off.
+func lowerApp(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.App == nil {
+		return registry.Lowered{}, fmt.Errorf("app %s has no run", d.Name)
+	}
+	if !d.App.Enabled {
+		return registry.Lowered{}, nil
+	}
+	out, err := lowerProcess(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	process := out.Resources[0].Properties
+	process["kind"] = "app"
+	process["readiness"] = ReadinessListening
+	return out, nil
 }
 
 // jobID is the ID of a job's node.

@@ -118,10 +118,15 @@ func digest(n int) string {
 // case).
 func images(n int) map[string]string {
 	return map[string]string{
-		"shop-api":              "shop-api@" + digest(n),
-		"Orders":                "orders@" + digest(n),
-		stacktest.ShipOrdersJob: stacktest.ShipOrdersJob + "@" + digest(n),
+		"shop-api":              image("shop-api", n),
+		"Orders":                image("Orders", n),
+		stacktest.ShipOrdersJob: image(stacktest.ShipOrdersJob, n),
 	}
+}
+
+// image is the image of deployable the fake platform writes, at digest n.
+func image(deployable string, n int) string {
+	return stacktest.ImageRepository(deployable) + "@" + digest(n)
 }
 
 // Models of shop-db: v1 has a product table with a name; v2 renames it

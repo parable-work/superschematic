@@ -298,11 +298,13 @@ func runStackInit(cmd *cobra.Command, a *app, flags *stackInitFlags, servicesRoo
 		return err
 	}
 	kinds := tree.kinds()
+	deploy := stackinit.Refs(tree.deployed(), kinds)
 	plan := &stackinit.Plan{
 		Name:        values.name,
-		Deploy:      stackinit.Refs(tree.deployed(), kinds),
+		Deploy:      deploy,
 		Expose:      stackinit.Refs(values.expose, kinds),
 		ExposeNamed: values.exposeFrom != "",
+		ExposeApps:  stackinit.AppsOf(deploy, apis),
 		CI:          values.ci,
 		Environments: []stackinit.Environment{{
 			Name:    stackinit.LocalEnvironment,
@@ -483,6 +485,13 @@ func printStackInitSummary(w io.Writer, tree *stackInitTree, plan *stackinit.Pla
 	}
 	if len(tree.sites) > 0 {
 		fmt.Fprintf(&b, "  A site is always exposed: %s.\n", joinNames(siteNames(tree)))
+	}
+	if len(plan.ExposeApps) > 0 {
+		apps := make([]string, len(plan.ExposeApps))
+		for i, app := range plan.ExposeApps {
+			apps[i] = app.App + " of " + app.API
+		}
+		fmt.Fprintf(&b, "  An app is always exposed: %s.\n", strings.Join(apps, ", "))
 	}
 	b.WriteString("\nEnvironments:\n")
 	for _, env := range plan.Environments {

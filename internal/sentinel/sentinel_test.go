@@ -562,3 +562,32 @@ func TestHandleContentTypesAnAPIsDerivers(t *testing.T) {
 		t.Errorf("DeriversOf = %v, want them sorted", got)
 	}
 }
+
+// TestHandleContentTypesAnAPIsApps: an API's apps are the sixth type
+// argument, beside its jobs, its workers and its derivers or never (D78),
+// and a written sentinel reads back to the types it was written with.
+func TestHandleContentTypesAnAPIsApps(t *testing.T) {
+	got := HandleContent("shop-stock", ir.SchemaKindAPI, naming.Default(), HandleTypes{Apps: []string{"Backoffice", "Kiosk"}})
+	if want := `export const ShopStock = service<"API", unknown, never, never, never, "Backoffice" | "Kiosk">({ name: "shop-stock", kind: SchemaKind.API });`; !strings.Contains(got, want) {
+		t.Errorf("HandleContent = %s, want %s", got, want)
+	}
+	for _, types := range []HandleTypes{
+		{Apps: []string{"Backoffice"}},
+		{Jobs: []string{"Reindex"}, Workers: []string{"FulfilOrders"}, Derivers: []string{"TriageTickets"}, Apps: []string{"Backoffice"}},
+		{Config: &ConfigType{Name: "StockConfig", Module: "./config.schema"}, Workers: []string{"Restock"}, Apps: []string{"Backoffice", "Kiosk"}},
+	} {
+		got = HandleContent("shop-stock", ir.SchemaKindAPI, naming.Default(), types)
+		path := filepath.Join(t.TempDir(), "service.generated.ts")
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if read := writtenTypes(path); !reflect.DeepEqual(read, types) {
+			t.Errorf("writtenTypes = %+v, want %+v, from\n%s", read, types, got)
+		}
+	}
+	schema := ir.NewSchema("shop-stock", ir.SchemaKindAPI)
+	schema.Apps = []*ir.App{{Name: "Kiosk"}, {Name: "Backoffice"}}
+	if got := AppsOf(schema); strings.Join(got, ",") != "Backoffice,Kiosk" {
+		t.Errorf("AppsOf = %v, want them sorted", got)
+	}
+}
