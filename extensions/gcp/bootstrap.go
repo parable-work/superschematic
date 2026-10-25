@@ -74,14 +74,18 @@ var apiServices = []string{
 // not this environment exports to Cloud Trace (D67, amended): another
 // environment in the same project may, and bootstrap sees only its own.
 // Enabling an API grants nothing; the trace agent role, which only an
-// exporting deployable's account holds, is what admits a writer.
+// exporting deployable's account holds, is what admits a writer. A memory
+// store's instance needs Memorystore, and Network Connectivity, whose
+// service connection policy lets it create its endpoints (D75).
 var graphServices = map[string][]string{
-	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
-	"gcp:cloudscheduler/":     {"cloudscheduler.googleapis.com"},
-	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
-	"gcp:compute/":            {"compute.googleapis.com"},
-	"gcp:certificatemanager/": {"certificatemanager.googleapis.com"},
-	"gcp:dns/":                {"dns.googleapis.com"},
+	"gcp:cloudrunv2/":          {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
+	"gcp:cloudscheduler/":      {"cloudscheduler.googleapis.com"},
+	"gcp:sql/":                 {"sqladmin.googleapis.com", "run.googleapis.com"},
+	"gcp:compute/":             {"compute.googleapis.com"},
+	"gcp:certificatemanager/":  {"certificatemanager.googleapis.com"},
+	"gcp:dns/":                 {"dns.googleapis.com"},
+	"gcp:memorystore/":         {"memorystore.googleapis.com", "networkconnectivity.googleapis.com"},
+	"gcp:networkconnectivity/": {"networkconnectivity.googleapis.com"},
 }
 
 // servicesFor returns the APIs a bootstrap of env enables, sorted.
@@ -115,6 +119,18 @@ var (
 	// role holds storage.buckets.create and storage.buckets.setIamPolicy,
 	// and IAM checks a bucket's create on the project, where a condition
 	// on the bucket's name cannot narrow it.
+	//
+	// A memory store (D75) takes two more. Memorystore's admin role
+	// creates, updates and deletes a Memorystore for Valkey instance: its
+	// editor role, the next narrower, updates one but neither creates nor
+	// deletes it, and the instance has no IAM policy of its own to narrow
+	// a grant to. Network Connectivity's consumer network admin role
+	// creates the service connection policy on the environment's network,
+	// and nothing of its hubs or spokes. The connection role an edge grants
+	// a workload's account is a project grant held by a condition, which
+	// resourcemanager.projectIamAdmin already sets, as it sets a Cloud SQL
+	// edge's; compute.networkAdmin already makes the network and the
+	// endpoints' subnet.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
@@ -127,6 +143,8 @@ var (
 		"roles/iam.serviceAccountAdmin",
 		"roles/iam.serviceAccountUser",
 		"roles/logging.viewer",
+		"roles/memorystore.admin",
+		"roles/networkconnectivity.consumerNetworkAdmin",
 		"roles/resourcemanager.projectIamAdmin",
 		"roles/run.admin",
 		"roles/secretmanager.admin",

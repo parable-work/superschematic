@@ -3,8 +3,9 @@
 // schedules, Cloud Run worker pools (D53), Cloud SQL Postgres databases,
 // Cloud Storage buckets (D54), Secret Manager secrets, a global external
 // Application Load Balancer for exposed servers, static sites in Cloud
-// Storage behind a load balancer with Cloud CDN (D55), and Cloud DNS for
-// their records. It registers through the public registry package alone,
+// Storage behind a load balancer with Cloud CDN (D55), memory stores in
+// Memorystore for Valkey (D75), and Cloud DNS for their records. It
+// registers through the public registry package alone,
 // as any extension does (D10), in a Go module of its own (D1), so the GCP
 // vocabulary stays out of the core.
 //
@@ -61,6 +62,10 @@ const (
 	// (D54).
 	Storage = "gcp.storage"
 
+	// Memorystore keeps a MemoryStore service's channels and keys in a
+	// Memorystore for Valkey instance (D75).
+	Memorystore = "gcp.memorystore"
+
 	// CloudDNS writes an environment's records into a Cloud DNS managed
 	// zone. It is the target's default DNS platform.
 	CloudDNS = "gcp.clouddns"
@@ -102,6 +107,15 @@ const (
 	DeriverHTTPConnector   = "gcp.cloudrunderiver-cloudrun"
 	DeriverBucketConnector = "gcp.cloudrunderiver-storage"
 
+	// MemoryStoreConnector, JobMemoryStoreConnector,
+	// WorkerMemoryStoreConnector and DeriverMemoryStoreConnector connect a
+	// Cloud Run server, job, worker pool and deriver to a memory store its
+	// API lists (D75).
+	MemoryStoreConnector        = "gcp.cloudrun-memorystore"
+	JobMemoryStoreConnector     = "gcp.cloudrunjob-memorystore"
+	WorkerMemoryStoreConnector  = "gcp.cloudrunworker-memorystore"
+	DeriverMemoryStoreConnector = "gcp.cloudrunderiver-memorystore"
+
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
 	Provisioner = "pulumi"
@@ -118,6 +132,10 @@ const (
 	// private, or a grant that admits the public to one, on behalf of any
 	// deployable (D54).
 	PolicyPrivateBuckets = "buckets-never-public"
+
+	// PolicyMemoryStoresTLSAndIAM refuses a Memorystore instance without
+	// transit encryption or without IAM authentication (D75).
+	PolicyMemoryStoresTLSAndIAM = "memory-stores-tls-and-iam"
 )
 
 // ProviderVersion is the pulumi-gcp release the resource types are pinned
@@ -246,13 +264,22 @@ func (e Extension) Register(r *registry.Registry) error {
 			AddressOf: bucketAddress,
 			Lower:     lowerBucket,
 		},
+		{
+			Name:      Memorystore,
+			Extension: Name,
+			Kind:      ir.DeployableMemoryStore,
+			Settings:  json.RawMessage(memoryStoreSettings),
+			NameOf:    memoryStoreName,
+			AddressOf: memoryStoreAddress,
+			Lower:     lowerMemoryStore,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
 	}
-	for _, spec := range []registry.ConnectorSpec{
+	connectors := []registry.ConnectorSpec{
 		{Name: SQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRun, To: CloudSQL, Connect: connectSQL},
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
@@ -267,7 +294,8 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunDeriver, To: CloudSQL, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunDeriver, To: CloudRun, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunDeriver, To: Storage, Connect: connectBucket},
-	} {
+	}
+	for _, spec := range append(connectors, memoryStoreConnectors()...) {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
 		}
@@ -285,14 +313,15 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:      Target,
 		Extension: Name,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   CloudRun,
-			ir.DeployableDatabase: CloudSQL,
-			ir.DeployableJob:      CloudRunJob,
-			ir.DeployableSite:     Site,
-			ir.DeployableBucket:   Storage,
-			ir.DeployableWorker:   CloudRunWorker,
-			ir.DeployableRunner:   CloudRunRunner,
-			ir.DeployableDeriver:  CloudRunDeriver,
+			ir.DeployableServer:      CloudRun,
+			ir.DeployableDatabase:    CloudSQL,
+			ir.DeployableJob:         CloudRunJob,
+			ir.DeployableSite:        Site,
+			ir.DeployableBucket:      Storage,
+			ir.DeployableWorker:      CloudRunWorker,
+			ir.DeployableRunner:      CloudRunRunner,
+			ir.DeployableDeriver:     CloudRunDeriver,
+			ir.DeployableMemoryStore: Memorystore,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,
@@ -302,6 +331,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			{Name: PolicyHighAvailability, Check: checkHighAvailability},
 			{Name: PolicyNothingPublic, Check: checkNothingPublic},
 			{Name: PolicyPrivateBuckets, Check: checkPrivateBuckets},
+			{Name: PolicyMemoryStoresTLSAndIAM, Check: checkMemoryStores},
 		},
 		State:      stateStore{ext: e},
 		Secrets:    secretStore{ext: e},
