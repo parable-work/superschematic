@@ -208,6 +208,10 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		doc := first()
 		doc.Derivers = append(doc.Derivers, schema.Derivers...)
 	}
+	if len(schema.Apps) > 0 {
+		doc := first()
+		doc.Apps = append(doc.Apps, schema.Apps...)
+	}
 
 	// Imports are service-level in the IR; restate them on every document so
 	// any document alone names its cross-service references.

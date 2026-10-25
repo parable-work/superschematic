@@ -426,7 +426,7 @@ func TestCheckExposeNotServer(t *testing.T) {
 	s, services := shop()
 	s.Expose = append(s.Expose, stacktest.Of(stacktest.ShopDB))
 	_, errs := resolve(t, reg, s, services, "Staging")
-	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server or a site is exposed")
+	mustFail(t, errs, stack.CodeExposeNotServer, "stack shop-stack exposes shop-db, a database; only a server, a site or an app is exposed")
 }
 
 func TestCheckPolicy(t *testing.T) {

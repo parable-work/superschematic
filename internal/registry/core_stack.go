@@ -44,6 +44,10 @@ func stackKind() KindSpec {
 const (
 	stackHandleSchema = `{"type":"object","required":["name","kind"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1},"kind":{"type":"string","minLength":1}}}`
 	stackRefSchema    = `{"oneOf":[` + stackHandleSchema + `,{"type":"object","required":["class"],"additionalProperties":false,"properties":{"class":{"type":"string","minLength":1}}}]}`
+	// stackExposeSchema is what `expose` lists: a handle, a declared
+	// deployable's class, or an app beside its API's handle,
+	// `{of: <API handle>, app: "<app class>"}` (D78).
+	stackExposeSchema = `{"oneOf":[` + stackHandleSchema + `,{"type":"object","required":["class"],"additionalProperties":false,"properties":{"class":{"type":"string","minLength":1}}},{"type":"object","required":["of","app"],"additionalProperties":false,"properties":{"of":` + stackHandleSchema + `,"app":{"type":"string","minLength":1}}}]}`
 )
 
 var (
@@ -52,7 +56,7 @@ var (
 		"additionalProperties": false,
 		"properties": {
 			"deploy": {"type": "array", "items": ` + stackHandleSchema + `},
-			"expose": {"type": "array", "items": ` + stackRefSchema + `}
+			"expose": {"type": "array", "items": ` + stackExposeSchema + `}
 		}
 	}`)
 	serverArgs = json.RawMessage(`{
@@ -70,15 +74,16 @@ var (
 	// Every key of @environment's argument other than those named here
 	// holds the values of the target the environment names, under the
 	// target's name (`gcp: { project, region }`). A settings element's keys
-	// other than of, job, worker, runner, deriver, platform, env, schedule,
-	// timeZone, enabled, onDeploy, instances and concurrency are the
-	// platform settings. job names a job of the API of; schedule, timeZone
+	// other than of, job, worker, runner, deriver, app, platform, env,
+	// schedule, timeZone, enabled, onDeploy, instances and concurrency are
+	// the platform settings. job names a job of the API of; schedule, timeZone
 	// and enabled change that job's schedule (D52), and onDeploy runs it on
 	// every deploy (D52, amended). worker names a worker of the API of;
 	// enabled, instances and concurrency change how it runs (D53). runner,
 	// true, names the engine's runner of the DB of; enabled turns it on or
 	// off (D58). deriver names a deriver of the API of; enabled, instances
-	// and concurrency change how it runs (D74).
+	// and concurrency change how it runs (D74). app names an app of the API
+	// of; enabled turns it on or off (D78).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -96,6 +101,7 @@ var (
 					"worker": {"type": "string", "minLength": 1},
 					"runner": {"const": true},
 					"deriver": {"type": "string", "minLength": 1},
+					"app": {"type": "string", "minLength": 1},
 					"instances": {"type": "integer", "minimum": 0},
 					"concurrency": {"type": "integer", "minimum": 1},
 					"schedule": {"type": "string", "minLength": 1},
@@ -184,7 +190,7 @@ func applyStack(td *ir.TypeDef, arg any) error {
 	}
 	decl := &ir.StackDecl{Deploy: args.Deploy}
 	for i, v := range args.Expose {
-		ref, err := deployableRef(v)
+		ref, err := exposedRef(v)
 		if err != nil {
 			return ArgErrorf(0, "@stack expose[%d]: %v", i, err)
 		}
@@ -240,13 +246,13 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 }
 
 // deployableSettings reads one settings element: of, job, worker, runner,
-// deriver, platform, env, a job's schedule, timeZone, enabled and
+// deriver, app, platform, env, a job's schedule, timeZone, enabled and
 // onDeploy, a worker's and a deriver's enabled, instances and
-// concurrency, a runner's enabled, and the platform settings in every
-// other key.
+// concurrency, a runner's and an app's enabled, and the platform settings
+// in every other key.
 func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) {
 	settings := &ir.DeployableSettings{}
-	var job, worker, deriver string
+	var job, worker, deriver, app string
 	var runner bool
 	for _, key := range sortedKeys(element) {
 		value := element[key]
@@ -265,6 +271,8 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 			runner, _ = value.(bool)
 		case "deriver":
 			deriver, _ = value.(string)
+		case "app":
+			app, _ = value.(string)
 		case "instances":
 			n, _ := value.(float64)
 			instances := int(n)
@@ -328,7 +336,29 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 		}
 		settings.Of.Deriver = deriver
 	}
+	if app != "" {
+		if settings.Of.Service == nil {
+			return nil, fmt.Errorf("app %s names an app of the API service of names, but of names no service; write `of: <API handle>, app: %q`", app, app)
+		}
+		settings.Of.App = app
+	}
 	return settings, nil
+}
+
+// exposedRef reads an `expose` entry: an app beside its API's handle,
+// {of, app} (D78), or what deployableRef reads.
+func exposedRef(v any) (ir.DeployableRef, error) {
+	if obj, ok := v.(map[string]any); ok {
+		if app, ok := obj["app"].(string); ok {
+			ref, err := deployableRef(obj["of"])
+			if err != nil || ref.Service == nil {
+				return ir.DeployableRef{}, fmt.Errorf("app %s names an app of the API service of names, but of names no service; write `{ of: <API handle>, app: %q }`", app, app)
+			}
+			ref.App = app
+			return ref, nil
+		}
+	}
+	return deployableRef(v)
 }
 
 // deployableRef reads a handle, {name, kind}, or a declared deployable's
@@ -435,6 +465,9 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if ref.Deriver != "" {
 					r.Errorf(td.Owner, "%s names deriver %s of deployable %s; a deriver belongs to an API service, so name the API's handle", where, ref.Deriver, ref.Deployable)
 				}
+				if ref.App != "" {
+					r.Errorf(td.Owner, "%s names app %s of deployable %s; an app belongs to an API service, so name the API's handle", where, ref.App, ref.Deployable)
+				}
 			}
 			if ref.Job != "" && ref.Worker != "" {
 				r.Errorf(td.Owner, "%s names both job %s and worker %s; an element names one", where, ref.Job, ref.Worker)
@@ -442,8 +475,11 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 			if ref.Deriver != "" && (ref.Job != "" || ref.Worker != "") {
 				r.Errorf(td.Owner, "%s names deriver %s and a job or a worker; an element names one", where, ref.Deriver)
 			}
-			if ref.Runner && (ref.Job != "" || ref.Worker != "" || ref.Deriver != "") {
-				r.Errorf(td.Owner, "%s names the runner and a job, a worker or a deriver; an element names one", where)
+			if ref.App != "" && (ref.Job != "" || ref.Worker != "" || ref.Deriver != "") {
+				r.Errorf(td.Owner, "%s names app %s and a job, a worker or a deriver; an element names one", where, ref.App)
+			}
+			if ref.Runner && (ref.Job != "" || ref.Worker != "" || ref.Deriver != "" || ref.App != "") {
+				r.Errorf(td.Owner, "%s names the runner and a job, a worker, a deriver or an app; an element names one", where)
 			}
 			if ref.Runner && ref.Service != nil && ref.Service.Kind != ir.SchemaKindDB {
 				r.Errorf(td.Owner, "%s names the runner of %s, a %s service; an engine's runner belongs to a DB service, so name the DB's handle", where, ref.Service.Name, ref.Service.Kind)
@@ -509,7 +545,7 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if settings.TimeZone != "" {
 			keys = append(keys, "timeZone")
 		}
-		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && !settings.Of.Runner {
+		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner {
 			keys = append(keys, "enabled")
 		}
 		if settings.OnDeploy != nil {

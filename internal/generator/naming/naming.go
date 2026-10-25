@@ -257,6 +257,14 @@ type ImplementationPathsConfig struct {
 	// (D57).
 	Rust string `toml:"rust"`
 
+	// RustApp is the crate directory of the program of an app of a Rust
+	// API (D78): "apps/{app}", in which `{app}` stands for the app's name
+	// in kebab case, and `{service}`, when it is there, for its API's. The
+	// crate is a library the project writes, whose `serve` the app's
+	// entrypoint calls with the app's parts; the build scaffolds a missing
+	// one there.
+	RustApp string `toml:"rust_app"`
+
 	// Site is a Site service's package directory, its code: "web/{service}"
 	// (D55). It is a member of the Bun workspace, as a TypeScript
 	// implementation is, and the build writes the site's typed browser
@@ -267,6 +275,10 @@ type ImplementationPathsConfig struct {
 // ServicePathPlaceholder is what an implementation path template replaces
 // with the service's name.
 const ServicePathPlaceholder = "{service}"
+
+// AppPathPlaceholder is what the [implementation_paths] rust_app template
+// replaces with the app's name in kebab case (D78).
+const AppPathPlaceholder = "{app}"
 
 // GoImplementationDir resolves the Go implementation path of service
 // against repoRoot.
@@ -304,6 +316,18 @@ func (n Naming) RustImplementationDir(repoRoot, service string) string {
 // implementation in by (D57).
 func (n Naming) RustImplementationGlob() string {
 	return strings.ReplaceAll(n.rustImplementationTemplate(), ServicePathPlaceholder, "*")
+}
+
+// RustAppDir resolves the directory of the crate of app, an @app class of
+// the Rust API service, against repoRoot (D78): the [implementation_paths]
+// rust_app template with the app's name in kebab case and the service's.
+func (n Naming) RustAppDir(repoRoot, service, app string) string {
+	template := n.ImplementationPaths.RustApp
+	if template == "" {
+		template = Default().ImplementationPaths.RustApp
+	}
+	dir := strings.ReplaceAll(strings.ReplaceAll(template, AppPathPlaceholder, ir.Kebab(app)), ServicePathPlaceholder, service)
+	return filepath.Join(repoRoot, filepath.FromSlash(dir))
 }
 
 func (n Naming) rustImplementationTemplate() string {
@@ -351,12 +375,19 @@ func (n Naming) siteImplementationTemplate() string {
 // functions would join under the root, and one without the service,
 // which would put every service's implementation in one package.
 func (c ImplementationPathsConfig) check() error {
-	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}, {"rust", c.Rust}, {"site", c.Site}} {
+	for _, t := range []struct{ key, template string }{{"go", c.Go}, {"typescript", c.TypeScript}, {"rust", c.Rust}, {"site", c.Site}, {"rust_app", c.RustApp}} {
 		if t.template == "" {
 			continue
 		}
 		if isAbsPath(t.template) {
 			return fmt.Errorf("implementation_paths.%s %q is an absolute path: it is relative to the parent of the schemas root", t.key, t.template)
+		}
+		if t.key == "rust_app" {
+			// An app's crate is named after the app (D78).
+			if !strings.Contains(t.template, AppPathPlaceholder) {
+				return fmt.Errorf("implementation_paths.rust_app %q does not contain %s: each app has a crate of its own", t.template, AppPathPlaceholder)
+			}
+			continue
 		}
 		if !strings.Contains(t.template, ServicePathPlaceholder) {
 			return fmt.Errorf("implementation_paths.%s %q does not contain %s: each API service has a package of its own", t.key, t.template, ServicePathPlaceholder)
@@ -768,6 +799,7 @@ func Default() Naming {
 			TypeScript: "typescript/" + ServicePathPlaceholder,
 			Rust:       "rust/" + ServicePathPlaceholder,
 			Site:       "web/" + ServicePathPlaceholder,
+			RustApp:    "apps/" + AppPathPlaceholder,
 		},
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -828,6 +860,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
 	fill(&n.ImplementationPaths.Rust, d.ImplementationPaths.Rust)
 	fill(&n.ImplementationPaths.Site, d.ImplementationPaths.Site)
+	fill(&n.ImplementationPaths.RustApp, d.ImplementationPaths.RustApp)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
 		// The default list names the default scalar package; a fork that
@@ -1069,6 +1102,20 @@ func (n Naming) RustWorkerCrate(stack, worker string) string {
 // -deriver.
 func (n Naming) RustDeriverCrate(stack, deriver string) string {
 	return strings.TrimSuffix(n.RustServerCrate(stack, deriver), "-server") + "-deriver"
+}
+
+// RustAppCrate returns the crate name of the entrypoint of a Rust app of a
+// stack (D78), as RustJobCrate names a job's, with the suffix -app.
+func (n Naming) RustAppCrate(stack, app string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, app), "-server") + "-app"
+}
+
+// RustAppImplementationCrate returns the crate name the scaffold gives the
+// program of app, an @app class of the Rust API service (D78), which the
+// engineer may rename: the API's name and the app's in kebab case, with the
+// suffix -app.
+func (n Naming) RustAppImplementationCrate(service, app string) string {
+	return n.RustCratePrefix + ir.AppDeployableName(service, app) + "-app"
 }
 
 // RustRunnerCrate returns the crate name of the entrypoint of a Rust

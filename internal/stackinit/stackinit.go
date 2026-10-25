@@ -37,6 +37,10 @@ type Plan struct {
 	// the rule gives.
 	ExposeNamed bool
 
+	// ExposeApps are the apps the stack exposes after Expose: every @app
+	// of a deployed API (AppsOf, D78).
+	ExposeApps []AppRef
+
 	// Environments are the stack's environments, in their order: the
 	// local one first.
 	Environments []Environment
@@ -260,6 +264,31 @@ func Refs(names []string, kinds map[string]ir.SchemaKind) []ir.ServiceRef {
 		refs = append(refs, ir.ServiceRef{Name: name, Kind: kinds[name]})
 	}
 	return refs
+}
+
+// AppRef names an app: its @app class, of the API service that declares
+// it.
+type AppRef struct {
+	API, App string
+}
+
+// AppsOf lists every @app of the APIs deploy names, in deploy's order and
+// each API's declaration order, from apis, each API's schema by name. Init
+// exposes each one (D78): an app is a program people use, and one the
+// stack does not expose is reachable from inside its environment alone,
+// which on gcp is no one.
+func AppsOf(deploy []ir.ServiceRef, apis map[string]*ir.Schema) []AppRef {
+	var out []AppRef
+	for _, ref := range deploy {
+		schema := apis[ref.Name]
+		if ref.Kind != ir.SchemaKindAPI || schema == nil {
+			continue
+		}
+		for _, app := range schema.Apps {
+			out = append(out, AppRef{API: ref.Name, App: app.Name})
+		}
+	}
+	return out
 }
 
 // Handles returns the class names of the handles the stack's schema

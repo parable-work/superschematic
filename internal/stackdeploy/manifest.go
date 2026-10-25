@@ -250,9 +250,10 @@ func readManifest(ctx context.Context, store registry.StateStore, run registry.R
 
 // nextManifest starts the manifest of a deploy from the previous one: the
 // images, bundles, sites and the databases' schemas carry forward until a
-// step changes them. Only the deployables env still has are carried, and a
-// server's, a job's or a worker's artifact only when it is still of its
-// kind.
+// step changes them. Only the deployables env still has are carried, and
+// the artifact of a deployable that runs code, a server's, a job's, a
+// worker's, a runner's, a deriver's or an app's (D78), only when it is
+// still of its kind.
 func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *Manifest {
 	env := run.Environment
 	m := &Manifest{
@@ -270,7 +271,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	}
 	for _, d := range env.Deployables {
 		switch d.Kind {
-		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver, ir.DeployableApp:
 			if b := prev.Bundles[d.Name]; d.HasBundle() && b != nil {
 				m.setBundle(d.Name, *b)
 			}

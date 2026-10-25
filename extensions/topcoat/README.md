@@ -58,32 +58,42 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   ([Money](#money)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
-are. Neither the core nor the installed `superschematic`, which links gcp
-and pulumi, links it (D44). `cmd/superschematic-topcoat` is the core with
-it linked:
+are. Neither the core nor the installed `superschematic`, which links the
+official extensions (gcp, cloudflare and pulumi), links it (D44).
+`cmd/superschematic-topcoat` is the installed binary with it linked
+beside those (D44, amended): it takes the same list from
+`cmd/superschematic/official`, so it builds and deploys everything
+`superschematic` does, and builds a stack whose app names `topcoat`
+(D78), which `superschematic` refuses. Each release ships it beside
+`superschematic`, built the same way against the release's static
+archives, as `superschematic-topcoat_<version>_<platform>.tar.gz` in the
+same `SHA256SUMS` (D47, amended), and a stack's generated CI installs it
+for a services root with such an app. From a checkout:
 
 ```bash
 go build -o superschematic-topcoat ./cmd/superschematic-topcoat
 ```
 
-A project's own binary links it beside its other extensions the same way,
-passing it to `cli.New`:
+A binary built from a checkout names no release, so the workflow it
+writes for a stack cannot install one: write it with the released
+binary. `go install` refuses the command, since the module replaces its
+siblings by their directories.
+
+A project's own binary links it beside the official extensions, or its
+own, the same way, passing them to `cli.New`:
 
 ```go
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/parable-work/superschematic/cli"
+	"github.com/parable-work/superschematic/cmd/superschematic/official"
 	"github.com/parable-work/superschematic/extensions/topcoat"
 )
 
 func main() {
-	if err := cli.New(cli.Config{Name: "superschematic-topcoat"}, topcoat.Extension{}).Execute(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := cli.New(cli.Config{Name: "superschematic-topcoat"}, append(official.Extensions(), topcoat.Extension{})...).Execute(); err != nil {
+		cli.Exit(err)
 	}
 }
 ```
@@ -304,6 +314,61 @@ cannot be read, or its crate is not built. When the service's API and the
 dependency's both authenticate with the identity runtime, the crate's
 `identity-postgres` and `identity-sqlite` features turn on the hosted
 crate's too ([Users and sessions](#users-and-sessions)).
+
+### An app in a stack
+
+An API service may declare an app, `@app({ extensions: ["topcoat"] })` on
+an empty class of its schema, which a stack runs as a deployable of its
+own beside the API's servers (D78). The app's program is a library crate
+the project writes, at the naming file's `[implementation_paths]
+rust_app` (`apps/{app}` by default), exporting
+
+```rust
+pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>
+```
+
+which the app's generated entrypoint calls once it has built the parts
+as the API's server builds its own: the API's `deps`, its
+`implementations`, the `engine` of an engine database, open on the
+stack's database, and `addr`, every interface at `PORT`. The core writes
+no Topcoat code for it, and a binary that does not link this extension
+refuses to build the stack: run `superschematic-topcoat`.
+
+For an API that declares an app, the crate gains
+`<service>_with_parts(parts)` and `<service>_with_parts_and_api(parts)`,
+which take any app's parts (through `AppParts`, which each `<App>Parts`
+converts into) and set the crate up from them: the implementations, the
+engine the entrypoint opened, in place of `engine::open` on SQLite, and,
+when the API authenticates with the identity runtime,
+`IdentityPageAuthenticator::of(&parts.implementations)`. An API whose
+users are its own passes its `PageAuthenticator` after the parts.
+`_with_parts` serves the pages alone, which call the API and the engine
+in-process, as `<service>_without_api` does: a stack exposes an app apart
+from its API, so the app's address does not serve an API the stack keeps
+internal. `_with_parts_and_api` mounts the JSON API at `/api` and the
+engine's routes at `/engine` too, as `<service>` does, for an app whose
+API the stack exposes as well. `serve` binds `parts.addr` and hands the
+listener to `topcoat::serve`:
+
+```rust
+pub async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
+    let listener = tokio::net::TcpListener::bind(parts.addr).await?;
+    let router = Router::builder().discover().shop_stock_with_parts(parts).build();
+    topcoat::serve(listener, router).await
+}
+```
+
+Never `topcoat::start`, which binds `HOST` and `PORT`, `127.0.0.1:3000`
+by default: on Cloud Run the app would listen on the container's loopback
+and fail its startup probe. The app's crate depends on this crate by
+path under the output root; the stack's build copies the app's crate
+into the output root's `impl/` with its paths re-based, and its image
+takes in every crate it reaches by path, this one among them. The image
+carries no asset bundle yet, so a live list is a GET form there.
+acme's `examples/acme-shop/apps/backoffice` is such an app over
+`shop-stock`, with its pages under `/stock` and the engine console over
+`shop-db` at `/stock/engine`; `superschematic-topcoat stack dev
+schemas/services/shop-stack` runs it beside `shop-stock`'s server.
 
 ## Users and sessions
 
