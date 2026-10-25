@@ -279,11 +279,9 @@ func (w *tsWriter) parts(decl *ir.MemoryStoreDeclaration) (params, wires []strin
 		var typ, wire string
 		switch part.Format {
 		case ir.MemoryStorePartString, "":
+			// A string, or a scalar whose wire form is a string, as the
+			// value holds it: a UUID's is superscalar's wire form.
 			typ, wire = "string", param
-			if uuidLike(part.Type.Name) {
-				// A UUID's name segment is its canonical lowercase form.
-				wire = param + ".toLowerCase()"
-			}
 		case ir.MemoryStorePartInteger:
 			w.use("integerPart")
 			typ, wire = "number", "integerPart("+param+")"
@@ -304,12 +302,6 @@ func (w *tsWriter) parts(decl *ir.MemoryStoreDeclaration) (params, wires []strin
 		wires = append(wires, wire)
 	}
 	return params, wires, nil
-}
-
-// uuidLike reports whether a part's type is a UUID scalar, whose wire form
-// is its canonical lowercase string.
-func uuidLike(typeName string) bool {
-	return strings.Contains(strings.ToLower(typeName), "uuid")
 }
 
 // picker is the name of the function that keeps the members of an object

@@ -19,21 +19,21 @@ import (
 // and in a nested StockBin, decodes without them, one that does not parse
 // is dropped and counted, a claim is taken once, forTTL refuses a TTL
 // above the maximum, a part that is no segment is refused, and each part's
-// wire string is the vectors' (a UUID's in lowercase, an integer in base
-// 10, an enum's value, a boolean's word).
+// wire string is the vectors' (a string scalar's wire form as it is, an
+// integer in base 10, an enum's value, a boolean's word).
 const tsDefinitionsUse = `import { expect, test } from 'bun:test';
 import { InProcessMemoryStore, MemoryStoreNameError, signal } from '@superschematic/http-runtime';
 import { Region } from '@schemas/shop-cache-common-types/types';
 import type { StockLevel } from '@schemas/shop-cache-common-types/types';
 import { STORE, productViews, receiptSent, stockChanged, stockSamples } from './index';
 
-const productId = '3F2A9C1E-7B4D-4E8A-9C2F-1D5E6A7B8C9D';
+const productId = '1dTTvbXa8LxwSmeC8pRVJx';
 
 test('the definitions name each channel and key by its typed parts', () => {
   expect(STORE).toBe('shop-cache');
-  expect(stockChanged.for(productId).ref).toEqual({ declaration: 'stock-changed', name: 'stock-changed:3f2a9c1e-7b4d-4e8a-9c2f-1d5e6a7b8c9d' });
+  expect(stockChanged.for(productId).ref).toEqual({ declaration: 'stock-changed', name: 'stock-changed:1dTTvbXa8LxwSmeC8pRVJx' });
   const views = productViews.forTTL(86_400_000, productId, 20261025, Region.North, true, 'a label');
-  expect(views.ref.name).toBe('views:3f2a9c1e-7b4d-4e8a-9c2f-1d5e6a7b8c9d:20261025:north:true:a label');
+  expect(views.ref.name).toBe('views:1dTTvbXa8LxwSmeC8pRVJx:20261025:north:true:a label');
   expect(views.ttlMs).toBe(86_400_000);
   expect(() => productViews.forTTL(86_400_001, productId, 1, Region.South, false, 'x')).toThrow(RangeError);
   expect(() => productViews.forTTL(1000, productId, 1.5, Region.South, false, 'x')).toThrow(MemoryStoreNameError);
@@ -50,12 +50,12 @@ test('the definitions run against the in-process store', async () => {
   const samples = stockSamples.for(productId);
   const levels: StockLevel[] = [];
   await samples.subscribe(store, m => void levels.push(m));
-  const later = { productId: productId.toLowerCase(), onHand: 3, bins: [{ bin: 'A1', count: 3, shelf: 'top' }], warehouse: 'north' };
+  const later = { productId, onHand: 3, bins: [{ bin: 'A1', count: 3, shelf: 'top' }], warehouse: 'north' };
   await store.publish(samples.ref, new TextEncoder().encode(JSON.stringify(later)));
   await store.publish(samples.ref, new TextEncoder().encode(JSON.stringify({ productId, bins: [] })));
   await Bun.sleep(0);
   expect(signals).toEqual([signal]);
-  expect(levels).toEqual([{ productId: productId.toLowerCase(), onHand: 3, bins: [{ bin: 'A1', count: 3 }] } as unknown as StockLevel]);
+  expect(levels).toEqual([{ productId, onHand: 3, bins: [{ bin: 'A1', count: 3 }] } as unknown as StockLevel]);
   expect(samples.decodeFailures).toBe(1);
 
   const receipt = receiptSent.for('o-1');

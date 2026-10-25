@@ -31,7 +31,7 @@ export const receiptSent = {
   ttlMs: 600_000,
   /** The key of one orderId. Throws MemoryStoreNameError for a part that is no segment. */
   for(orderId: string): Key {
-    return new Key({ declaration: 'receipt-sent', name: memoryStoreName('receipt-sent', orderId.toLowerCase()) }, 600_000);
+    return new Key({ declaration: 'receipt-sent', name: memoryStoreName('receipt-sent', orderId) }, 600_000);
   },
 } as const;
 
@@ -45,7 +45,7 @@ export const stockChanged = {
   name: 'stock-changed',
   /** The channel of one productId. Throws MemoryStoreNameError for a part that is no segment. */
   for(productId: string): Channel<Signal> {
-    return signalChannel({ declaration: 'stock-changed', name: memoryStoreName('stock-changed', productId.toLowerCase()) });
+    return signalChannel({ declaration: 'stock-changed', name: memoryStoreName('stock-changed', productId) });
   },
 } as const;
 
@@ -59,7 +59,7 @@ export const stockSamples = {
   name: 'stock-samples',
   /** The channel of one productId. Throws MemoryStoreNameError for a part that is no segment. */
   for(productId: string): Channel<StockLevel> {
-    return new Channel({ declaration: 'stock-samples', name: memoryStoreName('stock-samples', productId.toLowerCase()) }, stockLevelCodec);
+    return new Channel({ declaration: 'stock-samples', name: memoryStoreName('stock-samples', productId) }, stockLevelCodec);
   },
 } as const;
 
@@ -80,7 +80,7 @@ export const productViews = {
    */
   forTTL(ttlMs: number, productId: string, day: number, region: Region, mobile: boolean, label: string): Key {
     checkTtl(ttlMs, 86_400_000);
-    return new Key({ declaration: 'views', name: memoryStoreName('views', productId.toLowerCase(), integerPart(day), String(region), (mobile ? 'true' : 'false'), label) }, ttlMs);
+    return new Key({ declaration: 'views', name: memoryStoreName('views', productId, integerPart(day), String(region), (mobile ? 'true' : 'false'), label) }, ttlMs);
   },
 } as const;
 
