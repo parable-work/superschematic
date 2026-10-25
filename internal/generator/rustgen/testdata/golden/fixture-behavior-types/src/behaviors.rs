@@ -252,9 +252,20 @@ pub struct TicketWorkflow {
 /// TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TicketComments {
-    /// How many comments the instance has.
-    #[serde(rename = "commentCount")]
-    pub comment_count: i64,
+    /// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    pub messages: i64,
+    /// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    #[serde(default, rename = "lastMessageAt", skip_serializing_if = "Option::is_none")]
+    pub last_message_at: Option<i64>,
+    /// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    pub threads: TicketCommentsThreads,
+}
+
+/// TicketCommentsThreads types TicketComments.threads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TicketCommentsThreads {
+    pub open: i64,
+    pub resolved: i64,
 }
 
 /// TicketRevisions holds the fields a Ticket's Revisions adds, as a read returns them: a field with no value is absent.

@@ -751,12 +751,12 @@ func runEngineScript(t *testing.T, server *scriptServer, key ed25519.PrivateKey,
 		headers: map[string]string{"If-Match": `"1"`}, body: `{"to": "open"}`, status: http.StatusPreconditionFailed, corpus: transition.with(http.StatusPreconditionFailed)})
 	as("member", call{step: "a transition the workflow does not allow", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/transition",
 		body: `{"to": "escalated"}`, status: http.StatusConflict, corpus: transition.with(http.StatusConflict)})
-	as("member", call{step: "comment on the ticket", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/comment",
+	as("member", call{step: "post on the ticket", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/post",
 		body: `{"body": "A new cartridge is on its way."}`, status: http.StatusOK,
-		corpus: corpus("operations.json", "the core's behaviors over HTTP > listComments is a read", http.MethodPost, http.StatusOK, "/operations/comment")})
-	as("member", call{step: "list the ticket's comments", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/listComments",
+		corpus: corpus("operations.json", "the core's behaviors over HTTP > listMessages is a read", http.MethodPost, http.StatusOK, "/operations/post")})
+	as("member", call{step: "list the ticket's messages", method: http.MethodPost, path: tickets + "/" + t1 + "/operations/listMessages",
 		body: `{"limit": 10}`, status: http.StatusOK,
-		corpus: corpus("operations.json", "the core's behaviors over HTTP > listComments is a read", http.MethodPost, http.StatusOK, "/operations/listComments")})
+		corpus: corpus("operations.json", "the core's behaviors over HTTP > listMessages is a read", http.MethodPost, http.StatusOK, "/operations/listMessages")})
 	as("member", call{step: "patch a ticket", method: http.MethodPatch, path: tickets + "/" + t3,
 		headers: map[string]string{"Content-Type": "application/merge-patch+json", "If-Match": `"1"`}, body: `{"priority": "low", "tags": ["hardware"]}`, status: http.StatusOK,
 		corpus: corpus("http.json", "instances > an update is a merge patch", http.MethodPatch, http.StatusOK, "/instances/o1")})

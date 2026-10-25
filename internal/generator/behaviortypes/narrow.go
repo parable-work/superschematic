@@ -273,9 +273,144 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 	return nil
 }
 
-// Comments: the count is always there.
-func narrowComments(n *Narrowing, _ map[string]any, _ Target) error {
-	return setField(n, "commentCount", map[string]any{"type": "integer"}, true)
+// commentsMessageResults are Comments' operations whose result is one
+// message's record.
+var commentsMessageResults = []string{"post", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "getMessage"}
+
+// Comments (D77): the count of messages and the threads' counts are always
+// there, every instance starting with an empty conversation; when the
+// latest message was posted is absent while there is none. A block is one
+// of the kinds post's parameters declare, and a message's record is
+// post's result with its blocks typed so: <Base>CommentBlock and
+// <Base>CommentMessage, which every operation that returns a record
+// returns and listMessages' page holds. A record keeps every kind of
+// block, since narrowing the config leaves posted blocks as they are;
+// what post and edit give is of the kinds the config's blocks allow, and
+// with none allowed they take no blocks.
+func narrowComments(n *Narrowing, config map[string]any, target Target) error {
+	given, err := at(n.Params["post"], "properties", "blocks", "items")
+	if err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	kinds, _ := given["oneOf"].([]any)
+	if len(kinds) == 0 {
+		return fmt.Errorf("operation post: a block is not one of its kinds")
+	}
+	block := target.Base + "CommentBlock"
+	message := target.Base + "CommentMessage"
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   block,
+		Doc:    fmt.Sprintf("A block of a message of %s's Comments: a structured part beside its body, of a kind Comments declares.", An(target.Base)),
+		Schema: map[string]any{"oneOf": cloneValue(kinds)},
+	})
+	posted, ok := n.Results["post"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("operation post has no result schema")
+	}
+	record := cloneSchema(posted)
+	delete(record, "description")
+	if err := setItems(record, ref(block, ""), "properties", "blocks"); err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   message,
+		Doc:    fmt.Sprintf("A message of %s's Comments, as every operation that returns one gives it.", An(target.Base)),
+		Schema: record,
+	})
+	for _, op := range commentsMessageResults {
+		result, ok := n.Results[op].(map[string]any)
+		if !ok {
+			return fmt.Errorf("operation %s has no result schema", op)
+		}
+		n.Results[op] = ref(message, DescriptionOf(result))
+	}
+	if err := setItems(n.Results["listMessages"], ref(message, ""), "properties", "items"); err != nil {
+		return fmt.Errorf("operation listMessages: %w", err)
+	}
+	root, err := at(n.Results["listMessages"], "properties", "root")
+	if err != nil {
+		return fmt.Errorf("operation listMessages: %w", err)
+	}
+	if err := setOperationProperty(n.Results, "listMessages", nil, "root", ref(message, DescriptionOf(root))); err != nil {
+		return err
+	}
+	if err := setItems(n.Results["listEdits"], ref(block, ""), "properties", "items", "items", "properties", "blocks"); err != nil {
+		return fmt.Errorf("operation listEdits: %w", err)
+	}
+	allowed := kinds
+	if list, ok := config["blocks"].([]any); ok {
+		allowed = nil
+		for _, kind := range kinds {
+			if slices.Contains(stringsOf(list), blockKind(kind)) {
+				allowed = append(allowed, kind)
+			}
+		}
+	}
+	for _, op := range []string{"post", "edit"} {
+		if len(allowed) == 0 {
+			if err := deleteProperty(n.Params[op], "blocks"); err != nil {
+				return fmt.Errorf("operation %s: %w", op, err)
+			}
+			continue
+		}
+		var items map[string]any
+		if len(allowed) == len(kinds) {
+			items = ref(block, "")
+		} else {
+			items = map[string]any{"oneOf": cloneValue(allowed)}
+		}
+		if err := setItems(n.Params[op], items, "properties", "blocks"); err != nil {
+			return fmt.Errorf("operation %s: %w", op, err)
+		}
+	}
+	return setFields(n,
+		typedField{"messages", integer(), true},
+		typedField{"lastMessageAt", integer(), false},
+		typedField{"threads", map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"open", "resolved"},
+			"properties": map[string]any{"open": integer(), "resolved": integer()},
+		}, true},
+	)
+}
+
+// blockKind is the kind a block's schema holds: its kind's const.
+func blockKind(schema any) string {
+	kind, _ := at(schema, "properties", "kind")
+	text, _ := kind["const"].(string)
+	return text
+}
+
+// setItems replaces the items of the array schema at a path of object
+// keys, keeping their description.
+func setItems(schema any, items map[string]any, path ...string) error {
+	array, err := at(schema, path...)
+	if err != nil {
+		return err
+	}
+	current, ok := array["items"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("the declaration's schema at %v holds no items", path)
+	}
+	if description, ok := current["description"].(string); ok {
+		if _, has := items["description"]; !has {
+			items["description"] = description
+		}
+	}
+	array["items"] = items
+	return nil
+}
+
+// deleteProperty removes a property of an object schema; it must exist.
+func deleteProperty(schema any, name string) error {
+	properties, err := at(schema, "properties")
+	if err != nil {
+		return err
+	}
+	if _, ok := properties[name]; !ok {
+		return fmt.Errorf("the declaration's schema has no property %s", name)
+	}
+	delete(properties, name)
+	return nil
 }
 
 // Revisions: a proposal's patch is the type's patch, a revision's data its
