@@ -63,7 +63,7 @@ pub use branches::{
     uuid_v5, Branches, BranchesConfig, BranchesKind, BranchesParent, BranchesSweep, BranchesUnit,
     ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROOT_NAMESPACE,
 };
-pub use comments::{CommentRecord, Comments};
+pub use comments::{Comments, CommentsConfig};
 pub use constants::{Constants, ConstantsConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use derived::{Derived, DerivedConfig, DerivedField};

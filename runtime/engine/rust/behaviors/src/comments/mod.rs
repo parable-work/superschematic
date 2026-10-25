@@ -1,235 +1,181 @@
-//! Comments, the core's comments on an instance (D16), the port of
-//! `src/behaviors/core/comments.ts`. `comment` adds one, as a reply to one
-//! of the instance's comments or not; `listComments` reads them a page at a
-//! time in the order they were added, and goes through no write: it is
-//! read-only, so the access policy is asked for read. Each comment has a
-//! number on its instance, 1, 2, 3, ..., which a reply names; numbers are
-//! per instance, so a comment's id says nothing about any other instance.
-//! Comments live in the behavior's own table, and `commentCount` in a
-//! column of its own, so a list read costs no count query. Deleting the
-//! instance deletes its comments.
+//! Comments, the core's conversation on an instance (D16, rebuilt by D77):
+//! messages, each top-level or a reply in the thread of a top-level one,
+//! one level deep, which their authors edit and delete, others react to
+//! and pin, and whose threads are resolved and reopened; a moderator edits
+//! and deletes another's and purges. `comments-contract.md` beside this
+//! module is the contract it implements: the record, the operations'
+//! parameters, checks in order, refusals and results, the paging, the
+//! fields and the storage.
 //!
-//! Every statement is the same on SQLite and Postgres (D58): the table is
-//! a [`TableSpec`], and each parameter's type is the column's it is
-//! compared with or written to.
+//! Every writing operation is beside the instance (D77 primitive 1): it
+//! writes only Comments' own tables and its `count` column, never moves the
+//! instance's seq, ETag or updatedAt, asks no other behavior's guard (so a
+//! Lease another principal holds does not stop a reply), and appends one
+//! operation event of no sequence whose change carries its result. The
+//! three fields, `messages`, `lastMessageAt` and `threads`, are volatile:
+//! each is read from the counts the writes keep, and no event carries
+//! their moves.
 //!
-//! configChange: Comments takes no config. It can be added to a schema that
-//! has instances, which start with none, and cannot be removed from one:
-//! their comments would stay behind with nothing to delete them.
+//! Each message has a number on its instance, 1, 2, 3, ..., never reused;
+//! numbers are per instance. Deleting the instance deletes its
+//! conversation. Migration 2 moves version 1's comments, a chain of
+//! replies, into threads one level deep.
+//!
+//! configChange: Comments can be added to a schema that has instances,
+//! which start with an empty conversation, and cannot be removed from one:
+//! their messages would stay behind with nothing to delete them. A config
+//! change applies to the next call.
 
-use serde_json::{Map, Value};
+mod checks;
+mod reads;
+mod record;
+mod storage;
+mod writes;
 
-use superschematic_engine::behaviors::{
-    page, page_request, BehaviorMigration, ColumnSpec, InstanceView, TableSpec,
-};
-use superschematic_engine::errors::SchemaIssue;
-use superschematic_engine::storage::{Row, SqlValue};
-use superschematic_engine::{Behavior, ConfigTarget, EngineError, Hooks, InstanceChange, Result};
+use serde_json::Value;
+
+use superschematic_engine::behaviors::InstanceView;
+use superschematic_engine::{Behavior, ConfigTarget, Error, Hooks, InstanceChange, Result};
+
+use checks::integer;
+use storage::conversation;
 
 const NAME: &str = "Comments";
 
-const COLUMNS: &str = "comment, reply_to, body, created_by, created_at";
+/// The longest body when the config gives no `maxBodyLength`.
+pub const DEFAULT_MAX_BODY_LENGTH: i64 = 40_000;
 
-/// One comment, as `comment` and `listComments` return it.
+/// Comments' config. Every member is optional; `{}` and no config are the
+/// same.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommentRecord {
-    pub id: i64,
-    pub reply_to: Option<i64>,
-    pub body: String,
-    pub created_by: String,
-    pub created_at: i64,
+pub struct CommentsConfig {
+    /// The longest body a post or an edit gives, in code points.
+    pub max_body_length: i64,
+    /// How long after posting its author may edit a message; no limit when
+    /// `None`. A moderator is not held to it.
+    pub edit_window_ms: Option<i64>,
+    /// The block kinds a post or an edit may give; every kind when `None`.
+    pub blocks: Option<Vec<String>>,
+    /// Edit and delete another's message, edit past the window, purge.
+    pub moderate_permission: Option<String>,
+    /// Pin and unpin; anyone the policy lets write when `None`.
+    pub pin_permission: Option<String>,
+    /// Resolve and reopen another's thread; only its author when `None`.
+    pub resolve_permission: Option<String>,
 }
 
-impl CommentRecord {
-    /// The comment as the operations return it: `id`, `replyTo` when it
-    /// replies, `body`, `createdBy`, `createdAt`.
-    pub fn to_json(&self) -> Value {
-        let mut out = Map::new();
-        out.insert("id".into(), Value::from(self.id));
-        if let Some(reply_to) = self.reply_to {
-            out.insert("replyTo".into(), Value::from(reply_to));
+impl Default for CommentsConfig {
+    fn default() -> Self {
+        CommentsConfig {
+            max_body_length: DEFAULT_MAX_BODY_LENGTH,
+            edit_window_ms: None,
+            blocks: None,
+            moderate_permission: None,
+            pin_permission: None,
+            resolve_permission: None,
         }
-        out.insert("body".into(), Value::from(self.body.as_str()));
-        out.insert("createdBy".into(), Value::from(self.created_by.as_str()));
-        out.insert("createdAt".into(), Value::from(self.created_at));
-        Value::Object(out)
     }
+}
 
-    fn of(row: &Row) -> Result<Self> {
-        Ok(CommentRecord {
-            id: row.i64("comment")?,
-            reply_to: row.opt_i64("reply_to")?,
-            body: row.text("body")?.to_owned(),
-            created_by: row.text("created_by")?.to_owned(),
-            created_at: row.i64("created_at")?,
+impl CommentsConfig {
+    /// The config as the configSchema has checked it.
+    pub fn parse(raw: &Value) -> Result<Self> {
+        let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_owned);
+        let blocks = match raw.get("blocks") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(kinds)) => Some(
+                kinds
+                    .iter()
+                    .map(|kind| {
+                        kind.as_str().map(str::to_owned).ok_or_else(|| {
+                            Error::config("Comments: blocks lists block kinds, as strings")
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            Some(_) => return Err(Error::config("Comments: blocks is an array")),
+        };
+        Ok(CommentsConfig {
+            max_body_length: integer(raw.get("maxBodyLength")).unwrap_or(DEFAULT_MAX_BODY_LENGTH),
+            edit_window_ms: integer(raw.get("editWindowMs")),
+            blocks,
+            moderate_permission: text("moderatePermission"),
+            pin_permission: text("pinPermission"),
+            resolve_permission: text("resolvePermission"),
         })
     }
 }
 
-// The behavior's rows of one instance, as its SQL names them.
-fn key<C>(view: &InstanceView<'_, C>) -> Vec<SqlValue> {
-    vec![
-        SqlValue::from(view.namespace()),
-        SqlValue::from(view.schema()),
-        SqlValue::from(view.id()),
-    ]
-}
-
-// integer reads a parameter its paramsSchema holds to an integer.
-fn integer(value: Option<&Value>) -> Option<i64> {
-    match value {
-        Some(Value::Number(number)) => {
-            let read = superschematic_engine::json::number_value(number);
-            (read.fract() == 0.0).then_some(read as i64)
-        }
-        _ => None,
-    }
-}
-
-/// Comments: a thread on each instance.
+/// Comments: a conversation on each instance.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Comments;
 
+// The `threads` field: the posted top-level messages, open and resolved.
+fn threads(view: &InstanceView<'_, CommentsConfig>) -> Result<Option<Value>> {
+    let found = conversation(view)?.unwrap_or_default();
+    Ok(Some(checks::object(vec![
+        ("open", Value::from(found.open_threads)),
+        ("resolved", Value::from(found.resolved_threads)),
+    ])))
+}
+
 impl Behavior for Comments {
-    type Config = ();
+    type Config = CommentsConfig;
 
     fn declaration(&self) -> &str {
-        include_str!("../declarations/Comments.behavior.json")
+        include_str!("../../declarations/Comments.behavior.json")
     }
 
-    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<()> {
-        Ok(())
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<CommentsConfig> {
+        CommentsConfig::parse(raw)
     }
 
     fn hooks(&self) -> Hooks<Self> {
         Hooks {
             config_change: Some(|_, before, after, _| {
                 Ok((before.is_some() && after.is_none()).then(|| {
-                    "the comments its instances have would stay behind with nothing to delete them"
+                    "the messages its instances have would stay behind with nothing to delete them"
                         .to_owned()
                 }))
             }),
-            guidance: Some(|_, _, target| crate::guidance::comments::guidance(target)),
-            migrations: vec![BehaviorMigration::new(1, "comments")
-                .column("count", ColumnSpec::integer().not_null().default(0))
-                .table(
-                    TableSpec::new("comments")
-                        .column("namespace", ColumnSpec::text().not_null())
-                        .column("schema", ColumnSpec::text().not_null())
-                        .column("id", ColumnSpec::text().not_null())
-                        .column("comment", ColumnSpec::integer().not_null())
-                        .column("reply_to", ColumnSpec::integer())
-                        .column("body", ColumnSpec::text().not_null())
-                        .column("created_by", ColumnSpec::text().not_null())
-                        .column("created_at", ColumnSpec::integer().not_null())
-                        .primary_key(&["namespace", "schema", "id", "comment"]),
-                )],
+            guidance: Some(|_, config, target| crate::guidance::comments::guidance(config, target)),
+            migrations: storage::migrations(),
             operations: vec![
-                ("comment", |_, cx, params| {
-                    let table = cx.sql().table("comments")?;
-                    let reply_to = integer(params.get("replyTo"));
-                    if let Some(reply_to) = reply_to {
-                        let mut found = key(cx);
-                        found.push(SqlValue::Integer(reply_to));
-                        if cx
-                            .sql()
-                            .get(
-                                format!("SELECT 1 AS found FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND comment = ?"),
-                                &found,
-                            )?
-                            .is_none()
-                        {
-                            return Err(EngineError::operation_params(
-                                NAME,
-                                "comment",
-                                vec![SchemaIssue::new(
-                                    "/replyTo",
-                                    format!(
-                                        "{} {} has no comment {reply_to}",
-                                        cx.schema(),
-                                        cx.id()
-                                    ),
-                                )],
-                            )
-                            .into());
-                        }
-                    }
-                    let last = cx.sql().get(
-                        format!("SELECT MAX(comment) AS last FROM {table} WHERE namespace = ? AND schema = ? AND id = ?"),
-                        &key(cx),
-                    )?;
-                    let id = match last {
-                        Some(row) => row.opt_i64("last")?.unwrap_or(0) + 1,
-                        None => 1,
-                    };
-                    let record = CommentRecord {
-                        id,
-                        reply_to,
-                        body: params
-                            .get("body")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned(),
-                        created_by: cx.principal().subject.clone(),
-                        created_at: cx.now(),
-                    };
-                    let mut values = key(cx);
-                    values.extend([
-                        SqlValue::Integer(record.id),
-                        record.reply_to.map_or(SqlValue::Null, SqlValue::Integer),
-                        SqlValue::from(record.body.as_str()),
-                        SqlValue::from(record.created_by.as_str()),
-                        SqlValue::Integer(record.created_at),
-                    ]);
-                    cx.sql().run(
-                        format!("INSERT INTO {table} (namespace, schema, id, {COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
-                        &values,
-                    )?;
-                    let count = cx.columns().get()?.i64("count")?;
-                    cx.columns()
-                        .set(&[("count", SqlValue::Integer(count + 1))])?;
-                    Ok(record.to_json())
+                ("post", |_, cx, params| writes::post(cx, params)),
+                ("edit", |_, cx, params| writes::edit(cx, params)),
+                ("deleteMessage", |_, cx, params| {
+                    writes::delete_message(cx, params)
                 }),
-                ("listComments", |_, cx, params| {
-                    let request = page_request(NAME, "listComments", params)?;
-                    let table = cx.sql().table("comments")?;
-                    let mut values = key(cx);
-                    values.extend([
-                        SqlValue::Integer(request.after),
-                        SqlValue::Integer(request.limit + 1),
-                    ]);
-                    let rows = cx.sql().all(
-                        format!(
-                            "SELECT {COLUMNS} FROM {table}
-                             WHERE namespace = ? AND schema = ? AND id = ? AND comment > ?
-                             ORDER BY comment LIMIT ?"
-                        ),
-                        &values,
-                    )?;
-                    let records = rows
-                        .iter()
-                        .map(CommentRecord::of)
-                        .collect::<Result<Vec<_>>>()?;
-                    let found = page(records, request.limit, |record| record.id);
-                    Ok(superschematic_engine::behaviors::Page {
-                        items: found.items.iter().map(CommentRecord::to_json).collect(),
-                        next: found.next,
-                    }
-                    .to_json())
+                ("purge", |_, cx, params| writes::purge(cx, params)),
+                ("react", |_, cx, params| writes::react(cx, params)),
+                ("unreact", |_, cx, params| writes::unreact(cx, params)),
+                ("pin", |_, cx, params| writes::pin(cx, params)),
+                ("unpin", |_, cx, params| writes::unpin(cx, params)),
+                ("resolve", |_, cx, params| writes::resolve(cx, params)),
+                ("reopen", |_, cx, params| writes::reopen(cx, params)),
+                ("listMessages", |_, cx, params| {
+                    reads::list_messages(cx, params)
+                }),
+                ("getMessage", |_, cx, params| reads::get_message(cx, params)),
+                ("listEdits", |_, cx, params| reads::list_edits(cx, params)),
+                ("listReactions", |_, cx, params| {
+                    reads::list_reactions(cx, params)
                 }),
             ],
-            fields: vec![("commentCount", |_, view| {
-                Ok(Some(Value::from(view.columns().get()?.i64("count")?)))
-            })],
+            fields: vec![
+                ("messages", |_, view| {
+                    Ok(Some(Value::from(view.columns().get()?.i64("count")?)))
+                }),
+                ("lastMessageAt", |_, view| {
+                    Ok(conversation(view)?
+                        .and_then(|found| found.last_message_at)
+                        .map(Value::from))
+                }),
+                ("threads", |_, view| threads(view)),
+            ],
             after_change: Some(|_, cx, change| {
                 if matches!(change, InstanceChange::Delete) {
-                    let table = cx.sql().table("comments")?;
-                    cx.sql().run(
-                        format!(
-                            "DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ?"
-                        ),
-                        &key(cx),
-                    )?;
+                    writes::delete_conversation(cx)?;
                 }
                 Ok(())
             }),
