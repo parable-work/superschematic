@@ -86,7 +86,7 @@ func TestTheConsolePagesTheEngine(t *testing.T) {
 	t.Run("pages", func(t *testing.T) {
 		cargoTestCrateWith(t, engineService, enginePagesAppTest, crateOptions{
 			before:  map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
-			appends: map[string]string{"src/engine_pages.rs": panelFormPage},
+			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest},
 		})
 	})
 }
@@ -132,6 +132,44 @@ pub async fn panel_form_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         operation_form(schema: "Note".to_owned(), id: Some(id), seq: None, operation: comment, values: values, hidden: vec!["replyTo".to_owned()])
     })
+}
+`
+
+// panelShowsTest, appended to engine_pages.rs, holds panel_shows to the
+// panels: a core panel owns every operation of its behavior, a commerce
+// panel those commerce_shows names, and the instance page lists the rest.
+const panelShowsTest = `
+#[cfg(test)]
+mod panel_shows_tests {
+    use super::panel_shows;
+
+    #[test]
+    fn a_panel_owns_the_operations_it_shows_and_the_page_lists_the_rest() {
+        for (behavior, operation) in [
+            ("Workflow", "transition"),
+            ("Approvals", "signOff"),
+            ("Branches", "commit"),
+            ("Stock", "receiveStock"),
+            ("Stock", "adjustStock"),
+            ("Stock", "countStock"),
+            ("Stock", "listStockMovements"),
+            ("Calendar", "listBookings"),
+            ("Payments", "refundPayment"),
+        ] {
+            assert!(panel_shows(behavior, operation), "{behavior}.{operation} is the panel's");
+        }
+        for (behavior, operation) in [
+            ("Stock", "holdFor"),
+            ("Calendar", "setOpeningHours"),
+            ("Calendar", "addClosure"),
+            ("Calendar", "removeClosure"),
+            ("Holds", "retakeHolds"),
+            ("Payments", "capturePayment"),
+            ("Payments", "voidPayment"),
+        ] {
+            assert!(!panel_shows(behavior, operation), "{behavior}.{operation} is listed");
+        }
+    }
 }
 `
 
