@@ -17,9 +17,9 @@ times than expected.
 
 Version sites (relative to the repository root):
   versions.env                        VERSION=
-  packages/{api,db,schema,schema-config,stack}/package.json
+  packages/{api,db,memory-store,schema,schema-config,stack}/package.json
                                       version
-  packages/bun.lock                   the five workspace entries
+  packages/bun.lock                   the six workspace entries
   ir/typescript/package.json          version
   runtime/schema/typescript/package.json
                                       version
@@ -128,7 +128,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GO_MODULE = "github.com/parable-work/superschematic"
 
-NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config", "stack"]
+NPM_WORKSPACE_PACKAGES = ["api", "db", "memory-store", "schema", "schema-config", "stack"]
 
 # The targets of the engine's prebuilt Node-API addon, one npm package each
 # (@superschematic/engine-<target>, runtime/engine/typescript/npm/<target>),
