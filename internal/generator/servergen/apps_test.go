@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func loadAppFixture(t *testing.T) fixture {
 // authenticator and Implementations as the server does, opens desk-db's
 // engine and deploys its document, waits for it to open, and calls the
 // app crate's serve with the parts; it scaffolds the missing app crate at
-// apps/backoffice, whose serve fails, and mirrors it into the output root
+// apps/backoffice, whose serve answers 501, and mirrors it into the output root
 // (D78). Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestAppEntrypointGolden -update
@@ -209,5 +210,123 @@ func TestAppEntrypointCompiles(t *testing.T) {
 				t.Errorf("rustfmt lays out %s otherwise: %v\n%s", source, err, diff)
 			}
 		}
+	}
+
+	// The project's crate becomes a Topcoat app's, which depends on the
+	// crate the extension writes under the output root's topcoat/ and
+	// on one of its own: the stack's next build mirrors it and brings the
+	// lockfile up to date, and the workspace builds frozen to it.
+	writeTopcoatApp(t, repoRoot)
+	f.build(t, repoRoot, paths, appStack)
+	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
+}
+
+// writeTopcoatApp writes, under repoRoot, the crate of app Backoffice as a
+// Topcoat app's is (D78): it depends by path on a crate the way the
+// Topcoat crate is written under the output root's topcoat/, which itself
+// depends on another such crate and on the API's crate, and on a crate of
+// the project's own beside it. It returns the output root's topcoat
+// directory.
+func writeTopcoatApp(t *testing.T, repoRoot string) string {
+	t.Helper()
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	topcoat := filepath.Join(out, "topcoat")
+	app := naming.Default().RustAppDir(repoRoot, appAPI, "Backoffice")
+	rel := func(from, to string) string {
+		r, err := filepath.Rel(from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return filepath.ToSlash(r)
+	}
+	files := map[string]string{
+		filepath.Join(topcoat, appAPI, "Cargo.toml"): `[package]
+name = "schemas-desk-app-api-topcoat"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+schemas-desk-app-api-api = { path = "../../api/` + appAPI + `" }
+schemas-desk-hosted-topcoat = { path = "../desk-hosted" }
+`,
+		filepath.Join(topcoat, appAPI, "src", "lib.rs"): "pub use schemas_desk_app_api_api::apps::BackofficeParts;\npub use schemas_desk_hosted_topcoat::HOSTED;\n",
+		filepath.Join(topcoat, "desk-hosted", "Cargo.toml"): `[package]
+name = "schemas-desk-hosted-topcoat"
+version = "0.1.0"
+edition = "2024"
+publish = false
+`,
+		filepath.Join(topcoat, "desk-hosted", "src", "lib.rs"): "pub const HOSTED: &str = \"desk-hosted\";\n",
+		filepath.Join(repoRoot, "shared", "pages", "Cargo.toml"): `[package]
+name = "shared-pages"
+version = "0.1.0"
+edition = "2024"
+publish = false
+`,
+		filepath.Join(repoRoot, "shared", "pages", "src", "lib.rs"): "pub const TITLE: &str = \"Backoffice\";\n",
+		filepath.Join(app, "Cargo.toml"): `[package]
+name = "schemas-desk-app-api-backoffice-app"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+[dependencies]
+schemas-desk-app-api-api = { path = "` + rel(app, generator.APIDir(out, appAPI)) + `" }
+schemas-desk-app-api-topcoat = { path = "` + rel(app, filepath.Join(topcoat, appAPI)) + `" }
+shared-pages = { path = "` + rel(app, filepath.Join(repoRoot, "shared", "pages")) + `" }
+
+[workspace]
+`,
+		filepath.Join(app, "src", "lib.rs"): `use schemas_desk_app_api_topcoat::BackofficeParts;
+
+pub async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
+    Err(std::io::Error::other(format!(
+        "{} of {} at {}",
+        shared_pages::TITLE,
+        schemas_desk_app_api_topcoat::HOSTED,
+        parts.addr
+    )))
+}
+`,
+	}
+	for file, content := range files {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return topcoat
+}
+
+// TestAppImageContextHoldsItsCrates: the ignore file beside an app's
+// Dockerfile takes in each crate the app's crate reaches by path that no
+// other pattern takes in: the Topcoat crate under the output root, the
+// crate it depends on beside it, and the project's crate beside the
+// app's; the API's crate stays the API pattern's (D78).
+func TestAppImageContextHoldsItsCrates(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeTopcoatApp(t, repoRoot)
+	f := loadAppFixture(t)
+	f.build(t, repoRoot, rustFakePaths(repoRoot), appOrder...)
+	data, err := os.ReadFile(filepath.Join(servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), appStack, appName), servergen.DockerIgnoreFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, want := range []string{"!schemas/dist/topcoat/" + appAPI, "!schemas/dist/topcoat/desk-hosted", "!shared/pages", "!schemas/dist/api/*/src"} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("the app's ignore file takes in no %s:\n%s", want[1:], data)
+		}
+	}
+	if slices.Contains(lines, "!schemas/dist/api/"+appAPI) || slices.Contains(lines, "!schemas/dist/topcoat") {
+		t.Errorf("the app's ignore file takes in more than the crates:\n%s", data)
+	}
+	server, err := os.ReadFile(filepath.Join(servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), appStack, "desk-app-api"), servergen.DockerIgnoreFile))
+	if err == nil && strings.Contains(string(server), "topcoat") {
+		t.Errorf("the server's ignore file takes in the app's crates:\n%s", server)
 	}
 }

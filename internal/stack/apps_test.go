@@ -37,8 +37,8 @@ var backoffice = stacktest.AppOf(stacktest.ShopOrders, "Backoffice")
 // platform in its API's Rust, serves and calls what its API does, takes
 // its API's sql and http edges through the app platform's connectors and
 // its API's config, with the env its API's server is given, runs, and
-// rolls out after shop-api, which its API calls. It is not exposed unless
-// the stack says so.
+// rolls out after shop-api, which its API calls, and after Orders, its
+// API's server (D78). It is not exposed unless the stack says so.
 func TestAppDeployable(t *testing.T) {
 	s, services := appShop()
 	env := mustResolve(t, assemble(t), s, services, "Staging")
@@ -74,10 +74,16 @@ func TestAppDeployable(t *testing.T) {
 	if svc := env.Resources.Resource(backofficeApp + ".service"); svc == nil || svc.Properties["public"] != false || svc.Properties["language"] != "rust" {
 		t.Errorf("service = %+v, want a private Rust service", svc)
 	}
+	waves := map[string]int{}
 	for _, step := range env.DeployOrder {
-		if step.Step == ir.StepRollout && slices.Contains(step.Deployables, backofficeApp) && step.Wave != 2 {
-			t.Errorf("the app rolls out in %+v, want wave 2, after shop-api, which it calls", step)
+		if step.Step == ir.StepRollout {
+			for _, name := range step.Deployables {
+				waves[name] = step.Wave
+			}
 		}
+	}
+	if waves[backofficeApp] != 3 || waves["Orders"] != 2 || waves["shop-api"] != 1 {
+		t.Errorf("rollout waves %v: want the app in wave 3, after Orders, its API's server, whose start deploys what the app's engine waits for, and Orders after shop-api, which both call", waves)
 	}
 }
 
@@ -296,4 +302,31 @@ func TestAppRefusals(t *testing.T) {
 		_, errs := resolve(t, assemble(t, &noApps{}), s, services, "Staging")
 		mustFail(t, errs, stack.CodeUnrealizable, "app shop-orders-backoffice: target no-apps places no app: an app is a Rust program, and no-apps runs Go and TypeScript only")
 	})
+}
+
+// TestAppTurnedOffWhereNoAppIsPlaced: a target that places no app refuses
+// only an app the environment runs; one turned off there runs nothing, is
+// left out of the environment, and the stack may still expose it (D78).
+func TestAppTurnedOffWhereNoAppIsPlaced(t *testing.T) {
+	s, services := appShop()
+	for _, env := range s.Environments {
+		if env.Target != "" {
+			env.Target = "no-apps"
+			env.DNS = nil
+		}
+	}
+	s.Expose = append(s.Expose, backoffice)
+	settingsFor(s.Environment("Staging"), backoffice).Enabled = new(bool)
+	env := mustResolve(t, assemble(t, &noApps{}), s, services, "Staging")
+	if d := env.Deployable(backofficeApp); d != nil {
+		t.Errorf("the app turned off is in the environment: %+v", d)
+	}
+	for _, step := range env.DeployOrder {
+		if slices.Contains(step.Deployables, backofficeApp) {
+			t.Errorf("the deploy order names the app turned off: %+v", step)
+		}
+	}
+	if _, errs := resolve(t, assemble(t, &noApps{}), s, services, "Production"); errs == nil {
+		t.Error("Production, which runs the app, resolved on a target that places no app")
+	}
 }

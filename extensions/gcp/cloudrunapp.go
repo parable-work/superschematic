@@ -49,14 +49,28 @@ func lowerApp(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return lowerRunService(ctx, portProbe)
 }
 
-// portProbe is an app's startup probe: a TCP connection to its port, on
-// the startup probe's schedule, Cloud Run's own check for a service that
-// sets none. The app has no liveness probe.
+// portProbe is an app's health checks: a TCP connection to its port, as
+// its startup probe on the startup probe's schedule, Cloud Run's own check
+// for a service that sets none, and as its liveness probe on a server's
+// liveness schedule, so an instance that stops accepting connections is
+// restarted. TCP is all an app offers to probe: its program, the
+// project's serve, owns every route, so it answers neither /readyz nor
+// /healthz, and the entrypoint serves no route of its own beside it.
+// Its entrypoint listens only once its engine has opened on the document
+// it was built with, so the startup probe fails a revision whose
+// document is not live. A TCP probe passes once the program listens,
+// whether or not it accepts, and whatever its pools reach.
 func portProbe(container map[string]any) {
 	container["startupProbe"] = map[string]any{
 		"tcpSocket":        map[string]any{"port": containerPort},
 		"periodSeconds":    startupPeriod,
 		"timeoutSeconds":   startupTimeout,
 		"failureThreshold": startupFailures,
+	}
+	container["livenessProbe"] = map[string]any{
+		"tcpSocket":        map[string]any{"port": containerPort},
+		"periodSeconds":    livenessPeriod,
+		"timeoutSeconds":   livenessTimeout,
+		"failureThreshold": livenessFailures,
 	}
 }

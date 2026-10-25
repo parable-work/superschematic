@@ -6,16 +6,45 @@
 //! superschematic wrote this crate once, as a scaffold, because it was
 //! missing, and never writes it again: it is yours.
 
+use std::sync::Arc;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
 use schemas_desk_app_api_api::apps::BackofficeParts;
+
+/// What the scaffold answers every request with.
+const NOT_IMPLEMENTED: &str = "app Backoffice of desk-app-api does not serve yet: write its serve\n";
 
 /// Serves the app on `parts.addr` until it stops, with the API's Deps and
 /// implementations, and its engine, in `parts`. Return when the process
 /// should exit: an error fails it.
 ///
-/// It serves nothing yet, and fails, saying so.
+/// It serves nothing yet: it listens on `parts.addr` and answers every
+/// request with 501 Not Implemented, so the stack runs it, and finds it
+/// ready, until you write it.
 pub async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
-    Err(std::io::Error::other(format!(
-        "app Backoffice of desk-app-api does not serve {} yet: write its serve",
-        parts.addr
-    )))
+    let listener = TcpListener::bind(parts.addr).await?;
+    let response: Arc<str> = format!(
+        "HTTP/1.1 501 Not Implemented\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{NOT_IMPLEMENTED}",
+        NOT_IMPLEMENTED.len()
+    )
+    .into();
+    loop {
+        let (mut stream, _) = listener.accept().await?;
+        let response = Arc::clone(&response);
+        tokio::spawn(async move {
+            // The request's head, up to the blank line that ends it.
+            let mut head = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 * 1024 {
+                match stream.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        });
+    }
 }

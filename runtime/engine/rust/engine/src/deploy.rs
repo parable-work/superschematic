@@ -97,6 +97,30 @@ impl Engine {
         Ok(deployed.into_iter().flatten().collect())
     }
 
+    /// The names of `documents`, in the order given, whose live version in
+    /// `namespace` (the default namespace when `None`) does not have the
+    /// document's hash: none is live, or another version is. It reads as
+    /// the engine's own principal and writes nothing. What a deployable
+    /// that deploys nothing waits on: an app's entrypoint (D78) opens the
+    /// engine without deploying, and waits until its API's server has
+    /// deployed the documents the app was built with, so an app image from
+    /// another build never publishes its own.
+    pub fn undeployed(&self, documents: &[Value], namespace: Option<&str>) -> Result<Vec<String>> {
+        let system = Principal::system();
+        let mut out = Vec::new();
+        for given in documents {
+            let parsed = parse_document(given)?;
+            let live = self
+                .schemas()
+                .live(&system, &parsed.name, SchemaTarget { namespace })?;
+            match (live, &parsed.hash) {
+                (Some(live), Some(hash)) if live.hash == *hash => {}
+                _ => out.push(parsed.name),
+            }
+        }
+        Ok(out)
+    }
+
     // deploy_one defines and publishes one document, or leaves it when the
     // live version has its hash. A draft with its hash, which a publish a
     // pass before refused left, is published without a second define.
@@ -319,6 +343,59 @@ mod tests {
         );
         let refused = engine.deploy(&[json!({"kind": "General"})], None);
         assert!(refused.is_err());
+        drop(engine);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn undeployed_names_the_documents_whose_live_version_has_another_hash() {
+        let dir = std::env::temp_dir().join(format!(
+            "engine-undeployed-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let mut options = EngineOptions::sqlite(dir.join("engine.db"));
+        options.policy = Some(Policy::allow_all());
+        let engine = Engine::open(options).expect("open");
+        let old = note(&["body"]);
+        let new = note(&["body", "title"]);
+        assert_eq!(
+            engine.undeployed(&[old.clone()], None).expect("read"),
+            vec!["Note".to_owned()],
+            "nothing is live yet"
+        );
+        engine.deploy(&[old.clone()], None).expect("deploy");
+        assert!(engine
+            .undeployed(&[serde_json::Value::from(old.to_string())], None)
+            .expect("read")
+            .is_empty());
+        assert_eq!(
+            engine.undeployed(&[new.clone()], None).expect("read"),
+            vec!["Note".to_owned()],
+            "a newer document is not live"
+        );
+        engine
+            .deploy(&[new.clone()], None)
+            .expect("deploy the change");
+        assert_eq!(
+            engine.undeployed(&[old], None).expect("read"),
+            vec!["Note".to_owned()],
+            "an older document is not live once a newer one is"
+        );
+        let live = engine
+            .schemas()
+            .live(
+                &crate::Principal::system(),
+                "Note",
+                crate::SchemaTarget { namespace: None },
+            )
+            .expect("read")
+            .expect("live");
+        assert_eq!(live.version, Some(2), "undeployed wrote nothing");
+        assert!(engine
+            .undeployed(&[json!({"kind": "General"})], None)
+            .is_err());
         drop(engine);
         let _ = std::fs::remove_dir_all(&dir);
     }

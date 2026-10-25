@@ -40,6 +40,12 @@ type Runner interface {
 
 	// PortInUse reports whether something listens on port on loopback.
 	PortInUse(port int) bool
+
+	// Listens reports whether something accepts a connection on port on
+	// loopback, by dialing it alone: how an app's readiness is probed
+	// (D78). Unlike PortInUse it never listens on the port, so it cannot
+	// take the port from the process that is about to bind it.
+	Listens(port int) bool
 }
 
 // Command is one command a Runner runs.
@@ -203,18 +209,27 @@ func (execRunner) Post(ctx context.Context, url string, body []byte) (int, error
 // PortInUse dials the port on loopback, which a listener on loopback or on
 // every address answers, and failing that tries to listen there. It never
 // listens on every address, which a desktop firewall may ask about.
-func (execRunner) PortInUse(port int) bool {
-	addr := net.JoinHostPort(Loopback, strconv.Itoa(port))
-	if conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
-		_ = conn.Close()
+func (r execRunner) PortInUse(port int) bool {
+	if r.Listens(port) {
 		return true
 	}
-	l, err := net.Listen("tcp", addr)
+	l, err := net.Listen("tcp", net.JoinHostPort(Loopback, strconv.Itoa(port)))
 	if err != nil {
 		return true
 	}
 	_ = l.Close()
 	return false
+}
+
+// Listens dials the port on loopback, which a listener on loopback or on
+// every address answers.
+func (execRunner) Listens(port int) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(Loopback, strconv.Itoa(port)), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // execProcess is a process execRunner started.

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
@@ -241,6 +243,18 @@ func TestApplyRunsAnApp(t *testing.T) {
 				t.Errorf("the provisioner probed the app at %s; an app answers no readiness path", url)
 			}
 		}
+		// Readiness dials the app's port and never listens there, which
+		// could take the port from the app as it binds it; PortInUse
+		// checks it once, before the app starts.
+		checks := 0
+		for _, p := range f.runner.portChecks {
+			if p == port {
+				checks++
+			}
+		}
+		if !slices.Contains(f.runner.dials, port) || checks > 1 {
+			t.Errorf("the app's port was dialed %v and checked %d times, want readiness to dial it alone", f.runner.dials, checks)
+		}
 	})
 	t.Run("never listening", func(t *testing.T) {
 		f := newFixtureWith(t, rustOrdersStack(), appShop(), "Dev")
@@ -255,4 +269,44 @@ func TestApplyRunsAnApp(t *testing.T) {
 			t.Errorf("got %v, want %s", err, want)
 		}
 	})
+}
+
+// TestRunJobWithAnApp: stack run checks that the environment runs before
+// it runs a job, and an app's process, ready once it listens, is checked
+// by a dial of its port, not a GET of its readiness (D78): the run goes
+// on while the app listens, and is refused, naming the app, once it does
+// not.
+func TestRunJobWithAnApp(t *testing.T) {
+	f := newFixtureWith(t, rustOrdersStack(), appShop(), "Dev")
+	f.writeRustOrders(t)
+	f.writeCrate(t, backofficeApp, binCrate("rust-orders-stack-"+backofficeApp+"-app", backofficeApp))
+	f.runner.listens = map[string]bool{backofficeApp: true}
+	f.runner.rules = append(f.runningContainers("postgres:16-alpine"),
+		rule{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+		rule{prefix: "/bin/superschematic-migrate apply", out: "applied 2 steps\n"},
+	)
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	defer func() { _ = f.prov.Destroy(context.Background(), f.req) }()
+	port := local.ServerPort(f.senv(), *f.env.Deployable(backofficeApp))
+
+	f.runner.exits = map[string][]error{shipOrders: {nil}}
+	run := &local.Provisioner{Runner: f.runner, Out: f.out, ReadyTimeout: time.Second, PollInterval: time.Millisecond}
+	if err := run.RunJob(context.Background(), f.req, shipOrders); err != nil {
+		t.Fatalf("RunJob with the app listening = %v\n%s", err, f.out)
+	}
+	for url := range f.runner.probes {
+		if strings.HasPrefix(url, local.ServerURL(port)) {
+			t.Errorf("stack run probed the app at %s; an app answers no readiness path", url)
+		}
+	}
+
+	f.runner.mu.Lock()
+	f.runner.inUse = slices.DeleteFunc(f.runner.inUse, func(p int) bool { return p == port })
+	f.runner.mu.Unlock()
+	err := run.RunJob(context.Background(), f.req, shipOrders)
+	if want := "app " + backofficeApp + " does not listen at " + local.ServerURL(port); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("RunJob with the app not listening = %v, want it refused with %q", err, want)
+	}
 }

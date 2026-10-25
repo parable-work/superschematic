@@ -325,9 +325,9 @@ func (m *RustMirror) header() string {
 # (D65; docs/stack-model.md, section 8.6). Each build of a stack copies the
 # crate's files here and writes this file from its Cargo.toml, with each
 # path dependency re-based for this directory, the API crate's naming this
-# output root's, and the crate's own workspace left out. The server, job
-# and worker crates of the output root depend on the mirror. Edit the
-# crate, not the mirror.
+# output root's, and the crate's own workspace left out. The server, job,
+# worker, deriver and app crates of the output root depend on the mirror.
+# Edit the crate, not the mirror.
 
 `
 }
@@ -372,17 +372,11 @@ func (m *RustMirror) resolve(p string) string {
 // root named (the one the crate names its API crate under), and the same
 // directory otherwise, an absolute path left as it is.
 func (m *RustMirror) rebase(pkg, p, named string) (string, error) {
-	target := m.resolve(p)
-	switch {
-	case pkg == m.APICrate:
-		target = m.APIDir
-	case named != "" && within(named, target):
-		rel, err := filepath.Rel(named, target)
-		if err != nil {
-			return "", err
-		}
-		target = filepath.Join(m.OutputRoot, rel)
-	case filepath.IsAbs(p):
+	target, kept, err := m.rebasedTarget(pkg, p, named)
+	if err != nil {
+		return "", err
+	}
+	if kept {
 		return p, nil
 	}
 	rel, err := naming.RelPath(m.Dir, target)
@@ -390,6 +384,74 @@ func (m *RustMirror) rebase(pkg, p, named string) (string, error) {
 		return "", m.errorf("its path dependency %s: %w", pkg, err)
 	}
 	return rel, nil
+}
+
+// rebasedTarget is the directory the mirror's path dependency p on the
+// package pkg names once rebase has re-based it, absolute; kept is set
+// for an absolute p, which the mirror writes as it is.
+func (m *RustMirror) rebasedTarget(pkg, p, named string) (target string, kept bool, err error) {
+	target = m.resolve(p)
+	switch {
+	case pkg == m.APICrate:
+		return m.APIDir, false, nil
+	case named != "" && within(named, target):
+		rel, err := filepath.Rel(named, target)
+		if err != nil {
+			return "", false, err
+		}
+		return filepath.Join(m.OutputRoot, rel), false, nil
+	}
+	return target, filepath.IsAbs(p), nil
+}
+
+// pathDependencies are the directories the mirror's path dependencies
+// name once re-based, absolute and sorted: what a build of the mirror
+// reads beside it. A dev-dependency is left out, which a build of a crate
+// that is no member of the workspace does not read.
+func (m *RustMirror) pathDependencies(source []byte) ([]string, error) {
+	var doc map[string]any
+	if _, err := toml.Decode(string(source), &doc); err != nil {
+		return nil, m.errorf("has a Cargo.toml that does not parse: %w", err)
+	}
+	named := m.namedOutputRoot(doc)
+	var dirs []string
+	for _, dep := range pathDependencies(doc) {
+		target, _, err := m.rebasedTarget(dep.pkg, dep.path, named)
+		if err != nil {
+			return nil, err
+		}
+		dirs = append(dirs, target)
+	}
+	slices.Sort(dirs)
+	return slices.Compact(dirs), nil
+}
+
+// pathDependency is a dependency a manifest names by path: its package
+// and the path as the manifest writes it.
+type pathDependency struct{ pkg, path string }
+
+// pathDependencies lists the path dependencies of a manifest's normal and
+// build dependencies, its targets' among them, and its patches.
+func pathDependencies(doc map[string]any) []pathDependency {
+	var out []pathDependency
+	for _, deps := range buildDependencyTables(doc) {
+		for _, name := range slices.Sorted(maps.Keys(deps)) {
+			s, ok := deps[name].(map[string]any)
+			if !ok {
+				continue
+			}
+			p, ok := s["path"].(string)
+			if !ok {
+				continue
+			}
+			pkg, _ := s["package"].(string)
+			if pkg == "" {
+				pkg, _, _ = strings.Cut(name, ":")
+			}
+			out = append(out, pathDependency{pkg: pkg, path: p})
+		}
+	}
+	return out
 }
 
 // within reports whether p is root or lies under it.
@@ -439,9 +501,20 @@ func tableOrder(md toml.MetaData, doc map[string]any) []string {
 // too, and the patches and replacements, which Cargo reads at a workspace's
 // root alone but the mirror keeps.
 func dependencyTables(doc map[string]any) []map[string]any {
+	return dependencyTablesOf(doc, []string{"dependencies", "dev-dependencies", "dev_dependencies", "build-dependencies", "build_dependencies"})
+}
+
+// buildDependencyTables is dependencyTables without the dev-dependencies.
+func buildDependencyTables(doc map[string]any) []map[string]any {
+	return dependencyTablesOf(doc, []string{"dependencies", "build-dependencies", "build_dependencies"})
+}
+
+// dependencyTablesOf lists doc's dependency tables of the kinds named, its
+// targets' among them, and its patches and replacements.
+func dependencyTablesOf(doc map[string]any, names []string) []map[string]any {
 	var tables []map[string]any
 	kinds := func(t map[string]any) {
-		for _, k := range []string{"dependencies", "dev-dependencies", "dev_dependencies", "build-dependencies", "build_dependencies"} {
+		for _, k := range names {
 			if deps, ok := t[k].(map[string]any); ok {
 				tables = append(tables, deps)
 			}

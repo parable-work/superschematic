@@ -34,9 +34,9 @@ func appServices() []stack.Service {
 // TestAppPlatform checks the Cloud Run service an app lowers to (D78): a
 // service of its own named after the app, with an account of its own and a
 // database user, its API's Cloud SQL volume and VPC egress, internal
-// ingress when it is not exposed, and a TCP startup probe on its port in
-// place of the entrypoint's health paths, which the app's program does not
-// answer. Its edges are its API's, through the app platform's connectors,
+// ingress when it is not exposed, and TCP startup and liveness probes on
+// its port in place of the entrypoint's health paths, which the app's
+// program does not answer. Its edges are its API's, through the app platform's connectors,
 // and its address is the service's run.app URL.
 func TestAppPlatform(t *testing.T) {
 	env := resolve(t, assemble(t), shop(), appServices(), "Staging")
@@ -77,9 +77,7 @@ func TestAppPlatform(t *testing.T) {
 	container := template["containers"].([]any)[0].(map[string]any)
 	wantJSON(t, "the app's port", container["ports"], `{"containerPort":8080}`)
 	wantJSON(t, "the app's startup probe", container["startupProbe"], `{"failureThreshold":24,"periodSeconds":5,"tcpSocket":{"port":8080},"timeoutSeconds":4}`)
-	if probe, ok := container["livenessProbe"]; ok {
-		t.Errorf("the app has a liveness probe: %v", probe)
-	}
+	wantJSON(t, "the app's liveness probe", container["livenessProbe"], `{"failureThreshold":3,"periodSeconds":15,"tcpSocket":{"port":8080},"timeoutSeconds":5}`)
 	wantJSON(t, "the app's database user", node(t, env, backofficeApp+".database-user.shop-db").Properties["name"], `"shop-orders-backoffice@acme-staging.iam"`)
 
 	// A server keeps the entrypoint's probes.

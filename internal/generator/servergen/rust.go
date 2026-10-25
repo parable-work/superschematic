@@ -1129,9 +1129,102 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		return nil, why, nil
 	}
 	d.Include = append(d.Include, engines...)
+	if s.App != nil {
+		crates, why, err := appDockerIncludes(in, s, d.Include, rel)
+		if err != nil || why != "" {
+			return nil, why, err
+		}
+		d.Include = append(d.Include, crates...)
+	}
 	slices.Sort(d.Include)
 	d.Include = slices.Compact(d.Include)
 	return d, "", nil
+}
+
+// appDockerIncludes are the crates an app's image reads that the context
+// takes in for no other entrypoint (D78): each crate the app's crate
+// reaches by path, through its mirror's re-based path dependencies and
+// theirs in turn, that no pattern of include already holds. A crate an
+// extension writes under the output root, such as the Topcoat crate at
+// <output-root>/topcoat/<api>, is one; so is a crate of the project's own
+// beside the app's. Each is taken in whole. A crate not yet written is
+// left out, so cargo, not the context, says it is missing.
+func appDockerIncludes(in RustInput, s *RustServer, include []string, rel func(string) (string, bool)) ([]string, string, error) {
+	var mirror *RustMirror
+	for _, m := range s.Mirrors {
+		if m.App != "" {
+			mirror = m
+		}
+	}
+	if mirror == nil || in.App == nil || in.App.Implementation.Manifest == nil {
+		return nil, "", nil
+	}
+	queue, err := mirror.pathDependencies(in.App.Implementation.Manifest)
+	if err != nil {
+		return nil, "", err
+	}
+	var out []string
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		r, ok := rel(dir)
+		if !ok {
+			return nil, fmt.Sprintf("the crate at %s, which %s reaches by path, lies outside the repository root, the build context", dir, mirror.what()), nil
+		}
+		// A crate whose manifest the context already takes in, such as
+		// its API's crate, is the other patterns' to take in whole.
+		if manifest := r + "/" + RustManifestFile; includes(include, manifest) || includes(out, manifest) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, RustManifestFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, "", err
+		}
+		out = append(out, r)
+		var doc map[string]any
+		if _, err := toml.Decode(string(data), &doc); err != nil {
+			return nil, "", fmt.Errorf("the crate at %s, which %s reaches by path: Cargo.toml: %w", dir, mirror.what(), err)
+		}
+		for _, dep := range pathDependencies(doc) {
+			p := filepath.FromSlash(dep.path)
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(dir, p)
+			}
+			queue = append(queue, filepath.Clean(p))
+		}
+	}
+	return out, "", nil
+}
+
+// includes reports whether a pattern of include, as the ignore file
+// takes it in, holds p: p is the pattern's path or lies under it, each
+// segment matched as a glob.
+func includes(include []string, p string) bool {
+	segments := strings.Split(p, "/")
+	for _, pattern := range include {
+		parts := strings.Split(pattern, "/")
+		if len(parts) > len(segments) {
+			continue
+		}
+		matched := true
+		for i, part := range parts {
+			if ok, err := path.Match(part, segments[i]); err != nil || !ok {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadRustImplementation reads the names of the Rust implementation crate

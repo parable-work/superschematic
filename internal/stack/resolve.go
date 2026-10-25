@@ -161,6 +161,9 @@ type resolver struct {
 	// rolloutWaves are the rollout waves of the servers and jobs, callees
 	// first.
 	rolloutWaves map[string]int
+	// unplaced are the apps the environment turns off on a target that
+	// places no app, which dropUnplaced leaves out of it (D78).
+	unplaced []string
 }
 
 // deployable is one deployable while it is resolved.
@@ -244,6 +247,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.applySettings()
 	r.place()
 	r.expose()
+	r.dropUnplaced()
 	r.resolveCalls()
 	r.resolveBuckets()
 	r.checkCalls()
@@ -909,6 +913,12 @@ func (r *resolver) place() {
 			}
 			if platformName == "" {
 				if why := r.target.Unplaced[res.Kind]; why != "" {
+					if res.Kind == ir.DeployableApp && d.settings.enabled != nil && !*d.settings.enabled {
+						// An app turned off runs nothing here, so a target
+						// that places no app leaves it out (D78).
+						r.unplaced = append(r.unplaced, name)
+						continue
+					}
 					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s", res.Kind, name, r.target.Name, res.Kind, why)
 					continue
 				}
@@ -1121,6 +1131,21 @@ func (r *resolver) expose() {
 	for _, name := range sortedKeys(r.deployables) {
 		if d := r.deployables[name]; d.res.Kind == ir.DeployableSite {
 			d.res.Exposed = true
+		}
+	}
+}
+
+// dropUnplaced leaves out of the environment each app it turns off on a
+// target that places no app (D78): the app runs nothing here, so it has no
+// platform, no edges and no nodes. It runs after expose, which takes an
+// exposed one as it takes any app turned off: with no address.
+func (r *resolver) dropUnplaced() {
+	for _, name := range r.unplaced {
+		delete(r.deployables, name)
+		for key, app := range r.byApp {
+			if app == name {
+				delete(r.byApp, key)
+			}
 		}
 	}
 }

@@ -1004,11 +1004,11 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 	for _, s := range servers {
 		module := filepath.Join(req.OutputRoot, filepath.FromSlash(s.Module))
 		if info, err := os.Stat(module); err != nil || !info.IsDir() {
-			return fmt.Errorf("local: server %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.Deployable, module)
+			return fmt.Errorf("local: %s %s: no entrypoint module at %s; the stack's build writes it (docs/stack-model.md, section 8.1)", s.what(), s.Deployable, module)
 		}
 		env, err := serverEnv(s, secrets, req.Parameters, outputs)
 		if err != nil {
-			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
+			return fmt.Errorf("local: %s %s: %w", s.what(), s.Deployable, err)
 		}
 		engine, err := p.projectEngine(ctx, req, module, s.what(), s.Deployable, true)
 		if err != nil {
@@ -1040,7 +1040,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
 		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: engine.buildEnv(req)}); err != nil {
-			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
+			return fmt.Errorf("local: build %s %s: %w", s.what(), s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
 	}
@@ -1058,7 +1058,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		proc, err := p.runner().Start(cmd)
 		if err != nil {
-			return fmt.Errorf("local: start server %s: %w", b.server.Deployable, err)
+			return fmt.Errorf("local: start %s %s: %w", b.server.what(), b.server.Deployable, err)
 		}
 		p.mu.Lock()
 		if p.running == nil {
@@ -1367,8 +1367,10 @@ func (p *Provisioner) waitReady(ctx context.Context, k string, s *Server) error 
 		default:
 		}
 		if s.Readiness == ReadinessListening {
-			// An app is ready once it listens on its port (D78).
-			if p.runner().PortInUse(s.Port) {
+			// An app is ready once it listens on its port (D78): a dial
+			// alone, since a probe that listened could take the port from
+			// the app as it binds it.
+			if p.runner().Listens(s.Port) {
 				return nil
 			}
 			if time.Now().After(deadline) {
@@ -1451,7 +1453,7 @@ func (p *Provisioner) stop(rs *runningServer) error {
 		w.Flush()
 	}
 	if err != nil {
-		return fmt.Errorf("local: stop server %s: %w", rs.server.Deployable, err)
+		return fmt.Errorf("local: stop %s %s: %w", rs.server.what(), rs.server.Deployable, err)
 	}
 	return nil
 }

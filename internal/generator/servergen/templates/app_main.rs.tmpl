@@ -18,9 +18,11 @@
 {{- if .Engines }}
 //!
 //! The API's database is an engine database, whose engine (D58) its Deps
-//! hold: `engine.rs` opens it in the background and deploys its engine
-//! document, as the server does, and the app waits for it to open before it
-//! serves.
+//! hold: `engine.rs` opens it in the background and deploys nothing, which
+//! the API's server does. It opens once the live version of each schema of
+//! the database's engine document is the one this app was built with, so
+//! an app image from another build never publishes its own; the app waits
+//! for it to open before it serves.
 {{- end }}
 //!
 //! It then calls the app's program with the app's parts, which hold the
@@ -117,8 +119,9 @@ async fn run() -> Result<(), Failure> {
 {{- range .Engines }}
 
     // The engine of {{ .Service }}, an engine database (D58), opened on the
-    // same database in the background, which deploys the database's engine
-    // document once it opens, as the API's server does.
+    // same database in the background, which deploys nothing: it opens once
+    // the API's server has deployed the engine document this app was built
+    // with.
 {{ $.OpenLet . }}
 {{- end }}
 {{- if .Clients }}
@@ -182,8 +185,8 @@ async fn run() -> Result<(), Failure> {
 {{- with .App.Engine }}
 
     // The app's program calls the engine in-process, so the app serves once
-    // the engine has opened and deployed its document: until then it does
-    // not listen.
+    // the engine has opened on the document it was built with: until then
+    // it does not listen.
 {{ rustLetChain $.App.Opened .Var "wait()" "await" (printf "map_err(|err| format!(\"the engine of %s: {err}\"))?" .Service) }}
 {{- end }}
 
