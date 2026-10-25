@@ -11,8 +11,13 @@
 //! engine holds, one defined after the build too. Each control is named by
 //! its bare parameter. A read-only operation is a GET whose result renders
 //! on the page; one that writes is a POST that goes on with 303 to the page
-//! it was sent from. An operation the deployment hides, or the policy does
-//! not allow the caller, has no form.
+//! it was sent from. An operation the deployment hides (`tools.hidden`),
+//! or the policy does not allow the caller, has no form: one the
+//! deployment hides is not there (404), and one the policy refuses is the
+//! policy's refusal (403). An operation the engine hides from MCP alone,
+//! for an MCP handle MCP would refuse (one too long, say), is offered.
+//! A post another site sent is refused (403) before the engine is called,
+//! whatever the app's `PageAuthenticator` and origin policy let through.
 //!
 //! Every page calls the engine in-process, on the blocking pool, as the
 //! page's caller: the principal the `PageAuthenticator` establishes, mapped
@@ -26,8 +31,8 @@
 //! What a page reads of the engine is rendered here, on the server: no
 //! procedure hands it to the browser.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 
 use crate::forms::{FormErrors, Refusal};
 use crate::pages::{Back, NavLink, current, decode, encode, pager, pager_query, refused};
@@ -35,7 +40,7 @@ use serde_json::{Map, Value};
 use topcoat::context::{Cx, memoize};
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
-use topcoat::router::request::uri;
+use topcoat::router::request::{parts, uri};
 use topcoat::router::{StatusCode, page, path_param};
 use topcoat::view::{BoxView, View, ViewExt, component, view};
 use superschematic_engine::{
@@ -56,9 +61,9 @@ const PAGE_SIZES: &[i64] = &[10, DEFAULT_PAGE_SIZE, 200];
 /// The hidden input of a form that writes an instance: the instance's seq
 /// when its page was read, so a write to an instance that changed since is
 /// refused (409) rather than made over what the reader did not see. A form
-/// without it, a panel's, writes with no such check. It is named as the
-/// engine's routes name the seq an operation expects.
-const SEQ: &str = "expectedSeq";
+/// without it writes with no such check. It is named as the engine's
+/// routes name the seq an operation expects.
+pub(crate) const SEQ: &str = "expectedSeq";
 
 path_param!(engine_schema);
 
@@ -181,21 +186,70 @@ async fn instance(cx: &Cx, schema: &str, id: &str) -> Result<InstanceRecord, Ref
     .ok_or_else(|| refusal(StatusCode::NOT_FOUND, "There is no such instance"))
 }
 
-/// The tools the caller is offered, by name (`note.comment`): each the
-/// deployment does not hide and the policy allows the caller.
+/// What a tool of the namespace is to the caller: offered, or refused,
+/// with the engine's reason.
+#[derive(Debug, Clone, PartialEq)]
+enum Offer {
+    Offered,
+    Refused(String),
+}
+
+/// How the engine's reason begins when it hides a tool for its MCP handle
+/// alone: one longer than MCP allows, not snake case, an engine tool's, or
+/// another tool's too. That is a limit of MCP's, not the deployment's, and
+/// the engine hides such a tool before it asks the policy.
+const HANDLE_HIDDEN: &str = "its MCP handle ";
+
+/// The namespace's tools as the caller sees them, by name (`note.comment`),
+/// from the namespace's tools document: offered, unless the engine hides it
+/// from the caller for a reason other than its MCP handle (the policy
+/// refuses it, or the namespace is archived), when it is refused with that
+/// reason. One hidden for its handle alone is offered, and the engine asks
+/// the policy when it is called. The request keeps them (`#[memoize]`), so
+/// a request builds the tools document once.
 #[memoize(as_ref)]
-async fn offered(cx: &Cx) -> Result<HashSet<String>, Refusal> {
+async fn offers(cx: &Cx) -> Result<HashMap<String, Offer>, Refusal> {
     call(cx, |engine, principal| {
         let manifest = engine.tools().manifest(principal, ToolTarget { namespace: Some(NAMESPACE), filter: None })?;
         Ok(manifest["tools"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|tool| tool["mcp"]["hidden"] != Value::Bool(true))
-            .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+            .filter_map(|tool| {
+                let reason = tool["mcp"]["hiddenReason"].as_str().unwrap_or_default();
+                let offer = if tool["mcp"]["hidden"] != Value::Bool(true) || reason.starts_with(HANDLE_HIDDEN) {
+                    Offer::Offered
+                } else {
+                    Offer::Refused(reason.to_owned())
+                };
+                Some((tool["name"].as_str()?.to_owned(), offer))
+            })
             .collect())
     })
     .await
+}
+
+/// Whether the deployment hides `behavior`'s `operation` from every caller:
+/// the engine document the crate deploys lists it in `tools.hidden`
+/// (`<Behavior>.<operation>`), which the engine is opened with. The engine
+/// hides such a tool, but gives the reason of its MCP handle in place of
+/// this one when the handle is refused too, so the pages read the list
+/// where the engine does.
+fn deployment_hides(behavior: &str, operation: &str) -> bool {
+    static HIDDEN: LazyLock<Vec<String>> = LazyLock::new(|| {
+        let document: Value = serde_json::from_str(schemas_fixture_engine_db_types::ENGINE_DOCUMENT).unwrap_or_default();
+        document["tools"]["hidden"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
+    });
+    HIDDEN.iter().any(|hidden| hidden.rsplit_once('.') == Some((behavior, operation)))
+}
+
+/// What an operation of a describe document is to the caller (`offers`):
+/// none for one the deployment hides, or that the tools document lacks.
+fn offer_of<'o>(offers: &'o HashMap<String, Offer>, entry: &Value) -> Option<&'o Offer> {
+    if deployment_hides(entry["behavior"].as_str()?, entry["name"].as_str()?) {
+        return None;
+    }
+    offers.get(entry["tool"].as_str()?)
 }
 
 /// The nav's and the index's link to the engine's types, after the
@@ -462,28 +516,35 @@ pub struct EngineOperation {
     pub params: Value,
 }
 
+impl EngineOperation {
+    /// An entry of a describe document's `operations`: none for one that
+    /// is no behavior's (create, get, and the others of every type).
+    pub fn of(entry: &Value) -> Option<EngineOperation> {
+        Some(EngineOperation {
+            name: entry["name"].as_str()?.to_owned(),
+            behavior: entry["behavior"].as_str()?.to_owned(),
+            schema_scope: entry["scope"] == "schema",
+            writes: entry["writes"].as_bool().unwrap_or(true),
+            description: entry["description"].as_str().filter(|text| !text.is_empty()).map(str::to_owned),
+            params: entry["params"]["properties"]["params"].clone(),
+        })
+    }
+}
+
 /// The operations of a type the caller is offered, in the describe
 /// document's order: each the deployment does not hide and the policy
-/// allows the caller.
+/// does not refuse the caller (`offers`). A panel shows a form or a button
+/// only for these.
 pub async fn operations(cx: &Cx, describe: &Value) -> Vec<EngineOperation> {
-    let Ok(offered) = offered(cx).await else {
+    let Ok(offers) = offers(cx).await else {
         return Vec::new();
     };
     describe["operations"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|operation| operation["tool"].as_str().is_some_and(|tool| offered.contains(tool)))
-        .filter_map(|operation| {
-            Some(EngineOperation {
-                name: operation["name"].as_str()?.to_owned(),
-                behavior: operation["behavior"].as_str()?.to_owned(),
-                schema_scope: operation["scope"] == "schema",
-                writes: operation["writes"].as_bool().unwrap_or(true),
-                description: operation["description"].as_str().filter(|text| !text.is_empty()).map(str::to_owned),
-                params: operation["params"]["properties"]["params"].clone(),
-            })
-        })
+        .filter(|entry| offer_of(offers, entry) == Some(&Offer::Offered))
+        .filter_map(EngineOperation::of)
         .collect()
 }
 
@@ -821,18 +882,27 @@ async fn control_view(control: Control) -> topcoat::Result<impl View> {
 
 /// Runs an operation of `schema`, an instance's (`id`) or the type's, from
 /// its form's pairs, as the page's caller: its result, and whether it
-/// writes. An operation the caller is not offered is 404, a write sent by
-/// GET 405, and a form its kinds do not read 422 at its controls, before
-/// the engine is called. A write to an instance names the seq its page was
-/// read at.
+/// writes. A post another site sent is 403 (`same_origin`). An operation
+/// the type lacks, or the deployment hides, is 404; one the policy refuses
+/// the caller 403, with the engine's reason. A write sent by GET is 405,
+/// and a form its kinds do not read 422 at its controls. All of these are
+/// answered before the engine is called. A write to an instance names the
+/// seq its page was read at.
 async fn run(cx: &Cx, schema: &str, id: Option<&str>, name: &str, pairs: &[(String, String)], post: bool) -> Result<(bool, Value), Refusal> {
+    if post {
+        same_origin(cx)?;
+    }
     let describe = described(cx, schema).await.map_err(Refusal::clone)?;
-    let Some(operation) = operations(cx, describe)
-        .await
+    let offers = offers(cx).await.map_err(Refusal::clone)?;
+    let entry = describe["operations"]
+        .as_array()
         .into_iter()
-        .find(|operation| operation.name == name && operation.schema_scope == id.is_none())
-    else {
-        return Err(refusal(StatusCode::NOT_FOUND, "There is no such operation"));
+        .flatten()
+        .find(|entry| entry["name"] == name && entry["behavior"].is_string() && (entry["scope"] == "schema") == id.is_none());
+    let operation = match entry.and_then(|entry| Some((offer_of(offers, entry)?, EngineOperation::of(entry)?))) {
+        None => return Err(refusal(StatusCode::NOT_FOUND, "There is no such operation")),
+        Some((Offer::Refused(reason), _)) => return Err(refusal(StatusCode::FORBIDDEN, reason.clone())),
+        Some((Offer::Offered, operation)) => operation,
     };
     if operation.writes && !post {
         return Err(refusal(StatusCode::METHOD_NOT_ALLOWED, format!("{} writes, so its form posts", words(name))));
@@ -853,6 +923,28 @@ async fn run(cx: &Cx, schema: &str, id: Option<&str>, name: &str, pairs: &[(Stri
         None => call(cx, move |engine, principal| engine.instances().invoke_schema(principal, &schema, &name, &params, Some(NAMESPACE))).await?,
     };
     Ok((writes, result))
+}
+
+/// Refuses (403) a post that another site's page sent, as Topcoat's default
+/// origin policy and the identity runtime's `check_cross_origin` do,
+/// trusting no other origin: the console's forms are its own pages'. A
+/// `Sec-Fetch-Site` of `same-origin` or `none` passes, and any other does
+/// not; without one, an `Origin` whose host is the request's passes, and
+/// so does a request with no `Origin`, which no browser sent. A page that
+/// moves stock or money therefore does not rest on the app's
+/// `PageAuthenticator` or origin policy to refuse a forged post.
+fn same_origin(cx: &Cx) -> Result<(), Refusal> {
+    let request = parts(cx);
+    let header = |name: &str| request.headers.get(name).and_then(|value| value.to_str().ok());
+    let allowed = match (header("sec-fetch-site"), header("origin")) {
+        (Some(site), _) => matches!(site, "same-origin" | "none"),
+        (None, None) => true,
+        (None, Some(origin)) => {
+            let host = header("host").or_else(|| request.uri.authority().map(|authority| authority.as_str()));
+            origin.split_once("://").is_some_and(|(_, from)| host.is_some_and(|host| from.eq_ignore_ascii_case(host)))
+        }
+    };
+    if allowed { Ok(()) } else { Err(refusal(StatusCode::FORBIDDEN, "cross_origin: Cross-origin request refused")) }
 }
 
 /// A sent form's refusal that renders on its own, in place of the page: a

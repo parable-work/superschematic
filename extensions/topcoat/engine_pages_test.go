@@ -22,8 +22,12 @@ import (
 // (409), a parameter the form or the engine refuses at its control (422), a
 // read's result on the page, a write sent by GET (405), and a missing
 // instance or operation (404). A panel's form from operation_form fills in
-// its values and holds its hidden ones, and posts without a seq. The build
-// log says why a crate with pages and an engine has no engine pages.
+// its values and holds its hidden ones, and posts without a seq. With
+// fixture-engine-db's engine hiding Approvals.listSignOffs, an operation
+// the policy refuses is 403, one the deployment hides 404, and one the
+// engine hides from MCP for its handle's length alone runs; and a post
+// another site sent is refused (403) with the app's origin policy off. The
+// build log says why a crate with pages and an engine has no engine pages.
 func TestTheConsolePagesTheEngine(t *testing.T) {
 	t.Run("build log", func(t *testing.T) {
 		// logOf builds the service in dir with the pages as pages, and
@@ -85,10 +89,23 @@ func TestTheConsolePagesTheEngine(t *testing.T) {
 	})
 	t.Run("pages", func(t *testing.T) {
 		cargoTestCrateWith(t, engineService, enginePagesAppTest, crateOptions{
-			before:  map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
+			before:  map[string]map[string]any{engineDatabase: engineDatabaseHiding("Approvals.listSignOffs")},
 			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest},
 		})
 	})
+}
+
+// engineDatabaseHiding are fixture-engine-db's outputs with its engine's
+// tools hiding operations (outputs.engine.tools.hidden), by
+// <Behavior>.<operation>.
+func engineDatabaseHiding(hidden ...string) map[string]any {
+	names := make([]any, len(hidden))
+	for i, name := range hidden {
+		names[i] = name
+	}
+	outputs := engineDatabaseOutputs()
+	outputs["engine"] = map[string]any{"tools": map[string]any{"hidden": names}}
+	return outputs
 }
 
 // engineCopy is a copy of fixture-engine-api whose schema edit changes.
@@ -176,7 +193,16 @@ mod panel_shows_tests {
 // enginePagesAppTest is tests/app.rs of fixture-engine-api's Topcoat crate
 // with its pages on: the pages' caller is the API's, from the bearer token,
 // and ada holds Note, which the engine's permission policy asks of a
-// reader and a writer of notes, while nobody holds nothing.
+// reader and a writer of notes, reader Note.read alone, clerk and boss
+// what a SupplierContractAmendmentRequest and a Request ask, and nobody
+// nothing.
+// Each app's engine also holds SupplierContractAmendmentRequest, Request
+// under a name that makes the MCP handles of its Approvals tools too long,
+// and its engine document hides Approvals.listSignOffs. A second test
+// checks that an operation the engine hides from MCP for its handle alone
+// is offered, one the deployment hides is not there (404), and one the
+// policy refuses is refused (403); a third, with the app's origin policy
+// off, that a write another site sent is refused (403).
 const enginePagesAppTest = `use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -187,7 +213,7 @@ use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImple
 use schemas_fixture_engine_api_topcoat::{engine, PageAuthenticator, RouterBuilderFixtureEngineApiExt};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
-use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::router::{header, to_bytes, Body, OriginPolicy, Router, RouterBuilderDiscoverExt, StatusCode};
 
 #[path = "support/enter.rs"]
 mod enter;
@@ -205,7 +231,12 @@ impl Authenticator for Bearer {
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "));
         Ok(subject.map(|subject| {
-            let permissions: Vec<&str> = if subject == "nobody" { vec![] } else { vec!["Note"] };
+            let permissions: Vec<&str> = match subject {
+                "nobody" => vec![],
+                "reader" => vec!["Note.read"],
+                "clerk" | "boss" => vec!["SupplierContractAmendmentRequest", "Request", "requests.approve"],
+                _ => vec!["Note"],
+            };
             Principal::new(subject, permissions)
         }))
     }
@@ -235,13 +266,30 @@ impl NotesImplementation for Notes {
 }
 
 fn app() -> Router {
+    app_with(OriginPolicy::new())
+}
+
+// The app with origins as its origin policy, its engine holding
+// SupplierContractAmendmentRequest (long_type) beside the document's types.
+fn app_with(origins: OriginPolicy) -> Router {
     static APPS: AtomicUsize = AtomicUsize::new(0);
     let n = APPS.fetch_add(1, Ordering::SeqCst);
     let path = std::env::temp_dir().join(format!("topcoat-engine-pages-{}-{n}.db", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let engine = engine::open(&path).expect("open the engine");
+    engine.deploy(&[long_type()], Some("fixture-engine-db")).expect("deploy SupplierContractAmendmentRequest");
     let implementations = Implementations { notes: Arc::new(Notes), authenticator: Arc::new(Bearer) };
-    Router::builder().discover().fixture_engine_api(implementations, Pages, engine).build()
+    Router::builder().origin_policy(origins).discover().fixture_engine_api(implementations, Pages, engine).build()
+}
+
+// Request's schema document as SupplierContractAmendmentRequest: the MCP
+// handles of its withdrawSignOff and listSignOffs tools
+// (supplier_contract_amendment_request_withdraw_sign_off) are longer than
+// MCP's 48 characters, so the engine hides them from MCP.
+fn long_type() -> serde_json::Value {
+    let document: serde_json::Value = serde_json::from_str(schemas_fixture_engine_db_types::ENGINE_DOCUMENT).expect("the engine document");
+    let request = document["schemas"].as_array().into_iter().flatten().find(|schema| schema["name"] == "Request").expect("Request's schema");
+    serde_json::from_str(&request.to_string().replace("\"Request\"", "\"SupplierContractAmendmentRequest\"")).expect("the renamed schema")
 }
 
 struct Answer {
@@ -253,9 +301,17 @@ struct Answer {
 // Sends a request as bearer, a form's pairs to a page and JSON to the
 // engine's routes, and holds every HTML page to the enter rule.
 async fn send(router: &Router, method: &str, uri: &str, bearer: Option<&str>, body: &str) -> Answer {
+    send_with(router, method, uri, bearer, &[], body).await
+}
+
+// send with headers besides.
+async fn send_with(router: &Router, method: &str, uri: &str, bearer: Option<&str>, headers: &[(&str, &str)], body: &str) -> Answer {
     let mut request = http::Request::builder().method(method).uri(uri);
     if let Some(bearer) = bearer {
         request = request.header("authorization", format!("Bearer {bearer}"));
+    }
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
     if !body.is_empty() {
         let kind = if uri.starts_with("/console") { "application/x-www-form-urlencoded" } else { "application/json" };
@@ -404,5 +460,75 @@ async fn the_console_pages_the_engine() {
     page(&router, "/console/engine/Note/n9", Some("ada"), StatusCode::NOT_FOUND).await;
     let answer = send(&router, "POST", "/console/engine/Note/n1/operations/nothing", Some("ada"), "body=x").await;
     assert_eq!(answer.status, StatusCode::NOT_FOUND, "{}", answer.body);
+}
+
+const AMENDMENTS: &str = "/engine/namespaces/fixture-engine-db/schemas/SupplierContractAmendmentRequest/instances";
+const AMENDMENT: &str = "/console/engine/SupplierContractAmendmentRequest/r1";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_console_offers_what_the_deployment_and_the_policy_allow() {
+    let router = app();
+    let answer = send(&router, "POST", NOTES, Some("ada"), r#"{"id": "n1", "data": {"title": "Hello"}}"#).await;
+    assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
+
+    // A reader of notes lists a note's comments and has no comment form;
+    // the comment they post anyway is the policy's refusal (403), while an
+    // operation there is not stays 404.
+    let note = page(&router, NOTE, Some("reader"), StatusCode::OK).await;
+    assert!(note.contains("/operations/listComments") && !note.contains("/operations/comment\""), "{note}");
+    let answer = send(&router, "POST", COMMENT, Some("reader"), "body=Hi").await;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN, "{}", answer.body);
+    assert!(answer.body.contains("the access policy refuses reader write on Note (comment)"), "{}", answer.body);
+    let answer = send(&router, "POST", "/console/engine/Note/n1/operations/nothing", Some("reader"), "body=x").await;
+    assert_eq!(answer.status, StatusCode::NOT_FOUND, "{}", answer.body);
+
+    // The engine hides withdrawSignOff from MCP for its handle's length,
+    // which is no reason to keep it from the console. Its creator, boss,
+    // may not sign it off, so clerk does.
+    let answer = send(&router, "POST", AMENDMENTS, Some("boss"), r#"{"id": "r1", "data": {"title": "Amend the contract"}}"#).await;
+    assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
+    page(&router, AMENDMENT, Some("clerk"), StatusCode::OK).await;
+    for operation in ["signOff", "withdrawSignOff"] {
+        let answer = send(&router, "POST", &format!("{AMENDMENT}/operations/{operation}"), Some("clerk"), "state=approved").await;
+        assert_eq!(answer.status, StatusCode::SEE_OTHER, "{operation}: {}", answer.body);
+        assert_eq!(answer.location.as_deref(), Some(AMENDMENT));
+    }
+
+    // listSignOffs, which the deployment hides, is not there: on a type
+    // whose handle is too long too, and on Request, whose is not.
+    page(&router, &format!("{AMENDMENT}/operations/listSignOffs"), Some("clerk"), StatusCode::NOT_FOUND).await;
+    let answer = send(&router, "POST", "/engine/namespaces/fixture-engine-db/schemas/Request/instances", Some("clerk"), r#"{"id": "q1", "data": {"title": "Buy chairs"}}"#).await;
+    assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
+    let request = page(&router, "/console/engine/Request/q1", Some("clerk"), StatusCode::OK).await;
+    assert!(!request.contains("/operations/listSignOffs"), "{request}");
+    page(&router, "/console/engine/Request/q1/operations/listSignOffs", Some("clerk"), StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_another_site_sent_is_refused() {
+    // The app's origin policy is off, so the refusal is the engine pages'.
+    let router = app_with(OriginPolicy::dangerous_disable());
+    let answer = send(&router, "POST", NOTES, Some("ada"), r#"{"id": "n1", "data": {"title": "Hello"}}"#).await;
+    assert_eq!(answer.status, StatusCode::CREATED, "{}", answer.body);
+    for headers in [
+        [("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")],
+        [("origin", "https://evil.example"), ("host", "console.example")],
+        [("origin", "null"), ("host", "console.example")],
+    ] {
+        let answer = send_with(&router, "POST", COMMENT, Some("ada"), &headers, "body=Forged").await;
+        assert_eq!(answer.status, StatusCode::FORBIDDEN, "{headers:?}: {}", answer.body);
+    }
+    // A read is no write, and a post from the page's own origin passes.
+    let read = send_with(&router, "GET", "/console/engine/Note/n1/operations/listComments", Some("ada"), &[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")], "").await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.body);
+    for headers in [
+        [("sec-fetch-site", "same-origin"), ("origin", "https://console.example")],
+        [("origin", "https://console.example"), ("host", "console.example")],
+    ] {
+        let answer = send_with(&router, "POST", COMMENT, Some("ada"), &headers, "body=Mine").await;
+        assert_eq!(answer.status, StatusCode::SEE_OTHER, "{headers:?}: {}", answer.body);
+    }
+    let note = page(&router, NOTE, Some("ada"), StatusCode::OK).await;
+    assert!(note.contains("<dt>Comment count</dt><dd>2</dd>"), "{note}");
 }
 `
