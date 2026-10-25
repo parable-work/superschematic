@@ -1,0 +1,9 @@
+# The types shop-cache's channels carry and its parts name: StockLevel, an
+# object type with a nested one, and Region, an enum.
+name: shop-cache-common
+kind: General
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    rust: { enabled: true }

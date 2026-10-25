@@ -226,6 +226,31 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		}
 		schema.Derivers = append(schema.Derivers, deriver)
 	}
+	for _, decl := range doc.MemoryStoreDeclarations {
+		if decl == nil {
+			continue
+		}
+		if schema.MemoryStoreDeclaration(decl.Name) != nil {
+			fail("duplicate memory store declaration %q", decl.Name)
+			continue
+		}
+		if decl.File == "" {
+			decl.File = owner
+		}
+		schema.MemoryStoreDeclarations = append(schema.MemoryStoreDeclarations, decl)
+	}
+	ir.SortMemoryStoreDeclarations(schema.MemoryStoreDeclarations)
+
+	for _, app := range doc.Apps {
+		if app == nil {
+			continue
+		}
+		if schema.App(app.Name) != nil {
+			fail("duplicate app %q", app.Name)
+			continue
+		}
+		schema.Apps = append(schema.Apps, app)
+	}
 
 	errs = append(errs, applyDocumentDecorators(doc, schema, owner, reg)...)
 	return errs

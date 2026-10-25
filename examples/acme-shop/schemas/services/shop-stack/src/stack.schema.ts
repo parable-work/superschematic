@@ -13,11 +13,14 @@ import { environment, stack } from "@superschematic/stack";
 // Rust server over shop-db too, which shop-orders' server tells what a
 // checkout sold; shop-cart, a shopper's cart and the pickup slots, and
 // shop-storefront, each on a TypeScript server that Bun runs; and shop-web,
-// the static site whose browser code calls shop-api. Shoppers and staff
-// call every API, so all five are exposed; a site always is.
+// the static site whose browser code calls shop-api. shop-stock's app
+// Backoffice (D78), the Topcoat app staff receive stock in, runs beside its
+// server, a deployable of its own over shop-db. Shoppers and staff call
+// every API, so all five are exposed, and staff open the Backoffice, so it
+// is too; a site always is.
 @stack({
   deploy: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, ShopWeb],
-  expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront]
+  expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, { of: ShopStock, app: "Backoffice" }]
 })
 export abstract class Shop {}
 

@@ -412,6 +412,10 @@ type APIOutput struct {
 	// deps.rs, which the implementation's create_derivers builds with the
 	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
 	Derivers []DeriverInfo
+	// Apps are the API's apps, sorted by name: a parts struct each in
+	// src/apps.rs, which the app's entrypoint builds and hands to the
+	// app's program (D78).
+	Apps []AppInfo
 }
 
 // HasRateLimits reports whether a route the router mounts, a manual one
@@ -741,6 +745,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	if output.Workers, err = workersOf(schema); err != nil {
 		return nil, err
 	}
+	output.Apps = appsOf(schema)
 
 	return output, nil
 }
@@ -859,14 +864,16 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
 	}
 
-	// The user model's wiring (D50) and the implementation's Deps (D57); a
-	// crate written before with either keeps no stale module.
+	// The user model's wiring (D50), the implementation's Deps (D57) and
+	// the apps' parts (D78); a crate written before with one keeps no stale
+	// module.
 	for _, module := range []struct {
 		template, file string
 		written        bool
 	}{
 		{"identity.tmpl", "identity.rs", output.Identity != nil},
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
+		{"apps.tmpl", "apps.rs", output.HasApps()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {

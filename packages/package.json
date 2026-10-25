@@ -4,6 +4,7 @@
   "workspaces": [
     "api",
     "db",
+    "memory-store",
     "schema",
     "schema-config",
     "stack"

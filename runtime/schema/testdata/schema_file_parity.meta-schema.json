@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "App": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "ArgumentDef": {
       "additionalProperties": false,
       "properties": {
@@ -3344,6 +3367,10 @@
     "DeployableRef": {
       "additionalProperties": false,
       "properties": {
+        "app": {
+          "default": "",
+          "type": "string"
+        },
         "deployable": {
           "default": "",
           "type": "string"
@@ -3498,6 +3525,13 @@
     "Document": {
       "additionalProperties": false,
       "properties": {
+        "apps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/App"
+          },
+          "type": "array"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -3579,10 +3613,18 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],
           "type": "string"
+        },
+        "memoryStoreDeclarations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStoreDeclaration"
+          },
+          "type": "array"
         },
         "name": {
           "default": "",
@@ -4313,6 +4355,87 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "MemoryStoreDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "doc": {
+          "default": "",
+          "type": "string"
+        },
+        "file": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "channel",
+            "counter",
+            "claim"
+          ],
+          "type": "string"
+        },
+        "maxTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStorePart"
+          },
+          "type": "array"
+        },
+        "payload": {
+          "$ref": "#/$defs/TypeRef"
+        },
+        "reserved": {
+          "default": false,
+          "type": "boolean"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "ttlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "symbol",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "MemoryStorePart": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "default": "",
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "enum"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/TypeRef"
+        }
+      },
+      "required": [
+        "name",
+        "type"
       ],
       "type": "object"
     },
@@ -5269,6 +5392,7 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],

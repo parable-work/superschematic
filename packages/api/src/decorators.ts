@@ -384,6 +384,29 @@ export function deriver(_options?: DeriverOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of an app: the extensions its build needs. */
+export type AppOptions = {
+  /** The names of the superschematic extensions the app's build needs (`["topcoat"]`). A binary that does not link one refuses to build the app, and resolves and plans the stack as usual. */
+  readonly extensions?: readonly string[];
+};
+
+/**
+ * Declares an app of the API service: the project's own HTTP program over
+ * the API's Deps, implementations, identity and engine, which the stack
+ * runs as a deployable of its own where the API's servers run (D78). The
+ * program is a library crate the project writes, exporting `serve(parts)`,
+ * and the API is written in Rust. The class's name is the app's, and the
+ * class holds nothing:
+ *
+ * ```ts
+ * @app({ extensions: ["topcoat"] })
+ * export abstract class Backoffice {}
+ * ```
+ */
+export function app(_options?: AppOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 /** A UI schema renderer hides the field. */

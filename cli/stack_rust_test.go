@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -25,10 +26,10 @@ import (
 const rustFixtures = "../internal/generator/servergen/testdata/rust/services"
 
 // rustDevStack deploys rs-stock, a Rust server over rs-db, its authDb,
-// with the bucket rs-media (D54), and rs-pricing, the Rust server it
-// calls, on the local target, each on a port of its own, as are Postgres
-// and the storage emulator.
-func rustDevStack(pgPort, storagePort, stockPort, pricingPort int) map[string]string {
+// with the bucket rs-media (D54) and the memory store rs-cache (D75), and
+// rs-pricing, the Rust server it calls, on the local target, each on a
+// port of its own, as are Postgres, the storage emulator and Valkey.
+func rustDevStack(pgPort, storagePort, storePort, stockPort, pricingPort int) map[string]string {
 	return map[string]string{
 		"schema.config.yaml": "name: rs-dev-stack\nkind: Stack\noutputs: {}\n",
 		"src/stack.schema.yaml": fmt.Sprintf(`kind: Stack
@@ -45,13 +46,13 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
-      values: { postgresPort: %d, storagePort: %d }
+      values: { postgresPort: %d, storagePort: %d, memoryStorePort: %d }
       settings:
         - of: { service: { name: rs-stock, kind: API } }
           values: { port: %d }
         - of: { service: { name: rs-pricing, kind: API } }
           values: { port: %d }
-`, pgPort, storagePort, stockPort, pricingPort),
+`, pgPort, storagePort, storePort, stockPort, pricingPort),
 	}
 }
 
@@ -110,11 +111,11 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	t.Setenv(local.MigrateEnv, runner)
 
 	servicesRoot := filepath.Join(testpaths.TempDir(t), "schemas", "services")
-	for _, service := range []string{"rs-db", "rs-media", "rs-pricing", "rs-stock"} {
+	for _, service := range []string{"rs-db", "rs-media", "rs-cache", "rs-pricing", "rs-stock"} {
 		copyDir(t, filepath.Join(rustFixtures, service), filepath.Join(servicesRoot, service))
 	}
-	pgPort, storagePort, stockPort, pricingPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
-	writeFiles(t, filepath.Join(servicesRoot, "rs-dev-stack"), rustDevStack(pgPort, storagePort, stockPort, pricingPort))
+	pgPort, storagePort, storePort, stockPort, pricingPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	writeFiles(t, filepath.Join(servicesRoot, "rs-dev-stack"), rustDevStack(pgPort, storagePort, storePort, stockPort, pricingPort))
 	writeRustRuntimePaths(t, filepath.Dir(servicesRoot))
 	// Cargo resolves a crate's path dependencies from its directory's
 	// physical path, so the output root is one with no link above it, as
@@ -126,7 +127,8 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	require.NoError(t, err)
 	checkout := local.Checkout(canonical, "rs-dev-stack", "Dev")
 	container, storage := local.ContainerName("rs-dev-stack", "Dev", checkout), local.StorageContainerName("rs-dev-stack", "Dev", checkout)
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run() })
+	valkey := local.MemoryStoreContainerName("rs-dev-stack", "Dev", checkout)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage, valkey).Run() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -162,6 +164,10 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	_ = media.Body.Close()
 	require.Equal(t, http.StatusOK, media.StatusCode, buf.String())
 	require.Contains(t, buf.String(), "bucket   rs-media")
+	// rs-stock's memory store, rs-cache, runs on Valkey at its port.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", storePort), 5*time.Second)
+	require.NoError(t, err, buf.String())
+	_ = conn.Close()
 
 	base := local.ServerURL(stockPort)
 	call := func(method, path, token, body string, status int, want string) string {

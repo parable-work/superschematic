@@ -3,8 +3,9 @@
 // schedules, Cloud Run worker pools (D53), Cloud SQL Postgres databases,
 // Cloud Storage buckets (D54), Secret Manager secrets, a global external
 // Application Load Balancer for exposed servers, static sites in Cloud
-// Storage behind a load balancer with Cloud CDN (D55), and Cloud DNS for
-// their records. It registers through the public registry package alone,
+// Storage behind a load balancer with Cloud CDN (D55), memory stores in
+// Memorystore for Valkey (D75), and Cloud DNS for their records. It
+// registers through the public registry package alone,
 // as any extension does (D10), in a Go module of its own (D1), so the GCP
 // vocabulary stays out of the core.
 //
@@ -44,13 +45,15 @@ const (
 	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
 	// CloudRunRunner runs an engine's runner as a Cloud Run worker pool of
 	// one instance (D58); CloudRunDeriver runs a deriver as a Cloud Run
-	// worker pool of one instance (D74); CloudSQL runs Postgres databases
-	// on Cloud SQL instances.
+	// worker pool of one instance (D74); CloudRunApp runs an app as a Cloud
+	// Run service, as a server is run (D78); CloudSQL runs Postgres
+	// databases on Cloud SQL instances.
 	CloudRun        = "gcp.cloudrun"
 	CloudRunJob     = "gcp.cloudrunjob"
 	CloudRunWorker  = "gcp.cloudrunworker"
 	CloudRunRunner  = "gcp.cloudrunrunner"
 	CloudRunDeriver = "gcp.cloudrunderiver"
+	CloudRunApp     = "gcp.cloudrunapp"
 	CloudSQL        = "gcp.cloudsql"
 
 	// Site serves a static site's files from a Cloud Storage bucket,
@@ -60,6 +63,10 @@ const (
 	// Storage keeps a Bucket service's objects in a Cloud Storage bucket
 	// (D54).
 	Storage = "gcp.storage"
+
+	// Memorystore keeps a MemoryStore service's channels and keys in a
+	// Memorystore for Valkey instance (D75).
+	Memorystore = "gcp.memorystore"
 
 	// CloudDNS writes an environment's records into a Cloud DNS managed
 	// zone. It is the target's default DNS platform.
@@ -102,6 +109,21 @@ const (
 	DeriverHTTPConnector   = "gcp.cloudrunderiver-cloudrun"
 	DeriverBucketConnector = "gcp.cloudrunderiver-storage"
 
+	// MemoryStoreConnector, JobMemoryStoreConnector,
+	// WorkerMemoryStoreConnector and DeriverMemoryStoreConnector connect a
+	// Cloud Run server, job, worker pool and deriver to a memory store its
+	// API lists (D75).
+	MemoryStoreConnector        = "gcp.cloudrun-memorystore"
+	JobMemoryStoreConnector     = "gcp.cloudrunjob-memorystore"
+	WorkerMemoryStoreConnector  = "gcp.cloudrunworker-memorystore"
+	DeriverMemoryStoreConnector = "gcp.cloudrunderiver-memorystore"
+	// AppSQLConnector, AppHTTPConnector and AppBucketConnector connect an
+	// app's Cloud Run service, whose edges are its API's, as the server's
+	// connectors do (D78).
+	AppSQLConnector    = "gcp.cloudrunapp-cloudsql"
+	AppHTTPConnector   = "gcp.cloudrunapp-cloudrun"
+	AppBucketConnector = "gcp.cloudrunapp-storage"
+
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
 	Provisioner = "pulumi"
@@ -111,13 +133,18 @@ const (
 	PolicyHighAvailability = "production-databases-highly-available"
 
 	// PolicyNothingPublic refuses a resource that admits the public on
-	// behalf of anything but an exposed server or a site.
+	// behalf of anything but an exposed server, an exposed app (D78) or a
+	// site.
 	PolicyNothingPublic = "nothing-public-unless-exposed"
 
 	// PolicyPrivateBuckets refuses a Bucket service's bucket that is not
 	// private, or a grant that admits the public to one, on behalf of any
 	// deployable (D54).
 	PolicyPrivateBuckets = "buckets-never-public"
+
+	// PolicyMemoryStoresTLSAndIAM refuses a Memorystore instance without
+	// transit encryption or without IAM authentication (D75).
+	PolicyMemoryStoresTLSAndIAM = "memory-stores-tls-and-iam"
 )
 
 // ProviderVersion is the pulumi-gcp release the resource types are pinned
@@ -218,6 +245,19 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerDeriver,
 		},
 		{
+			Name:      CloudRunApp,
+			Extension: Name,
+			Kind:      ir.DeployableApp,
+			// An app runs on a Rust API (D78).
+			Languages: []string{registry.APILanguageRust},
+			// A Cloud Run service's, as a server's.
+			Settings:        json.RawMessage(cloudRunSettings),
+			NameOf:          serviceName,
+			AddressOf:       appAddress,
+			PublicAddressOf: appPublicAddress,
+			Lower:           lowerApp,
+		},
+		{
 			Name:      CloudSQL,
 			Extension: Name,
 			Kind:      ir.DeployableDatabase,
@@ -246,13 +286,22 @@ func (e Extension) Register(r *registry.Registry) error {
 			AddressOf: bucketAddress,
 			Lower:     lowerBucket,
 		},
+		{
+			Name:      Memorystore,
+			Extension: Name,
+			Kind:      ir.DeployableMemoryStore,
+			Settings:  json.RawMessage(memoryStoreSettings),
+			NameOf:    memoryStoreName,
+			AddressOf: memoryStoreAddress,
+			Lower:     lowerMemoryStore,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
 	}
-	for _, spec := range []registry.ConnectorSpec{
+	connectors := []registry.ConnectorSpec{
 		{Name: SQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRun, To: CloudSQL, Connect: connectSQL},
 		{Name: HTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRun, To: CloudRun, Connect: connectHTTP},
 		{Name: JobSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunJob, To: CloudSQL, Connect: connectSQL},
@@ -267,7 +316,11 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunDeriver, To: CloudSQL, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunDeriver, To: CloudRun, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunDeriver, To: Storage, Connect: connectBucket},
-	} {
+		{Name: AppSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunApp, To: CloudSQL, Connect: connectSQL},
+		{Name: AppHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunApp, To: CloudRun, Connect: connectHTTP},
+		{Name: AppBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunApp, To: Storage, Connect: connectBucket},
+	}
+	for _, spec := range append(connectors, memoryStoreConnectors()...) {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
 		}
@@ -285,14 +338,16 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:      Target,
 		Extension: Name,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   CloudRun,
-			ir.DeployableDatabase: CloudSQL,
-			ir.DeployableJob:      CloudRunJob,
-			ir.DeployableSite:     Site,
-			ir.DeployableBucket:   Storage,
-			ir.DeployableWorker:   CloudRunWorker,
-			ir.DeployableRunner:   CloudRunRunner,
-			ir.DeployableDeriver:  CloudRunDeriver,
+			ir.DeployableServer:      CloudRun,
+			ir.DeployableDatabase:    CloudSQL,
+			ir.DeployableJob:         CloudRunJob,
+			ir.DeployableSite:        Site,
+			ir.DeployableBucket:      Storage,
+			ir.DeployableWorker:      CloudRunWorker,
+			ir.DeployableRunner:      CloudRunRunner,
+			ir.DeployableDeriver:     CloudRunDeriver,
+			ir.DeployableMemoryStore: Memorystore,
+			ir.DeployableApp:         CloudRunApp,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,
@@ -302,6 +357,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			{Name: PolicyHighAvailability, Check: checkHighAvailability},
 			{Name: PolicyNothingPublic, Check: checkNothingPublic},
 			{Name: PolicyPrivateBuckets, Check: checkPrivateBuckets},
+			{Name: PolicyMemoryStoresTLSAndIAM, Check: checkMemoryStores},
 		},
 		State:      stateStore{ext: e},
 		Secrets:    secretStore{ext: e},

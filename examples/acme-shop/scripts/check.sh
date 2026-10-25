@@ -16,12 +16,15 @@
 # directory there, which keeps the compiled crates from run to run.
 #
 # Asserts, in order:
-#   1. build-all builds every service with the installed binary, which links
-#      the official targets, since storefront-stack's Staging is on the
-#      cloudflare target (D64), dependencies first, and each stack,
+#   1. build-all builds every service with superschematic-topcoat, the
+#      installed binary with the Topcoat extension linked: it links the
+#      official targets, since storefront-stack's Staging is on the
+#      cloudflare target (D64), and Topcoat, since shop-stock's app
+#      Backoffice needs it (D78), dependencies first, and each stack,
 #      shop-stack, storefront-stack and wishlist-stack, last of the
 #      services it deploys, which writes the entrypoint of each server and
-#      of shop-orders' and shop-stock's jobs and workers, the Workers
+#      of shop-orders' and shop-stock's jobs and workers, and of shop-stock's
+#      app Backoffice, with shop-stock's Topcoat crate, the Workers
 #      entrypoints of the storefront and the wishlist and bundle.ts beside
 #      each main.ts, and brings the Cargo workspace's
 #      lockfile up to date, which fails the check when that changes it;
@@ -31,8 +34,8 @@
 #   2. every generated Go module builds and vets, the entrypoints of
 #      shop-stack's Go servers, job and worker included, and shop-stack's
 #      Rust server, shop-stock, and its Rust job and worker check with its
-#      implementation in rust-impl/shop-stock, frozen to the committed
-#      lockfile;
+#      implementation in rust-impl/shop-stock, and its app Backoffice with
+#      its program in apps/backoffice, frozen to the committed lockfile;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, storefront-stack's and
 #      wishlist-stack's, their Workers entrypoints fetch.ts included, the
@@ -65,10 +68,10 @@
 #      of shop-db's identity tables (rust-server/identity.sql, whose
 #      tables have the columns shop-db's DDL gives them) that the Rust
 #      server reads too, and check they print the same; and, when Docker
-#      runs, `superschematic stack dev` runs shop-stack's Dev environment,
-#      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
-#      servers, shop-stock's Rust server, which cargo builds, and shop-cart's
-#      and the storefront's TypeScript servers on Bun, each on its generated
+#      runs, `superschematic-topcoat stack dev` runs shop-stack's Dev
+#      environment, Postgres, fake-gcs-server with shop-api's bucket
+#      shop-media, both Go servers, shop-stock's Rust server, which cargo
+#      builds, and its app Backoffice, and shop-cart's and the storefront's TypeScript servers on Bun, each on its generated
 #      entrypoint, shop-db's engine runner, shop-orders' worker, shop-stock's
 #      Rust worker and the site shop-web, and the test
 #      calls each Go and Rust API through its Go SDK and the storefront over
@@ -89,6 +92,8 @@
 #      shop-stock's Rust worker file the product's restock request, and its
 #      Rust job, run with `stack run`, order it, then runs stack dev and the
 #      job once more into an output root of the test's own (D65);
+#      and staff sign in to the Backoffice and receive stock through its
+#      engine console's Inventory page, which shop-stock counts (D78);
 #      `superschematic stack dev` runs storefront-stack's Dev, the storefront
 #      alone on Bun, and the test puts a tea in a cart and reads it (D64);
 #      and it runs wishlist-stack's Dev, the wishlist on Bun over a SQLite
@@ -108,15 +113,20 @@
 #   5. the storefront's tests call the generated TypeScript router over its
 #      implementation through the generated TypeScript SDK, and the clients'
 #      type tests decode the generated types;
-#   6. build-all with --cache skips every service on a second run and,
-#      once dist is gone, restores every service whose key reads nothing a
-#      build recorded there (D41), and builds the others again;
+#   6. superschematic-topcoat's build-all with --cache skips every service
+#      on a second run and, once dist is gone, restores every service
+#      whose key reads nothing a build recorded there (D41), and builds the
+#      others again;
 #   7. the copies under testdata/generated/ match this run byte for byte:
 #      the generated files the docs site quotes, and under logs/ the output
 #      of the commands it shows; but for the ports and the checkout's
 #      discriminator in shop-stack's Dev environment.json, which name this
 #      checkout's containers and differ from checkout to checkout (D30,
-#      amended).
+#      amended);
+#   8. the installed binary, which links no Topcoat and refuses to build
+#      shop-stock's app, still inits and resolves a stack over acme's
+#      services, on gcp too (cmd/superschematic's
+#      TestStackInitOverAcmeShop, D78).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,11 +174,14 @@ echo "==> installed binary"
 # run: the core with the official extensions linked. storefront-stack's
 # Staging is on the cloudflare target, which the core alone does not link,
 # so the core with no extension builds every service of the example but
-# that stack.
+# that stack. The installed binary links no Topcoat, so it builds every
+# service but shop-stack, whose app Backoffice needs it (D78).
 (cd "$REPO_ROOT/cmd/superschematic" && go build -o "$OUT/superschematic" .)
-# The core with the Topcoat extension, a module of its own: only the
-# Topcoat step below uses it.
+# superschematic-topcoat, a module of its own, links the installed binary's
+# extensions and Topcoat beside them, so it builds every service: build-all,
+# the stack's test and the Topcoat step below run it.
 (cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)
+superschematic_topcoat() { "$OUT/superschematic-topcoat" "$@"; }
 
 echo "==> build-all"
 clean_dist
@@ -178,9 +191,9 @@ COMMITTED_CARGO_LOCK="$OUT/Cargo.lock.committed"
 if [[ -f "$DIST/Cargo.lock" ]]; then
   cp "$DIST/Cargo.lock" "$COMMITTED_CARGO_LOCK"
 fi
-capture build-all.full.txt superschematic build-all schemas/services
+capture build-all.full.txt superschematic_topcoat build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 14 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 15 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -190,6 +203,7 @@ built_before() {
 }
 built_before shop-common shop-storefront
 built_before shop-db shop-api
+built_before shop-cache shop-api
 built_before shop-db shop-orders
 built_before shop-db shop-stock
 built_before shop-stock shop-orders
@@ -260,7 +274,7 @@ capture price-ir.json sh -c "\"$OUT/superschematic\" build schemas/services/shop
 
 echo "==> generated Go modules compile"
 for module in \
-  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders types/go/shop-stock \
+  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders types/go/shop-stock types/go/shop-cache \
   orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders sdk/go/shop-stock; do
   echo "    $module"
   go_module_compiles "$DIST/$module"
@@ -274,11 +288,12 @@ for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-settl
 done
 
 echo "==> the Rust server's, job's and worker's crates check, frozen to the committed lockfile"
-# shop-stock's server, job and worker, the members of schemas/dist's Cargo
-# workspace, with the generated API crate and the mirror of the
-# implementation in rust-impl/shop-stock they depend on by path, as stack
-# dev, the images and the generated CI build them (D57, D65).
-for crate in shop-stock shop-stock-order-restocks shop-stock-reorder-stock; do
+# shop-stock's server, job, worker and app, the members of schemas/dist's
+# Cargo workspace, with the generated API crate and the mirror of the
+# implementation in rust-impl/shop-stock they depend on by path, and the
+# app's mirror of apps/backoffice with shop-stock's Topcoat crate, as stack
+# dev, the images and the generated CI build them (D57, D65, D78).
+for crate in shop-stock shop-stock-order-restocks shop-stock-reorder-stock shop-stock-backoffice; do
   echo "    server/shop-stack/$crate"
 done
 (cd "$DIST" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" cargo check --locked --workspace -q)
@@ -435,7 +450,8 @@ echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Ru
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_ENGINE=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
-    ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
+    ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" ACME_SHOP_SUPERSCHEMATIC_TOPCOAT="$OUT/superschematic-topcoat" \
+    SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
     go test -count=1 -timeout 30m -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
 grep -E '^(--- |ok)' "$OUT/go-test.log"
 for server in Go Rust; do
@@ -537,21 +553,21 @@ done
 
 echo "==> build-all --cache: skip, then restore"
 CACHE_FLAGS=(--cache --cache-root "$OUT/cache")
-superschematic build-all "${CACHE_FLAGS[@]}" "$SCHEMAS/services" >/dev/null
-capture build-all-cache.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
+superschematic_topcoat build-all "${CACHE_FLAGS[@]}" "$SCHEMAS/services" >/dev/null
+capture build-all-cache.full.txt superschematic_topcoat build-all "${CACHE_FLAGS[@]}" schemas/services
 clean_dist
-capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
+capture build-all-restore.full.txt superschematic_topcoat build-all "${CACHE_FLAGS[@]}" schemas/services
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 14
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 15
 # A schema's references to other services in its decorators' arguments
 # are recorded under dist (D41): each stack's to the APIs it deploys, and
 # shop-stock's to shop-orders, the one caller its sales admit. So
 # once dist is gone, they build again, and so does shop-orders, whose key
 # covers shop-stock's, the API it calls; each is cached under its new key,
 # and every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 9
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 10
 for service in shop-stock shop-orders shop-stack storefront-stack wishlist-stack; do
   grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
 done
@@ -588,5 +604,11 @@ elif ! diff -r "$OUT/quoted" "$COPIES"; then
   echo "testdata/generated/ is stale: rerun with UPDATE=1, then check the docs pages that quote it" >&2
   exit 1
 fi
+
+echo "==> the installed binary inits and resolves a stack with shop-stock's app"
+# The installed binary links no Topcoat, so it refuses to build shop-stock's
+# app, and still inits a stack over the example's services, which resolves
+# in Dev and on gcp: cmd/superschematic's own test (D78).
+(cd "$REPO_ROOT/cmd/superschematic" && go test -count=1 -run '^TestStackInitOverAcmeShop$' . >/dev/null)
 
 echo "OK"

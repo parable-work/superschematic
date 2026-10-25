@@ -1,6 +1,6 @@
 ---
 name: superschematic
-description: Build backends with superschematic by declaring them in schema files (.schema.ts), not by writing SQL, migrations, validation, DTOs, routes, auth checks, OpenAPI or clients. The compiler generates Postgres and SQLite DDL, migration plans, a Go ORM, validated servers in Go, TypeScript or Rust, OpenAPI, SDKs in four languages, MCP tools and deploys. Use whenever a project has a superschematic.toml or schema.config.ts, or the task is to add or change a type, table, field, route, permission, user model, job, queue, bucket, site or environment in such a project, or to start a new one.
+description: Build backends with superschematic by declaring them in schema files (.schema.ts), not by writing SQL, migrations, validation, DTOs, routes, auth checks, OpenAPI or clients. The compiler generates Postgres and SQLite DDL, migration plans, a Go ORM, validated servers in Go, TypeScript or Rust, OpenAPI, SDKs in four languages, MCP tools and deploys. Use whenever a project has a superschematic.toml or schema.config.ts, or the task is to add or change a type, table, field, route, permission, user model, job, queue, bucket, memory store, site or environment in such a project, or to start a new one.
 ---
 
 # superschematic
@@ -58,12 +58,17 @@ The **kind** decides what a class means:
 | `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, types |
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
+| `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |
 | `Bucket`, `Site` | config only: a file bucket, a static front end | | |
 
 Schema classes are `abstract`. An operation's body is
 `throw new Error("schema declaration only")`: nothing runs it, the
 compiler reads the declaration. An API reaches a DB through `authDb`, a
-DB `dependencies` entry or `@source`; another API through `calls`.
+DB `dependencies` entry or `@source`; another API through `calls`; a
+bucket through `buckets`; a memory store through `memoryStores`, and
+`rateLimitStore` to share its `@rateLimit` budgets across replicas. A
+memory store never holds a fact: every key expires, and the code keeps a
+path for when the store is unavailable.
 
 ## The loop
 
@@ -115,7 +120,20 @@ DB `dependencies` entry or `@source`; another API through `calls`.
   `@userSessions` on an API class) instead of writing auth.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
-  transaction as the change that causes them.
+  transaction as the change that causes them, and `@deriver` on an API
+  class to fill an engine type's Derived fields from a model.
+- **Your own HTTP program is an app.** Pages or a back office over a Rust
+  API is `@app` on an empty API class: the stack runs the crate at
+  `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`
+  gets the API's `Deps`, implementations and engine, beside the API's
+  servers. Expose it in `@stack`, or no one reaches it. An
+  `@app({ extensions: ["topcoat"] })` builds only with
+  `superschematic-topcoat`, which each release ships beside
+  `superschematic`: `superschematic` plans the stack and refuses
+  `build-all`, `stack dev` and deploys, and the generated CI of every
+  stack in that services root runs `superschematic-topcoat`. Topcoat's
+  `<service>_with_parts` serves the app's pages alone; the JSON API and
+  engine routes need `_with_parts_and_api`.
 - **No server at all?** If the data's shape is defined at run time, or
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
@@ -160,14 +178,15 @@ the checkout's runtimes), `tsconfig.base.json` (whose `paths` map
 nothing is published, so it needs a checkout prepared with `make setup`:
 `--superschematic` names it, else the checkout that holds the project.
 
-`new service <name> --kind DB|API|General|Bucket|Site [--root <schemas-root>]`
+`new service <name> --kind DB|API|General|Bucket|Site|MemoryStore [--root <schemas-root>]`
 writes `services/<name>/`: `schema.config.ts` with an `outputs` block
 that loads, `package.json` (`<npm_scope>/<name>`), `tsconfig.json`,
-`src/index.ts` and, for DB, API and General, a starter
+`src/index.ts` and, for DB, API, General and MemoryStore, a starter
 `src/<name>.schema.ts` to rename and grow. Then it builds the service
 once, which writes `src/service.generated.ts`, so other configs can
 import its handle at once. Wire services together afterwards in the
-configs (`authDb`, `calls`, `buckets`, `dependencies`).
+configs (`authDb`, `calls`, `buckets`, `memoryStores`, `rateLimitStore`,
+`dependencies`).
 
 Both refuse to replace a file that exists and write nothing then. Once
 APIs exist, `superschematic stack init` writes the Stack service.

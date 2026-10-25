@@ -13,6 +13,7 @@
 !schemas/dist/sdk/go/shop-api
 !schemas/dist/server/shop-cloud-stack/shop-orders-expire-orders
 !schemas/dist/types/go/shop-api
+!schemas/dist/types/go/shop-cache
 !schemas/dist/types/go/shop-db
 !schemas/dist/types/go/shop-orders
 !third_party/superscalar/Cargo.lock

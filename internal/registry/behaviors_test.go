@@ -449,7 +449,7 @@ func TestFinalizeHoldsARustCrateToOnePath(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}
@@ -580,7 +580,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}

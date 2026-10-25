@@ -197,7 +197,8 @@ type ServiceCredential struct {
 
 // CheckDerivedValue checks a derived value against the contract of an
 // edge of kind: a DatabaseConnection for sql, a ServiceEndpoint for http,
-// a SiteEndpoint for site (D55), a BucketConnection for bucket (D54).
+// a SiteEndpoint for site (D55), a BucketConnection for bucket (D54), a
+// MemoryStoreConnection for memoryStore (D75).
 // The members a Worker alone reads (D64) are among them: a database's d1,
 // a service's binding, and a bucket's binding and r2.
 // v is the typed value or its JSON form; a member the contract does not
@@ -216,8 +217,60 @@ func CheckDerivedValue(kind EdgeKind, v any) error {
 		return checkSiteEndpoint(value)
 	case EdgeBucket:
 		return checkBucketConnection(value)
+	case EdgeMemoryStore:
+		return checkMemoryStoreConnection(value)
 	}
 	return fmt.Errorf("edge kind %q has no derived value", kind)
+}
+
+// checkMemoryStoreConnection checks a memory store connection (D75): a
+// store, a URL and an authentication, a CA and a member when set. A
+// literal URL's scheme is redis or rediss, a CA goes with rediss, and a
+// literal authentication is iam or none, iam with rediss; a reference is
+// the platform's to resolve.
+func checkMemoryStoreConnection(v any) error {
+	m, err := members(v, "a memory store connection", "store", "url", "ca", "auth", "member")
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"store", "url", "auth"} {
+		if err := requiredString(m, "", name); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"ca", "member"} {
+		if value, ok := m[name]; ok {
+			if err := stringMember(name, value); err != nil {
+				return err
+			}
+		}
+	}
+	scheme := ""
+	if url, ok := m["url"].(string); ok {
+		switch {
+		case strings.HasPrefix(url, "redis://"):
+			scheme = "redis"
+		case strings.HasPrefix(url, "rediss://"):
+			scheme = "rediss"
+		default:
+			return fmt.Errorf("url is %q; a memory store's URL is redis:// or rediss://", url)
+		}
+	}
+	if _, ok := m["ca"]; ok && scheme == "redis" {
+		return errors.New("a memory store connection with a redis:// url sets no ca; a CA verifies a rediss:// server")
+	}
+	if auth, ok := m["auth"].(string); ok {
+		switch auth {
+		case MemoryStoreAuthNone:
+		case MemoryStoreAuthIAM:
+			if scheme == "redis" {
+				return errors.New("a memory store connection with auth iam has a rediss:// url; an access token travels only over TLS")
+			}
+		default:
+			return fmt.Errorf("auth is %q; want %s or %s", auth, MemoryStoreAuthIAM, MemoryStoreAuthNone)
+		}
+	}
+	return nil
 }
 
 func checkBucketConnection(v any) error {
@@ -648,6 +701,10 @@ const (
 	// DefaultBucketField is the core's template for a bucket edge's field
 	// (D54).
 	DefaultBucketField = ServicePlaceholder + "_BUCKET"
+
+	// DefaultMemoryStoreField is the core's template for a memoryStore
+	// edge's field (D75).
+	DefaultMemoryStoreField = ServicePlaceholder + "_MEMORY_STORE"
 )
 
 // DerivedFieldNames are the templates that name the config field each
@@ -662,6 +719,10 @@ type DerivedFieldNames struct {
 
 	// Bucket names a bucket edge's field, after the Bucket service (D54).
 	Bucket string `json:"bucket,omitempty"`
+
+	// MemoryStore names a memoryStore edge's field, after the MemoryStore
+	// service (D75).
+	MemoryStore string `json:"memoryStore,omitempty"`
 }
 
 // Field returns the name of the config field an edge of kind to service
@@ -688,6 +749,12 @@ func (n DerivedFieldNames) template(kind EdgeKind) string {
 		}
 		return DefaultBucketField
 	}
+	if kind == EdgeMemoryStore {
+		if n.MemoryStore != "" {
+			return n.MemoryStore
+		}
+		return DefaultMemoryStoreField
+	}
 	if n.Service != "" {
 		return n.Service
 	}
@@ -698,7 +765,7 @@ func (n DerivedFieldNames) template(kind EdgeKind) string {
 // whose other characters would not make an environment variable's name:
 // upper-case letters, digits and underscores, not starting with a digit.
 func (n DerivedFieldNames) Validate() error {
-	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}, {"bucket", n.Bucket}} {
+	for _, t := range []struct{ key, template string }{{"database", n.Database}, {"service", n.Service}, {"bucket", n.Bucket}, {"memory_store", n.MemoryStore}} {
 		if t.template == "" {
 			continue
 		}
@@ -754,15 +821,16 @@ type DerivedConfigField struct {
 	Name string
 
 	// Kind is the edge's kind: sql for the database, http for a call,
-	// bucket for a bucket the API lists.
+	// bucket for a bucket the API lists, memoryStore for a memory store it
+	// lists.
 	Kind EdgeKind
 
-	// Service is the DB service, the called API service or the Bucket
-	// service.
+	// Service is the DB service, the called API service, the Bucket
+	// service or the MemoryStore service.
 	Service string
 
 	// From is the config key the edge comes from: authDb, dependencies,
-	// calls or buckets.
+	// calls, buckets, memoryStores or rateLimitStore.
 	From string
 }
 
@@ -791,8 +859,8 @@ func (s *Schema) Database() (service, from string, ok bool) {
 
 // DerivedConfigFields lists the config fields an API service's edges
 // derive, named by names: its database's, then one per `calls` entry in
-// order, then one per `buckets` entry in order (D54). A schema that is not
-// an API has none.
+// order, then one per `buckets` entry in order (D54), then one per memory
+// store in order (D75). A schema that is not an API has none.
 func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigField {
 	if s.Kind != SchemaKindAPI {
 		return nil
@@ -806,6 +874,13 @@ func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigFie
 	}
 	for _, bucket := range s.Buckets {
 		out = append(out, DerivedConfigField{Name: names.Field(EdgeBucket, bucket.Name), Kind: EdgeBucket, Service: bucket.Name, From: "buckets"})
+	}
+	for _, store := range s.MemoryStores {
+		from := "memoryStores"
+		if s.RateLimitStore != nil && s.RateLimitStore.Name == store.Name {
+			from = "rateLimitStore"
+		}
+		out = append(out, DerivedConfigField{Name: names.Field(EdgeMemoryStore, store.Name), Kind: EdgeMemoryStore, Service: store.Name, From: from})
 	}
 	return out
 }
@@ -823,6 +898,8 @@ func DerivedMembers(kind EdgeKind) []string {
 		return []string{"url"}
 	case EdgeBucket:
 		return []string{"name", "endpoint", "binding", "r2.account", "r2.accessKeyId", "r2.token", "r2.jurisdiction"}
+	case EdgeMemoryStore:
+		return []string{"store", "url", "ca", "auth", "member"}
 	}
 	return nil
 }
