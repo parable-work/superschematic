@@ -1226,9 +1226,10 @@ func TestBucketsReachTheEmulator(t *testing.T) {
 // go-redis through the memorystores.go its build wrote, which vets and
 // passes testdata/memorystores_test.go: against a fake server that refuses
 // CLIENT, over TLS with auth iam and a fake metadata server, a server that
-// is not there, and, with Docker, a Valkey container of the test's own,
-// which SUPERSCHEMATIC_TEST_MEMORY_STORE names unless the environment
-// names one (D75).
+// is not there, a pool held busy, and, with Docker, a Valkey container of
+// the test's own, which SUPERSCHEMATIC_TEST_MEMORY_STORE names unless the
+// environment names one, also behind a proxy that goes away or goes
+// silent (D75).
 func TestMemoryStoresOnRedis(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -1279,13 +1280,13 @@ func TestMemoryStoresOnRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
 	}
-	for _, name := range []string{"TestMemoryStoreSendsNoClientCommand", "TestMemoryStoreDownAtOpen", "TestMemoryStoreRefusals"} {
+	for _, name := range []string{"TestMemoryStoreSendsNoClientCommand", "TestMemoryStoreDownAtOpen", "TestMemoryStoreRefusals", "TestMemoryStorePoolTimeout"} {
 		if !strings.Contains(string(out), "--- PASS: "+name) {
 			t.Errorf("%s did not pass:\n%s", name, out)
 		}
 	}
 	if server != "" {
-		for _, name := range []string{"TestMemoryStoreOnRedis", "TestMemoryStoreReconnects"} {
+		for _, name := range []string{"TestMemoryStoreOnRedis", "TestMemoryStoreReconnects", "TestMemoryStoreRecoversASilentSubscriber", "TestMemoryStoreSubscribeDuringAnOutage"} {
 			if !strings.Contains(string(out), "--- PASS: "+name) {
 				t.Errorf("%s did not pass against %s:\n%s", name, server, out)
 			}

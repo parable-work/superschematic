@@ -10222,8 +10222,9 @@ Status: built, as amended below. Nothing has run on Google Cloud.
   Rust's `memorystore` module, and the `memorystore-redis` feature over
   the `redis` crate. Each has `Disabled`, an in-process store, the typed
   `Channel` and `Key`, and the shared rate limit: Go's
-  `RateLimitCounter`, an httprate `LimitCounter`, TypeScript's
-  `MemoryStoreRateLimitStore` and Rust's `RateLimits::with_store`.
+  `RateLimiter`, which the middleware runs before httprate's in-process
+  limiter, TypeScript's `MemoryStoreRateLimitStore` and Rust's
+  `RateLimits::with_store`.
 - **Deps and the entrypoints.** apigen, tsrestgen and rustrestgen give
   `Deps` a store per listed store, and each Go, TypeScript and Rust
   server, job and worker entrypoint, and each TypeScript and Rust deriver's, opens each store once,
@@ -10258,7 +10259,8 @@ The tests that hold it:
   `TestTypeScriptDefinitionsCompileAndRun` and `TestRustDefinitionsBuild`;
 - the runtimes: each passes both vector files; Go's
   `runtime/http/go/memorystore` tests and the middleware's
-  `TestRateLimitWithStore`; TypeScript's `memorystore.test.ts` and
+  `TestRateLimitWithStore` and `TestRateLimitWithStoreIsNotSerialized`;
+  TypeScript's `memorystore.test.ts` and
   `redis.test.ts`; Rust's `memorystore` tests and
   `tests/memorystore_redis.rs`;
 - the Redis stores against Valkey, a server that refuses `CLIENT`, a
@@ -10678,7 +10680,7 @@ Building D75 showed where the entry's words and the code had to part.
 |----------|------------------------|
 | The memory store field is one variable per member of `ir.MemoryStoreConnection`, as every derived field is (`ir.DerivedVariables`): `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL`, `_CA`, `_AUTH` and `_MEMBER`. None set is a disabled store. A reader refuses a URL that holds a user or a password. | One JSON value in one variable, which no other derived field is, and whose members a platform could not each set from an output reference, such as the CA on gcp. |
 | A field that is set and malformed fails the config's load, as every refused field does, and the workload does not start. Only a connection the Redis client refuses when it opens, such as a CA that holds no certificate, runs the workload with a disabled store, after one log line. | Running disabled whenever the field is malformed, which turns a broken deploy into a quiet change of behavior, the outcome D75 refuses for a target with no platform. |
-| The shared rate limit is httprate's own rule, which the Go runtime's in-process limiter already applies: a request is allowed when `round(estimate) + 1 <= limit`, rounding half away from zero, and then increments the current window's counter with a TTL of two windows and five seconds; it is refused with `Retry-After` the window's length in whole seconds. The TypeScript and Rust limiters, and the vectors, hold the same. Go's counter never returns an error to httprate, which answers 428 on one: while the store is unavailable, or a call fails, it counts in process. | `estimate < limit`, with `Retry-After` the rest of the window, which D75 wrote: a Go route would then answer differently from httprate's own limiter, so its answers would change whenever its store went away. |
+| The shared rate limit is httprate's own rule, which the Go runtime's in-process limiter already applies: a request is allowed when `round(estimate) + 1 <= limit`, rounding half away from zero, and then increments the current window's counter with a TTL of two windows and five seconds; it is refused with `Retry-After` the window's length in whole seconds. The TypeScript and Rust limiters, and the vectors, hold the same. Go's route with a store runs the runtime's own limiter, not an httprate `LimitCounter`: httprate holds one lock per route across its counter's calls, which would put every request's round trips to the store in a line. The limiter reads both windows in one `MGET`, holds no lock, and leaves a request to httprate's in-process limiter while the store is unavailable or a call fails. | `estimate < limit`, with `Retry-After` the rest of the window, which D75 wrote: a Go route would then answer differently from httprate's own limiter, so its answers would change whenever its store went away. |
 | The `operation` part of a rate-limit key is the operation's kebab namespace and its name, `product.getProduct` or `order-item.addItem`, as apigen names it: Go's `RateLimitOperation()`, TypeScript's `operationSpecs` and Rust's `OperationInfo` already carry it, so no runtime needs more. `TestRateLimitOperationIsTheGoServers` in tsrestgen and rustrestgen holds the three to one spelling, and the key vectors use it. | The operation set's class and method, `ProductQueries.getProduct`, which the vectors first wrote and no runtime has at a route. |
 | A part's string is its wire string: the string its value takes in the API's JSON. A string part is itself, so an `Identity.UUID` is its compact base62 form; an integer is base 10, a boolean `true` or `false`, an enum its wire value. A name built from a value read off the wire in any language is the same name. | A UUID's canonical lowercase hex form, which the contract first named: a TypeScript or Rust caller that holds the wire string would convert it first, and one that forgot would key another name. |
 | A claim is `SET <name> <token> PX <ttl> NX GET`, with a random token per call: it is the caller's when no value was there, or when the value read back is its own token, which happens when the client retries a call whose first reply was lost. `GET` beside `NX` needs Valkey or Redis 7.0 or later, which every target runs. | `SET <name> 1 PX <ttl> NX`, whose retry finds the key its own first try set and answers false, so the call that made the claim reports it lost. |

@@ -12,10 +12,14 @@ package main
 // seconds while it is up and with a jittered backoff from 100ms to five
 // seconds while it is down, and every call but Subscribe returns
 // memorystore.ErrUnavailable at once while it is unavailable. Subscribe
-// while the server is down holds the subscription, which go-redis
-// subscribes when the connection returns, as the TypeScript and Rust
-// runtimes do; it refuses only once the store is closed. An operation
-// has 500ms, and one retry covers a stale pooled connection. A field that
+// never touches the network: it records the channel and wakes the
+// subscriber goroutine, which subscribes after each connect, as the
+// TypeScript and Rust runtimes do. While the store is up it waits up to
+// 500ms for the server to confirm; while it is down it returns at once,
+// and it refuses only once the store is closed. An operation has 500ms,
+// and one retry covers a stale pooled connection. A call that finds every
+// pooled connection busy for that long fails alone and leaves the store
+// up. A field that
 // is unset, or whose connection the store cannot use (a CA that holds no
 // certificate, say), is a disabled store, which the worker runs with
 // after one log line. Readiness never waits for a store.
@@ -26,8 +30,10 @@ package main
 // later, verified against the connection's CA. With auth iam each new
 // connection authenticates as the workload's account, with the access
 // token the metadata server gives as the password of user default. A
-// process holds one subscriber connection per store, whose channels go-redis
-// subscribes again when it reconnects. A message over 64 KiB is refused
+// process holds one subscriber connection per store, which pings after
+// 15s without a message and is replaced, subscribed again to every
+// channel, when no reply comes within the next 15s, so a connection that
+// went silent without closing is found. A message over 64 KiB is refused
 // before it is sent. No log line holds a URL, a token or a part: go-redis's
 // own lines go through the runtime's redacting logger.
 
@@ -40,6 +46,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -88,11 +95,12 @@ type redisStore struct {
 	fanout  *memorystore.Fanout
 	release func()
 
-	// subMu orders each SUBSCRIBE and UNSUBSCRIBE with the change of the
-	// local handlers it follows; pubsub is the one subscriber connection,
-	// made by the first Subscribe.
-	subMu  sync.Mutex
-	pubsub *redis.PubSub
+	// kick wakes the subscriber goroutine when the fanout's channels
+	// change; it alone touches the subscriber connection. waiters are the
+	// Subscribe calls that wait for the server to confirm a channel.
+	kick    chan struct{}
+	waitMu  sync.Mutex
+	waiters map[string][]chan struct{}
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -101,7 +109,10 @@ type redisStore struct {
 	closeOnce sync.Once
 }
 
-var _ memorystore.Store = (*redisStore)(nil)
+var (
+	_ memorystore.Store        = (*redisStore)(nil)
+	_ memorystore.MultiCounter = (*redisStore)(nil)
+)
 
 // openRedisStore opens conn with the timings tm, the defaults where zero,
 // asking metadataHost for an access token with auth iam, or
@@ -119,20 +130,35 @@ func openRedisStore(ctx context.Context, logger *zap.Logger, conn stackconfig.Me
 	}
 	installRedisLog.Do(func() { redis.SetLogger(memorystore.ClientLog) })
 	s := &redisStore{
-		prefix: prefix,
-		client: redis.NewClient(opts),
-		logger: logger.With(zap.String("prefix", prefix), zap.String("host", host)),
-		tm:     tm,
-		fanout: memorystore.NewFanout(logger),
+		prefix:  prefix,
+		client:  redis.NewClient(opts),
+		logger:  logger.With(zap.String("prefix", prefix), zap.String("host", host)),
+		tm:      tm,
+		fanout:  memorystore.NewFanout(logger),
+		kick:    make(chan struct{}, 1),
+		waiters: map[string][]chan struct{}{},
 	}
 	s.release = memorystore.ClientLog.Add(s.logger)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.watch = memorystore.NewWatch(func(ctx context.Context) error { return s.client.Ping(ctx).Err() }, s.changed, tm)
+	s.watch = memorystore.NewWatch(s.ping, s.changed, tm)
 	s.metrics = memorystore.NewMetrics(nil, prefix, s.Available)
 	if !s.watch.Start(ctx) {
 		s.logger.Warn("the memory store is unavailable at open; it reconnects in the background")
 	}
+	s.wg.Add(1)
+	go s.subscriber()
 	return s, nil
+}
+
+// ping is the health ping. A pool whose every connection is busy is no
+// sign of a server that is down: those connections fail on their own
+// when it is.
+func (s *redisStore) ping(ctx context.Context) error {
+	err := s.client.Ping(ctx).Err()
+	if errors.Is(err, redis.ErrPoolTimeout) {
+		return nil
+	}
+	return err
 }
 
 // redisOptions are go-redis's options for conn, and the host its log
@@ -269,6 +295,38 @@ func (s *redisStore) Count(ctx context.Context, ref memorystore.Ref) (int64, err
 	return n, nil
 }
 
+// Counts reads the counters refs name in one MGET: the shared rate limit's
+// two windows in one round trip.
+func (s *redisStore) Counts(ctx context.Context, refs ...memorystore.Ref) ([]int64, error) {
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		if err := s.ready(ctx, ref, memorystore.OpCount, 0); err != nil {
+			return nil, err
+		}
+		names[i] = memorystore.FullName(s.prefix, ref)
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	values, err := s.client.MGet(ctx, names...).Result()
+	if err := s.results(ctx, refs, memorystore.OpCount, err); err != nil {
+		return nil, err
+	}
+	counts := make([]int64, len(refs))
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+		text, ok := value.(string)
+		n, err := strconv.ParseInt(text, 10, 64)
+		if !ok || err != nil {
+			return nil, fmt.Errorf("memory store %s: count %s: the key holds no count", s.prefix, refs[i].Declaration)
+		}
+		counts[i] = n
+	}
+	return counts, nil
+}
+
 func (s *redisStore) Claim(ctx context.Context, ref memorystore.Ref, ttl time.Duration) (bool, error) {
 	if err := s.ready(ctx, ref, memorystore.OpClaim, ttl); err != nil {
 		return false, err
@@ -305,83 +363,263 @@ func (s *redisStore) Subscribe(ctx context.Context, ref memorystore.Ref, h func(
 	if h == nil {
 		return nil, fmt.Errorf("memory store %s: subscribe to %s with no handler", s.prefix, ref.Declaration)
 	}
-	full := memorystore.FullName(s.prefix, ref)
-	s.subMu.Lock()
-	defer s.subMu.Unlock()
 	if s.closed.Load() {
 		return nil, memorystore.ErrUnavailable
 	}
+	full := memorystore.FullName(s.prefix, ref)
+	var confirmed chan struct{}
+	if s.Available() {
+		confirmed = s.await(full)
+	}
 	id, first := s.fanout.Add(full, ref.Declaration, h)
 	if first {
-		if s.pubsub == nil {
-			s.pubsub = s.client.Subscribe(s.ctx)
-			s.wg.Add(1)
-			go s.receive(s.pubsub)
+		s.wake()
+	}
+	if confirmed != nil {
+		// The store is up: wait a little for the server to confirm, so a
+		// message published next reaches h. A store that is down holds
+		// the subscription and returns at once; the subscriber goroutine
+		// subscribes when it connects.
+		if first {
+			timer := time.NewTimer(s.tm.Op)
+			select {
+			case <-confirmed:
+			case <-timer.C:
+			case <-ctx.Done():
+			case <-s.ctx.Done():
+			}
+			timer.Stop()
 		}
-		opCtx, cancel := context.WithTimeout(ctx, s.tm.Op)
-		if !s.Available() {
-			// The store is down: go-redis records the channel, and the
-			// receive loop's reconnect subscribes it, so the call does not
-			// wait for a dial that fails.
-			cancel()
-		}
-		err := s.pubsub.Subscribe(opCtx, full)
-		cancel()
-		if err != nil {
-			// go-redis holds the channel and subscribes again when the
-			// connection returns.
-			s.logger.Debug("the memory store subscribes again when its connection returns", zap.String("declaration", ref.Declaration), zap.String("error", memorystore.RedactError(err)))
-		}
+		s.unawait(full, confirmed)
 	}
 	return memorystore.NewSubscription(func() error {
-		s.subMu.Lock()
-		defer s.subMu.Unlock()
-		if !s.fanout.Remove(full, id) || s.pubsub == nil || s.closed.Load() {
-			return nil
-		}
-		opCtx, cancel := context.WithTimeout(context.Background(), s.tm.Op)
-		defer cancel()
-		if err := s.pubsub.Unsubscribe(opCtx, full); err != nil {
-			s.logger.Debug("the memory store's unsubscribe did not reach the server", zap.String("declaration", ref.Declaration), zap.String("error", memorystore.RedactError(err)))
+		if s.fanout.Remove(full, id) {
+			s.wake()
 		}
 		return nil
 	}), nil
 }
 
-// receive reads the subscriber connection until the store closes, and
-// wakes each message's local handlers.
-func (s *redisStore) receive(pubsub *redis.PubSub) {
+// wake tells the subscriber goroutine that the fanout's channels changed.
+func (s *redisStore) wake() {
+	select {
+	case s.kick <- struct{}{}:
+	default:
+	}
+}
+
+// await is closed once the server confirms the channel full.
+func (s *redisStore) await(full string) chan struct{} {
+	ch := make(chan struct{})
+	s.waitMu.Lock()
+	s.waiters[full] = append(s.waiters[full], ch)
+	s.waitMu.Unlock()
+	return ch
+}
+
+// unawait drops ch from full's waiters, when the server has not confirmed
+// it yet.
+func (s *redisStore) unawait(full string, ch chan struct{}) {
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	waiting := s.waiters[full]
+	for i, w := range waiting {
+		if w == ch {
+			waiting = append(waiting[:i], waiting[i+1:]...)
+			break
+		}
+	}
+	if len(waiting) == 0 {
+		delete(s.waiters, full)
+	} else {
+		s.waiters[full] = waiting
+	}
+}
+
+// confirm wakes every Subscribe that waits for the channel full.
+func (s *redisStore) confirm(full string) {
+	s.waitMu.Lock()
+	waiting := s.waiters[full]
+	delete(s.waiters, full)
+	s.waitMu.Unlock()
+	for _, ch := range waiting {
+		close(ch)
+	}
+}
+
+// errNoPong is the cause of a subscriber connection that sent a ping and
+// heard nothing for a whole idle window: a connection that went silent
+// without closing, which the kernel may not fail for many minutes.
+var errNoPong = errors.New("the subscriber connection did not answer its ping")
+
+// subscriber holds the one subscriber connection while any channel has a
+// handler, and replaces it, with backoff, when it fails or goes silent,
+// until the store closes. It alone touches the connection, so neither
+// Subscribe nor a subscription's Close waits for a dial.
+func (s *redisStore) subscriber() {
 	defer s.wg.Done()
 	backoff := s.tm.MinBackoff
 	for {
-		msg, err := pubsub.ReceiveTimeout(s.ctx, s.tm.ReceiveIdle)
-		if err != nil {
-			if s.ctx.Err() != nil || errors.Is(err, redis.ErrClosed) {
+		for len(s.fanout.Channels()) == 0 {
+			select {
+			case <-s.ctx.Done():
 				return
+			case <-s.kick:
 			}
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				// An idle connection: a ping proves it, or fails it so the
-				// next read reconnects.
-				ctx, cancel := context.WithTimeout(s.ctx, s.tm.Ping)
-				_ = pubsub.Ping(ctx)
-				cancel()
-				continue
-			}
-			s.logger.Debug("the memory store's subscriber connection failed; it reconnects", zap.String("error", memorystore.RedactError(err)))
-			if !memorystore.Sleep(s.ctx, memorystore.Jitter(backoff)) {
-				return
-			}
-			backoff = memorystore.NextBackoff(backoff, s.tm.MaxBackoff)
+		}
+		heard, err := s.subscribeConnection()
+		if s.ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			// Every channel was closed: wait for the next.
+			backoff = s.tm.MinBackoff
 			continue
 		}
-		backoff = s.tm.MinBackoff
-		if m, ok := msg.(*redis.Message); ok {
-			if declaration, ok := s.fanout.Deliver(s.ctx, m.Channel, []byte(m.Payload)); ok {
-				s.metrics.Receive(s.ctx, declaration)
+		s.logger.Debug("the memory store's subscriber connection failed; it reconnects", zap.String("error", memorystore.RedactError(err)))
+		if heard {
+			backoff = s.tm.MinBackoff
+		}
+		if !memorystore.Sleep(s.ctx, memorystore.Jitter(backoff)) {
+			return
+		}
+		backoff = memorystore.NextBackoff(backoff, s.tm.MaxBackoff)
+	}
+}
+
+// subscribeConnection opens a subscriber connection, subscribes to every
+// channel of the fanout, and serves it until it fails, whose cause it
+// returns, or no channel is left or the store closes, nil. heard reports
+// whether the connection read anything.
+func (s *redisStore) subscribeConnection() (heard bool, err error) {
+	pubsub := s.client.Subscribe(s.ctx)
+	defer pubsub.Close()
+	subscribed := map[string]bool{}
+	select {
+	case <-s.kick:
+	default:
+	}
+	if err := s.subscribeTo(pubsub, subscribed); err != nil || len(subscribed) == 0 {
+		return false, err
+	}
+
+	// The reader reads the connection, which a ping proves; pubsub.Close
+	// ends a read that would wait forever.
+	events := make(chan any, 64)
+	done := make(chan struct{})
+	defer close(done)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			msg, err := pubsub.Receive(s.ctx)
+			var event any = msg
+			if err != nil {
+				event = err
+			}
+			select {
+			case events <- event:
+			case <-done:
+				return
+			}
+			if err != nil {
+				return
 			}
 		}
+	}()
+
+	idle := time.NewTimer(s.tm.ReceiveIdle)
+	defer idle.Stop()
+	pinged := false
+	for {
+		select {
+		case <-s.ctx.Done():
+			return heard, nil
+		case <-s.kick:
+			if err := s.subscribeTo(pubsub, subscribed); err != nil {
+				return heard, err
+			}
+			if len(subscribed) == 0 {
+				return heard, nil
+			}
+		case event := <-events:
+			switch m := event.(type) {
+			case error:
+				return heard, m
+			case *redis.Subscription:
+				if m.Kind == "subscribe" {
+					s.confirm(m.Channel)
+				}
+			case *redis.Message:
+				if declaration, ok := s.fanout.Deliver(s.ctx, m.Channel, []byte(m.Payload)); ok {
+					s.metrics.Receive(s.ctx, declaration)
+				}
+			}
+			heard, pinged = true, false
+			idle.Reset(s.tm.ReceiveIdle)
+		case <-idle.C:
+			if pinged {
+				if len(events) > 0 {
+					// A slow handler held the loop: read what came first.
+					idle.Reset(s.tm.ReceiveIdle)
+					continue
+				}
+				return heard, errNoPong
+			}
+			// An idle connection: a ping proves it, and its reply must
+			// come within the next idle window.
+			ctx, cancel := context.WithTimeout(s.ctx, s.tm.Ping)
+			err := pubsub.Ping(ctx)
+			cancel()
+			if err != nil {
+				return heard, err
+			}
+			pinged = true
+			idle.Reset(s.tm.ReceiveIdle)
+		}
 	}
+}
+
+// subscribeTo makes the connection's channels the fanout's: it subscribes
+// to each channel subscribed lacks and unsubscribes from each it holds
+// that no handler has, and records the result in subscribed. The first
+// call dials.
+func (s *redisStore) subscribeTo(pubsub *redis.PubSub, subscribed map[string]bool) error {
+	want := s.fanout.Channels()
+	var add, drop []string
+	for _, name := range want {
+		if subscribed[name] {
+			// Already on the server: a Subscribe that waits for it has
+			// its confirmation.
+			s.confirm(name)
+		} else {
+			add = append(add, name)
+		}
+	}
+	for name := range subscribed {
+		if !slices.Contains(want, name) {
+			drop = append(drop, name)
+		}
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, s.tm.Dial+s.tm.Op)
+	defer cancel()
+	if len(add) > 0 {
+		if err := pubsub.Subscribe(ctx, add...); err != nil {
+			return err
+		}
+		for _, name := range add {
+			subscribed[name] = true
+		}
+	}
+	if len(drop) > 0 {
+		if err := pubsub.Unsubscribe(ctx, drop...); err != nil {
+			return err
+		}
+		for _, name := range drop {
+			delete(subscribed, name)
+		}
+	}
+	return nil
 }
 
 // Close closes the subscriber connection and the pool, and stops the
@@ -391,11 +629,6 @@ func (s *redisStore) Close() error {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 		s.cancel()
-		s.subMu.Lock()
-		if s.pubsub != nil {
-			_ = s.pubsub.Close()
-		}
-		s.subMu.Unlock()
 		err = s.client.Close()
 		s.wg.Wait()
 		s.watch.Stop()
@@ -425,15 +658,26 @@ func (s *redisStore) ready(ctx context.Context, ref memorystore.Ref, op string, 
 
 // result counts a call's outcome and wraps its error. A connection error
 // wraps ErrUnavailable and marks the store down; a reply the server
-// refused leaves it up.
+// refused leaves it up, as does a pool whose every connection stayed busy
+// for the call's wait, which wraps ErrUnavailable so the caller falls
+// back for that call alone.
 func (s *redisStore) result(ctx context.Context, ref memorystore.Ref, op string, err error) error {
+	return s.results(ctx, []memorystore.Ref{ref}, op, err)
+}
+
+// results is result for a call on each of refs, whose error names the
+// first.
+func (s *redisStore) results(ctx context.Context, refs []memorystore.Ref, op string, err error) error {
 	record := func(outcome string) {
-		if op == "publish" {
-			s.metrics.Publish(ctx, ref.Declaration, outcome)
-			return
+		for _, ref := range refs {
+			if op == "publish" {
+				s.metrics.Publish(ctx, ref.Declaration, outcome)
+			} else {
+				s.metrics.Key(ctx, ref.Declaration, op, outcome)
+			}
 		}
-		s.metrics.Key(ctx, ref.Declaration, op, outcome)
 	}
+	ref := refs[0]
 	switch {
 	case err == nil:
 		record(memorystore.OutcomeOK)
@@ -445,6 +689,9 @@ func (s *redisStore) result(ctx context.Context, ref memorystore.Ref, op string,
 		record(memorystore.OutcomeUnavailable)
 		s.watch.MarkDown(err)
 		return fmt.Errorf("%w: %s %s: %s", memorystore.ErrUnavailable, op, ref.Declaration, memorystore.RedactError(err))
+	case errors.Is(err, redis.ErrPoolTimeout):
+		record(memorystore.OutcomeError)
+		return fmt.Errorf("%w: %s %s: every connection of the pool is busy", memorystore.ErrUnavailable, op, ref.Declaration)
 	}
 	record(memorystore.OutcomeError)
 	return fmt.Errorf("memory store %s: %s %s: %s", s.prefix, op, ref.Declaration, memorystore.RedactError(err))
@@ -453,6 +700,9 @@ func (s *redisStore) result(ctx context.Context, ref memorystore.Ref, op string,
 // isConnectionError reports whether err comes from the connection rather
 // than from a reply: an out-of-memory refusal, say, leaves the store up.
 func isConnectionError(err error) bool {
+	if errors.Is(err, redis.ErrPoolTimeout) {
+		return false
+	}
 	if errors.Is(err, redis.ErrClosed) {
 		return true
 	}

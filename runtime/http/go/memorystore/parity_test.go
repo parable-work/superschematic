@@ -121,13 +121,14 @@ func TestRateLimitKeyParity(t *testing.T) {
 	}
 }
 
-// TestRateLimitWindowParity: for each window of the shared vectors, the
-// counter over an in-process store holding the vector's counts gives
-// httprate the counts of the vector's windows, httprate's rule decides as
-// the vector does, and an allowed request's increment creates the
-// current window's key with the vector's TTL. The rule here is httprate's
-// own (limiter.go: calculateRate, then OnLimit's rate+1 > limit), which
-// the counter plugs into unchanged.
+// TestRateLimitWindowParity: for each window of the shared vectors,
+// RateLimiter over an in-process store holding the vector's counts reads
+// the vector's windows, decides as the vector does, with httprate's
+// Retry-After, and an allowed request's increment creates the current
+// window's key with the vector's TTL. httprate's own arithmetic
+// (limiter.go: calculateRate, then OnLimit's rate+1 > limit), which the
+// route's in-process limiter applies, decides the same, so a route answers
+// alike with and without its store.
 func TestRateLimitWindowParity(t *testing.T) {
 	const service, operation, client = "shop-api", "ProductQueries.getProduct", "203.0.113.7"
 	for _, v := range readParity(t).RateLimit.Windows {
@@ -136,57 +137,55 @@ func TestRateLimitWindowParity(t *testing.T) {
 			store := NewInProcess("shop-cache", WithClock(func() time.Time { return now }))
 			defer store.Close()
 			window := time.Duration(v.WindowMs) * time.Millisecond
-			curr := now.Truncate(window)
-			prev := curr.Add(-window)
-			if curr.Unix() != v.Want.CurrWindowStart || prev.Unix() != v.Want.PrevWindowStart {
-				t.Fatalf("windows %d and %d, want %d and %d", curr.Unix(), prev.Unix(), v.Want.CurrWindowStart, v.Want.PrevWindowStart)
-			}
+			curr := time.UnixMilli(v.Want.CurrWindowStart * 1000)
+			prev := time.UnixMilli(v.Want.PrevWindowStart * 1000)
 			ctx := context.Background()
+			refs := map[time.Time]Ref{}
 			for start, n := range map[time.Time]int{curr: v.CurrCount, prev: v.PrevCount} {
 				ref, err := RateLimitRef(service, operation, start.Unix(), client)
 				if err != nil {
 					t.Fatal(err)
 				}
+				refs[start] = ref
 				for range n {
 					if _, err := store.Increment(ctx, ref, RateLimitTTL(window)); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
-			counter := NewRateLimitCounter(store, service, operation)
-			counter.Config(v.Limit, window)
-			currCount, prevCount, err := counter.Get(client, curr, prev)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if currCount != v.CurrCount || prevCount != v.PrevCount {
-				t.Fatalf("Get = %d, %d, want %d, %d", currCount, prevCount, v.CurrCount, v.PrevCount)
-			}
-			diff := now.Sub(curr)
-			estimate := float64(prevCount)*(float64(window)-float64(diff))/float64(window) + float64(currCount)
+			estimate := slidingWindowEstimate(v.WindowMs, now.Sub(curr), int64(v.PrevCount), int64(v.CurrCount))
 			if math.Abs(estimate-v.Want.Estimate) > 1e-9 {
 				t.Errorf("estimate = %v, want %v", estimate, v.Want.Estimate)
 			}
-			allowed := int(math.Round(estimate))+1 <= v.Limit
-			if allowed != v.Want.Allowed {
-				t.Fatalf("allowed = %v, want %v", allowed, v.Want.Allowed)
+			d, err := NewRateLimiter(store, service, operation, v.Limit, window).Take(ctx, client, now)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !allowed {
-				if got := int64(window.Seconds()); got != v.Want.RetryAfterSeconds {
-					t.Errorf("Retry-After = %d, want %d", got, v.Want.RetryAfterSeconds)
+			if d.Allowed != v.Want.Allowed || d.RetryAfterSeconds != v.Want.RetryAfterSeconds {
+				t.Fatalf("decision = %+v, want allowed %v, Retry-After %d", d, v.Want.Allowed, v.Want.RetryAfterSeconds)
+			}
+			if !d.Reset.Equal(curr.Add(window)) || d.Limit != v.Limit {
+				t.Errorf("decision = %+v, want the limit %d and the reset %s", d, v.Limit, curr.Add(window))
+			}
+			// httprate's own arithmetic, in nanoseconds since the window began.
+			diff := now.Sub(now.Truncate(window))
+			rate := float64(v.PrevCount)*(float64(window)-float64(diff))/float64(window) + float64(v.CurrCount)
+			if httprate := int(math.Round(rate))+1 <= v.Limit; httprate != d.Allowed {
+				t.Errorf("httprate's rule allows %v, the shared limit %v", httprate, d.Allowed)
+			}
+			n, _ := store.Count(ctx, refs[curr])
+			ttl, _ := store.TTL(refs[curr])
+			if !d.Allowed {
+				if n != int64(v.CurrCount) {
+					t.Errorf("a refused request counted: %d, want %d", n, v.CurrCount)
 				}
 				return
 			}
-			fresh := NewInProcess("shop-cache", WithClock(func() time.Time { return now }))
-			defer fresh.Close()
-			c := NewRateLimitCounter(fresh, service, operation)
-			c.Config(v.Limit, window)
-			if err := c.Increment(client, curr); err != nil {
-				t.Fatal(err)
+			if n != int64(v.CurrCount)+1 {
+				t.Errorf("the allowed request's count = %d, want %d", n, v.CurrCount+1)
 			}
-			ref, _ := RateLimitRef(service, operation, curr.Unix(), client)
-			if ttl, ok := fresh.TTL(ref); !ok || ttl.Milliseconds() != v.Want.IncrementTTLMs {
-				t.Errorf("the increment's TTL = %s (%v), want %dms", ttl, ok, v.Want.IncrementTTLMs)
+			if ttl.Milliseconds() != v.Want.IncrementTTLMs {
+				t.Errorf("the increment's TTL = %s, want %dms", ttl, v.Want.IncrementTTLMs)
 			}
 		})
 	}

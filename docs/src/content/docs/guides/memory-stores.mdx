@@ -321,8 +321,11 @@ operation part is the operation's kebab namespace and its name, as
 `product.getProduct`, the same in every language. The client part is the lowercase hex SHA-256 of the limiter's client key, so
 an IP address is not in the store. While the store is unavailable, or a
 call to it fails, each route falls back to the in-process limiter it had
-before, with each replica on its own budget. In Go the counter plugs into
-httprate as its `LimitCounter`, and never returns an error to it.
+before, with each replica on its own budget. Requests in flight at the
+same time can each pass on the same counts, as requests on two replicas
+can. In Go a route with a store runs the runtime's own limiter, which
+holds no lock while it calls the store, and gives a request to httprate's
+in-process limiter when it falls back.
 `runtime/http/testdata/memorystore_parity.json` holds the rule's vectors,
 which the three runtimes pass.
 

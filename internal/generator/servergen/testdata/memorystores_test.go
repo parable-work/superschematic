@@ -7,7 +7,7 @@ package main
 // a database other than 0, so they never touch a running stack dev's keys,
 // and skip when it is unset. The others run against servers of their own:
 // a fake one that refuses CLIENT, over TLS with auth iam and a fake
-// metadata server, and a proxy that goes away.
+// metadata server, and a proxy that goes away or goes silent.
 
 import (
 	"bufio"
@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,9 +82,10 @@ func ref(t *testing.T, declaration string, parts ...string) memorystore.Ref {
 }
 
 // TestMemoryStoreOnRedis: on a real server, keys count with their TTL,
-// claim once and delete; a message reaches every local handler over one
-// subscription; a member's names carry its prefix; over 64 KiB is
-// refused; and a closed store refuses at once.
+// read together, claim once and delete; the shared rate limit counts; a
+// message reaches every local handler over one subscription; a member's
+// names carry its prefix; over 64 KiB is refused; and a closed store
+// refuses at once.
 func TestMemoryStoreOnRedis(t *testing.T) {
 	raw := testServerURL(t)
 	ctx := context.Background()
@@ -117,6 +119,28 @@ func TestMemoryStoreOnRedis(t *testing.T) {
 	if n, err := s.Count(ctx, ref(t, "views", "absent")); err != nil || n != 0 {
 		t.Errorf("Count of an absent key = %d, %v", n, err)
 	}
+	if counts, err := s.Counts(ctx, views, ref(t, "views", "absent")); err != nil || fmt.Sprint(counts) != "[2 0]" {
+		t.Errorf("Counts = %v, %v", counts, err)
+	}
+	// The shared rate limit reads both windows in one MGET.
+	limiter := memorystore.NewRateLimiter(s, "shop-api", "product.getProduct", 2, time.Minute)
+	now := time.Now()
+	var decisions []bool
+	for range 3 {
+		d, err := limiter.Take(ctx, "203.0.113.7", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decisions = append(decisions, d.Allowed)
+	}
+	if fmt.Sprint(decisions) != "[true true false]" {
+		t.Errorf("three requests under a limit of two = %v", decisions)
+	}
+	limitRef, _ := memorystore.RateLimitRef("shop-api", "product.getProduct", now.Truncate(time.Minute).Unix(), "203.0.113.7")
+	if ttl := raw2.PTTL(ctx, memorystore.FullName(s.Name(), limitRef)).Val(); ttl <= 2*time.Minute || ttl > 2*time.Minute+5*time.Second {
+		t.Errorf("the rate-limit key's PTTL = %s, want two windows and five seconds", ttl)
+	}
+	_ = raw2.Del(ctx, memorystore.FullName(s.Name(), limitRef))
 	claim := ref(t, "receipt-sent", "o1")
 	first, err1 := s.Claim(ctx, claim, time.Minute)
 	second, err2 := s.Claim(ctx, claim, time.Minute)
@@ -166,7 +190,7 @@ func TestMemoryStoreOnRedis(t *testing.T) {
 
 // TestMemoryStoreReconnects: a store whose server goes away goes
 // unavailable and refuses at once, but holds a subscription made then;
-// it comes back with both subscriptions, which go-redis subscribes again.
+// it comes back with both subscriptions, which the store subscribes again.
 func TestMemoryStoreReconnects(t *testing.T) {
 	raw := testServerURL(t)
 	ctx := context.Background()
@@ -229,6 +253,163 @@ func TestMemoryStoreReconnects(t *testing.T) {
 		t.Errorf("the state's changes were not logged: %v", logs.All())
 	}
 	checkNoSecret(t, logs, proxied)
+}
+
+// TestMemoryStoreRecoversASilentSubscriber: a subscriber connection that
+// stops carrying anything without closing, as one through a black-holed
+// route does, is found by its unanswered ping within two idle windows and
+// replaced, subscribed again to its channels.
+func TestMemoryStoreRecoversASilentSubscriber(t *testing.T) {
+	raw := testServerURL(t)
+	ctx := context.Background()
+	u, _ := url.Parse(raw)
+	p := newProxy(t, u.Host)
+	defer p.close()
+	proxied := "redis://" + p.addr() + u.Path
+	store := "shop-cache-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	logger, logs := observed()
+	s, err := openRedisStore(ctx, logger, stackconfig.MemoryStore{Store: store, URL: proxied, Auth: stackconfig.AuthNone}, fast, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	opts, _ := redis.ParseURL(raw)
+	direct := redis.NewClient(opts)
+	defer direct.Close()
+	heard := make(chan string, 64)
+	sub, err := s.Subscribe(ctx, ref(t, "stock-changed", "p1"), func(_ context.Context, b []byte) { heard <- string(b) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	full := store + ":stock-changed:p1"
+	publishUntilHeard(t, direct, full, heard, 5*time.Second)
+
+	// Every connection open now goes silent; new ones still reach the
+	// server.
+	p.freeze()
+	start := time.Now()
+	publishUntilHeard(t, direct, full, heard, 5*time.Second)
+	t.Logf("the subscriber heard again %s after its connection went silent", time.Since(start).Round(time.Millisecond))
+	checkNoSecret(t, logs, proxied)
+}
+
+// TestMemoryStoreSubscribeDuringAnOutage: while the server is down and new
+// connections hang, as they do through a black-holed route, Subscribe and
+// a subscription's Close return at once, and a subscription held then
+// hears once the server is back. The dial's bound is long, so a Subscribe
+// that waited for the subscriber's dial would show.
+func TestMemoryStoreSubscribeDuringAnOutage(t *testing.T) {
+	raw := testServerURL(t)
+	ctx := context.Background()
+	u, _ := url.Parse(raw)
+	p := newProxy(t, u.Host)
+	defer p.close()
+	proxied := "redis://" + p.addr() + u.Path
+	store := "shop-cache-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	slow := fast
+	slow.Dial, slow.Op = 2*time.Second, 2*time.Second
+	s, err := openRedisStore(ctx, zap.NewNop(), stackconfig.MemoryStore{Store: store, URL: proxied, Auth: stackconfig.AuthNone}, slow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	opts, _ := redis.ParseURL(raw)
+	direct := redis.NewClient(opts)
+	defer direct.Close()
+	first, err := s.Subscribe(ctx, ref(t, "stock-changed", "p1"), func(context.Context, []byte) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+
+	p.blackhole(true)
+	p.drop()
+	waitFor(t, func() bool { return !s.Available() })
+	// Let the subscriber start dialing into the black hole.
+	time.Sleep(100 * time.Millisecond)
+	heard := make(chan string, 64)
+	var held memorystore.Subscription
+	for i := range 5 {
+		start := time.Now()
+		sub, err := s.Subscribe(ctx, ref(t, "stock-changed", "held", strconv.Itoa(i)), func(_ context.Context, b []byte) { heard <- string(b) })
+		if err != nil || time.Since(start) > 50*time.Millisecond {
+			t.Fatalf("Subscribe %d during the outage = %v in %s, want a held subscription at once", i, err, time.Since(start))
+		}
+		if i < 4 {
+			start = time.Now()
+			_ = sub.Close()
+			if time.Since(start) > 50*time.Millisecond {
+				t.Fatalf("Close %d during the outage took %s", i, time.Since(start))
+			}
+		} else {
+			held = sub
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	defer held.Close()
+	p.blackhole(false)
+	waitFor(t, func() bool { return s.Available() })
+	publishUntilHeard(t, direct, store+":stock-changed:held:4", heard, 10*time.Second)
+}
+
+// TestMemoryStorePoolTimeout: a call that finds the pool's every
+// connection busy fails alone, wrapping ErrUnavailable, and leaves the
+// store up, its health ping too.
+func TestMemoryStorePoolTimeout(t *testing.T) {
+	f := newFakeServer(t, false)
+	defer f.close()
+	ctx := context.Background()
+	tm := fast
+	tm.Op = 100 * time.Millisecond
+	s, err := openRedisStore(ctx, zap.NewNop(), stackconfig.MemoryStore{Store: "shop-cache", URL: "redis://" + f.addr() + "/0?pool_size=1", Auth: stackconfig.AuthNone}, tm, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if !s.Available() {
+		t.Fatal("not available against the fake server")
+	}
+	// BLPOP holds the pool's one connection for a second.
+	go func() { _ = s.client.BLPop(ctx, time.Second, "held").Err() }()
+	waitFor(t, func() bool { return f.saw("BLPOP") })
+	// Count's GET waits for the main pool; an increment's transaction
+	// takes go-redis's pipeline pool.
+	_, err = s.Count(ctx, ref(t, "views", "p1"))
+	if !errors.Is(err, memorystore.ErrUnavailable) || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("Count with the pool busy = %v, want a busy pool's ErrUnavailable", err)
+	}
+	if !s.Available() {
+		t.Fatal("a busy pool marked the store down")
+	}
+	// The health ping, every 50ms, also finds the pool busy.
+	time.Sleep(300 * time.Millisecond)
+	if !s.Available() {
+		t.Fatal("the health ping marked the store down while the pool was busy")
+	}
+}
+
+// publishUntilHeard publishes to the channel full through client until a
+// message reaches heard, or fails after limit.
+func publishUntilHeard(t *testing.T, client *redis.Client, full string, heard <-chan string, limit time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
+	for {
+		if err := client.Publish(context.Background(), full, "{}").Err(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-heard:
+			for len(heard) > 0 {
+				<-heard
+			}
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no message on %s in %s", full, limit)
+		}
+	}
 }
 
 // TestMemoryStoreDownAtOpen: a store whose server is not there opens
@@ -384,14 +565,29 @@ func checkNoSecret(t *testing.T, logs *observer.ObservedLogs, secret string) {
 }
 
 // proxy forwards TCP connections to a server until stopped, and again once
-// started.
+// started. freeze makes every connection open now silent without closing
+// it, and blackhole makes each new connection silent too: what it reads
+// it drops, and it writes nothing, as a black-holed route does.
 type proxy struct {
 	t      *testing.T
 	target string
 	port   string
 	mu     sync.Mutex
 	l      net.Listener
-	conns  []net.Conn
+	conns  []*proxyConn
+	silent atomic.Bool
+}
+
+type proxyConn struct {
+	client, server net.Conn
+	frozen         atomic.Bool
+}
+
+func (c *proxyConn) close() {
+	_ = c.client.Close()
+	if c.server != nil {
+		_ = c.server.Close()
+	}
 }
 
 func newProxy(t *testing.T, target string) *proxy {
@@ -417,28 +613,75 @@ func (p *proxy) serve(l net.Listener) {
 			if err != nil {
 				return
 			}
+			pc := &proxyConn{client: c}
+			if p.silent.Load() {
+				pc.frozen.Store(true)
+				p.mu.Lock()
+				p.conns = append(p.conns, pc)
+				p.mu.Unlock()
+				go func() { _, _ = io.Copy(io.Discard, c); pc.close() }()
+				continue
+			}
 			up, err := net.Dial("tcp", p.target)
 			if err != nil {
 				_ = c.Close()
 				continue
 			}
+			pc.server = up
 			p.mu.Lock()
-			p.conns = append(p.conns, c, up)
+			p.conns = append(p.conns, pc)
 			p.mu.Unlock()
-			go func() { _, _ = io.Copy(up, c); _ = up.Close() }()
-			go func() { _, _ = io.Copy(c, up); _ = c.Close() }()
+			go pc.pump(up, c)
+			go pc.pump(c, up)
 		}
 	}()
 }
 
-func (p *proxy) stop() {
+// pump copies src to dst until either closes, dropping what it reads while
+// the connection is frozen.
+func (c *proxyConn) pump(dst, src net.Conn) {
+	defer c.close()
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 && !c.frozen.Load() {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// freeze makes every connection open now silent.
+func (p *proxy) freeze() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_ = p.l.Close()
 	for _, c := range p.conns {
-		_ = c.Close()
+		c.frozen.Store(true)
+	}
+}
+
+// blackhole makes each new connection silent, or forwarded again.
+func (p *proxy) blackhole(on bool) { p.silent.Store(on) }
+
+// drop closes every connection open now, and keeps listening.
+func (p *proxy) drop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, c := range p.conns {
+		c.close()
 	}
 	p.conns = nil
+}
+
+func (p *proxy) stop() {
+	p.mu.Lock()
+	_ = p.l.Close()
+	p.mu.Unlock()
+	p.drop()
 }
 
 func (p *proxy) start() {
@@ -453,7 +696,8 @@ func (p *proxy) close() { p.stop() }
 
 // fakeServer speaks enough RESP for a store: it refuses HELLO and CLIENT,
 // takes AUTH, PING, PUBLISH, MULTI, INCR, PEXPIRE, EXEC, GET, SET and DEL,
-// and records every command.
+// answers BLPOP with nothing once its timeout passes, and records every
+// command.
 type fakeServer struct {
 	l     net.Listener
 	caPEM string
@@ -558,6 +802,11 @@ func (f *fakeServer) serve(c net.Conn) {
 			reply = "$-1\r\n"
 		case "DEL":
 			reply = ":1\r\n"
+		case "BLPOP":
+			if wait, err := strconv.ParseFloat(cmd[len(cmd)-1], 64); err == nil {
+				time.Sleep(time.Duration(wait * float64(time.Second)))
+			}
+			reply = "*-1\r\n"
 		default:
 			reply = "-ERR unknown command '" + cmd[0] + "'\r\n"
 		}

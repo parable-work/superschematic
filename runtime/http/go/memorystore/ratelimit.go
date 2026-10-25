@@ -4,30 +4,33 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-chi/httprate"
 	"github.com/parable-work/superschematic/ir"
 )
 
 // The shared rate limit (D75). An API whose config names a rateLimitStore
 // counts each @rateLimit route in that store, so every replica spends one
-// budget. The limiter is still httprate's, with its sliding window: the
-// previous window's count weighted by the part of it still in the window,
-// plus this window's, and a request is allowed while that estimate,
-// rounded, plus one is at most the limit. RateLimitCounter is the
-// httprate.LimitCounter that keeps the counts in the store, under the
-// reserved rate-limit declaration's keys, one per service, operation,
-// window and client, where the client is the SHA-256 of the limiter's key
-// in hex, so no address is in the store.
+// budget. The rule is httprate's sliding window, which the route's
+// in-process limiter applies: the previous window's count weighted by the
+// part of it still in the window, plus this window's, and a request is
+// allowed while that estimate, rounded, plus one is at most the limit.
+// RateLimiter keeps the counts in the store, under the reserved rate-limit
+// declaration's keys, one per service, operation, window and client, where
+// the client is the SHA-256 of the limiter's key in hex, so no address is
+// in the store.
 //
-// httprate answers 428 when its counter returns an error, so the counter
-// never returns one: while the store is unavailable, or a call to it
-// fails, it counts in process instead, each replica on its own budget, as
-// the route did before it had a store.
+// RateLimiter holds no lock: a request reads both windows' counters in one
+// round trip and, when allowed, increments the current one in a second,
+// so the requests of a route overlap. Requests in flight together may each
+// pass on the counts before the others' increments, as requests on two
+// replicas may. While the store is unavailable, or a call to it fails,
+// Take returns the error, and the route limits the request in process
+// instead, each replica on its own budget, as it did before it had a
+// store.
 
 // RateLimitDeclaration is the reserved declaration whose keys the shared
 // rate limit counts in.
@@ -37,8 +40,7 @@ const RateLimitDeclaration = ir.MemoryStoreRateLimit
 // declaration's maxTtlSeconds.
 const RateLimitMaxTTL = ir.MemoryStoreRateLimitMaxTTLSeconds * time.Second
 
-// rateLimitCallTimeout bounds one call of the counter to the store, which
-// httprate makes without a context.
+// rateLimitCallTimeout bounds a request's calls to the store.
 const rateLimitCallTimeout = time.Second
 
 // RateLimitRef is the ref of the counter of service's operation in the
@@ -53,15 +55,6 @@ func RateLimitRef(service, operation string, windowStart int64, clientKey string
 	return Ref{Declaration: RateLimitDeclaration, Name: name}, nil
 }
 
-// ClientKey is the client's key in the key httprate gives its counter:
-// httprate joins its key functions' keys, each followed by ':', so the
-// one key of a limiter keyed by the client's address, `203.0.113.7`,
-// reaches the counter as `203.0.113.7:`. The shared counters hash the
-// address alone, as every language's limiter does.
-func ClientKey(httprateKey string) string {
-	return strings.TrimSuffix(httprateKey, ":")
-}
-
 // RateLimitTTL is the TTL of a window's counter: two windows and five
 // seconds, so the previous window's count outlives the window that reads
 // it.
@@ -69,106 +62,118 @@ func RateLimitTTL(window time.Duration) time.Duration {
 	return 2*window + ir.MemoryStoreRateLimitWindowSlackSeconds*time.Second
 }
 
-// RateLimitCounter is an httprate.LimitCounter that counts service's
-// operation in store, and in process while the store cannot.
-type RateLimitCounter struct {
+// RateLimiter is the shared rate limit of one route: service's operation,
+// at most limit requests per client in a sliding window of window, counted
+// in store.
+type RateLimiter struct {
 	store     Store
 	service   string
 	operation string
-
-	mu     sync.Mutex
-	window time.Duration
-	local  httprate.LimitCounter
+	limit     int
+	window    time.Duration
 }
 
-var _ httprate.LimitCounter = (*RateLimitCounter)(nil)
-
-// NewRateLimitCounter counts service's operation in store.
-func NewRateLimitCounter(store Store, service, operation string) *RateLimitCounter {
-	return &RateLimitCounter{store: store, service: service, operation: operation}
+// NewRateLimiter limits service's operation to limit requests per client
+// in each window, in store.
+func NewRateLimiter(store Store, service, operation string, limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{store: store, service: service, operation: operation, limit: limit, window: window}
 }
 
-// Config is httprate's: the limiter's window, which sets each key's TTL.
-func (c *RateLimitCounter) Config(_ int, window time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.window = window
-	c.local = httprate.NewLocalLimitCounter(window)
+// RateLimitDecision is the shared rate limit's answer to one request, with
+// what httprate's headers carry.
+type RateLimitDecision struct {
+	// Allowed reports whether the request may go on; it was counted.
+	Allowed bool
+	// Limit is the route's limit, and Remaining what is left of it in the
+	// window: the limit less the rounded estimate, and less this request
+	// when it is allowed.
+	Limit     int
+	Remaining int
+	// Reset is the end of the current window.
+	Reset time.Time
+	// RetryAfterSeconds is the window's length in whole seconds when the
+	// request is refused, 0 when it is allowed.
+	RetryAfterSeconds int64
 }
 
-// Increment counts one request of key in the window starting at
-// currentWindow.
-func (c *RateLimitCounter) Increment(key string, currentWindow time.Time) error {
-	return c.IncrementBy(key, currentWindow, 1)
-}
-
-// IncrementBy counts amount requests of key in the window starting at
-// currentWindow: in the store, or in process while it cannot.
-func (c *RateLimitCounter) IncrementBy(key string, currentWindow time.Time, amount int) error {
-	window, local := c.config()
-	if ref, ttl, ok := c.ref(key, currentWindow, window); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), rateLimitCallTimeout)
-		defer cancel()
-		counted := 0
-		for ; counted < amount; counted++ {
-			if _, err := c.store.Increment(ctx, ref, ttl); err != nil {
-				break
-			}
-		}
-		if counted == amount {
-			return nil
-		}
-		amount -= counted
+// Take decides the request of the client whose limiter key is clientKey,
+// at now, and counts it when it is allowed. It returns an error, which
+// wraps ErrUnavailable while the store is unavailable, when the store
+// cannot decide: the caller limits the request in process instead.
+func (l *RateLimiter) Take(ctx context.Context, clientKey string, now time.Time) (RateLimitDecision, error) {
+	if l.store == nil || !l.store.Available() {
+		return RateLimitDecision{}, ErrUnavailable
 	}
-	return local.IncrementBy(key, currentWindow, amount)
-}
-
-// Get returns key's counts in the current and the previous window: the
-// store's, or the process's while the store cannot answer both.
-func (c *RateLimitCounter) Get(key string, currentWindow, previousWindow time.Time) (int, int, error) {
-	window, local := c.config()
-	curr, ttl, ok := c.ref(key, currentWindow, window)
-	prev, _, prevOK := c.ref(key, previousWindow, window)
-	if ok && prevOK && ttl > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), rateLimitCallTimeout)
-		defer cancel()
-		currCount, err := c.store.Count(ctx, curr)
-		if err == nil {
-			var prevCount int64
-			if prevCount, err = c.store.Count(ctx, prev); err == nil {
-				return int(currCount), int(prevCount), nil
-			}
-		}
+	ttl := RateLimitTTL(l.window)
+	windowMs := l.window.Milliseconds()
+	if windowMs <= 0 || ttl > RateLimitMaxTTL {
+		return RateLimitDecision{}, ErrUnavailable
 	}
-	return local.Get(key, currentWindow, previousWindow)
-}
-
-func (c *RateLimitCounter) config() (time.Duration, httprate.LimitCounter) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.local == nil {
-		// httprate calls Config before any other method; a counter used
-		// without it counts per minute.
-		c.window = time.Minute
-		c.local = httprate.NewLocalLimitCounter(c.window)
-	}
-	return c.window, c.local
-}
-
-// ref is the ref and TTL of key's counter in the window starting at
-// start, and false when the store cannot take it: it is unavailable, or
-// the service, the operation or the window cannot name a key.
-func (c *RateLimitCounter) ref(key string, start time.Time, window time.Duration) (Ref, time.Duration, bool) {
-	if c.store == nil || !c.store.Available() {
-		return Ref{}, 0, false
-	}
-	ttl := RateLimitTTL(window)
-	if window <= 0 || ttl > RateLimitMaxTTL {
-		return Ref{}, 0, false
-	}
-	ref, err := RateLimitRef(c.service, c.operation, start.Unix(), ClientKey(key))
+	curr := time.UnixMilli(now.UnixMilli() / windowMs * windowMs)
+	prev := curr.Add(-l.window)
+	currRef, err := RateLimitRef(l.service, l.operation, curr.Unix(), clientKey)
 	if err != nil {
-		return Ref{}, 0, false
+		return RateLimitDecision{}, err
 	}
-	return ref, ttl, true
+	prevRef, err := RateLimitRef(l.service, l.operation, prev.Unix(), clientKey)
+	if err != nil {
+		return RateLimitDecision{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, rateLimitCallTimeout)
+	defer cancel()
+	counts, err := Counts(ctx, l.store, prevRef, currRef)
+	if err != nil {
+		return RateLimitDecision{}, err
+	}
+	estimate := slidingWindowEstimate(windowMs, now.Sub(curr), counts[0], counts[1])
+	rate := int(math.Round(estimate))
+	d := RateLimitDecision{Limit: l.limit, Reset: curr.Add(l.window)}
+	if rate+1 > l.limit {
+		d.Remaining = l.limit - rate
+		d.RetryAfterSeconds = int64(l.window.Seconds())
+		return d, nil
+	}
+	if _, err := l.store.Increment(ctx, currRef, ttl); err != nil {
+		return RateLimitDecision{}, err
+	}
+	d.Allowed = true
+	d.Remaining = l.limit - rate - 1
+	return d, nil
+}
+
+// slidingWindowEstimate is prevCount * (windowMs - elapsed) / windowMs +
+// currCount, in milliseconds and IEEE doubles, in that order, as the
+// vectors write it.
+func slidingWindowEstimate(windowMs int64, elapsed time.Duration, prevCount, currCount int64) float64 {
+	w := float64(windowMs)
+	e := float64(elapsed) / float64(time.Millisecond)
+	return float64(prevCount)*(w-e)/w + float64(currCount)
+}
+
+// MultiCounter is a store that reads several counters in one round trip.
+type MultiCounter interface {
+	// Counts returns the counters refs name, in order: 0 for a key that
+	// does not exist.
+	Counts(ctx context.Context, refs ...Ref) ([]int64, error)
+}
+
+// Counts returns the counters refs name, in order: in one call when store
+// is a MultiCounter, and otherwise by a Count for each, all at once.
+func Counts(ctx context.Context, store Store, refs ...Ref) ([]int64, error) {
+	if m, ok := store.(MultiCounter); ok {
+		return m.Counts(ctx, refs...)
+	}
+	counts := make([]int64, len(refs))
+	errs := make([]error, len(refs))
+	var wg sync.WaitGroup
+	for i, ref := range refs {
+		wg.Go(func() { counts[i], errs[i] = store.Count(ctx, ref) })
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return counts, nil
 }
