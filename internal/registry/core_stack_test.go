@@ -257,11 +257,20 @@ func TestVerifyStack(t *testing.T) {
 	if len(f.errs) > 0 {
 		t.Fatalf("a valid stack: %v", f.errs)
 	}
+	// A memory store's element turns it off (D75).
+	off := false
+	withStoreOff := valid()
+	withStoreOff.Types["Staging"].Environment.Settings = append(withStoreOff.Types["Staging"].Environment.Settings,
+		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}, Enabled: &off})
+	spec.Verify(withStoreOff, &f)
+	if len(f.errs) > 0 {
+		t.Fatalf("a stack that turns a memory store off: %v", f.errs)
+	}
 
 	// An app is exposed, and turned off, beside its API's handle (D78).
 	withApp := valid()
 	backoffice := ir.DeployableRef{Service: &api, App: "Backoffice"}
-	off := false
+	off = false
 	withApp.Types["Shop"].Stack.Expose = append(withApp.Types["Shop"].Stack.Expose, backoffice)
 	withApp.Types["Staging"].Environment.Settings = append(withApp.Types["Staging"].Environment.Settings, &ir.DeployableSettings{Of: backoffice, Enabled: &off})
 	f = findings{}
@@ -352,6 +361,10 @@ func TestVerifyStack(t *testing.T) {
 		{"an exposed deriver", func(s *ir.Schema) {
 			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Deriver: "TriageTickets"}}
 		}, "@stack class Shop expose[0] names deriver TriageTickets; only a server is exposed"},
+		{"enabled on a bucket", func(s *ir.Schema) {
+			off := false
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}}, Enabled: &off}
+		}, "sets enabled, which only a job takes"},
 		{"an app and a worker", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, App: "Backoffice", Worker: "FulfilOrders"}}
 		}, "names app Backoffice and a job, a worker or a deriver; an element names one"},

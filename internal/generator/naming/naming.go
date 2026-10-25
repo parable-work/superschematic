@@ -221,7 +221,7 @@ type Naming struct {
 // DerivedFieldsConfig is the [derived_fields] table of superschematic.toml:
 // a template per edge kind that names the config field the edge derives
 // (docs/stack-model.md, section 3.4). `{SERVICE}` stands for the DB,
-// called API or Bucket service's name in upper snake case, and the rest of
+// called API, Bucket or MemoryStore service's name in upper snake case, and the rest of
 // a template holds upper-case letters, digits and underscores. The envgen
 // loaders and the stack resolver name the fields by it.
 type DerivedFieldsConfig struct {
@@ -232,11 +232,14 @@ type DerivedFieldsConfig struct {
 	// Bucket names the field of a bucket it lists: "{SERVICE}_BUCKET"
 	// (D54).
 	Bucket string `toml:"bucket"`
+	// MemoryStore names the field of a memory store it lists:
+	// "{SERVICE}_MEMORY_STORE" (D75).
+	MemoryStore string `toml:"memory_store"`
 }
 
 // FieldNames returns the templates as the IR's rule takes them.
 func (d DerivedFieldsConfig) FieldNames() ir.DerivedFieldNames {
-	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service, Bucket: d.Bucket}
+	return ir.DerivedFieldNames{Database: d.Database, Service: d.Service, Bucket: d.Bucket, MemoryStore: d.MemoryStore}
 }
 
 // ImplementationPathsConfig is the [implementation_paths] table of
@@ -790,9 +793,10 @@ func Default() Naming {
 		HistoryActorSetting:      "superschematic.history_actor_id",
 		AuthProvider:             "session",
 		DerivedFields: DerivedFieldsConfig{
-			Database: ir.DefaultDatabaseField,
-			Service:  ir.DefaultServiceField,
-			Bucket:   ir.DefaultBucketField,
+			Database:    ir.DefaultDatabaseField,
+			Service:     ir.DefaultServiceField,
+			Bucket:      ir.DefaultBucketField,
+			MemoryStore: ir.DefaultMemoryStoreField,
 		},
 		ImplementationPaths: ImplementationPathsConfig{
 			Go:         "go/" + ServicePathPlaceholder,
@@ -856,6 +860,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.DerivedFields.Database, d.DerivedFields.Database)
 	fill(&n.DerivedFields.Service, d.DerivedFields.Service)
 	fill(&n.DerivedFields.Bucket, d.DerivedFields.Bucket)
+	fill(&n.DerivedFields.MemoryStore, d.DerivedFields.MemoryStore)
 	fill(&n.ImplementationPaths.Go, d.ImplementationPaths.Go)
 	fill(&n.ImplementationPaths.TypeScript, d.ImplementationPaths.TypeScript)
 	fill(&n.ImplementationPaths.Rust, d.ImplementationPaths.Rust)

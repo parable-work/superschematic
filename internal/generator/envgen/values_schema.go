@@ -153,10 +153,12 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 			}
 		}
 		envVars = append(envVars, valuesSchemaEnvVar{
-			Name:        field.Key,
-			IRType:      field.ContractType(),
-			Primitive:   "object",
-			Required:    true,
+			Name:      field.Key,
+			IRType:    field.ContractType(),
+			Primitive: "object",
+			// A memory store's field may be unset: the store is then
+			// disabled (D75).
+			Required:    field.Kind != ir.EdgeMemoryStore,
 			Derived:     field.Kind,
 			Service:     field.Service,
 			Variables:   field.Variables,
@@ -289,6 +291,9 @@ func derivedNoun(field DerivedField) string {
 	}
 	if field.Kind == ir.EdgeBucket {
 		return "bucket connection"
+	}
+	if field.Kind == ir.EdgeMemoryStore {
+		return "memory store connection"
 	}
 	return "service endpoint"
 }

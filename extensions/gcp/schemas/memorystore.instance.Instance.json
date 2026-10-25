@@ -1,0 +1,433 @@
+{
+  "token": "gcp:memorystore/instance:Instance",
+  "terraform": {
+    "type": "google_memorystore_instance",
+    "renames": {
+      "aclPolicy": "acl_policy",
+      "authorizationMode": "authorization_mode",
+      "automatedBackupConfig": "automated_backup_config",
+      "automatedBackupConfig.fixedFrequencySchedule": "fixed_frequency_schedule",
+      "automatedBackupConfig.fixedFrequencySchedule.startTime": "start_time",
+      "crossInstanceReplicationConfig": "cross_instance_replication_config",
+      "crossInstanceReplicationConfig.instanceRole": "instance_role",
+      "crossInstanceReplicationConfig.memberships": "membership",
+      "crossInstanceReplicationConfig.memberships.primaryInstances": "primary_instance",
+      "crossInstanceReplicationConfig.memberships.secondaryInstances": "secondary_instance",
+      "crossInstanceReplicationConfig.primaryInstance": "primary_instance",
+      "crossInstanceReplicationConfig.secondaryInstances": "secondary_instances",
+      "crossInstanceReplicationConfig.updateTime": "update_time",
+      "deletionPolicy": "deletion_policy",
+      "deletionProtectionEnabled": "deletion_protection_enabled",
+      "desiredAutoCreatedEndpoints": "desired_auto_created_endpoints",
+      "desiredAutoCreatedEndpoints.projectId": "project_id",
+      "desiredPscAutoConnections": "desired_psc_auto_connections",
+      "desiredPscAutoConnections.projectId": "project_id",
+      "engineConfigs": "engine_configs",
+      "engineVersion": "engine_version",
+      "gcsSource": "gcs_source",
+      "instanceId": "instance_id",
+      "kmsKey": "kms_key",
+      "maintenancePolicy": "maintenance_policy",
+      "maintenancePolicy.createTime": "create_time",
+      "maintenancePolicy.updateTime": "update_time",
+      "maintenancePolicy.weeklyMaintenanceWindows": "weekly_maintenance_window",
+      "maintenancePolicy.weeklyMaintenanceWindows.startTime": "start_time",
+      "maintenanceVersion": "maintenance_version",
+      "managedBackupSource": "managed_backup_source",
+      "nodeType": "node_type",
+      "persistenceConfig": "persistence_config",
+      "persistenceConfig.aofConfig": "aof_config",
+      "persistenceConfig.aofConfig.appendFsync": "append_fsync",
+      "persistenceConfig.rdbConfig": "rdb_config",
+      "persistenceConfig.rdbConfig.rdbSnapshotPeriod": "rdb_snapshot_period",
+      "persistenceConfig.rdbConfig.rdbSnapshotStartTime": "rdb_snapshot_start_time",
+      "replicaCount": "replica_count",
+      "serverCaMode": "server_ca_mode",
+      "serverCaPool": "server_ca_pool",
+      "shardCount": "shard_count",
+      "transitEncryptionMode": "transit_encryption_mode",
+      "zoneDistributionConfig": "zone_distribution_config"
+    }
+  },
+  "inputProperties": {
+    "aclPolicy": {
+      "type": "string"
+    },
+    "authorizationMode": {
+      "type": "string"
+    },
+    "automatedBackupConfig": {
+      "$ref": "#/types/gcp:memorystore/InstanceAutomatedBackupConfig:InstanceAutomatedBackupConfig"
+    },
+    "crossInstanceReplicationConfig": {
+      "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfig:InstanceCrossInstanceReplicationConfig"
+    },
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "deletionProtectionEnabled": {
+      "type": "boolean"
+    },
+    "desiredAutoCreatedEndpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:memorystore/InstanceDesiredAutoCreatedEndpoint:InstanceDesiredAutoCreatedEndpoint"
+      }
+    },
+    "desiredPscAutoConnections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/gcp:memorystore/InstanceDesiredPscAutoConnection:InstanceDesiredPscAutoConnection"
+      },
+      "deprecationMessage": "<span pulumi-lang-nodejs=\"`desiredPscAutoConnections`\" pulumi-lang-dotnet=\"`DesiredPscAutoConnections`\" pulumi-lang-go=\"`desiredPscAutoConnections`\" pulumi-lang-python=\"`desired_psc_auto_connections`\" pulumi-lang-yaml=\"`desiredPscAutoConnections`\" pulumi-lang-java=\"`desiredPscAutoConnections`\" pulumi-lang-hcl=\"`desired_psc_auto_connections`\">`desiredPscAutoConnections`</span> is deprecated. Use <span pulumi-lang-nodejs=\"`desiredAutoCreatedEndpoints`\" pulumi-lang-dotnet=\"`DesiredAutoCreatedEndpoints`\" pulumi-lang-go=\"`desiredAutoCreatedEndpoints`\" pulumi-lang-python=\"`desired_auto_created_endpoints`\" pulumi-lang-yaml=\"`desiredAutoCreatedEndpoints`\" pulumi-lang-java=\"`desiredAutoCreatedEndpoints`\" pulumi-lang-hcl=\"`desired_auto_created_endpoints`\">`desiredAutoCreatedEndpoints`</span> instead. `terraform import` will only work with<span pulumi-lang-nodejs=\" desiredAutoCreatedEndpoints`\" pulumi-lang-dotnet=\" DesiredAutoCreatedEndpoints`\" pulumi-lang-go=\" desiredAutoCreatedEndpoints`\" pulumi-lang-python=\" desired_auto_created_endpoints`\" pulumi-lang-yaml=\" desiredAutoCreatedEndpoints`\" pulumi-lang-java=\" desiredAutoCreatedEndpoints`\" pulumi-lang-hcl=\" desired_auto_created_endpoints`\"> desiredAutoCreatedEndpoints`</span>."
+    },
+    "engineConfigs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "engineVersion": {
+      "type": "string"
+    },
+    "gcsSource": {
+      "$ref": "#/types/gcp:memorystore/InstanceGcsSource:InstanceGcsSource"
+    },
+    "instanceId": {
+      "type": "string"
+    },
+    "kmsKey": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "maintenancePolicy": {
+      "$ref": "#/types/gcp:memorystore/InstanceMaintenancePolicy:InstanceMaintenancePolicy"
+    },
+    "maintenanceVersion": {
+      "type": "string"
+    },
+    "managedBackupSource": {
+      "$ref": "#/types/gcp:memorystore/InstanceManagedBackupSource:InstanceManagedBackupSource"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "nodeType": {
+      "type": "string"
+    },
+    "persistenceConfig": {
+      "$ref": "#/types/gcp:memorystore/InstancePersistenceConfig:InstancePersistenceConfig"
+    },
+    "project": {
+      "type": "string"
+    },
+    "replicaCount": {
+      "type": "integer"
+    },
+    "serverCaMode": {
+      "type": "string"
+    },
+    "serverCaPool": {
+      "type": "string"
+    },
+    "shardCount": {
+      "type": "integer"
+    },
+    "transitEncryptionMode": {
+      "type": "string"
+    },
+    "zoneDistributionConfig": {
+      "$ref": "#/types/gcp:memorystore/InstanceZoneDistributionConfig:InstanceZoneDistributionConfig"
+    }
+  },
+  "requiredInputs": [
+    "instanceId",
+    "location",
+    "shardCount"
+  ],
+  "types": {
+    "gcp:memorystore/InstanceAutomatedBackupConfig:InstanceAutomatedBackupConfig": {
+      "type": "object",
+      "properties": {
+        "fixedFrequencySchedule": {
+          "$ref": "#/types/gcp:memorystore/InstanceAutomatedBackupConfigFixedFrequencySchedule:InstanceAutomatedBackupConfigFixedFrequencySchedule"
+        },
+        "retention": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fixedFrequencySchedule",
+        "retention"
+      ]
+    },
+    "gcp:memorystore/InstanceAutomatedBackupConfigFixedFrequencySchedule:InstanceAutomatedBackupConfigFixedFrequencySchedule": {
+      "type": "object",
+      "properties": {
+        "startTime": {
+          "$ref": "#/types/gcp:memorystore/InstanceAutomatedBackupConfigFixedFrequencyScheduleStartTime:InstanceAutomatedBackupConfigFixedFrequencyScheduleStartTime"
+        }
+      },
+      "required": [
+        "startTime"
+      ]
+    },
+    "gcp:memorystore/InstanceAutomatedBackupConfigFixedFrequencyScheduleStartTime:InstanceAutomatedBackupConfigFixedFrequencyScheduleStartTime": {
+      "type": "object",
+      "properties": {
+        "hours": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hours"
+      ]
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfig:InstanceCrossInstanceReplicationConfig": {
+      "type": "object",
+      "properties": {
+        "instanceRole": {
+          "type": "string"
+        },
+        "memberships": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfigMembership:InstanceCrossInstanceReplicationConfigMembership"
+          }
+        },
+        "primaryInstance": {
+          "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfigPrimaryInstance:InstanceCrossInstanceReplicationConfigPrimaryInstance"
+        },
+        "secondaryInstances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfigSecondaryInstance:InstanceCrossInstanceReplicationConfigSecondaryInstance"
+          }
+        },
+        "updateTime": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfigMembership:InstanceCrossInstanceReplicationConfigMembership": {
+      "type": "object",
+      "properties": {
+        "primaryInstances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfigMembershipPrimaryInstance:InstanceCrossInstanceReplicationConfigMembershipPrimaryInstance"
+          }
+        },
+        "secondaryInstances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:memorystore/InstanceCrossInstanceReplicationConfigMembershipSecondaryInstance:InstanceCrossInstanceReplicationConfigMembershipSecondaryInstance"
+          }
+        }
+      }
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfigMembershipPrimaryInstance:InstanceCrossInstanceReplicationConfigMembershipPrimaryInstance": {
+      "type": "object",
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfigMembershipSecondaryInstance:InstanceCrossInstanceReplicationConfigMembershipSecondaryInstance": {
+      "type": "object",
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfigPrimaryInstance:InstanceCrossInstanceReplicationConfigPrimaryInstance": {
+      "type": "object",
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceCrossInstanceReplicationConfigSecondaryInstance:InstanceCrossInstanceReplicationConfigSecondaryInstance": {
+      "type": "object",
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceDesiredAutoCreatedEndpoint:InstanceDesiredAutoCreatedEndpoint": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "network",
+        "projectId"
+      ]
+    },
+    "gcp:memorystore/InstanceDesiredPscAutoConnection:InstanceDesiredPscAutoConnection": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "network",
+        "projectId"
+      ]
+    },
+    "gcp:memorystore/InstanceGcsSource:InstanceGcsSource": {
+      "type": "object",
+      "properties": {
+        "uris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "uris"
+      ]
+    },
+    "gcp:memorystore/InstanceMaintenancePolicy:InstanceMaintenancePolicy": {
+      "type": "object",
+      "properties": {
+        "createTime": {
+          "type": "string"
+        },
+        "updateTime": {
+          "type": "string"
+        },
+        "weeklyMaintenanceWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/gcp:memorystore/InstanceMaintenancePolicyWeeklyMaintenanceWindow:InstanceMaintenancePolicyWeeklyMaintenanceWindow"
+          }
+        }
+      }
+    },
+    "gcp:memorystore/InstanceMaintenancePolicyWeeklyMaintenanceWindow:InstanceMaintenancePolicyWeeklyMaintenanceWindow": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "string"
+        },
+        "startTime": {
+          "$ref": "#/types/gcp:memorystore/InstanceMaintenancePolicyWeeklyMaintenanceWindowStartTime:InstanceMaintenancePolicyWeeklyMaintenanceWindowStartTime"
+        }
+      },
+      "required": [
+        "day",
+        "startTime"
+      ]
+    },
+    "gcp:memorystore/InstanceMaintenancePolicyWeeklyMaintenanceWindowStartTime:InstanceMaintenancePolicyWeeklyMaintenanceWindowStartTime": {
+      "type": "object",
+      "properties": {
+        "hours": {
+          "type": "integer"
+        },
+        "minutes": {
+          "type": "integer"
+        },
+        "nanos": {
+          "type": "integer"
+        },
+        "seconds": {
+          "type": "integer"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceManagedBackupSource:InstanceManagedBackupSource": {
+      "type": "object",
+      "properties": {
+        "backup": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backup"
+      ]
+    },
+    "gcp:memorystore/InstancePersistenceConfig:InstancePersistenceConfig": {
+      "type": "object",
+      "properties": {
+        "aofConfig": {
+          "$ref": "#/types/gcp:memorystore/InstancePersistenceConfigAofConfig:InstancePersistenceConfigAofConfig"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "rdbConfig": {
+          "$ref": "#/types/gcp:memorystore/InstancePersistenceConfigRdbConfig:InstancePersistenceConfigRdbConfig"
+        }
+      }
+    },
+    "gcp:memorystore/InstancePersistenceConfigAofConfig:InstancePersistenceConfigAofConfig": {
+      "type": "object",
+      "properties": {
+        "appendFsync": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstancePersistenceConfigRdbConfig:InstancePersistenceConfigRdbConfig": {
+      "type": "object",
+      "properties": {
+        "rdbSnapshotPeriod": {
+          "type": "string"
+        },
+        "rdbSnapshotStartTime": {
+          "type": "string"
+        }
+      }
+    },
+    "gcp:memorystore/InstanceZoneDistributionConfig:InstanceZoneDistributionConfig": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "zone": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

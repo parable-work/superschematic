@@ -231,6 +231,9 @@ func (e *emitter) emitDocument() {
 	for _, app := range e.doc.Apps {
 		e.emitApp(app)
 	}
+	for _, decl := range e.doc.MemoryStoreDeclarations {
+		e.emitMemoryStoreDeclaration(decl)
+	}
 }
 
 // emitApp renders an app as the class the reader reads it from (D78):

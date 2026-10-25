@@ -228,7 +228,10 @@ python:
 # logging, and the two at once, as a worker runs (D65); and gcs, a bucket on
 # GCS (D54), whose tests run against fakes, and against the fake-gcs-server
 # SUPERSCHEMATIC_TEST_GCS_EMULATOR names, when it is set, and beside a
-# worker's two, as a worker with a bucket builds; and otel, a deployable's
+# worker's two, as a worker with a bucket builds; memorystore-redis, a memory
+# store on Redis (D75), whose tests run on the Valkey
+# SUPERSCHEMATIC_TEST_MEMORY_STORE names, when it is set, and beside a
+# worker's two; and otel, a deployable's
 # trace export (D67), alone and with postgres, as a worker builds it.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -246,6 +249,9 @@ rust:
 		&& cargo test --features postgres,logging \
 		&& cargo clippy --all-targets --features gcs -- -D warnings && cargo test --features gcs \
 		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
+		&& cargo clippy --all-targets --features memorystore-redis -- -D warnings \
+		&& cargo test --features memorystore-redis \
+		&& cargo clippy --all-targets --features memorystore-redis,postgres,logging -- -D warnings \
 		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
 		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
 		&& cargo test --features postgres,otel \
