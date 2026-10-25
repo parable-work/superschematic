@@ -303,3 +303,30 @@ func TestAppRefusals(t *testing.T) {
 		mustFail(t, errs, stack.CodeUnrealizable, "app shop-orders-backoffice: target no-apps places no app: an app is a Rust program, and no-apps runs Go and TypeScript only")
 	})
 }
+
+// TestAppTurnedOffWhereNoAppIsPlaced: a target that places no app refuses
+// only an app the environment runs; one turned off there runs nothing, is
+// left out of the environment, and the stack may still expose it (D78).
+func TestAppTurnedOffWhereNoAppIsPlaced(t *testing.T) {
+	s, services := appShop()
+	for _, env := range s.Environments {
+		if env.Target != "" {
+			env.Target = "no-apps"
+			env.DNS = nil
+		}
+	}
+	s.Expose = append(s.Expose, backoffice)
+	settingsFor(s.Environment("Staging"), backoffice).Enabled = new(bool)
+	env := mustResolve(t, assemble(t, &noApps{}), s, services, "Staging")
+	if d := env.Deployable(backofficeApp); d != nil {
+		t.Errorf("the app turned off is in the environment: %+v", d)
+	}
+	for _, step := range env.DeployOrder {
+		if slices.Contains(step.Deployables, backofficeApp) {
+			t.Errorf("the deploy order names the app turned off: %+v", step)
+		}
+	}
+	if _, errs := resolve(t, assemble(t, &noApps{}), s, services, "Production"); errs == nil {
+		t.Error("Production, which runs the app, resolved on a target that places no app")
+	}
+}
