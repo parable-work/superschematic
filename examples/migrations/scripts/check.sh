@@ -23,14 +23,14 @@
 #      model; after apply --phase expand, servers of both versions can
 #      write comments, the reminders are numbers, the project v1 wrote
 #      takes the new status column's default and its check refuses a value
-#      outside the enum (D81), and status shows the contract pending;
+#      outside the enum (D83), and status shows the contract pending;
 #      apply --phase contract drops comment.legacy_id;
 #      the database is then at v2's model, a plan from it has no steps, a
 #      second apply does nothing, and a database with no recorded model
 #      refuses the plan;
 #   4. Postgres, when the URL is set: step 3's apply on Postgres, where the
 #      raw SQL's materialized view counts the open task and refreshes
-#      concurrently (D81);
+#      concurrently (D83);
 #   5. the copies under testdata/generated/ match this run byte for byte.
 set -euo pipefail
 
@@ -159,7 +159,7 @@ apply_plan() {
   superschematic-migrate status --service tasks-db --database-url "$url" | steady >"$OUT/status-expanded.$dialect.txt"
   grep -q '(expand done; contract pending; ' "$OUT/status-expanded.$dialect.txt"
   test "$("$sql" "SELECT summary, remind_before FROM task")" = "Write the changelog|$reminders"
-  # A column v2 adds with a default and an enum's check (D81): the project
+  # A column v2 adds with a default and an enum's check (D83): the project
   # v1 wrote takes the default, and a value outside the enum is refused.
   test "$("$sql" "SELECT status FROM project")" = active
   fails "$OUT/status-check.$dialect.txt" "$sql" "UPDATE project SET status = 'paused'"
@@ -220,7 +220,7 @@ if [[ -n "$PG_ADMIN_URL" ]]; then
   seed postgres_sql false '{15,60}'
   apply_plan postgres_sql "$PG_URL" postgres '{}' '{15,60}'
   # The raw SQL's materialized view, on Postgres alone, counts the open
-  # task, and its unique index lets it refresh concurrently (D81).
+  # task, and its unique index lets it refresh concurrently (D83).
   test "$(postgres_sql "SELECT open_tasks FROM project_open_tasks")" = 1
   postgres_sql "REFRESH MATERIALIZED VIEW CONCURRENTLY project_open_tasks"
 else

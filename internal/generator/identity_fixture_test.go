@@ -23,7 +23,7 @@ const identityFixtureDir = "../../runtime/http/testdata/identity"
 // the identity runtimes read differ. It writes the DDL again under
 // defaults/ with a column the store's insert leaves out, a required
 // active: Default<boolean, false> on the User table, whose DEFAULT the
-// column carries (D81). Rewrite them with:
+// column carries (D83). Rewrite them with:
 //
 //	go test ./internal/generator -run TestIdentityStoreFixtureIsCurrent -update
 func TestIdentityStoreFixtureIsCurrent(t *testing.T) {

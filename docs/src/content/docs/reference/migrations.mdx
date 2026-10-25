@@ -344,7 +344,7 @@ enum's members and `Validate`'s bounds are its column's `CHECK`
 | any other change of a check | the old check dropped in `expand`, the new one added in `contract` (`data-dependent`) |
 | a check dropped | in `expand`; one on a column `contract` drops goes with the column |
 
-A database built before D81 has neither, so its next plan sets each
+A database built before D83 has neither, so its next plan sets each
 default and adds each check, every check a `contract` step that passes on
 the rows the generated code wrote and fails, naming the constraint, on any
 other. A field typed by a `@jsonField` class was `TEXT` then and is `JSONB`

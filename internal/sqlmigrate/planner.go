@@ -85,7 +85,7 @@ func (d *differ) steps() ([]*Step, error) {
 // by copying them, when the new model has raw SQL: it runs every piece
 // again, in order, since dropping the old table dropped the indexes and
 // triggers raw SQL made on it, and each piece can run again over what it
-// made (D81). It is nil for a phase that rebuilds nothing.
+// made (D83). It is nil for a phase that rebuilds nothing.
 func (d *differ) rawSQLAfterRebuilds(phase Phase, rebuilds map[string]*tableRebuild) *Step {
 	if len(rebuilds) == 0 || len(d.to.RawSQL) == 0 {
 		return nil
@@ -349,7 +349,7 @@ func (d *differ) renamedFK(prevTable string, fk *ForeignKey) *ForeignKey {
 // it when it has a default or is generated, and its check. A foreign key
 // contract replaces is the previous one under the name expand gave it. A
 // check contract adds is not there yet, and one it narrows is the previous
-// one (D81).
+// one (D83).
 func (d *differ) betweenPhases(ft, tt *Table) *Table {
 	t := *tt
 	t.Columns = nil

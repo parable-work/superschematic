@@ -19,7 +19,7 @@
 // drops the prune functions create.sql makes. TestConcurrentCreateOnPostgres
 // (concurrent_create_test.go) applies create.sql from several connections
 // at once. TestDDLOnPostgres (ddl_test.go) checks the defaults, checks,
-// SET NULL relations, indexes and raw SQL of D81.
+// SET NULL relations, indexes and raw SQL of D83.
 package pgcheck
 
 import (

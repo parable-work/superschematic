@@ -5,7 +5,7 @@ import { at, databaseKinds, type TestDatabase } from './fixture.testing';
 /*
 A User table may hold columns the store's insert leaves out: registration
 writes a user's login and name alone. A required column with a
-Default<T, V> takes V from its DEFAULT (D81), so registration succeeds; the
+Default<T, V> takes V from its DEFAULT (D83), so registration succeeds; the
 same column without one refuses the insert. The DDL is the fixture's with
 a required active: Default<boolean, false> on the User table
 (runtime/http/testdata/identity/defaults, which

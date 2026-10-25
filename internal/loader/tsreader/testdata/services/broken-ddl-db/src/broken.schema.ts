@@ -2,7 +2,7 @@ import { Identity } from "superscalar";
 import { jsonField } from "@superschematic/schema";
 import { AutoGenerate, index, key, rawSql } from "@superschematic/db";
 
-// Each declaration below is one the loader refuses (D81).
+// Each declaration below is one the loader refuses (D83).
 
 // A vector index over a column that is not a vector, which every column is
 // until vector columns arrive; a predicate of two statements.

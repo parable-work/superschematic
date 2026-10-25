@@ -58,7 +58,7 @@ type Model struct {
 	Graphs []*Graph `json:"graphs,omitempty"`
 
 	// RawSQL is the raw SQL the schema declares for the dialect (@rawSql,
-	// D81), in the order it runs, which the schema alone decides.
+	// D83), in the order it runs, which the schema alone decides.
 	RawSQL []*RawSQL `json:"rawSql,omitempty"`
 }
 
@@ -93,7 +93,7 @@ type Table struct {
 	ForeignKeys []*ForeignKey `json:"foreignKeys,omitempty"`
 	Indexes     []*Index      `json:"indexes,omitempty"`
 	// Checks are the CHECK constraints the fields' enums and Validate rules
-	// give their columns (D81).
+	// give their columns (D83).
 	Checks []*Check `json:"checks,omitempty"`
 
 	// PartitionBy is the partition clause of a partitioned table, as
@@ -186,14 +186,14 @@ type Index struct {
 	// Where is a partial index's predicate, without WHERE.
 	Where string `json:"where,omitempty"`
 	// Expression is the raw expression the index covers instead of its
-	// columns, which are then the columns of its keys (D81).
+	// columns, which are then the columns of its keys (D83).
 	Expression string `json:"expression,omitempty"`
 	// InTransaction builds the index, on a table the plan does not create,
-	// inside its step's transaction rather than concurrently (D81).
+	// inside its step's transaction rather than concurrently (D83).
 	InTransaction bool `json:"inTransaction,omitempty"`
 }
 
-// Check is a CHECK constraint over one column (D81): the values an enum
+// Check is a CHECK constraint over one column (D83): the values an enum
 // column holds, or the bounds of a Validate rule, ANDed. The dialect
 // renders its predicate (sqlutil.Check.Expression).
 type Check struct {
@@ -223,7 +223,7 @@ func sameRule(a, b *Check) bool {
 	return slices.Equal(a.In, b.In) && eqF(a.Min, b.Min) && eqF(a.Max, b.Max) && eqI(a.MinLength, b.MinLength) && eqI(a.MaxLength, b.MaxLength)
 }
 
-// RawSQL is a piece of raw SQL the schema declares (@rawSql, D81). A plan
+// RawSQL is a piece of raw SQL the schema declares (@rawSql, D83). A plan
 // runs it when it is new or its checksum changes, and its down when the
 // schema no longer declares it.
 type RawSQL struct {

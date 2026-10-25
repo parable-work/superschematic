@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The DDL a DB schema declares beyond its tables (D81): the options of an
+// The DDL a DB schema declares beyond its tables (D83): the options of an
 // @index, and the raw SQL of @rawSql.
 
 // checkIndexOptions refuses an @index option the DDL cannot honor: a
@@ -18,7 +18,7 @@ import (
 // engine type, whose index the engine keeps over its fields alone; a where
 // or an expression that holds more than one statement; and the vector
 // methods, hnsw and ivfflat, on a key whose column is not a vector, which
-// every column is until vector columns arrive (D83).
+// every column is until vector columns arrive in a later decision.
 func checkIndexOptions(schema *ir.Schema, r *Result) {
 	scalarTypes := sqlutil.ScalarSQLTypes(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
@@ -57,7 +57,7 @@ func checkIndexOptions(schema *ir.Schema, r *Result) {
 						continue // checkIndexKeys refuses the key.
 					}
 					if column := sqlutil.ColumnType(schema, fd, scalarTypes); !isVectorColumn(column) {
-						r.errorf(td.Owner, "%s: %s uses the %s method, which indexes a vector column, and %s.%s is %s; vector columns follow (D83)", td.Name, label, idx.Method, td.Name, fd.Name, column)
+						r.errorf(td.Owner, "%s: %s uses the %s method, which indexes a vector column, and %s.%s is %s; vector columns follow", td.Name, label, idx.Method, td.Name, fd.Name, column)
 					}
 				}
 			}

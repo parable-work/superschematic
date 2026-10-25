@@ -10,7 +10,7 @@ import (
 
 // TestStoreCreateUserWithADefaultedColumn: registration writes a user's
 // login and name alone, so a required column of the User table it leaves
-// out takes its Default<T, V> from the column's DEFAULT (D81). The DDL is
+// out takes its Default<T, V> from the column's DEFAULT (D83). The DDL is
 // the fixture's with a required active: Default<boolean, false>
 // (testdata/identity/defaults), as the TypeScript store's defaults.test.ts
 // reads it.

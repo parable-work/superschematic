@@ -151,7 +151,7 @@ func sqliteDefault(def, pg string) (string, error) {
 	if parsePGType(pg).array && def == "'{}'" {
 		return "'[]'", nil
 	}
-	// A boolean is an INTEGER, 1 or 0, as the runtimes write it (D81).
+	// A boolean is an INTEGER, 1 or 0, as the runtimes write it (D83).
 	if parsePGType(pg).base == "BOOLEAN" {
 		switch strings.ToLower(def) {
 		case "true":
@@ -197,7 +197,7 @@ func sqliteAffinity(t string) string {
 // the column by hand and adopts the new model (D27). Text that becomes a
 // JSON value is the exception: a rebuild parses it with json(), which
 // fails on text that is not JSON, as Postgres's cast to JSONB does
-// (sqliteCopySQL; D81, for a @jsonField field a compiler before it stored
+// (sqliteCopySQL; D83, for a @jsonField field a compiler before it stored
 // as text). A list is TEXT whatever its element, so a list's change is its
 // element's (sqliteListConvert).
 func (sqliteDialect) convert(from, to *Column) conversion {

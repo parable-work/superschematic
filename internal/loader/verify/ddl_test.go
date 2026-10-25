@@ -9,7 +9,7 @@ import (
 
 // TestIndexOptionsOnEngineType: the engine keeps an engine type's index
 // over its fields alone, so the options only a table's index has are
-// refused there, and accepted on a table (D81).
+// refused there, and accepted on a table (D83).
 func TestIndexOptionsOnEngineType(t *testing.T) {
 	schema := indexSchema()
 	post := schema.Types["Post"]
@@ -30,7 +30,7 @@ func TestIndexOptionsOnEngineType(t *testing.T) {
 }
 
 // TestRawSQLPlacement: @rawSql lives on a table; on a queue's message, a
-// base class or an engine type it is refused (D81).
+// base class or an engine type it is refused (D83).
 func TestRawSQLPlacement(t *testing.T) {
 	piece := []ir.RawSQLDef{{ID: "v", Up: "CREATE OR REPLACE VIEW v AS SELECT 1"}}
 	for _, tc := range []struct {

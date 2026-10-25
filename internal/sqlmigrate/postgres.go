@@ -311,7 +311,7 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 // index creates or replaces an index. On a table the previous version has
 // it is built concurrently, outside a transaction, except on a partitioned
 // table, where Postgres cannot, and for an index that declares
-// concurrently: false (D81).
+// concurrently: false (D83).
 func (postgresDialect) index(c *change) *Step {
 	name := q(c.index.Name)
 	if c.created || c.partitioned || c.index.InTransaction {
@@ -387,7 +387,7 @@ func (postgresDialect) foreignKey(c *change) rendered {
 	return rendered{steps: []*Step{add, validate}, main: 1}
 }
 
-// check adds or replaces a CHECK constraint (D81). On a table the plan
+// check adds or replaces a CHECK constraint (D83). On a table the plan
 // creates, CREATE TABLE declares it. On a table the previous version has,
 // it is added NOT VALID, which takes its lock only briefly, and validated in
 // a step of its own, which reads the table without blocking writes.

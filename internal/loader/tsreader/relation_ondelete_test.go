@@ -66,7 +66,7 @@ func TestRelationOnDeleteInvalidValueFails(t *testing.T) {
 
 // TestRelationOnDeleteSetNullNeedsNullable: SET NULL writes null into the
 // foreign key column, so on a required relation, whose column is NOT NULL,
-// the loader refuses it and names the nullable form (D81).
+// the loader refuses it and names the nullable form (D83).
 func TestRelationOnDeleteSetNullNeedsNullable(t *testing.T) {
 	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-relation-ondelete-set-null"))
 	if err == nil {

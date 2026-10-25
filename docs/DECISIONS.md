@@ -10878,7 +10878,7 @@ Status: built with D75; none of it has run on Google Cloud (D75's
 Status lists the first live run's checks). The rule is reversible until
 the first release.
 
-## D81. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
+## D83. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
 
 The DDL a DB service's build writes left out much of what its schema
 declares, so a row written outside the generated code was held to none of
@@ -10933,7 +10933,7 @@ This entry closes those gaps.
 |----------|------------------------|
 | `@index` takes `method` (`btree`, `gin`, `gist`, `brin`, `hnsw`, `ivfflat`), `ops` (one operator class for every key), `where` (a raw predicate, ANDed with a soft-delete table's `deleted_at IS NULL` on a unique index) and `expression` (one raw expression in place of the keys' columns, the keys naming the fields it reads and the index's default name). An operator class whose extension the DDL knows (`gin_trgm_ops`) enables it. | A typed predicate, which would need an expression language for one option; several expressions, which one expression and the keys cover for now. |
 | `concurrently: false` builds the index on a table a plan does not create inside the step's transaction (`blocking`); the default stays `CONCURRENTLY`, D27's online form. | `concurrently: true` as an opt-in, which would make the online form the exception. |
-| `hnsw` and `ivfflat` need a vector column, and verification refuses them on any other with a message that vector columns follow. A column is a vector when its type is `vector(n)`, so D83, which adds the type, lifts the refusal without changing it. | Leaving the vector methods out of the type until D83, which would change the decorator's type twice. |
+| `hnsw` and `ivfflat` need a vector column, and verification refuses them on any other with a message that vector columns follow. A column is a vector when its type is `vector(n)`, so the later decision that adds the type lifts the refusal without changing it. | Leaving the vector methods out of the type until vector columns arrive, which would change the decorator's type twice. |
 | SQLite takes an expression and a predicate, and refuses a method other than BTREE and an operator class. An engine type's index is the engine's, over its fields alone, so it takes none of the options. `where` and `expression` hold one statement each. | |
 
 ### Raw SQL

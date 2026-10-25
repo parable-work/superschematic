@@ -43,7 +43,7 @@ func TestListDefaultsCreateSQLOnPostgres(t *testing.T) {
 // TestDDLOnPostgres holds the checks: the defaults a raw INSERT takes, the
 // checks that refuse an enum's other values and a Validate bound's
 // outside, the relations SET NULL clears, the expression and partial
-// indexes, and the raw SQL's materialized view (D81). Set
+// indexes, and the raw SQL's materialized view (D83). Set
 // SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
 // TestProjectionMigrationsOnPostgres.
 func TestDDLCreateSQLOnPostgres(t *testing.T) {

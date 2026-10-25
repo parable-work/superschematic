@@ -61,7 +61,7 @@ const (
 // triggers, views and comments, then the changes of a version graph's
 // content that change no table. Contract runs tightenings, then drops in
 // reverse dependency order (D27). rankOf places the raw SQL between them
-// (D81).
+// (D83).
 var rank = map[op]int{
 	opCreateExtension:  0,
 	opCreateSchema:     1,
@@ -113,7 +113,7 @@ var rank = map[op]int{
 // sits between ranks. A piece that runs after the tables runs after the
 // alterations and before the indexes; one that runs after every object,
 // after the comments; and a removed piece's down after the tightenings,
-// before any drop (D81).
+// before any drop (D83).
 func rankOf(c *change) int {
 	switch {
 	case c.op == opRunRawSQL && c.raw.Position == ir.RawSQLAfterTables:

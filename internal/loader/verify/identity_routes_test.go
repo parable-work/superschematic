@@ -229,7 +229,7 @@ func TestUserModelRoutes(t *testing.T) {
 			},
 		},
 		// A default the column cannot carry leaves the decoders to fill
-		// it, which the routes' insert does not run (D81).
+		// it, which the routes' insert does not run (D83).
 		{
 			name: "a required field with a default its column cannot carry",
 			db: func(db *ir.Schema) {

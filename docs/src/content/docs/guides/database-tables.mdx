@@ -255,7 +255,7 @@ A field of its type, or of a list of it, is a `JSONB` column, read and
 written with its row, and the ORM marshals it for you. `shop-db`'s
 `ShippingAddress` is one; see
 [Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
-and lists of lists are `JSONB` too. A compiler before D81 made such a
+and lists of lists are `JSONB` too. A compiler before D83 made such a
 field `TEXT`; a migration plan from a database it built casts the column
 with `USING shipping_address::JSONB`, which fails on text that is not JSON
 (`data-dependent`).

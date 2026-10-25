@@ -8,7 +8,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// What a column says beyond its type (D81): the DEFAULT a field's
+// What a column says beyond its type (D83): the DEFAULT a field's
 // Default<T, V> gives it, and the CHECK its enum or its Validate rules
 // give it. sqlgen writes both into create.sql, the migration planner
 // diffs them, and verification refuses a required user column whose
@@ -106,7 +106,7 @@ func QuoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// Check is the CHECK constraint a field gives its column (D81): the values
+// Check is the CHECK constraint a field gives its column (D83): the values
 // its enum allows, or the bounds of its Validate rules. A field has at most
 // one; its rules are ANDed. NULL passes every check, so a nullable column
 // stays nullable.

@@ -11,7 +11,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// Raw SQL a DB service declares (@rawSql, D81). Verification refuses a
+// Raw SQL a DB service declares (@rawSql, D83). Verification refuses a
 // piece the DDL could not place or run again (CheckRawSQL); sqlgen and the
 // migration planner run the pieces in the order OrderRawSQL gives.
 

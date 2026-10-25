@@ -11,7 +11,7 @@ import (
 )
 
 // TestDDLOnPostgres applies create.sql for the fixture-ddl-db service,
-// whose tables say what their schema says (D81), and checks what Postgres
+// whose tables say what their schema says (D83), and checks what Postgres
 // makes of it:
 //
 //   - a raw INSERT that leaves out a column with a Default<T, V> takes V,

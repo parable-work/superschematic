@@ -189,7 +189,7 @@ type seedCheck struct {
 
 // seeds is how a dialect seeds rows: value is a literal for a column, or
 // false for a column whose type it has none for, checked the literal of a
-// column for a value that passes the column's check (D81), and same
+// column for a value that passes the column's check (D83), and same
 // compares a column with a literal, true when both are null.
 type seeds struct {
 	value   func(col *Column, n, i int) (string, bool)

@@ -1,6 +1,6 @@
 import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 
-// What the DDL says beyond a table's columns (D81): defaults, checks, a
+// What the DDL says beyond a table's columns (D83): defaults, checks, a
 // relation that SET NULL clears, richer indexes and raw SQL. Built for
 // SQLite too, which runs the raw SQL that names it.
 export default defineConfig({
