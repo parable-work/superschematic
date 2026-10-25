@@ -342,6 +342,14 @@ as a committed language must. Pair it with `--out`, so the two servers do
 not share an output root; a build's cache stamps come from `build-all`,
 which has no such flag.
 
+`outputs.api.mcp: true` makes a TypeScript API's router serve the API's
+visible `@mcp` operations as MCP tools at `POST /api/mcp`, beside its
+OpenAPI document at `GET /api/openapi.json`, which every server serves
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+The Go and Rust servers serve no MCP endpoint yet, so the config fails to
+load with it on another language, `--api-language` included:
+`outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+
 `--scaffold` writes the implementation of each Go API the command builds
 whose package is missing: an `implementation.go` at the naming file's
 `[implementation_paths]` `go` template (`go/{service}` from the parent of

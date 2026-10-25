@@ -96,6 +96,7 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 				r.errorf("", "%s: @userSessions: register needs the login; drop register: true or login: false", set.Name)
 			}
 			checkIdentityRoutesPath(set, "@userSessions", cfg.Path, r)
+			checkIdentityRegistration(set, cfg, r)
 			if sessions != nil {
 				r.errorf("", "%s", IdentityRoutesSecond(set, sessions, "@userSessions"))
 			} else {
@@ -137,6 +138,63 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 func checkIdentityRoutesPath(set *ir.OperationSet, decorator, path string, r *Result) {
 	if path != "" && !identityRoutesPath.MatchString(path) {
 		r.errorf("", "%s: %s path %q must be route segments joined by /, with no leading or trailing / and no {parameter}", set.Name, decorator, path)
+	}
+}
+
+// identityPermission is a permission's form: dotted segments of ASCII
+// letters, digits, _ and -, as the identity runtimes check a role's.
+var identityPermission = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
+
+// checkIdentityRegistration checks how register admits users (D81):
+// registration is open or approval, and it, defaultRoles and firstUser
+// need register; the role names are non-empty and named once, and
+// firstUser names its role and at least one permission of a permission's
+// form. The authDb's UserRole table is checkIdentityRoutesAuthDB's.
+func checkIdentityRegistration(set *ir.OperationSet, cfg *ir.UserSessionsConfig, r *Result) {
+	switch cfg.Registration {
+	case "", ir.IdentityRegistrationOpen, ir.IdentityRegistrationApproval:
+	default:
+		r.errorf("", "%s: @userSessions registration %q must be %q or %q", set.Name, cfg.Registration, ir.IdentityRegistrationOpen, ir.IdentityRegistrationApproval)
+	}
+	var keys []string
+	if cfg.Registration != "" {
+		keys = append(keys, "registration")
+	}
+	if len(cfg.DefaultRoles) > 0 {
+		keys = append(keys, "defaultRoles")
+	}
+	if cfg.FirstUser != nil {
+		keys = append(keys, "firstUser")
+	}
+	if len(keys) > 0 && (!cfg.Register || cfg.NoLogin) {
+		verb := "configures"
+		if len(keys) > 1 {
+			verb = "configure"
+		}
+		r.errorf("", "%s: @userSessions %s %s register, which needs register: true and the login", set.Name, joinAnd(keys), verb)
+	}
+	seen := map[string]bool{}
+	for _, role := range cfg.DefaultRoles {
+		switch {
+		case role == "":
+			r.errorf("", "%s: @userSessions defaultRoles holds an empty role name", set.Name)
+		case seen[role]:
+			r.errorf("", "%s: @userSessions defaultRoles names %q twice", set.Name, role)
+		}
+		seen[role] = true
+	}
+	if first := cfg.FirstUser; first != nil {
+		if first.Role == "" {
+			r.errorf("", "%s: @userSessions firstUser needs role, the name of the administrator's role", set.Name)
+		}
+		if len(first.Permissions) == 0 {
+			r.errorf("", "%s: @userSessions firstUser needs permissions, at least one, which the role carries when register creates it", set.Name)
+		}
+		for _, permission := range first.Permissions {
+			if !identityPermission.MatchString(permission) {
+				r.errorf("", "%s: @userSessions firstUser permission %q is not dotted segments of letters, digits, _ and -, such as orders.read", set.Name, permission)
+			}
+		}
 	}
 }
 
@@ -188,6 +246,9 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 	}
 	if admin != nil && authDB.UserRoleTable() == nil {
 		r.errorf("", "%s: @userAdministration needs a UserRole table in the authDb %s, a table that implements UserRole from @superschematic/db, and it has none", admin.Name, schema.AuthDB)
+	}
+	if sessions != nil && (len(sessions.UserSessions.DefaultRoles) > 0 || sessions.UserSessions.FirstUser != nil) && authDB.UserRoleTable() == nil {
+		r.errorf("", "%s: @userSessions defaultRoles and firstUser grant roles, which need a UserRole table in the authDb %s, a table that implements UserRole from @superschematic/db, and it has none", sessions.Name, schema.AuthDB)
 	}
 	var creators []string
 	if sessions != nil && sessions.UserSessions.Register && !sessions.UserSessions.NoLogin {

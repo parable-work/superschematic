@@ -52,6 +52,34 @@ describe('the storefront', () => {
     expect(viewer.statusCode).toBe(403);
   });
 
+  test('a shopper imports lines from a CSV file and exports the cart as CSV (D81)', async () => {
+    const sdk = await sdkFor('shopper-token');
+    const csv = new File(['sku,quantity\ngreen-tea,2\noolong,1\n'], 'order.csv', { type: 'text/csv' });
+    const cart = await sdk.cart.importCartLines(cartId, {}, { lines: csv });
+    expect(cart.lines.map(line => [line.sku, line.quantity])).toEqual([['green-tea', 2], ['oolong', 1]]);
+    expect(cart.total).toEqual({ amountCents: 2 * 450 + 720, currency: 'EUR' });
+
+    const exported = await sdk.cart.exportCart(cartId);
+    expect(exported.filename).toBe('cart.csv');
+    expect(exported.contentType).toBe('text/csv; charset=utf-8');
+    expect(await exported.blob.text()).toBe('sku,quantity,unit_price_cents,currency\ngreen-tea,2,450,EUR\noolong,1,720,EUR\n');
+
+    // The export reads back: the quantities add up.
+    const again = await sdk.cart.importCartLines(cartId, {}, { lines: new File([exported.blob], 'cart.csv', { type: 'text/csv' }) });
+    expect(again.lines.map(line => line.quantity)).toEqual([4, 2]);
+  });
+
+  test('the router refuses a file the lines field does not admit, and the import a row it cannot read', async () => {
+    const sdk = await sdkFor('shopper-token');
+    const sheet = await sdk.cart.importCartLines(cartId, {}, { lines: new File(['x'], 'order.xlsx', { type: 'text/csv' }) }).catch(error => error);
+    expect(sheet).toBeInstanceOf(ApiError);
+    expect(sheet.statusCode).toBe(400);
+    expect(sheet.validationErrors.lines[0].validator).toBe('uploadExtension');
+    const unknown = await sdk.cart.importCartLines(cartId, {}, { lines: new File(['sku,quantity\nmatcha,1\n'], 'order.csv', { type: 'text/csv' }) }).catch(error => error);
+    expect(unknown.statusCode).toBe(422);
+    expect(unknown.code).toBe('unknown_sku');
+  });
+
   test('the SDK checks an input before it sends it', async () => {
     // quantity is Validate<number, { min: 1; max: 99 }>.
     const tooMany = await (await sdkFor('shopper-token')).cart.addCartLine(cartId, { sku: 'green-tea', quantity: 100 }).catch(error => error);

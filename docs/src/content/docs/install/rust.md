@@ -359,8 +359,11 @@ an encrypted operation
 unless it is `@manualRouteRegistration`. The service's own handler for
 such an operation receives the envelope as its body and decrypts it, as
 the Go server's `PayloadDecryptor` does. The router has no multipart step
-either, so the build refuses an operation that uploads files unless it is
-`@manualRouteRegistration`; the service's handler reads the multipart body.
+either, and answers JSON alone, so the build refuses an operation that
+uploads files, or whose result is a `FileDownload`, unless it is
+`@manualRouteRegistration`; the service's handler reads the multipart body
+or answers the file. The Go and TypeScript servers serve both
+([Files](/superschematic/guides/api-routes/#files)); support here follows.
 
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -390,6 +393,33 @@ impl WebhookVerifier for GitHubVerifier {
         next.run(Request::from_parts(parts, Body::from(bytes))).await
     }
 }
+```
+
+For a provider that signs with a JWT carrying the body's SHA-256, such as
+Plaid, the runtime's `JwtBodyHashVerifier` does the checking
+([A JWT that carries the body's hash](/superschematic/guides/api-routes/#a-jwt-that-carries-the-bodys-hash)).
+`WebhookVerifier` is the generated crate's trait, so wrap it in a type of
+your own:
+
+```rust
+struct Plaid(JwtBodyHashVerifier);
+
+#[async_trait]
+impl WebhookVerifier for Plaid {
+    async fn verify(&self, request: Request, next: Next) -> Response {
+        self.0.verify(request, next).await
+    }
+}
+
+let plaid = JwtBodyHashVerifier::new(JwtBodyHashOptions {
+    header: "Plaid-Verification".into(),
+    keys: WebhookKeys::Lookup(Arc::new(plaid_key)), // async fn(String) -> Result<Option<Value>, String>
+    alg: JwsAlgorithm::Es256,
+    max_age: Duration::from_secs(300),
+    body_hash_claim: "request_body_sha256".into(),
+    clock_skew: None,
+    max_body_bytes: None,
+})?;
 ```
 
 `build_router_with_manual_routes` runs the verifier before a

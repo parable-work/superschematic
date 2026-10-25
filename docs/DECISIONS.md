@@ -10577,3 +10577,114 @@ Status: built.
 Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
+
+## D81. A generated server covers what an app wrote by hand: approval-gated registration, files up and down, its OpenAPI document and an MCP endpoint, and a JWT body-hash webhook verifier
+
+A TypeScript API with the user model, a statement upload, a CSV export,
+an agent and a Plaid webhook still wrote five things by hand beside its
+schema:
+- `register` signed every new user in at once, with no role, so an app
+  whose users an administrator admits either let anyone in or hid every
+  route behind a role the new user lacked. The first administrator came
+  from `identity bootstrap`, a step a self-hosted app has no place for.
+- `tsrestgen` refused an operation that uploads a file unless it was
+  `@manualRouteRegistration`, and nothing in the core could declare a
+  file at all: uploads came from an extension's upload scalar, and the
+  Go template aliased a `FileUploadData` superscalar never defined (D4).
+- Nothing declared a response that is not JSON, so a CSV download was a
+  manual route that no SDK could call.
+- The Go and Rust servers served `GET /api/openapi.json` and `/api/docs`,
+  and the TypeScript router only exported the document. Generated APIs
+  wrote MCP tool documents and an `invokeTool`, but only the engine served
+  MCP.
+- Each project re-implemented a provider's JWT webhook signature: the
+  JWKS by `kid`, the `iat` age and the body's SHA-256.
+
+This entry adds:
+- **Registration.** `@userSessions({ register: true, registration:
+  "approval", defaultRoles, firstUser })`, a credential column
+  `pendingAt`, `approveUser`, `listUsers`' `?pending`, and the codes 403
+  `pending_approval` and 409 `not_pending`, in the Go, TypeScript and Rust
+  identity runtimes.
+- **Files.** `FileUpload<{ maxBytes?, contentTypes?, extensions? }>` on a
+  string field of an operation's input, and `FileDownload<{ contentType,
+  filename? }>` as an operation's result, from `@superschematic/api`.
+- **Served documents.** The TypeScript router serves the OpenAPI document
+  and its page as Go and Rust do, and, with `outputs.api.mcp: true`, the
+  API's `@mcp` tools at `POST /api/mcp`.
+- **Webhooks.** `jwtBodyHashVerifier` (TypeScript), `webhook.JWTBodyHashVerifier`
+  (Go) and `JwtBodyHashVerifier` (Rust), which fit `@hmacVerified`'s
+  verifier seam unchanged.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Under `registration: "approval"` register creates the user with `pendingAt` set and answers `RegisterResult`: 202 `{ pending: true, user }` with no session and no cookie, or 200 with a session for the first administrator. Open registration keeps `LoginResult`. | `disabledAt` for pending, which an administrator cannot tell from a disabled user; always answering 200, which an SDK reads as signed in; changing open registration's result, which breaks every SDK that calls it |
+| A pending user's login is 403 `pending_approval`, and only once the password verifies; every other failure stays 401 `invalid_credentials`. A pending user's session, should one exist, does not authenticate. | 401 `invalid_credentials`, which leaves a sign-in page unable to say why; answering before the password, which tells anyone which logins are pending |
+| `defaultRoles` are granted when register creates the user, under approval too, and a role no role has the name of is created with no permissions. A pending user can neither sign in nor hold a session, so the roles take effect at approval. | Granting at approval, the requirements' wording: `approveUser` belongs to `@userAdministration`, which may sit in another API than the `@userSessions` that names the roles, so it would not know them; failing a registration whose role is missing |
+| `approveUser` needs `users.write`, and the approver's permissions must cover the user's, the default roles' included, as for `enableUser` (D50, amended). Approving a user who is not pending is 409 `not_pending`. | `enableUser` as approval, which mixes the two states; approval as an implicit grant no one's permissions are checked against |
+| `firstUser: { role, permissions }` makes the registration that finds no role grant, the state `identity bootstrap` runs in, the first administrator: active, signed in, holding the role, created with its permissions when missing. A store reads the grants without a lock first, so only an empty database's registrations take Postgres's `LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE`, Bootstrap's lock; SQLite lets one transaction write at a time. | "the table has no user", which bootstrap and the registration would read apart; a role holding every permission the API names, which misses the ones added later; an advisory lock, whose key a deployment would have to keep apart from its own |
+| The generated wiring hands the runtime the registration (`IdentityRegistration`, `identityRegistration`, `registration()`), and only for an API whose register declares any; others build as before. | The identity config's JSON, which would let an environment open what the schema closed |
+| Rust's `Store` gains `create_user_with(user, grants)` beside `create_user`, so `NewUser` literals keep compiling; Go's and TypeScript's `NewUser` take the grants as members. | One more field on Rust's `NewUser`, which breaks every literal |
+| A field typed `FileUpload<C>` is a file: `FieldDef.FileUpload`, the `ir.FileUploadConfig` an upload scalar's metadata gives, with `AllowedExtensions`. The request is `multipart/form-data` with a part per file field and the other fields as JSON in `data`; a JSON body with no file is accepted. The Go API package defines `FileUploadData`. | A core upload scalar, which superscalar does not have (D3, D4); requiring an extension's scalar, which the stock binary cannot declare; a `@upload` decorator, when wrappers already carry a field's metadata |
+| A refused file is a refused input (D42): 400 `bad_request` with `errors.<field>` `required`, `uploadMaxBytes`, `uploadContentType` or `uploadExtension`, the files checked first, in field order. The Go route now answers the same, reads `data` with the unknown-member check and compares a part's media type lowercased without parameters, with none read as `application/octet-stream` (RFC 7578). | Go's free-text 400s and `http.DetectContentType`, which TypeScript cannot reproduce and which reads a CSV as `text/plain`; 413 for one file over its limit, which stays the whole body's |
+| The TypeScript router reads multipart with its own reader, and its cap without `@bodyLimit` is the files' `maxBytes` plus the JSON cap. | `Request.formData()`, which on Bun takes a part's type from its filename; the 1 MiB JSON default, which refuses a 5 MB statement |
+| `FileDownload<{ contentType, filename? }>` is an operation's result, with an empty TypeRef. The implementation returns the body (string, bytes, `Blob` or stream in TypeScript, an `io.Reader` in Go) and may name the file; the router sets `Content-Type`, an RFC 6266 `attachment` with an ASCII `filename` and a UTF-8 `filename*` by vectors Go and TypeScript share, and `Cache-Control: no-store`. OpenAPI describes a binary 200 with the header. | `@produces("text/csv")` on a `string` result, which splits one fact over two places and is no binary; the unused `httpBinaryStream`; a `string` TypeRef, which a generator that knows no downloads would answer as JSON |
+| The TypeScript SDK answers a download as `{ blob, filename, contentType }`, and the Go and Python SDKs as a `DownloadedFile`. The Rust SDK and the Rust server refuse a download, and the Rust server an upload, at build, saying support follows. A download is a hidden tool unless `@mcp` names it, which is refused. | Rust now: its client reads every body as text and its router answers JSON alone; a file as an MCP tool result, which no client reads yet |
+| The TypeScript router mounts the runtime's `mountOpenAPI` before its operations: Go's and Rust's paths, rewriting of `info.version` and `servers`, key order and page, Rust's `serveOpenAPI: false`. The document is a string module, so serving it reads no file, on Workers too. | A JSON import, which every consumer's bundler must support; reading the file at request time |
+| `outputs.api.mcp: true` serves the API's visible `@mcp` tools at `POST /api/mcp` (GET and DELETE 405), with a transport copied from the engine's (both protocol eras) and held to the engine's recorded exchanges. The tool table is generated from what `tools/schema.json` is written from. | Depending on `@superschematic/engine`, which an HTTP runtime may not; the MCP SDK, a new dependency; reading `tools/schema.json` at run time |
+| A `tools/call` runs in process through the router, as a request to the tool's route with the caller's headers and request id, so the route's authentication, permissions, validation, rate limit and timeout apply unchanged; `tools/list` holds the tools whose routes admit the caller. The invocation policy is published in `_meta`, as the engine does. | `invokeTool`, which makes the server depend on its SDK; calling the implementation, which skips the route's checks; enforcing `ask` on the server, which is the client's to ask |
+| Go and Rust APIs with `mcp` are refused when the outputs load, saying TypeScript serves it and they follow. A server with two MCP APIs and an operation routed at `/api/mcp` are refused at build. | Ignoring the flag; Go and Rust now |
+| The webhook verifier is a runtime helper per language that fits `@hmacVerified({ provider })`'s seam, with no decorator or generator change. It takes the header, `ES256` (and refuses any other `alg` the token names), `maxAge`, the body-hash claim, and the keys by `kid` from a lookup or a JWKS URL. | A decorator option, when the keys come from a provider call (Plaid's `/webhook_verification_key/get`) that is code; Plaid's header and claim as defaults, in a provider-neutral core; RS256 and EdDSA now |
+| A key is held an hour by `kid`, the provider is asked at most once a minute whatever asks, one lookup runs at a time, a failed lookup keeps the held key and "no such key" drops it. The body is read after the signature, at most 1 MiB, and its lowercase hex SHA-256 compared in constant time. A refusal is 401 `invalid_signature`; a key that cannot be fetched with none held is 503. | Caching forever; a negative cache per `kid`, which random kids defeat; reading the body first; no cap, since the verifier runs before `@bodyLimit`; 401 for a provider outage |
+| The verifier's parity vectors hold signing inputs and how to tamper them, and no key: each runtime generates its keys per run. | Seed-derived keys and deterministic signatures, a committed key in all but name |
+
+What changed while building:
+- The requirements assumed a file argument could be declared. None could
+  on the stock binary, so `FileUpload` came first, and the Go upload path
+  changed with it to answer as TypeScript does.
+- Default roles are granted at registration, as the table says.
+
+Status: built.
+- **Registration.** `runtime/http/go/identity/registration_test.go`,
+  `runtime/http/typescript/src/identity/registration.test.ts` and
+  `runtime/http/rust/tests/identity_registration.rs` run one script on
+  SQLite and Postgres: under approval register answers 202 with no
+  cookie, login is refused as `pending_approval` (and as
+  `invalid_credentials` with a wrong password), `?pending=true` lists the
+  user, `approveUser` admits them, and login then holds the default
+  roles; approval needs the user's permissions; open registration grants
+  the default roles; the first registrant is an active administrator and
+  the next waits; and eight registrations at once on an empty database
+  make one administrator, which `TestFirstRegistrantsAtOnce` fails
+  without the lock. `internal/registry`, `internal/loader/verify` and
+  `internal/loader/identity` hold the decorator, its refusals and the
+  expansion, and `fixture-user-routes-api` registers under approval in
+  every generator's goldens.
+- **Files.** `internal/generator/tsrestgen/files_test.go`
+  (`TestGeneratedFilesEndToEnd`) serves a typed implementation through
+  the generated TypeScript router and calls it through the generated SDK;
+  acme-shop's `shop-storefront` imports cart lines from a CSV file and
+  exports the cart as one (`typescript/shop-storefront/index.test.ts`).
+  `apigen`'s `TestFileTransferRoutes` runs the Go router's refusals and
+  downloads, `gosdkgen`'s `TestFileTransfersThroughTheGoSDK` the Go SDK,
+  and `runtime/http/testdata/content_disposition_parity.json` the shared
+  header.
+- **Served documents.** `internal/generator/servergen/mcp_test.go`
+  (`TestTypeScriptMCPEndpointServes`) runs a generated TypeScript server:
+  `/api/openapi.json` and `/api/docs`, then an agent that registers, logs
+  in, and with its bearer token initializes, lists the tools (the hidden
+  and staff-only ones absent) and calls them, and is refused without the
+  token and after logout. `src/mcp-parity.test.ts` replays the engine's
+  MCP exchanges.
+- **Webhooks.** `runtime/http/testdata/webhook_jwt_parity.json`, which
+  Go's `TestParityVectors`, TypeScript's `webhook.test.ts` and Rust's
+  `tests/webhook_jwt.rs` all run: a good Plaid-style token, an expired
+  one, a wrong body hash, an unknown `kid`, another `alg` and a tampered
+  signature among 29 cases; `TestGeneratedWebhooksRouter` puts the
+  verifier in a generated router.
+
+Left: password reset and email verification; an approve action on
+Topcoat's user pages; uploads and downloads in the Rust server and SDK;
+MCP in the Go and Rust servers; per-route scaffolds in TypeScript; RS256
+and EdDSA webhook tokens. D4's note that `FileUploadData` does not exist
+is resolved here. The rules are reversible until the first release.

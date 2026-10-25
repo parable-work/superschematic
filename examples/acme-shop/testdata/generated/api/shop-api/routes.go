@@ -239,6 +239,15 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				cfg.Identity.RequirePermissions("identity.users.read"),
 			},
 		},
+		// Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/approve",
+			Handler: identityHandler(cfg.Identity, "approveUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
+			},
+		},
 		// Disables a user, who can no longer sign in, and ends their sessions.
 		{
 			Method:  "POST",

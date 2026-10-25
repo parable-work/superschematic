@@ -1138,6 +1138,10 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	if info.sortBy != nil {
 		return nil, errorAtNode(prop.Type, "SortBy marks an operation's argument; a field is no sort")
 	}
+	if info.fileDownload != nil {
+		return nil, errorAtNode(prop.Type, "FileDownload marks an operation's result; a field that is a file is FileUpload")
+	}
+	fd.FileUpload = info.fileUpload
 	fd.References = info.references
 	applyValidateConfig(info.validate, fd)
 
@@ -1511,6 +1515,9 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	if info.sortBy != nil {
 		return nil, nil, errorAtNode(method.Type, "SortBy marks an operation's argument, not its result")
 	}
+	if info.fileUpload != nil {
+		return nil, nil, errorAtNode(method.Type, "FileUpload marks a field of an input type; a result that is a file is FileDownload")
+	}
 	// A reference on the result is the loader's refusal, in every form.
 	op := &ir.FieldDef{
 		Name:       m.Name().Text(),
@@ -1519,6 +1526,8 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 		Required:   !info.nullable,
 		Encrypted:  info.encrypted,
 		References: info.references,
+		// A FileDownload result (D81) names no JSON type.
+		FileDownload: info.fileDownload,
 	}
 
 	decorators := w.decoratorsOf(m)
@@ -1573,6 +1582,12 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 	}
 	if info.platformDefault {
 		return nil, "", errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
+	}
+	if info.fileUpload != nil {
+		return nil, "", errorAtNode(p, "FileUpload is a field of the operation's input type, which travels as multipart/form-data; an argument is no file")
+	}
+	if info.fileDownload != nil {
+		return nil, "", errorAtNode(p, "FileDownload marks an operation's result, not an argument")
 	}
 	w.recordReference(info)
 

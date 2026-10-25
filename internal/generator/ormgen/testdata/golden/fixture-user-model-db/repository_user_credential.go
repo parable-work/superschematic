@@ -26,6 +26,7 @@ var UserCredentialAllowedFields = map[string]bool{
 	"password_hash":       true,
 	"password_changed_at": true,
 	"disabled_at":         true,
+	"pending_at":          true,
 	"user_id":             true,
 }
 
@@ -35,6 +36,7 @@ var UserCredentialQuotedFields = map[string]string{
 	"password_hash":       `password_hash`,
 	"password_changed_at": `password_changed_at`,
 	"disabled_at":         `disabled_at`,
+	"pending_at":          `pending_at`,
 	"user_id":             `user_id`,
 }
 
@@ -200,6 +202,9 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		if opts.Fields.DisabledAt {
 			fieldStrings = append(fieldStrings, "disabled_at")
 		}
+		if opts.Fields.PendingAt {
+			fieldStrings = append(fieldStrings, "pending_at")
+		}
 		// Validate fields
 		if err := validateFields(fieldStrings, UserCredentialAllowedFields); err != nil {
 			return nil, err
@@ -208,7 +213,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		query = fmt.Sprintf(`SELECT %s FROM user_credential WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at" FROM user_credential WHERE id = $1`
+		query = `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE id = $1`
 	}
 
 	// Execute query
@@ -224,6 +229,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -235,6 +241,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 
 		scanDest := make([]any, len(fieldStrings))
 		for i, fieldName := range fieldStrings {
@@ -248,6 +255,9 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -264,6 +274,10 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			if selectedDisabledAt && tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if selectedPendingAt && tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -284,6 +298,8 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 
 		if err == nil {
@@ -292,6 +308,10 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			if tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 		}
 	}
@@ -361,7 +381,7 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at" FROM user_credential WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 
 	// Execute query
 	var rows pgx.Rows
@@ -384,6 +404,7 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 		var tempRelUser *types.IdentityUUID
@@ -400,6 +421,8 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 			&entity.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
@@ -409,6 +432,9 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 
 		if tempDisabledAt != nil {
 			entity.DisabledAt = tempDisabledAt
+		}
+		if tempPendingAt != nil {
+			entity.PendingAt = tempPendingAt
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -454,6 +480,9 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		if opts.Fields.DisabledAt {
 			fieldStrings = append(fieldStrings, "disabled_at")
 		}
+		if opts.Fields.PendingAt {
+			fieldStrings = append(fieldStrings, "pending_at")
+		}
 		// Validate fields
 		if err := validateFields(fieldStrings, UserCredentialAllowedFields); err != nil {
 			return nil, err
@@ -461,7 +490,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		selectFields = buildSelectFieldsTyped(fieldStrings, "user_credential")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+		selectFields = `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 		if opts == nil {
 			opts = &UserCredentialFindOptions{}
 		}
@@ -490,6 +519,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -500,6 +530,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 		var selectedRelUser bool
 
 		scanDest := make([]any, len(fieldStrings))
@@ -514,6 +545,9 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -530,6 +564,10 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			if selectedDisabledAt && tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if selectedPendingAt && tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -553,6 +591,8 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 
 		if err == nil {
@@ -561,6 +601,10 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			if tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 		}
 	}
@@ -679,6 +723,9 @@ func userCredentialFieldStrings(fields UserCredentialFields) []string {
 	if fields.DisabledAt {
 		fieldStrings = append(fieldStrings, "disabled_at")
 	}
+	if fields.PendingAt {
+		fieldStrings = append(fieldStrings, "pending_at")
+	}
 	return fieldStrings
 }
 
@@ -707,6 +754,7 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		// Create temporary variables for nullable fields that need pointer scanning (per-row)
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these directly on the struct)
 		var tempRelUser *types.IdentityUUID
@@ -714,6 +762,7 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 		var selectedRelUser bool
 
 		scanDest := make([]any, len(fieldStrings))
@@ -728,6 +777,9 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -746,6 +798,10 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		if selectedDisabledAt && tempDisabledAt != nil {
 			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 			result.DisabledAt = tempDisabledAt
+		}
+		if selectedPendingAt && tempPendingAt != nil {
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.PendingAt = tempPendingAt
 		}
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
@@ -963,6 +1019,15 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 			values = append(values, time.Time(*input.DisabledAt))
 		}
 	}
+	// Optional field: pendingAt - only add if set
+	{
+		if input.PendingAt != nil {
+			fields = append(fields, `pending_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.PendingAt))
+		}
+	}
 
 	// Handle relationship foreign key columns
 	// Relationship: user (FK: user_id)
@@ -977,7 +1042,7 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	returningClause := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 	query := fmt.Sprintf(
 		`INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -998,6 +1063,7 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -1014,6 +1080,8 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 		&result.PasswordChangedAt,
 
 		&tempDisabledAt,
+
+		&tempPendingAt,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan result: %w", err)
 	}
@@ -1023,6 +1091,10 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	if tempDisabledAt != nil {
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.DisabledAt = tempDisabledAt
+	}
+	if tempPendingAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.PendingAt = tempPendingAt
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1079,6 +1151,15 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 			}
 			row = append(row, cell)
 		}
+		// Optional field: pendingAt
+		{
+			cell := batchInsertCell{column: `pending_at`}
+			if input.PendingAt != nil {
+				cell.value = time.Time(*input.PendingAt)
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
 
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: user (FK: user_id)
@@ -1095,7 +1176,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	returningClauseMany := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 	query := fmt.Sprintf(
 		`INSERT INTO user_credential (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
@@ -1123,6 +1204,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 		var tempRelUser *types.IdentityUUID
@@ -1139,6 +1221,8 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -1149,6 +1233,10 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 		if tempDisabledAt != nil {
 			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 			result.DisabledAt = tempDisabledAt
+		}
+		if tempPendingAt != nil {
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.PendingAt = tempPendingAt
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -1191,6 +1279,16 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.DisabledAt))
 	}
+	if update.PendingAt != nil && update.PendingAtSetNull {
+		return nil, fmt.Errorf("pending_at cannot be updated with both value and null assignment")
+	}
+	if update.PendingAtSetNull {
+		setClauses = append(setClauses, `pending_at = NULL`)
+	} else if update.PendingAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`pending_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PendingAt))
+	}
 	// Handle relationship foreign key: user
 	if update.UserID != nil {
 		paramNum++
@@ -1216,7 +1314,7 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	query += ` RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 
 	// Execute query
 	var row pgx.Row
@@ -1231,6 +1329,7 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -1247,6 +1346,8 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 		&result.PasswordChangedAt,
 
 		&tempDisabledAt,
+
+		&tempPendingAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -1259,6 +1360,10 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	if tempDisabledAt != nil {
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.DisabledAt = tempDisabledAt
+	}
+	if tempPendingAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.PendingAt = tempPendingAt
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1294,6 +1399,16 @@ func (r *UserCredentialRepository) UpdateMany(ctx context.Context, filter *UserC
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.DisabledAt))
+	}
+	if update.PendingAt != nil && update.PendingAtSetNull {
+		return 0, fmt.Errorf("pending_at cannot be updated with both value and null assignment")
+	}
+	if update.PendingAtSetNull {
+		setClauses = append(setClauses, `pending_at = NULL`)
+	} else if update.PendingAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`pending_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PendingAt))
 	}
 	// Handle relationship foreign key: user
 	if update.UserID != nil {

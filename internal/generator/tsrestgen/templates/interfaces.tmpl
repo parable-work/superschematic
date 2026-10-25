@@ -6,6 +6,10 @@
 // success envelope by the router) or an OperationResult to choose the status.
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
+{{- if .HasDownloads }}
+// An operation whose result is a FileDownload (D81) returns the file, its
+// body and filename, which the router answers in place of the envelope.
+{{- end }}
 {{- if .HasPages }}
 // A @paginated operation (D60) takes the page asked for as args.page and
 // returns a Page, {items, next}, next null after the last page:
@@ -16,7 +20,7 @@
 // serves.
 {{- end }}
 
-import type { OperationResult, {{ if .HasPages }}Page, PageRequest, {{ end }}RequestContext } from '{{ .RuntimePackage }}';
+import type { {{ if .HasDownloads }}FileDownload, {{ end }}OperationResult, {{ if .HasPages }}Page, PageRequest, {{ end }}RequestContext } from '{{ .RuntimePackage }}';
 {{- if .WebhookProviders }}
 import type { WebhookVerifier } from '{{ .RuntimePackage }}/hono';
 {{- end }}
@@ -54,7 +58,11 @@ export interface {{ .ArgsTypeName }} {
   {{ .TSName }}{{ if not .Required }}?{{ end }}: {{ .TSType }};
 {{- end }}
 {{- if .HasInput }}
-  input{{ if not .InputRequired }}?{{ end }}: {{ .InputType }};
+  input{{ if not .InputRequired }}?{{ end }}: {{ .InputArgType }};
+{{- end }}
+{{- if .Uploads }}
+  /** The input's files (D81), each within its field's limits; an optional one the caller left out is absent. */
+  files: {{ .FilesArgType }};
 {{- end }}
 {{- if .Page }}
 {{- if .Page.Sort }}
@@ -77,7 +85,7 @@ export interface {{ .InterfaceName }} {
    *{{ if . }} {{ jsdoc . }}{{ end }}
 {{- end }}
    */
-  {{ .Name }}(args: {{ .ArgsTypeName }}, ctx: RequestContext): Promise<OperationOutcome<{{ .OutputType }}>>;
+  {{ .Name }}(args: {{ .ArgsTypeName }}, ctx: RequestContext): Promise<{{ if .Download }}FileDownload{{ else }}OperationOutcome<{{ .OutputType }}>{{ end }}>;
 {{- end }}
 }
 {{- end }}

@@ -21,6 +21,12 @@ import {
 } from './problem.js';
 import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
+import { downloadResponse } from './download.js';
+import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
+
+// A built-in WebhookVerifier: a JWT carrying the body's SHA-256 (D81).
+export { INVALID_SIGNATURE_CODE, jwtBodyHashVerifier } from './webhook.js';
+export type { JwtBodyHashVerifierOptions, JwtWebhookAlgorithm, WebhookJwk, WebhookKeyLookup } from './webhook.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls
@@ -57,8 +63,11 @@ the decoding and the implementation, as the Go router's covers its handler:
 it answers 504 when they have not produced a response in time, and aborts
 ctx.signal so an implementation that honours it stops early.
 
-Streaming, multipart and file uploads are not modelled by this adapter; an
-operation that needs them is a manual route.
+An operation whose input has file parts (D81) reads a multipart/form-data
+body (upload.ts), capped by its files' limits beside the JSON cap unless
+it declares @bodyLimit, and one whose result is a FileDownload answers the
+file (download.ts). A streaming request, or a response no FileDownload
+describes, is a manual route.
 */
 
 /** Default JSON body cap for operations without @bodyLimit: 1 MiB. The Go router has no default; only @bodyLimit caps its routes. */
@@ -126,6 +135,8 @@ export interface DecodedRequest {
   readonly body: Readonly<Record<string, unknown>>;
   /** The parsed input type, undefined when the operation declares none or the body was optional and absent. */
   readonly input: unknown;
+  /** The files of a multipart input (D81), by field name; absent for an operation without file parts. */
+  readonly files?: UploadedFiles;
 }
 
 export type OperationHandler = (ctx: RequestContext, request: DecodedRequest) => Promise<unknown>;
@@ -396,6 +407,14 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
   if (!hasBody(spec)) {
     return { path, query, body: {}, input: undefined };
   }
+  if (spec.uploads) {
+    // A multipart input (D81): its files, then its other fields.
+    try {
+      return { path, query, body: {}, ...(await decodeUploads(ctx, spec)) };
+    } catch (error) {
+      throw error instanceof HttpProblem ? error : inputRefusal(error);
+    }
+  }
   const raw = await parseJsonBody(ctx.raw);
   let input: unknown;
   if (spec.input) {
@@ -456,6 +475,7 @@ function listOfListsResult(data: unknown): unknown {
 
 function successResponse(result: unknown, requestId: string, spec: OperationSpec): Response {
   if (result instanceof Response) return result;
+  if (spec.download) return downloadResponse(result, spec.download, requestId);
   const shape = spec.outputIsArrayOfArrays ? listOfListsResult : (data: unknown) => data;
   if (result instanceof OperationResult) {
     return envelopeResponse(shape(result.data), requestId, result.status, result.headers);
@@ -580,7 +600,10 @@ export function mountOperation<E extends Env>(
   options: RouterRuntimeOptions = {},
   mount: MountOptions = {}
 ): void {
-  const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  const jsonLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  // An input with file parts (D81) is capped by its files' limits beside the JSON cap.
+  const limitBytes =
+    mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? (spec.uploads ? uploadBodyLimitBytes(spec.uploads, jsonLimitBytes) : jsonLimitBytes);
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),

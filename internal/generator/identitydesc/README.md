@@ -40,7 +40,8 @@ The descriptor is version 1.
     "table": "user_credential",
     "columns": {
       "id": "id", "user": "user_id", "passwordHash": "password_hash",
-      "passwordChangedAt": "password_changed_at", "disabledAt": "disabled_at"
+      "passwordChangedAt": "password_changed_at", "disabledAt": "disabled_at",
+      "pendingAt": "pending_at"
     }
   },
   "role": {
@@ -70,7 +71,7 @@ The descriptor is version 1.
 | `session.table` | The `Session` table the loader adds: one row per session. |
 | `session.columns` | `id`, the row's key. `user`, the session's user. `tokenHash`, unique: the lowercase hexadecimal SHA-256 of the session's token (`Crypto.SHA256`); the token itself is never stored. `createdAt` and `expiresAt`. `lastSeenAt`, nullable: when a request last used the session. `revokedAt`, null until logout or a revocation ends the session. |
 | `credential.table` | The `UserCredential` table the loader adds: a user's password, apart from the user row. |
-| `credential.columns` | `id`, the row's key. `user`, unique, so a user has at most one. `passwordHash`, the password's PHC string (`$argon2id$v=19$...`). `passwordChangedAt`. `disabledAt`, null unless the user is disabled. |
+| `credential.columns` | `id`, the row's key. `user`, unique, so a user has at most one. `passwordHash`, the password's PHC string (`$argon2id$v=19$...`). `passwordChangedAt`. `disabledAt`, null unless the user is disabled. `pendingAt`, null unless the user registered under `registration: "approval"` and waits for an administrator (D81). |
 | `role` | Absent when the schema has no `UserRole` table, and `roleGrant` with it. `type` and `table` name the type with the `UserRole` trait and its table. |
 | `role.columns` | `key`, the role table's key column. `name`, the role's unique name. `permissions`, a list of permission strings (`TEXT[]` in Postgres). |
 | `role.keyScalar` | The role table's key field's type, as `user.keyScalar` is the user table's. A role's id is a value of it. |

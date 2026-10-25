@@ -38,8 +38,8 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	if len(output.Endpoints) != 1 || output.Endpoints[0].Name != "greet" || !slices.Equal(output.Namespaces, []string{"greeting"}) {
 		t.Errorf("endpoints %+v, namespaces %v; want greet alone", output.Endpoints, output.Namespaces)
 	}
-	if len(output.IdentityEndpoints) != 18 || output.Identity == nil || output.Identity.AuthDB != "fixture-user-model-db" {
-		t.Fatalf("%d identity endpoints, identity %+v; want the 18 of the user model's routes over fixture-user-model-db", len(output.IdentityEndpoints), output.Identity)
+	if len(output.IdentityEndpoints) != 19 || output.Identity == nil || output.Identity.AuthDB != "fixture-user-model-db" {
+		t.Fatalf("%d identity endpoints, identity %+v; want the 19 of the user model's routes over fixture-user-model-db", len(output.IdentityEndpoints), output.Identity)
 	}
 	generated := writeGoldenAPI(t, userRoutesAPI, output)
 	for _, absent := range []string{"login", "change_password", "account", "Login"} {
@@ -86,7 +86,7 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 	}
 
 	alone := generateRustAPI(t, userRoutesAPI, false, "", nil, routesOnly)
-	if len(alone.Endpoints) != 0 || len(alone.Namespaces) != 0 || len(alone.IdentityEndpoints) != 18 || !alone.HasAuth || alone.Identity == nil {
+	if len(alone.Endpoints) != 0 || len(alone.Namespaces) != 0 || len(alone.IdentityEndpoints) != 19 || !alone.HasAuth || alone.Identity == nil {
 		t.Errorf("the route sets alone: endpoints %+v, namespaces %v, %d identity endpoints, HasAuth %v, identity %+v", alone.Endpoints, alone.Namespaces, len(alone.IdentityEndpoints), alone.HasAuth, alone.Identity)
 	}
 }
@@ -249,6 +249,7 @@ use API_CRATE::runtime::identity::{
 };
 use API_CRATE::runtime::{ApiError, RequestContext};
 use API_CRATE::{build_router, identity, types, GreetingImplementation, Implementations};
+use SDK_CRATE::namespaces::account_admin::ListUsersInput;
 use SDK_CRATE::{ClientConfig, FixtureUserRoutesApiSdk};
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
@@ -399,15 +400,25 @@ async fn bearer_session(implementations: Implementations) {
     let err = anonymous.greeting.greet(None).await.unwrap_err();
     assert_eq!((err.status_code(), err.error_code()), (Some(401), Some("unauthorized")), "{err}");
 
-    // register signs the new user in with a bearer session, their login in
-    // the scalar's one case.
+    // register creates the new user, their login in the scalar's one case,
+    // pending an administrator's approval with no session (D81): login
+    // refuses them as pending until the administrator approves them.
     let registered = anonymous.account.register(register("Ada@Example.com", "Ada"), None).await.unwrap();
     assert_eq!(registered.user.login, "ada@example.com");
-    let ada = sdk(&base_url, Some(registered.token.expect("a bearer session's token")));
+    assert!(registered.pending && registered.token.is_none(), "{registered:?}");
+    let err = anonymous.account.login(login("ada@example.com", "correct horse"), None).await.unwrap_err();
+    assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("pending_approval")), "{err}");
+    let admin = sdk(&base_url, anonymous.account.login(login(ADMIN, ADMIN_PASSWORD), None).await.unwrap().token);
+    let pending = admin.account_admin.list_users(ListUsersInput { pending: Some(true) }, None).await.unwrap();
+    assert_eq!(pending.iter().map(|user| user.login.as_str()).collect::<Vec<_>>(), ["ada@example.com"]);
+    let approved = admin.account_admin.approve_user(registered.user.id, None).await.unwrap();
+    assert!(!approved.pending, "{approved:?}");
+    let ada = sdk(&base_url, anonymous.account.login(login("ada@example.com", "correct horse"), None).await.unwrap().token);
 
     let me = ada.account.me(None).await.unwrap();
     assert_eq!((me.user.login.as_str(), me.user.name.as_str()), ("ada@example.com", "Ada"));
-    assert!(me.roles.is_empty() && me.permissions.is_empty(), "{me:?}");
+    assert_eq!(me.roles.iter().map(|role| role.name.as_str()).collect::<Vec<_>>(), ["member"]);
+    assert!(me.permissions.is_empty(), "{me:?}");
     assert_eq!(ada.greeting.greet(None).await.unwrap().message, "Hello, Ada");
     let capabilities = ada.account.capabilities(None).await.unwrap().operations;
     for (operation, admitted) in [
@@ -455,9 +466,10 @@ async fn grant_rule(implementations: Implementations) {
     let admin = sdk(&base_url, anonymous.account.login(login(ADMIN, ADMIN_PASSWORD), None).await.unwrap().token);
     let registered = anonymous.account.register(register("member@example.com", "Member"), None).await.unwrap();
     let member_id = registered.user.id;
-    let member = sdk(&base_url, registered.token);
+    admin.account_admin.approve_user(member_id, None).await.unwrap();
+    let member = sdk(&base_url, anonymous.account.login(login("member@example.com", "correct horse"), None).await.unwrap().token);
 
-    let err = member.account_admin.list_users(None).await.unwrap_err();
+    let err = member.account_admin.list_users(ListUsersInput { pending: None }, None).await.unwrap_err();
     assert_eq!((err.status_code(), err.error_code()), (Some(403), Some("forbidden")), "{err}");
 
     // The administrator holds identity, which covers identity.users.read
@@ -471,8 +483,8 @@ async fn grant_rule(implementations: Implementations) {
 
     // A grant reaches the member's next request.
     let granted = admin.account_admin.grant_role(member_id, auditor.id, None).await.unwrap();
-    assert_eq!(granted.roles.iter().map(|role| role.name.as_str()).collect::<Vec<_>>(), ["auditor"]);
-    let users = member.account_admin.list_users(None).await.unwrap();
+    assert_eq!(granted.roles.iter().map(|role| role.name.as_str()).collect::<Vec<_>>(), ["auditor", "member"]);
+    let users = member.account_admin.list_users(ListUsersInput { pending: None }, None).await.unwrap();
     assert_eq!(users.len(), 2, "{users:?}");
     let capabilities = member.account.capabilities(None).await.unwrap().operations;
     assert_eq!(capabilities.get("AccountAdminListUsersHandler"), Some(&true), "{capabilities:?}");

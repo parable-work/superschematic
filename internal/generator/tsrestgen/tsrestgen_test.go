@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -275,12 +276,14 @@ func TestGenerateFixtureAPIShape(t *testing.T) {
 	}
 }
 
-// A file-upload operation has no multipart adapter in the TypeScript router;
-// the generator refuses it unless the service registers the route by hand.
-func TestGenerateRefusesFileUploadWithoutManualRegistration(t *testing.T) {
+// TestGenerateMountsAnUploadScalarField: a field of a file-upload scalar
+// is a file part of the route, as a FileUpload field is (D81): the router
+// reads the multipart body, so the operation is no manual route, and its
+// part takes the scalar's limits.
+func TestGenerateMountsAnUploadScalarField(t *testing.T) {
 	apiSchema, dbSchema := loadFixtureAPI(t)
 	fileScalar := "Upload.File"
-	apiSchema.Scalars[fileScalar] = &ir.ScalarDef{Name: fileScalar, LanguagePrimitive: ir.LanguageString, FileUpload: &ir.FileUploadConfig{}}
+	apiSchema.Scalars[fileScalar] = &ir.ScalarDef{Name: fileScalar, LanguagePrimitive: ir.LanguageString, FileUpload: &ir.FileUploadConfig{AllowedTypes: []string{"image/png"}}}
 	apiSchema.Types["UploadInput"] = &ir.TypeDef{
 		Name: "UploadInput",
 		Role: ir.RoleAPIInput,
@@ -301,11 +304,19 @@ func TestGenerateRefusesFileUploadWithoutManualRegistration(t *testing.T) {
 			Arguments:  []*ir.ArgumentDef{{Name: "input", TypeRef: ir.TypeRef{Name: "UploadInput"}, Required: true}},
 		})
 	}
-	_, err := Generate(apiSchema, extractEndpoints(t, apiSchema, dbSchema), Options{
+	output, err := Generate(apiSchema, extractEndpoints(t, apiSchema, dbSchema), Options{
 		SchemaName:   "fixture-api",
 		Dependencies: map[string]*ir.Schema{"fixture-db": dbSchema},
 	})
-	if err == nil || !strings.Contains(err.Error(), "@manualRouteRegistration") {
-		t.Fatalf("expected a manual-registration refusal, got %v", err)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	upload, ok := endpointsByName(output)["uploadLogo"]
+	if !ok || upload.ManualRouteRegistration || len(output.ManualEndpoints) != 1 {
+		t.Fatalf("uploadLogo = %+v, manual endpoints %+v", upload, output.ManualEndpoints)
+	}
+	want := []UploadInfo{{Name: "file", TSName: "file", MaxBytes: ir.DefaultUploadMaxBytes, ContentTypes: []string{"image/png"}, Extensions: []string{}}}
+	if !reflect.DeepEqual(upload.Uploads, want) || upload.FilesArgType() != "{ file?: File }" {
+		t.Errorf("uploads = %+v (%s), want %+v", upload.Uploads, upload.FilesArgType(), want)
 	}
 }

@@ -26,7 +26,8 @@ service's config lists, and regenerates it on every change:
   Go, TypeScript, Python and Rust
 - the HTTP server: routing, argument decoding, validation, permission
   checks, rate, body and time limits, pagination, webhook signature checks
-- OpenAPI, client SDKs in four languages, and MCP tool documents
+- OpenAPI, client SDKs in four languages, MCP tool documents, and on a
+  TypeScript API an MCP endpoint that serves the tools
 - environment variable loaders, and the server entrypoints, Dockerfiles
   and CI of a stack
 
@@ -80,10 +81,11 @@ breaks your code, the type checker of each language points at the line.
 | A validated request body | an argument whose type is a class with `Validate` fields | a 400 with every failure at once, keyed by path, before your code runs | nothing | [API routes](/superschematic/guides/api-routes/#arguments) |
 | Query parameters | `QueryParam<T>` arguments | their decoding and checks | nothing | [API routes](/superschematic/guides/api-routes/#arguments) |
 | Paged, sorted, searchable lists | `@paginated`, a `SortBy<Item, [...]>` and a `SearchQuery` argument | `cursor` and `limit`, `{ items, next }`, cursors that hold the sort | the query for one page | [API routes](/superschematic/guides/api-routes/#pages) |
+| Files in and out | a `FileUpload<C>` field of an input type; a `FileDownload<C>` result | the multipart body's reading and each file's checks, the file's `Content-Type` and `Content-Disposition`, OpenAPI, SDK methods that take a `File` and return a `Blob` | what the file holds | [API routes](/superschematic/guides/api-routes/#files) |
 | A field that names an item of another list | `RefersTo<T, Target>` | the operation that lists the targets, recorded for the documents, forms and pickers | nothing | [References and search](/superschematic/reference/references-and-search/) |
 | Errors with the right status | nothing | `NotFoundError`, `BadRequestError`, `ConflictError` and the rest | returning one | [API routes](/superschematic/guides/api-routes/#errors) |
 | Rate, body and time limits | `@rateLimit`, `@bodyLimit`, `@timeout` | the limits, in every server | nothing | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
-| A webhook a third party calls | `@webhook` and `@hmacVerified({ provider })` | the signature check before anything else | the handler | [API routes](/superschematic/guides/api-routes/#webhooks) |
+| A webhook a third party calls | `@webhook` and `@hmacVerified({ provider })` | the signature check before anything else | the handler, and the provider's verifier unless it signs with a JWT carrying the body's hash, as Plaid does, which every runtime checks built in | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | The server in another language | `outputs.api.language`: `GO`, `TYPESCRIPT` or `RUST` | the same routes and checks in that language | the implementation in it | [API routes](/superschematic/guides/api-routes/#the-typescript-server) |
 | Settings and secrets for a server | a class with `@envVars`, fields `Secret<T>` where secret | a typed loader and `values-schema.json` | nothing | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |
 
@@ -113,7 +115,7 @@ breaks your code, the type checker of each language points at the line.
 | A private file bucket | a Bucket service, listed in an API config's `buckets` | the bucket in the API's `Deps`, signed upload and download URLs | which object to sign for | [Buckets](/superschematic/guides/buckets/#declare-a-bucket) |
 | A static front end | a Site service | the config, served in each environment, that holds each API's address, and CORS on each API it calls | the front end | [Static sites](/superschematic/guides/static-sites/#declare-a-site) |
 | Clients in Go, TypeScript, Python, Rust | a line per language in `outputs.sdk` | an SDK with the server's checks, pages, errors and retries | nothing | [Client SDKs](/superschematic/guides/client-sdks/#generate-them) |
-| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs | nothing | [MCP tools](/superschematic/reference/mcp-tools/) |
+| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript API's endpoint at `POST /api/mcp` | nothing | [MCP tools](/superschematic/reference/mcp-tools/) |
 | Labels and controls for forms | `@docs`, `@purpose`, `@display`, `@uiControl` | the metadata a schema form reads | nothing | [Documentation](/superschematic/reference/documentation/) |
 
 ## Running and deploying

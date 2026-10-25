@@ -241,6 +241,7 @@ interface Names {
   passwordHash: string;
   passwordChangedAt: string;
   disabledAt: string;
+  pendingAt: string;
   role: string;
   roleKey: string;
   roleName: string;
@@ -303,6 +304,7 @@ export class SqlIdentityStore implements IdentityStore {
       passwordHash: quote(c.columns.passwordHash),
       passwordChangedAt: quote(c.columns.passwordChangedAt),
       disabledAt: quote(c.columns.disabledAt),
+      pendingAt: quote(c.columns.pendingAt),
       role: r ? quote(r.table) : '',
       roleKey: r ? quote(r.columns.key) : '',
       roleName: r ? quote(r.columns.name) : '',
@@ -354,12 +356,12 @@ export class SqlIdentityStore implements IdentityStore {
     return (yield* rows(`SELECT 1 AS "one" FROM ${table} WHERE ${column} = ?`, [key])).length > 0;
   }
 
-  /** Selects a user's key, login, name, disabledAt and password hash, the credential joined when there is one. */
+  /** Selects a user's key, login, name, disabledAt, pendingAt and password hash, the credential joined when there is one. */
   private userSelect(): string {
     const t = this.t;
     return (
       `SELECT u.${t.userKey} AS "user_key", u.${t.userLogin} AS "user_login", u.${t.userName} AS "user_name", ` +
-      `c.${t.disabledAt} AS "disabled_at", c.${t.passwordHash} AS "password_hash" ` +
+      `c.${t.disabledAt} AS "disabled_at", c.${t.pendingAt} AS "pending_at", c.${t.passwordHash} AS "password_hash" ` +
       `FROM ${t.user} u LEFT JOIN ${t.credential} c ON c.${t.credentialUser} = u.${t.userKey}`
     );
   }
@@ -371,6 +373,7 @@ export class SqlIdentityStore implements IdentityStore {
         login: textOf(row.user_login),
         name: textOf(row.user_name),
         disabled: row.disabled_at !== null && row.disabled_at !== undefined,
+        pending: row.pending_at !== null && row.pending_at !== undefined,
         roles: [],
       },
       passwordHash: textOf(row.password_hash),
@@ -457,6 +460,8 @@ export class SqlIdentityStore implements IdentityStore {
         );
       }
     }
+    const roles = user.roles ?? [];
+    if ((roles.length > 0 || user.first) && !this.hasRoles()) return Promise.reject(this.noRoles());
     const store = this;
     const t = this.t;
     let columns = t.userLogin;
@@ -467,19 +472,77 @@ export class SqlIdentityStore implements IdentityStore {
       values += ', ?';
       params.push(name);
     }
-    return this.run(function* () {
-      const inserted = yield* rows(
-        `INSERT INTO ${t.user} (${columns}) VALUES (${values}) ON CONFLICT (${t.userLogin}) DO NOTHING RETURNING ${t.userKey} AS "user_key"`,
-        params
+    const create = (candidate: boolean) =>
+      this.run(function* () {
+        // Two first users at once make one administrator, as two
+        // bootstraps do (D81). On Postgres the lock conflicts with itself
+        // and with every write to the grants, so a second waits for the
+        // first to commit and then finds its grant; a SQLite transaction
+        // holds the database's one write lock from its BEGIN IMMEDIATE.
+        if (candidate && store.dialect === 'postgres') yield* exec(`LOCK TABLE ${t.grant} IN SHARE ROW EXCLUSIVE MODE`);
+        const inserted = yield* rows(
+          `INSERT INTO ${t.user} (${columns}) VALUES (${values}) ON CONFLICT (${t.userLogin}) DO NOTHING RETURNING ${t.userKey} AS "user_key"`,
+          params
+        );
+        if (inserted.length === 0) throw new IdentityStoreError('login_taken', 'the login is taken');
+        const key = textOf(inserted[0]!.user_key);
+        let pending = user.pending === true;
+        yield* exec(
+          `INSERT INTO ${t.credential} (${t.credentialUser}, ${t.passwordHash}, ${t.passwordChangedAt}, ${t.pendingAt}) VALUES (?, ?, ?, ?)`,
+          [key, user.passwordHash, timeParam(user.at), pending ? timeParam(user.at) : null]
+        );
+        const granted: { name: string; permissions: readonly string[] }[] = roles.map(role => ({ name: role, permissions: [] }));
+        if (candidate && user.first && (yield* store.noGrant())) {
+          if (pending) {
+            yield* exec(`UPDATE ${t.credential} SET ${t.pendingAt} = NULL WHERE ${t.credentialUser} = ?`, [key]);
+            pending = false;
+          }
+          granted.push({ name: user.first.role, permissions: user.first.permissions });
+        }
+        const held = yield* store.grantNewRoles(key, granted, user.at);
+        return { id: store.userKey.toWire(key), login, name, disabled: false, pending, roles: held };
+      }, true);
+    // A grant seen now rules out the first administrator without the lock,
+    // so only the registrations of an empty database take it.
+    if (!user.first) return create(false);
+    return this.run(() => this.noGrant()).then(create);
+  }
+
+  /** Whether no role grant exists. */
+  private *noGrant(): SqlWork<boolean> {
+    return (yield* rows(`SELECT 1 AS "one" FROM ${this.t.grant} LIMIT 1`)).length === 0;
+  }
+
+  /** Grants the user with the database key user each role, creating the ones no role has the name of, and returns the roles by name. */
+  private *grantNewRoles(user: string, roles: readonly { name: string; permissions: readonly string[] }[], at: Date): SqlWork<StoredRole[]> {
+    const t = this.t;
+    const held: StoredRole[] = [];
+    for (const role of roles) {
+      yield* exec(
+        `INSERT INTO ${t.role} (${t.roleName}, ${t.rolePermissions}) VALUES (?, ${this.permissionsWrite()}) ON CONFLICT (${t.roleName}) DO NOTHING`,
+        [role.name, JSON.stringify(role.permissions)]
       );
-      if (inserted.length === 0) throw new IdentityStoreError('login_taken', 'the login is taken');
-      const key = textOf(inserted[0]!.user_key);
-      yield* exec(`INSERT INTO ${t.credential} (${t.credentialUser}, ${t.passwordHash}, ${t.passwordChangedAt}) VALUES (?, ?, ?)`, [
-        key,
-        user.passwordHash,
-        timeParam(user.at),
-      ]);
-      return { id: store.userKey.toWire(key), login, name, disabled: false, roles: [] };
+      const found = yield* this.queryRoles(`${this.roleSelect()} WHERE r.${t.roleName} = ?`, [role.name], false);
+      if (found.length === 0) throw new Error(`identity: role ${role.name} is missing once created`);
+      const stored = found[0]!.role;
+      yield* exec(
+        `INSERT INTO ${t.grant} (${t.grantUser}, ${t.grantRole}, ${t.grantedAt}) VALUES (?, ?, ?) ON CONFLICT (${t.grantUser}, ${t.grantRole}) DO NOTHING`,
+        [user, this.roleKey.toDB(stored.id)!, timeParam(at)]
+      );
+      if (!held.some(r => r.name === stored.name)) held.push(stored);
+    }
+    return sortRoles(held);
+  }
+
+  approveUser(userId: string): Promise<void> {
+    const key = this.userKey.toDB(userId);
+    if (key === undefined) return Promise.reject(this.notFound('user'));
+    const store = this;
+    const t = this.t;
+    return this.run(function* () {
+      if (!(yield* store.exists(t.user, t.userKey, key))) throw store.notFound('user');
+      const changed = yield* exec(`UPDATE ${t.credential} SET ${t.pendingAt} = NULL WHERE ${t.credentialUser} = ? AND ${t.pendingAt} IS NOT NULL`, [key]);
+      if (changed === 0) throw new IdentityStoreError('not_pending', 'the user is not pending');
     }, true);
   }
 
@@ -564,7 +627,7 @@ export class SqlIdentityStore implements IdentityStore {
       const found = yield* rows(
         `SELECT s.${t.sessionId} AS "session_id", s.${t.sessionUser} AS "user_key", s.${t.createdAt} AS "created_at", s.${t.expiresAt} AS "expires_at", ` +
           `s.${t.lastSeenAt} AS "last_seen_at", s.${t.revokedAt} AS "revoked_at", u.${t.userLogin} AS "user_login", u.${t.userName} AS "user_name", ` +
-          `c.${t.disabledAt} AS "disabled_at" ` +
+          `c.${t.disabledAt} AS "disabled_at", c.${t.pendingAt} AS "pending_at" ` +
           `FROM ${t.session} s JOIN ${t.user} u ON u.${t.userKey} = s.${t.sessionUser} ` +
           `LEFT JOIN ${t.credential} c ON c.${t.credentialUser} = s.${t.sessionUser} ` +
           `WHERE s.${t.tokenHash} = ?`,
@@ -587,6 +650,7 @@ export class SqlIdentityStore implements IdentityStore {
           login: textOf(row.user_login),
           name: textOf(row.user_name),
           disabled: row.disabled_at !== null && row.disabled_at !== undefined,
+          pending: row.pending_at !== null && row.pending_at !== undefined,
           roles: [],
         },
       };

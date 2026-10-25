@@ -5,6 +5,15 @@
 // operation table below is the schema's declaration of paths, parameters,
 // strict body parsers, auth requirements, and the @bodyLimit, @rateLimit
 // and @timeout directives, applied by {{ .RuntimePackage }}.
+{{- if .HasUploads }}
+// An input with file parts (D81) carries them as uploads: the route reads
+// the multipart body, checks each file against its field, and hands the
+// method the files in args.files.
+{{- end }}
+{{- if .HasDownloadsAny }}
+// A FileDownload result (D81) carries its download: the route answers the
+// file with its Content-Type and Content-Disposition.
+{{- end }}
 {{- if .HasPages }}
 // A @paginated operation's page (D60) carries its limits: the route reads
 // the request's cursor and limit with readPage after the query parameters,
@@ -46,6 +55,10 @@ import {
 {{- end }}
   type RouterRuntimeOptions,
 } from '{{ .RuntimePackage }}/hono';
+import { {{ if .MCP }}DEFAULT_OPENAPI_VERSION, {{ end }}mountOpenAPI, type OpenAPIOptions } from '{{ .RuntimePackage }}/openapi';
+{{- if .MCP }}
+import { {{ if .Identity }}MCP_PATH, {{ end }}mountMcp, type McpOptions } from '{{ .RuntimePackage }}/mcp';
+{{- end }}
 {{- if .Identity }}
 import {
   IdentityService,
@@ -56,6 +69,9 @@ import {
   identityRouterOptions,
   routesOf,
   type IdentityServiceOptions,
+{{- if .Identity.Registration }}
+  type RegistrationOptions,
+{{- end }}
 } from '{{ .RuntimePackage }}/identity';
 {{- end }}
 {{- if .ScalarImports }}
@@ -80,6 +96,10 @@ import {
 } from '{{ .Package }}/validators';
 {{- end }}
 import type { Implementations } from './interfaces';
+{{- if .MCP }}
+import { mcpTools } from './mcp';
+{{- end }}
+import { openAPIJSON } from './openapi';
 
 export type OperationName =
 {{- range .Endpoints }}
@@ -99,7 +119,13 @@ export const operationSpecs = {
     queryParams: [{{ range $i, $p := .QueryParams }}{{ if $i }}, {{ end }}{{ $p.SpecLiteral }}{{ end }}],
     bodyParams: [{{ range $i, $p := .BodyParams }}{{ if $i }}, {{ end }}{{ $p.SpecLiteral }}{{ end }}],
 {{- if .HasInput }}
-    input: { parse: (value: unknown) => {{ .InputParser }}({{ .InputValidator }}(value)), required: {{ .InputRequired }} },
+    input: { parse: (value: unknown) => {{ .InputParser }}({{ .InputValidator }}(value)), {{ if .Uploads }}fromJSON: {{ .InputParser }}, {{ end }}required: {{ .InputRequired }} },
+{{- end }}
+{{- if .Uploads }}
+    uploads: {{ .UploadsLiteral }},
+{{- end }}
+{{- if .Download }}
+    download: {{ .DownloadLiteral }},
 {{- end }}
 {{- if .Page }}
     page: {{ .PageSpecLiteral }},
@@ -129,7 +155,7 @@ export const operationSpecs = {
 } as const satisfies Record<OperationName, OperationSpec{{ if .HasPages }} & { readonly page?: PageSpec }{{ end }}>;
 
 {{ if .Identity -}}
-export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'> {
+export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
   /**
    * The identity service (D50), which authenticates every route: the
    * principal is the user, with their roles' permissions. Build it with
@@ -140,7 +166,7 @@ export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOp
   authenticate?: never;
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
 {{- else -}}
-export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions {
+export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions, OpenAPIOptions {
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
 {{- end }}
   bodyLimits?: Partial<Record<OperationName, number>>;
@@ -148,6 +174,14 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
   rateLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation timeouts in seconds; overrides the schema's @timeout (0 disables). */
   timeouts?: Partial<Record<OperationName, number>>;
+{{- if .MCP }}
+  /**
+   * The MCP endpoint (outputs.api.mcp, D81): its server info, this API's
+   * name and its served OpenAPI version unless given, its instructions, and
+   * its own rate limit and timeout. Each tools/call keeps its route's.
+   */
+  mcp?: McpOptions;
+{{- end }}
 {{- if .HasManualRoutes }}
   /**
    * Handlers for the @manualRouteRegistration operations. The router mounts
@@ -175,10 +209,19 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
  *   node:sqlite database (bunSqlite for bun:sqlite).
  * - config: the identity config's JSON value, or what parseIdentityConfig
  *   returns for it; absent is every default.
+{{- if .Identity.Registration }}
+ *
+ * register admits users as identityRegistration says.
+{{- end }}
  */
-export function identityService(options: Omit<IdentityServiceOptions, 'routes'>): IdentityService {
-  return new IdentityService({ ...options, routes: routesOf(operationSpecs) });
+export function identityService(options: Omit<IdentityServiceOptions, 'routes'{{ if .Identity.Registration }} | 'registration'{{ end }}>): IdentityService {
+  return new IdentityService({ ...options, routes: routesOf(operationSpecs){{ if .Identity.Registration }}, registration: identityRegistration{{ end }} });
 }
+{{- if .Identity.Registration }}
+
+/** How register admits users, as the API's @userSessions declares it (D81). */
+export const identityRegistration: RegistrationOptions = {{ .Identity.Registration }};
+{{- end }}
 
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
@@ -224,11 +267,17 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   }
 {{- end }}
   const router = new Hono<E>();
+  // The OpenAPI document at GET /api/openapi.json and its page at GET
+  // /api/docs, as the Go and Rust servers serve them (D81).
+  mountOpenAPI(router, openAPIJSON, {{ tsString .SchemaName }}, options);
 {{- if .Identity }}
   // The trusted origins' CORS, on this API's routes alone, registered
   // before each route's handler.
   const cors = identityCorsRoutes(router, runtime.identity);
   for (const spec of Object.values(operationSpecs)) cors(spec);
+{{- if .MCP }}
+  cors({ method: 'POST', path: MCP_PATH });
+{{- end }}
 {{- end }}
 {{- range .Endpoints }}
 {{- if .IdentityOperation }}
@@ -304,7 +353,10 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
           {{ .TSName }}: request.body[{{ tsString .Name }}] as {{ .TSType }}{{ if not .Required }} | undefined{{ end }},
 {{- end }}
 {{- if .HasInput }}
-          input: request.input as {{ .InputType }}{{ if not .InputRequired }} | undefined{{ end }},
+          input: request.input as {{ .InputArgType }}{{ if not .InputRequired }} | undefined{{ end }},
+{{- end }}
+{{- if .Uploads }}
+          files: request.files as {{ .FilesArgType }},
 {{- end }}
 {{- if .Page }}
           page: readPage(ctx.query, operationSpecs.{{ .Name }}.page),
@@ -324,6 +376,19 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     }
   );
 {{- end }}
+{{- end }}
+{{- if .MCP }}
+  // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
+  // POST /api/mcp, behind the routes' auth gate, each call run in process
+  // through its operation's route.
+  mountMcp(
+    router,
+    operationSpecs,
+    mcpTools,
+    {{ $runtime }},
+    { api: {{ tsString .SchemaName }}, version: options.openAPIVersion || DEFAULT_OPENAPI_VERSION, requiresAuth: {{ .MCP.RequiresAuth }} },
+    options.mcp
+  );
 {{- end }}
   return router;
 }

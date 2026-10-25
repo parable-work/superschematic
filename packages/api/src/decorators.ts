@@ -255,19 +255,48 @@ export function source(_target: unknown): ClassDecorator {
  * `login`, true by default, adds login, logout and changePassword; false
  * leaves me and capabilities, for an API whose users sign in through
  * another API of the same authDb. `register`, false by default, adds
- * register, which anyone may call, and needs the login.
+ * register, which anyone may call, and needs the login; the
+ * RegistrationConfig members shape it.
  */
 export type UserSessionsConfig =
   | {
       readonly path?: string;
       readonly login?: true;
-      readonly register?: boolean;
+      readonly register?: false;
     }
+  | ({
+      readonly path?: string;
+      readonly login?: true;
+      readonly register: true;
+    } & RegistrationConfig)
   | {
       readonly path?: string;
       readonly login: false;
       readonly register?: false;
     };
+
+/**
+ * How register admits a user (D81).
+ *
+ * - `registration`: "open", the default, signs the user in. "approval"
+ *   creates them pending: register answers 202 with no session, and login
+ *   refuses them with 403 pending_approval until an administrator calls
+ *   approveUser.
+ * - `defaultRoles`: the roles each new user holds, by name, each created
+ *   with no permissions when no role has the name. Under approval they
+ *   take effect at approval.
+ * - `firstUser`: the registration that finds no role grant, as `identity
+ *   bootstrap` would, makes the database's first administrator, active
+ *   even under approval, holding `role`, created with `permissions` when
+ *   no role has the name, beside the default roles. Two at once make one.
+ *
+ * defaultRoles and firstUser need a UserRole table in the authDb.
+ */
+export type RegistrationConfig = {
+  readonly registration?: 'open' | 'approval';
+  readonly defaultRoles?: readonly string[];
+  readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
+};
 
 /** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
 export type UserAdministrationConfig = {

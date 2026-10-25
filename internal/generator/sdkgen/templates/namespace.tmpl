@@ -13,6 +13,9 @@ import type { FilterParam } from '../types';
 {{- if .Namespace.HasFileUpload}}
 import type { RequestOptions } from '../types';
 {{- end}}
+{{- if .Namespace.HasFileDownload}}
+import type { DownloadedFile } from '../types';
+{{- end}}
 {{- if .Namespace.HasPagedEndpoints}}
 import type { Page{{if ne .Namespace.PageType "Page"}} as {{.Namespace.PageType}}{{end}} } from '../types';
 {{- end}}
@@ -178,7 +181,7 @@ export class {{.Namespace.ClassName}} {
    {{- end}}
    * @param files - File uploads
    {{- range .FileUploadFields}}
-   * @param files.{{.TSName}} - {{if .Required}}Required{{else}}Optional{{end}} {{.ScalarType}} file
+   * @param files.{{.TSName}} - {{if .Required}}Required{{else}}Optional{{end}} {{if .ScalarType}}{{.ScalarType}} {{end}}file
    {{- end}}
    {{- if has_query_params .QueryParams}}
    * @param params - Optional query parameters
@@ -347,7 +350,9 @@ export class {{.Namespace.ClassName}} {
    {{- else}}
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    {{- end}}
-   {{- if .Page}}
+   {{- if .FileDownload}}
+   * @returns The file ({{.FileDownload.ContentType}}): its bytes as a Blob, and the filename the server offered
+   {{- else if .Page}}
    * @returns One page of {{type_ref .OutputType}}: its items and next, null after the last page; {{.AllName}} yields every item
    {{- else}}
    * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
@@ -778,7 +783,7 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
     const result = await this.client.get<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
-      { ...toRequestOptions({{if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if .HasInput}}, data: input{{end}}{{if and .ScalarArgs (not .HasInput)}}{{if .Filterable}}, params: { ...scalarParams, ...filterParams }{{else}}, params: scalarParams{{end}}{{else if and .HasQuery .Filterable}}, params: { ...params, ...filterParams }{{else if .HasQuery}}, params{{else if .Filterable}}, params: filterParams{{end}} }
+      { ...toRequestOptions({{if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if .HasInput}}, data: input{{end}}{{if and .ScalarArgs (not .HasInput)}}{{if .Filterable}}, params: { ...scalarParams, ...filterParams }{{else}}, params: scalarParams{{end}}{{else if and .HasQuery .Filterable}}, params: { ...params, ...filterParams }{{else if .HasQuery}}, params{{else if .Filterable}}, params: filterParams{{end}}{{if .FileDownload}}, responseType: 'file'{{end}} }
     );
     {{- else if eq .Method "POST"}}
     // Make POST request
@@ -793,7 +798,7 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
+      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}}{{if .FileDownload}}, responseType: 'file'{{end}} }
     );
     {{- else if eq .Method "PUT"}}
     // Make PUT request
@@ -808,7 +813,7 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
+      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}}{{if .FileDownload}}, responseType: 'file'{{end}} }
     );
     {{- else if eq .Method "PATCH"}}
     // Make PATCH request
@@ -823,14 +828,14 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
+      { ...toRequestOptions({{if has_encrypted_body .Method .Encrypted}}options{{else if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}}{{if .FileDownload}}, responseType: 'file'{{end}} }
     );
     {{- else if eq .Method "DELETE"}}
     // Make DELETE request; config.data carries its input or its arguments as
     // the body, where the route reads them.
     const result = await this.client.delete<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
-      { ...toRequestOptions({{if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if .HasInput}}, data: input{{else if .ScalarArgs}}, data: scalarInput{{end}}{{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
+      { ...toRequestOptions({{if .ScalarArgs}}requestSignal{{else}}signal{{end}}){{if .HasInput}}, data: input{{else if .ScalarArgs}}, data: scalarInput{{end}}{{if and .HasQuery .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if .HasQuery}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}}{{if .FileDownload}}, responseType: 'file'{{end}} }
     );
     {{- end}}
 

@@ -610,6 +610,7 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
 	rest.ValidateUploadMaxBytes = nil
+	rest.FileUpload = nil
 	rest.ValidateMinLength, rest.ValidateMaxLength = nil, nil
 	rest.ValidateListMin, rest.ValidateListMax = nil, nil
 	rest.ValidatePattern = ""

@@ -376,7 +376,11 @@ return r.RegisterScalars(Name, catalog)
   the spellings it may have meant
   ([JSON-valued scalars](/superschematic/reference/json-scalars/#a-scalar-of-your-own-that-holds-json)).
 - A field of an upload scalar is a multipart file part in the generated
-  APIs and SDKs. `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
+  APIs and SDKs, as a field the core's `FileUpload<C>` declares is
+  ([Files](/superschematic/guides/api-routes/#files)), which needs no
+  scalar of its own. The upload's `ir.FileUploadConfig` holds its limit,
+  its media types and its filename extensions (`AllowedExtensions`).
+  `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
   the limit for one field; the loader checks it after hydration, so it
   needs the upload declared here. An upload row's `Primitive` is `String`:
   `RegisterScalars` refuses an upload scalar whose primitive reads as
@@ -543,7 +547,8 @@ r.RegisterCheck(registry.CheckSpec{
 
 An OpenAPI hook edits the document the `api` generator builds, before
 every server's build writes it to `openapi.json` (and the Go server embeds
-it in `openapi.go`, the Rust server in `src/openapi.rs`). It gets the document
+it in `openapi.go`, the Rust server in `src/openapi.rs`, the TypeScript
+package in `openapi.ts`). It gets the document
 as decoded JSON (`map[string]any`, `[]any`, `json.Number`). Hooks run in
 registration order:
 

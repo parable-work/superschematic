@@ -326,7 +326,8 @@ failed` with `enum` at its path beside the other rules the body breaks, as
 the TypeScript and Rust servers, which validate before they decode, answer
 it: the route reads the body again with each such string replaced by one
 of the enum's values (`bodyargs.DecodeRefusal`). The `data` part of a
-multipart input is answered the same way. Any other body the type's
+multipart input is answered the same way, once its files pass their
+fields' checks ([Files](/superschematic/guides/api-routes/#files)). Any other body the type's
 decoder refuses, a value of the wrong JSON type among them, is `does not
 match the declared type`. A top-level key the type does not declare is
 refused, `unknown` at its key:

@@ -482,6 +482,10 @@ type IdentityInfo struct {
 	// ScalarDepPath is the scalar crate's directory relative to the
 	// crate's, set by SetReplacePaths; empty names the crate's version.
 	ScalarDepPath string
+	// Registration is how register admits users (D81), when the API's
+	// @userSessions declares approval, default roles or a first
+	// administrator; nil otherwise.
+	Registration *ir.UserSessionsConfig
 }
 
 // Specs are the ParamSpec statics of every mounted operation's arguments.
@@ -684,11 +688,15 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and add its route in the service, which decrypts the payload", endpoint.Namespace, endpoint.Name)
 		}
-		// The Go router reads a file upload's multipart body. The Rust
-		// router's handlers take JSON, so axum would answer every upload
-		// 415; the service mounts the route and reads the multipart body.
+		// The Go and TypeScript routers read a file upload's multipart body
+		// and answer a FileDownload's file (D81). The Rust router's handlers
+		// take and answer JSON, so axum would answer every upload 415; the
+		// service mounts the route and reads the body or answers the file.
 		if endpoint.HasFileUpload && !endpoint.ManualRouteRegistration {
-			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step, declare it @manualRouteRegistration and add its route in the service, which reads the multipart body", endpoint.Namespace, endpoint.Name)
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step yet (the Go and TypeScript routers read one, D81), declare it @manualRouteRegistration and add its route in the service, which reads the multipart body, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
+		}
+		if endpoint.FileDownload != nil && !endpoint.ManualRouteRegistration {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s answers a FileDownload; the Rust router answers JSON only yet (the Go and TypeScript routers answer the file, D81), declare it @manualRouteRegistration and answer the file in the service, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
 		}
 		info := endpointInfo(endpoint, output.HasServiceCallers)
 		if info.WebhookProvider != "" {
@@ -718,7 +726,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 
 	var err error
-	if output.Identity, err = identityOf(opts, output.HasAuth); err != nil {
+	if output.Identity, err = identityOf(opts, output.HasAuth, api.Registration); err != nil {
 		return nil, err
 	}
 	if len(output.IdentityEndpoints) > 0 && output.Identity == nil {
@@ -794,7 +802,7 @@ func endpointInfo(endpoint apigen.EndpointInfo, serviceStep bool) EndpointInfo {
 // identityOf is the crate's user model wiring (D50): nil unless the authDb
 // has a User table and an operation needs a caller, since otherwise no
 // route reads a session.
-func identityOf(opts Options, hasAuth bool) (*IdentityInfo, error) {
+func identityOf(opts Options, hasAuth bool, registration *ir.UserSessionsConfig) (*IdentityInfo, error) {
 	if opts.AuthDB == nil || !hasAuth {
 		return nil, nil
 	}
@@ -816,6 +824,7 @@ func identityOf(opts Options, hasAuth bool) (*IdentityInfo, error) {
 		PermissionPrefix: names.IdentityPermissionPrefix,
 		ScalarCrate:      names.ScalarRustCrate,
 		ScalarRegistry:   names.ScalarRustRegistryExpr(),
+		Registration:     registration,
 	}, nil
 }
 

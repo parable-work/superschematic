@@ -43,6 +43,7 @@ export type {
   MCPToolOptions,
   PaginatedConfig,
   RateLimitConfig,
+  RegistrationConfig,
   ServiceCallersConfig,
   ServiceHandleRef,
   TimeoutConfig,
@@ -51,4 +52,15 @@ export type {
   WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";
-export type { EncryptedField, QueryParam, RefersTo, RefersToConfig, SearchQuery, SortBy } from "./wrappers";
+export type {
+  EncryptedField,
+  FileDownload,
+  FileDownloadConfig,
+  FileUpload,
+  FileUploadConfig,
+  QueryParam,
+  RefersTo,
+  RefersToConfig,
+  SearchQuery,
+  SortBy
+} from "./wrappers";

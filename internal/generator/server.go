@@ -1104,6 +1104,8 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
 	}
 	var scaffolds []*tsrestgen.APIOutput
+	// The API whose router answers the server's POST /api/mcp (D81).
+	mcp := ""
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
 		if err != nil {
@@ -1115,6 +1117,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		}
 		if output == nil {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		if output.MCP != nil && s.Kind == ir.DeployableServer {
+			if mcp != "" {
+				return nil, nil, fmt.Errorf("stack %s: server %s serves %s and %s, which both turn on outputs.api.mcp, and one server answers POST %s for one API; serve them from two servers, or turn mcp off in one (D81)", stackName, s.Name, mcp, ref.Name, tsrestgen.MCPPath)
+			}
+			mcp = ref.Name
 		}
 		if err := r.checkIdentityDescriptor(stackName, s.Name, output); err != nil {
 			return nil, nil, err

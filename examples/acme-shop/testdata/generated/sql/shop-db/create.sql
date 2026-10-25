@@ -146,6 +146,7 @@ CREATE TABLE user_credential (
   password_hash TEXT NOT NULL,
   password_changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   disabled_at TIMESTAMPTZ,
+  pending_at TIMESTAMPTZ,
   UNIQUE (user_id)
 );
 

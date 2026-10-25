@@ -128,14 +128,18 @@ type (
 
 // FileUploadField represents a file upload field in an endpoint's input type.
 type FileUploadField struct {
-	Name             string
-	GoName           string
-	ScalarType       string
-	MaxSize          int64
-	AllowedTypes     []string
-	Category         string
-	Required         bool
-	ImageConstraints *ir.ImageConstraints
+	Name         string
+	GoName       string
+	ScalarType   string
+	MaxSize      int64
+	AllowedTypes []string
+	// AllowedExtensions are the filename extensions the part's filename
+	// may end in, with the dot, matched without regard to case (D81);
+	// empty admits any.
+	AllowedExtensions []string
+	Category          string
+	Required          bool
+	ImageConstraints  *ir.ImageConstraints
 }
 
 // EndpointInfo represents one REST API endpoint extracted from an operation.
@@ -229,6 +233,12 @@ type EndpointInfo struct {
 
 	HasFileUpload    bool
 	FileUploadFields []FileUploadField
+
+	// FileDownload is the operation's FileDownload<C> result (D81), nil for
+	// every other endpoint: the route answers the file's bytes with its
+	// Content-Type and a Content-Disposition filename, not the envelope,
+	// and OutputType is empty.
+	FileDownload *ir.FileDownloadDef
 
 	// Middleware values resolved from the operation set defaults plus
 	// field-level overrides. Nil means no directive.
@@ -338,6 +348,11 @@ type APIOutput struct {
 	// and implements none of them. Nil in the output Generate returns,
 	// whose Endpoints hold every operation.
 	IdentityEndpoints []EndpointInfo
+
+	// Registration is the API's @userSessions when its register admits
+	// users otherwise than open registration with no roles does (D81), and
+	// nil otherwise: the identity wiring passes it to the runtime.
+	Registration *ir.UserSessionsConfig
 
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
@@ -808,6 +823,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 	output.Jobs = jobsOf(schema)
 	output.Workers = workersOf(schema)
+	output.Registration = IdentityRegistration(schema)
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	if opts.IsPublic && opts.UpstreamSchema != "" {
@@ -1194,6 +1210,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		ServiceCallers:               ir.EffectiveServiceCallers(set, op),
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
+		FileDownload:                 op.FileDownload,
 		RateLimit:                    rateLimit,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
@@ -1613,36 +1630,42 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 
 	var fields []FileUploadField
 	for _, field := range typeDef.Fields {
-		scalarDef, ok := m.findScalarDef(field.TypeRef.Name)
-		if !ok || scalarDef.FileUpload == nil {
+		fu := ir.FileUploadOf(field, m.findScalarDef)
+		if fu == nil {
 			continue
 		}
 
 		if field.TypeRef.IsArrayOfArrays {
 			return nil, fmt.Errorf("input field %s.%s: a file upload cannot be an array of arrays", inputTypeName, field.Name)
 		}
-		fu := scalarDef.FileUpload
 		maxSize := int64(fu.MaxSize)
 		allowedTypes := fu.AllowedTypes
 		if field.ValidateUploadMaxBytes != nil {
 			maxSize = *field.ValidateUploadMaxBytes
 		}
 		if maxSize <= 0 {
-			maxSize = 100 * 1024 * 1024
+			maxSize = ir.DefaultUploadMaxBytes
 		}
 		if allowedTypes == nil {
 			allowedTypes = []string{}
 		}
+		var imageConstraints *ir.ImageConstraints
+		if field.FileUpload == nil {
+			if scalarDef, ok := m.findScalarDef(field.TypeRef.Name); ok {
+				imageConstraints = scalarDef.ImageConstraints
+			}
+		}
 
 		fields = append(fields, FileUploadField{
-			Name:             field.Name,
-			GoName:           codegen.ToPascalCase(field.Name),
-			ScalarType:       field.TypeRef.Name,
-			MaxSize:          maxSize,
-			AllowedTypes:     allowedTypes,
-			Category:         fu.Category,
-			Required:         field.Required,
-			ImageConstraints: scalarDef.ImageConstraints,
+			Name:              field.Name,
+			GoName:            codegen.ToPascalCase(field.Name),
+			ScalarType:        field.TypeRef.Name,
+			MaxSize:           maxSize,
+			AllowedTypes:      allowedTypes,
+			AllowedExtensions: append([]string{}, fu.AllowedExtensions...),
+			Category:          fu.Category,
+			Required:          field.Required,
+			ImageConstraints:  imageConstraints,
 		})
 	}
 	return fields, nil

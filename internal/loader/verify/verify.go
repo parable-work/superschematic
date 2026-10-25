@@ -226,6 +226,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkEncryptedOperations(schema, r)
 	checkMiddleware(schema, r)
 	checkPages(schema, r)
+	checkFileTransfers(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)

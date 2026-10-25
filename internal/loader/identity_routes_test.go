@@ -33,8 +33,8 @@ func TestLoadUserRoutesExpandsFromTheAuthDb(t *testing.T) {
 	for _, set := range schema.OperationSets {
 		counts[set.Name] = len(set.Operations)
 	}
-	if counts["Account"] != 6 || counts["AccountAdmin"] != 12 || counts["GreetingQueries"] != 1 {
-		t.Errorf("operations per set = %v, want 6, 12 and 1", counts)
+	if counts["Account"] != 6 || counts["AccountAdmin"] != 13 || counts["GreetingQueries"] != 1 {
+		t.Errorf("operations per set = %v, want 6, 13 and 1", counts)
 	}
 	for _, name := range []string{"Auth.Password", "Contact.Email", "Identity.Name", "Identity.UUID", "Temporal.DateTime"} {
 		def := schema.Scalars[name]
@@ -185,15 +185,20 @@ func TestLoadUserRoutesInTheDataForms(t *testing.T) {
 	for _, tc := range []struct{ file, body string }{
 		{"src/account.schema.json", `{
   "operationSets": [
-    {"name": "Account", "comment": "Signs users in and out, and lets anyone register.", "operations": [], "userSessions": {"register": true}},
+    {"name": "Account", "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81).", "operations": [],
+     "userSessions": {"register": true, "registration": "approval", "defaultRoles": ["member"], "firstUser": {"role": "admin", "permissions": ["identity"]}}},
     {"name": "AccountAdmin", "comment": "Manages users, roles and the grants between them.", "operations": [], "userAdministration": {}}
   ]
 }`},
 		{"src/account.schema.yaml", `operationSets:
   - name: Account
-    comment: Signs users in and out, and lets anyone register.
+    comment: "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81)."
     operations: []
-    userSessions: { register: true }
+    userSessions:
+      register: true
+      registration: approval
+      defaultRoles: [member]
+      firstUser: { role: admin, permissions: [identity] }
   - name: AccountAdmin
     comment: Manages users, roles and the grants between them.
     operations: []

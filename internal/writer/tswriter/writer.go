@@ -140,6 +140,7 @@ var symbolPackages = map[string]string{
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
+	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api",
 	"paginated": "@superschematic/api",

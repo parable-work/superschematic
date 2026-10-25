@@ -73,6 +73,14 @@ var routeTable = []identity.Route{
 
 func newHarness(t *testing.T, db testDB, config string) *harness {
 	t.Helper()
+	return newHarnessWith(t, db, config, true)
+}
+
+// newHarnessWith is newHarness with the service's options opts, and the
+// admin and the member only when seed is true: a database without them
+// has no role grant yet.
+func newHarnessWith(t *testing.T, db testDB, config string, seed bool, opts ...identity.Option) *harness {
+	t.Helper()
 	store, err := identity.NewSQLStore(db.db, db.dialect, descriptorJSON(t, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +90,7 @@ func newHarness(t *testing.T, db testDB, config string) *harness {
 		t.Fatal(err)
 	}
 	c := &clock{now: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)}
-	svc, err := identity.New(store, cfg, identity.WithClock(c.Now), identity.WithRoutes(routeTable))
+	svc, err := identity.New(store, cfg, append([]identity.Option{identity.WithClock(c.Now), identity.WithRoutes(routeTable)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +105,9 @@ func newHarness(t *testing.T, db testDB, config string) *harness {
 		_, _ = io.WriteString(w, session.GetPrincipalName(r.Context()))
 	})
 	h.router = svc.CORS()(r)
+	if !seed {
+		return h
+	}
 
 	ctx := context.Background()
 	hash := func(password string) string {

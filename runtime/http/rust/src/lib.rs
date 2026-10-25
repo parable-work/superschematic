@@ -66,6 +66,8 @@ pub mod telemetry;
 mod token_source;
 #[cfg(any(feature = "identity", feature = "postgres", feature = "sqlite"))]
 mod uuid62;
+// A webhook verifier over a JWT carrying the body's SHA-256 (D81).
+mod webhook;
 // A worker's claim loop (D53, D65), with the `postgres` or `sqlite`
 // feature.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -113,4 +115,7 @@ pub use service_auth::{
 pub use shutdown::{CancellationToken, Shutdown};
 pub use token_source::{
     GoogleIdTokenSource, HttpGetter, SignedKeySource, TokenFileSource, TokenFuture, TokenSource,
+};
+pub use webhook::{
+    JwtBodyHashOptions, JwtBodyHashVerifier, WebhookKeyLookup, WebhookKeys, INVALID_SIGNATURE_CODE,
 };

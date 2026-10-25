@@ -348,7 +348,14 @@ returns a Hono app. The router decodes path and query parameters, parses
 JSON bodies with the generated `parse<Input>Json` decoder, applies
 `@publicRoute`, `@auth` and `@requirePermission`, `@bodyLimit`,
 `@rateLimit` and `@timeout`, and writes the `{data, meta: {requestId}}` and
-RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
+RFC 9457 problem envelopes. It serves the OpenAPI document at
+`GET /api/openapi.json`, with its page at `GET /api/docs`, as the Go and
+Rust servers do
+([OpenAPI](/superschematic/guides/api-routes/#openapi)), and, with
+`outputs.api.mcp: true`, the API's visible `@mcp` tools at
+`POST /api/mcp`
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+It is built on `@superschematic/http-runtime`
 (the `http_runtime_npm_package` naming key) and Hono, which are its peer
 dependencies.
 
@@ -530,17 +537,24 @@ and puts the caller on `ctx.serviceCaller`, and a route with an
 limit and before `authenticate`. Without it, such a route answers 401
 `service_unauthorized`.
 
-Two kinds of operation must be `@manualRouteRegistration`, and the build
-fails with the operation named when one is not:
+An encrypted operation must be `@manualRouteRegistration`, and the build
+fails with the operation named when one is not: one in an `Encrypted`
+operation set, one declared `@encrypted`, or one whose result or an
+argument is an `EncryptedField<T>`
+([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
+The Go server decrypts such a body with its `PayloadDecryptor` before it
+parses it. The TypeScript router has no decryption step and would hand the
+ciphertext to the body parser, so the service's handler decrypts the
+payload and decodes it.
 
-- An encrypted operation: one in an `Encrypted` operation set, one declared
-  `@encrypted`, or one whose result or an argument is an
-  `EncryptedField<T>` ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
-  The Go server decrypts such a body with its `PayloadDecryptor` before it
-  parses it. The TypeScript router has no decryption step and would hand the
-  ciphertext to the body parser, so the service's handler decrypts the
-  payload and decodes it.
-- An operation that uploads files. The router has no multipart adapter.
+An operation that uploads files is an ordinary route
+([Files](/superschematic/guides/api-routes/#files)): the router reads its
+`multipart/form-data` body, checks each file against its field and hands
+the method the files in `args.files`, beside `args.input` without the file
+fields. Its body cap is `@bodyLimit`, or without one the files' limits
+beside `bodyLimitBytes`. An operation whose result is a `FileDownload`
+returns `{ body, filename }`, and the router answers the file with its
+`Content-Type` and `Content-Disposition`.
 
 An `@hmacVerified` operation
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -570,6 +584,11 @@ const implementations: Implementations = {
   webhookVerifiers: { github: verifyGitHub },
 };
 ```
+
+For a provider that signs with a JWT carrying the body's SHA-256, such as
+Plaid, `jwtBodyHashVerifier` from the same module is the verifier
+([A JWT that carries the body's hash](/superschematic/guides/api-routes/#a-jwt-that-carries-the-bodys-hash)).
+It verifies with WebCrypto, so it runs on Node.js, Bun and Workers.
 
 The generated package ships TypeScript sources, so run it with Bun, a
 bundler or a TypeScript loader. The runtime ships compiled JavaScript with

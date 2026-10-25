@@ -522,6 +522,20 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 
 
+	{{- if .FileDownload}}
+	// A FileDownload result (D81): the file, not a JSON value.
+	return n.client.DoFile(
+		ctx,
+		"{{.HTTPMethod}}",
+		path,
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable .Page}}
+		queryValues,
+		{{- else}}
+		nil,
+		{{- end}}
+		requestBody,
+	)
+	{{- else}}
 	{{- if .IsUnionOutput}}
 	var out {{.OutputUnionWrapperGoType}}
 	{{- else}}
@@ -622,6 +636,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	return out.Value, nil
 	{{- else}}
 	return out, nil
+	{{- end}}
 	{{- end}}
 }
 {{- if .Page}}

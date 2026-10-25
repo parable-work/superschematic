@@ -47,7 +47,8 @@ const withRoles = `{
       "user": "user_id",
       "passwordHash": "password_hash",
       "passwordChangedAt": "password_changed_at",
-      "disabledAt": "disabled_at"
+      "disabledAt": "disabled_at",
+      "pendingAt": "pending_at"
     }
   },
   "role": {
@@ -283,7 +284,7 @@ func TestDescriptorNamesTheGeneratedTables(t *testing.T) {
 			c := d.Credential.Columns
 			check(d.Credential.Table, map[string]string{
 				"id": c.ID, "user": c.User, "passwordHash": c.PasswordHash,
-				"passwordChangedAt": c.PasswordChangedAt, "disabledAt": c.DisabledAt,
+				"passwordChangedAt": c.PasswordChangedAt, "disabledAt": c.DisabledAt, "pendingAt": c.PendingAt,
 			}, map[string]string{c.User: d.User.Table})
 			if (d.Role != nil) != opts.Roles || (d.RoleGrant != nil) != opts.Roles {
 				t.Fatalf("role %v, roleGrant %v; want both only with roles", d.Role != nil, d.RoleGrant != nil)

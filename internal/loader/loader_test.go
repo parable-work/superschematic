@@ -37,6 +37,8 @@ func TestLoadServiceDataFormatsMatchTSGolden(t *testing.T) {
 		{"fixture-paged-api-yaml", "fixture-paged-api"},
 		{"fixture-refs-api-json", "fixture-refs-api"},
 		{"fixture-refs-api-yaml", "fixture-refs-api"},
+		// FileUpload fields and FileDownload results (D81).
+		{"fixture-files-api-yaml", "fixture-files-api"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.service, func(t *testing.T) {
