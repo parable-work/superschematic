@@ -486,6 +486,35 @@ pub fn decode_json<T: DeserializeOwned>(data: &[u8]) -> Result<T, String> {
     serde_json::from_slice(data).map_err(|err| err.to_string())
 }
 
+/// Calls `keep` on each value that `value` holds: in each of its values
+/// when `map` is set, then `depth` lists down, then on the value itself.
+/// What a generated decoder walks a payload's JSON with, to remove the keys
+/// a type with `@denyUnknownFields` does not declare before it decodes.
+pub fn each_value(
+    value: &mut serde_json::Value,
+    depth: usize,
+    map: bool,
+    keep: fn(&mut serde_json::Value),
+) {
+    if map {
+        if let Some(object) = value.as_object_mut() {
+            for item in object.values_mut() {
+                each_value(item, depth, false, keep);
+            }
+        }
+        return;
+    }
+    if depth > 0 {
+        if let Some(items) = value.as_array_mut() {
+            for item in items {
+                each_value(item, depth - 1, false, keep);
+            }
+        }
+        return;
+    }
+    keep(value);
+}
+
 fn decode_signal(_: &[u8]) -> Result<Signal, String> {
     Ok(Signal)
 }
