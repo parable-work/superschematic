@@ -1304,6 +1304,13 @@ func (b *pageBuilder) prefill(st *formStruct, typeName string) string {
 			if b.valueKind(in.TypeRef) != b.valueKind(out.TypeRef) {
 				continue
 			}
+			// An amount's decimal control holds it in major units (D44,
+			// amended), where the item holds minor units.
+			if f.Currency != "" {
+				b.m.importName("forms", "held_decimal")
+				p.Lines = append(p.Lines, "form."+f.Name+" = held_decimal("+at+", "+rustString(f.Currency)+");")
+				continue
+			}
 			// A long text's control is "longtext", held as text; a JSON
 			// textarea's holds the value's JSON text.
 			read := "held"
@@ -1331,6 +1338,12 @@ func (b *pageBuilder) prefill(st *formStruct, typeName string) string {
 			p.Lines = append(p.Lines, "if let Some(rows) = json["+rustString(f.JSONName)+"].as_array() {", "    form."+f.Name+" = rows.iter().map("+child+").collect();", "}")
 		case kindValueRows:
 			if b.valueKind(in.TypeRef) != b.valueKind(out.TypeRef) {
+				continue
+			}
+			if f.Currency != "" {
+				b.m.importName("forms", "held_decimal")
+				p.Lines = append(p.Lines, "if let Some(rows) = json["+rustString(f.JSONName)+"].as_array() {",
+					"    form."+f.Name+" = rows.iter().map(|row| held_decimal(row, "+rustString(f.Currency)+")).collect();", "}")
 				continue
 			}
 			b.m.use("held")
