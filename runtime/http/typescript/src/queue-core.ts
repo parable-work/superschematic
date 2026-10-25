@@ -4,9 +4,11 @@ docs/stack-model.md): a queue's definition, as a DB service's TypeScript
 types package exports it in its ./queues entry, the claims a worker makes
 of it, the lost claim's error, and a duration's text, which the Postgres
 client (queue.ts, ./postgres) and the SQLite client (queue-sqlite.ts,
-./sqlite and ./d1) both read and write. It imports nothing, so a Worker
-bundles it.
+./sqlite and ./d1) both read and write. It imports nothing but uuid.ts,
+which imports nothing, so a Worker bundles it.
 */
+
+import { uuidToDb } from './uuid.js';
 
 /** A field of a queue's message and the column it writes, as a types package's ./queues entry declares it. */
 export interface QueueField {
@@ -215,34 +217,13 @@ export function errorMessage(error: unknown): string {
  */
 export const UNREADABLE = 'the message could not be read';
 
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const HYPHENATED_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/u;
-const MAX_UUID = (1n << 128n) - 1n;
-
 /**
  * A UUID's lowercase hyphenated text from its hyphenated form or its base62
  * form (1 to 22 characters, case-sensitive), as superscalar's ParseUUID, the
  * Go ORM and the Rust client read one, since a TypeScript type's
- * Identity.UUID may hold either. Throws for any other text.
+ * Identity.UUID may hold either. Throws for any other text. It is
+ * uuidToDb (uuid.ts), the one copy every runtime path converts through.
  */
 export function canonicalUUID(value: unknown): string {
-  const text = typeof value === 'string' ? value : '';
-  let n: bigint | undefined;
-  if (text.length === 36 && HYPHENATED_UUID.test(text)) {
-    n = BigInt(`0x${text.replaceAll('-', '')}`);
-  } else if (text.length >= 1 && text.length <= 22) {
-    n = 0n;
-    for (const c of text) {
-      const digit = BASE62.indexOf(c);
-      if (digit < 0) {
-        n = undefined;
-        break;
-      }
-      n = n * 62n + BigInt(digit);
-    }
-    if (n !== undefined && n > MAX_UUID) n = undefined;
-  }
-  if (n === undefined) throw new Error(`${JSON.stringify(value)} is no UUID, hyphenated or base62`);
-  const hex = n.toString(16).padStart(32, '0');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return uuidToDb(value);
 }
