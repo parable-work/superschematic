@@ -480,6 +480,21 @@ fn integer(value: Option<&str>) -> Read {
     }
 }
 
+/// An amount in the minor units of a currency another field names (D44,
+/// amended): digits, after a `-` or not, refused otherwise. A number input
+/// takes `12.00` and `1.2e1` for twelve, but a member of staff who types a
+/// point means a decimal, which this control does not read.
+fn minor_amount(value: Option<&str>) -> Read {
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("must be a whole number of minor units");
+    }
+    text.parse::<i64>().map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
+}
+
 /// The minor-unit exponent of `currency` (D44, amended), from superscalar's
 /// `Finance.Currency` table: 2 for GBP, 0 for JPY, 3 for BHD, and 0 for a
 /// code ISO 4217 gives none (XAU), whose amounts are whole numbers.
@@ -489,15 +504,18 @@ fn minor_units(currency: &str) -> usize {
 
 /// An amount typed as a decimal of `currency` (D44, amended), read as the
 /// whole number of its minor units the input holds: `4.5` and `4.50` of
-/// GBP are 450, and `4` is 400. Text that is no decimal, more decimals
-/// than the currency has, or an amount past an i64 is refused; a sign the
-/// field's bounds refuse, the input's rules refuse.
-fn money(value: Option<&str>, currency: &str) -> Read {
-    let Some(text) = value.map(str::trim) else {
+/// GBP are 450, and `4` is 400. It takes what its control's pattern
+/// (`decimal_pattern`) takes and refuses the rest: text that is no
+/// decimal, space around it, a sign when not `signed`, a point in an
+/// amount of a currency without decimals, and more decimals than the
+/// currency has. It refuses an amount past an i64 too.
+fn money(value: Option<&str>, currency: &str, signed: bool) -> Read {
+    let Some(text) = value else {
         return Ok(None);
     };
     let places = minor_units(currency);
     let (negative, digits) = match text.strip_prefix('-') {
+        Some(_) if !signed => return Err("must not be negative"),
         Some(rest) => (true, rest),
         None => (false, text),
     };
@@ -505,7 +523,7 @@ fn money(value: Option<&str>, currency: &str) -> Read {
     if whole.is_empty() && fraction.is_empty() || !whole.bytes().chain(fraction.bytes()).all(|byte| byte.is_ascii_digit()) {
         return Err("must be an amount");
     }
-    if fraction.len() > places {
+    if places == 0 && digits.contains('.') || fraction.len() > places {
         return Err(match places {
             0 => "must be a whole amount",
             1 => "must have at most 1 decimal place",
@@ -521,14 +539,14 @@ fn money(value: Option<&str>, currency: &str) -> Read {
     i64::try_from(amount).map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
 }
 
-/// An amount typed as a decimal of GBP, read as its minor units.
+/// An amount typed as a decimal of GBP, without a sign, read as its minor units.
 fn money_gbp(value: Option<&str>) -> Read {
-    money(value, "GBP")
+    money(value, "GBP", false)
 }
 
-/// An amount typed as a decimal of JPY, read as its minor units.
-fn money_jpy(value: Option<&str>) -> Read {
-    money(value, "JPY")
+/// An amount typed as a decimal of JPY, with a sign or not, read as its minor units.
+fn signed_money_jpy(value: Option<&str>) -> Read {
+    money(value, "JPY", true)
 }
 
 /// The pattern of a decimal control of `currency` (D44, amended): digits,
@@ -1048,8 +1066,8 @@ impl BookingInputForm {
         put(&mut json, errors, "preferences", &format!("{at}preferences"), json_text(self.preferences.as_deref()));
         put(&mut json, errors, "labels", &format!("{at}labels"), json_text(self.labels.as_deref()));
         put(&mut json, errors, "deposit", &format!("{at}deposit"), money_gbp(self.deposit.as_deref()));
-        put(&mut json, errors, "tip", &format!("{at}tip"), money_jpy(self.tip.as_deref()));
-        put(&mut json, errors, "extraCharge", &format!("{at}extraCharge"), integer(self.extra_charge.as_deref()));
+        put(&mut json, errors, "tip", &format!("{at}tip"), signed_money_jpy(self.tip.as_deref()));
+        put(&mut json, errors, "extraCharge", &format!("{at}extraCharge"), minor_amount(self.extra_charge.as_deref()));
         json
     }
 
@@ -1791,20 +1809,14 @@ pub async fn booking_input_fields(
         </div>
         <div class="field">
             <label for="booking-input-deposit">"Deposit (GBP)"</label>
-            match choices.of("deposit", "deposit") {
-                Some(options) => choice_select(id: "booking-input-deposit", name: "deposit", required: false, invalid: errors.invalid("deposit"), options: choice_options(options, form.deposit.as_deref())),
-                None => <input id="booking-input-deposit" name="deposit" type="text" inputmode="decimal" pattern=(decimal_pattern("GBP", false)) value=(form.deposit.clone()) aria-invalid=(errors.invalid("deposit"))>,
-            }
+            <input id="booking-input-deposit" name="deposit" type="text" inputmode="decimal" pattern=(decimal_pattern("GBP", false)) value=(form.deposit.clone()) aria-invalid=(errors.invalid("deposit"))>
             for message in errors.of("deposit") {
                 <p class="field-error">(message)</p>
             }
         </div>
         <div class="field">
             <label for="booking-input-tip">"Tip (JPY)"</label>
-            match choices.of("tip", "tip") {
-                Some(options) => choice_select(id: "booking-input-tip", name: "tip", required: false, invalid: errors.invalid("tip"), options: choice_options(options, form.tip.as_deref())),
-                None => <input id="booking-input-tip" name="tip" type="text" inputmode="decimal" pattern=(decimal_pattern("JPY", true)) value=(form.tip.clone()) aria-invalid=(errors.invalid("tip"))>,
-            }
+            <input id="booking-input-tip" name="tip" type="text" inputmode="decimal" pattern=(decimal_pattern("JPY", true)) value=(form.tip.clone()) aria-invalid=(errors.invalid("tip"))>
             for message in errors.of("tip") {
                 <p class="field-error">(message)</p>
             }
