@@ -1933,8 +1933,9 @@ engine.instances.update(me, 'Item', id, { title: 'Desk' }, { preconditions: { 'a
 - A read-only operation's guards get them too; a patch that changes
   nothing asks no guard. A precondition fences a write.
 - A beside operation ("Instances and events") asks only its own
-  behavior's guard: an entry for another behavior is checked against its
-  schema and asked of no guard.
+  behavior's guard, so an entry for another behavior, which no guard
+  would read, is a `PreconditionsError` (`invalid_argument`) with its
+  issue at `/<Behavior>`, rather than a fence that holds nothing.
 
 ### Contexts
 

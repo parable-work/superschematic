@@ -43,6 +43,7 @@ fn chat_declaration(fields: Value, extra: &[Value]) -> String {
         json!({"name": "poke", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": true}),
         json!({"name": "echo", "paramsSchema": body, "resultSchema": true, "writes": true, "beside": true}),
         json!({"name": "spawn", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": true}),
+        json!({"name": "dodge", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": true}),
         json!({"name": "bump", "paramsSchema": none, "resultSchema": true, "writes": true}),
         json!({"name": "peek", "paramsSchema": none, "resultSchema": true}),
     ];
@@ -147,6 +148,13 @@ impl Behavior for Chat {
                     cx.instances()
                         .create("Item", &json!({"title": "Spawned"}), None, None)?;
                     Ok(Value::Null)
+                }),
+                ("dodge", |_, cx, _| {
+                    // The refusal stays this handler's: the read-only call
+                    // after it neither takes it nor fails for it.
+                    let _ = cx.update(&json!({"title": "Dodged"}));
+                    let peeked = cx.call("test.Chat", "peek", &json!({}));
+                    Ok(json!(peeked.is_ok()))
                 }),
                 ("bump", |_, cx, _| {
                     cx.update(&json!({"title": "Bumped"}))?;
@@ -552,11 +560,12 @@ fn a_beside_operation_asks_its_own_guard_and_no_lease_vetoes_it() {
             (behavior.as_str(), action.as_str(), code.as_deref()),
             ("test.Chat", "post", Some("muted"))
         );
-        // A precondition for another behavior is checked, and asked of no
-        // guard.
-        let preconditions = json!({"Lease": {"token": 99}});
-        world
-            .invoke_as(
+        // A precondition for another behavior, which no guard would read,
+        // is refused, whatever its entry says, and the post goes nowhere.
+        let head = world.engine.events().head().unwrap();
+        for token in [99, 1] {
+            let preconditions = json!({"Lease": {"token": token}});
+            let refused = world.invoke_as(
                 &alice(),
                 "post",
                 json!({"body": "later"}),
@@ -564,9 +573,21 @@ fn a_beside_operation_asks_its_own_guard_and_no_lease_vetoes_it() {
                     preconditions: Some(&preconditions),
                     ..WriteOptions::default()
                 },
-            )
-            .unwrap();
-        assert_eq!(world.get().behaviors["test.Chat"]["messages"], json!(2));
+            );
+            let error = support::refusal(refused);
+            assert_eq!(error.code(), EngineErrorCode::InvalidArgument, "{error}");
+            let issues = support::issues_of(&error);
+            assert_eq!(issues.len(), 1, "{issues:?}");
+            assert_eq!(issues[0].0, "/Lease");
+            assert!(
+                issues[0]
+                    .1
+                    .contains("takes no precondition for behavior Lease"),
+                "{issues:?}"
+            );
+        }
+        assert_eq!(world.get().behaviors["test.Chat"]["messages"], json!(1));
+        assert_eq!(world.engine.events().head().unwrap(), head);
     }
 }
 
@@ -587,6 +608,16 @@ fn a_handler_that_reaches_past_its_own_storage_is_refused_and_rolled_back() {
         assert!(
             message
                 .contains("operation sneak is beside the instance: it cannot update the instance"),
+            "{message}"
+        );
+        // A nested call does not take the refusal of the handler that
+        // makes it, so the read-only call succeeds and the call that
+        // caught its refused update() is refused all the same, as its own.
+        let (behavior, message) = defect(world.invoke("dodge", json!({})));
+        assert_eq!(behavior, "test.Chat");
+        assert!(
+            message
+                .contains("operation dodge is beside the instance: it cannot update the instance"),
             "{message}"
         );
         let (_, message) = defect(world.invoke("poke", json!({})));

@@ -174,7 +174,9 @@ pub(crate) struct Execution<'t, 'db> {
     /// False for a read and a read-only operation: nothing may write.
     writable: bool,
     // What a beside operation's handler was refused, which refuses its
-    // call when it returns.
+    // call when it returns. A nested operate sets the outer handler's
+    // aside while its own handler runs and puts it back after, so each
+    // level answers only for its own handler.
     beside_refusal: RefCell<Option<String>>,
 }
 
@@ -519,6 +521,25 @@ impl<'t, 'db> Execution<'t, 'db> {
                     .ok_or_else(|| Error::internal("an operation's behavior is not on the type"))?;
                 let preconditions = if caller.is_none() { preconditions } else { None };
                 if operation.beside {
+                    // Only its own behavior's guard is asked, so an entry
+                    // for another would go unread: refused, not ignored.
+                    if let Some((name, _)) = preconditions
+                        .into_iter()
+                        .flatten()
+                        .find(|(name, _)| name != behavior)
+                    {
+                        return Err(EngineError::preconditions(
+                            &self.schema,
+                            vec![SchemaIssue::new(
+                                json::pointer(&[name]),
+                                format!(
+                                    "operation {} of behavior {behavior} is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior {name}",
+                                    operation.name
+                                ),
+                            )],
+                        )
+                        .into());
+                    }
                     self.guard_of(index, &request, preconditions)?;
                 } else {
                     self.guard(&request, operation.writes, preconditions)?;
@@ -537,6 +558,7 @@ impl<'t, 'db> Execution<'t, 'db> {
                         beside: operation.beside.then_some(operation.name.as_str()),
                     },
                 );
+                let outer = self.beside_refusal.take();
                 let result = declared_vetoes(
                     self,
                     bound
@@ -550,7 +572,7 @@ impl<'t, 'db> Execution<'t, 'db> {
                             )))
                         }),
                 );
-                if let Some(refusal) = self.beside_refusal.borrow_mut().take() {
+                if let Some(refusal) = self.beside_refusal.replace(outer) {
                     return Err(Error::behavior(behavior, refusal));
                 }
                 let checked = check_result(&bound.behavior, operation, result?)?;
