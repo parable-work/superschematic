@@ -110,6 +110,10 @@ func renderGitHub(req registry.CIRequest) ([]registry.CIFile, error) {
 	if g.branch == "" {
 		g.branch = registry.DefaultCIBranch
 	}
+	var err error
+	if g.cli, err = cliOf(req); err != nil {
+		return nil, err
+	}
 	data, err := g.render()
 	if err != nil {
 		return nil, err
@@ -120,6 +124,61 @@ func renderGitHub(req registry.CIRequest) ([]registry.CIFile, error) {
 type github struct {
 	req    registry.CIRequest
 	branch string
+	// cli is the superschematic binary every job installs and runs
+	// (cliOf).
+	cli string
+}
+
+// coreCLI is the binary a release ships: the core with the official
+// extensions linked.
+const coreCLI = "superschematic"
+
+// sourceCLIs are the extensions whose binary superschematic's own
+// repository holds, by the directory of its module: the core with the
+// extension linked, at cmd/superschematic-<extension> under it. A release
+// ships none of them, so a job builds one from the release's commit
+// (buildCLI).
+var sourceCLIs = map[string]string{"topcoat": "extensions/topcoat"}
+
+// cliOf is the binary the workflow installs and runs: superschematic,
+// unless an app of the stack names an extension its build needs (D78),
+// which the released superschematic does not link, and whose build
+// superschematic refuses. The binary that links an extension e is
+// superschematic-e, as the refusal says, so the workflow runs that one in
+// every job, built from the release's commit. An extension whose binary
+// superschematic's repository does not hold, and apps that name two
+// extensions between them, which no one binary links, are refused: the
+// workflow would refuse the stack's build on every run.
+func cliOf(req registry.CIRequest) (string, error) {
+	needs := map[string][]string{}
+	for _, env := range req.Environments {
+		for _, d := range env.Environment.Deployables {
+			if d.Kind != ir.DeployableApp || d.App == nil {
+				continue
+			}
+			for _, ext := range d.App.Extensions {
+				app := fmt.Sprintf("app %s of %s", d.App.Name, d.App.API)
+				if !slices.Contains(needs[ext], app) {
+					needs[ext] = append(needs[ext], app)
+				}
+			}
+		}
+	}
+	switch exts := slices.Sorted(maps.Keys(needs)); len(exts) {
+	case 0:
+		return coreCLI, nil
+	case 1:
+		if _, ok := sourceCLIs[exts[0]]; !ok {
+			return "", fmt.Errorf("stack %s: %s needs the %s extension, and superschematic's release neither ships nor holds the source of a binary that links it, so the workflow's build would refuse the stack; build the stack's CI yourself with a binary that links it", req.Stack.Name, strings.Join(needs[exts[0]], " and "), exts[0])
+		}
+		return coreCLI + "-" + exts[0], nil
+	default:
+		var named []string
+		for _, ext := range exts {
+			named = append(named, fmt.Sprintf("%s needs %s", strings.Join(needs[ext], " and "), ext))
+		}
+		return "", fmt.Errorf("stack %s: %s; one binary builds the stack in CI, and no superschematic-<extension> links more than one extension: give the apps one extension between them", req.Stack.Name, strings.Join(named, ", "))
+	}
 }
 
 // job is one job of the workflow.
@@ -310,11 +369,13 @@ func (g github) check() job {
 	rustCrates := g.deployables(registry.APILanguageRust)
 	sites := slices.Sorted(maps.Keys(st.Sites))
 	workspace := len(tsPackages) > 0 || len(sites) > 0
-	steps := []step{g.checkout(), g.install()}
-	if len(goModules) > 0 && g.req.Version != "" {
+	steps := append([]step{g.checkout()}, g.install()...)
+	// A job that builds the binary has set up Go and the archives already.
+	built := g.cli != coreCLI && g.req.Version != ""
+	if len(goModules) > 0 && g.req.Version != "" && !built {
 		steps = append(steps, g.archives())
 	}
-	if len(goModules) > 0 {
+	if len(goModules) > 0 && !built {
 		steps = append(steps, step{
 			name: "Set up Go",
 			uses: &actionSetupGo,
@@ -644,7 +705,7 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 // install or build. Only the stack commands read the credentials the
 // sign-in leaves.
 func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
-	steps := []step{g.checkout(), g.install()}
+	steps := append([]step{g.checkout()}, g.install()...)
 	if role == registry.CIDeployer && env.Migrate {
 		// The target migrates from the deploying machine (D64).
 		steps = append(steps, g.installMigrate())
@@ -679,29 +740,90 @@ func (g github) checkout() step {
 // install downloads the release of superschematic that wrote the workflow
 // from the release page of its repository, and checks it against the
 // release's SHA256SUMS. A checkout build is no release, so its install
-// step fails.
-func (g github) install() step {
+// step fails. A stack whose app needs an extension runs the binary that
+// links it, which the release does not ship, so the job builds it
+// (buildCLI).
+func (g github) install() []step {
 	v := g.req.Version
 	if v == "" {
-		return step{
-			name: "Install superschematic",
+		return []step{{
+			name: "Install " + g.cli,
 			run:  `echo "A superschematic built from a checkout generated this workflow, and it names no release to install; generate this workflow again with a released superschematic" && exit 1`,
-		}
+		}}
 	}
-	dist := fmt.Sprintf("superschematic_%s_linux-x64", v)
-	return step{
-		name: "Install superschematic " + v,
+	if g.cli != coreCLI {
+		return g.buildCLI()
+	}
+	return []step{g.downloadCLI("Install superschematic "+v, true)}
+}
+
+// downloadCLI downloads the release's superschematic tarball for the
+// runner's platform into $RUNNER_TEMP/superschematic, checks it against the
+// release's SHA256SUMS and unpacks it, putting the binary on PATH when
+// onPath.
+func (g github) downloadCLI(name string, onPath bool) step {
+	v := g.req.Version
+	dist := fmt.Sprintf("superschematic_%s_%s", v, runnerPlatform)
+	lines := []string{
+		"set -euo pipefail",
+		`dir="$RUNNER_TEMP/superschematic"`,
+		`mkdir -p "$dir"`,
+		"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
+		fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
+		`curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"`,
+		`(cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)`,
+		fmt.Sprintf(`tar -xzf "$dir/%s.tar.gz" -C "$dir"`, dist),
+	}
+	if onPath {
+		lines = append(lines, fmt.Sprintf(`echo "$dir/%s" >> "$GITHUB_PATH"`, dist))
+	}
+	return step{name: name, run: strings.Join(lines, "\n")}
+}
+
+// buildCLI builds the binary that links the extension the stack's apps
+// need (cliOf), superschematic-<extension>, from the commit the release
+// was built from, as the release builds superschematic: the release's
+// tarball, checked against its SHA256SUMS, names that commit in its
+// BUILD_COMMIT; git fetches it by its hash, which names its content; and
+// Go builds the extension's command against the release's static
+// archives, with their digests linked in, so what the binary generates
+// pins what the release's binary would. It runs no project code.
+func (g github) buildCLI() []step {
+	v := g.req.Version
+	ext := strings.TrimPrefix(g.cli, coreCLI+"-")
+	module := sourceCLIs[ext]
+	var digests []string
+	for _, platform := range slices.Sorted(maps.Keys(g.req.Archives)) {
+		digests = append(digests, platform+"="+g.req.Archives[platform].SHA256)
+	}
+	repo := "https://" + release.Module
+	build := step{
+		name: fmt.Sprintf("Build %s %s from the release's commit", g.cli, v),
 		run: strings.Join([]string{
 			"set -euo pipefail",
 			`dir="$RUNNER_TEMP/superschematic"`,
-			`mkdir -p "$dir"`,
-			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
-			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
-			`curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"`,
-			`(cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)`,
-			fmt.Sprintf(`tar -xzf "$dir/%s.tar.gz" -C "$dir"`, dist),
-			fmt.Sprintf(`echo "$dir/%s" >> "$GITHUB_PATH"`, dist),
+			fmt.Sprintf(`commit="$(cat "$dir/superschematic_%s_%s/BUILD_COMMIT")"`, v, runnerPlatform),
+			`src="$RUNNER_TEMP/superschematic-source"`,
+			`mkdir -p "$dir/bin"`,
+			`git init -q "$src"`,
+			fmt.Sprintf(`git -C "$src" fetch -q --depth 1 %s "$commit"`, repo),
+			`git -C "$src" checkout -q FETCH_HEAD`,
+			`test "$(git -C "$src" rev-parse HEAD)" = "$commit"`,
+			fmt.Sprintf(`(cd "$src/%s" && CGO_ENABLED=1 go build -trimpath -buildvcs=false \
+  -ldflags "-s -w -X %s/internal/release.archiveDigests=%s" \
+  -o "$dir/bin/%s" ./cmd/%s)`, module, release.Module, strings.Join(digests, ","), g.cli, g.cli),
+			`echo "$dir/bin" >> "$GITHUB_PATH"`,
 		}, "\n"),
+	}
+	return []step{
+		g.downloadCLI(fmt.Sprintf("Download superschematic %s, whose BUILD_COMMIT %s builds from", v, g.cli), false),
+		g.archives(),
+		{
+			name: "Set up Go",
+			uses: &actionSetupGo,
+			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
+		},
+		build,
 	}
 }
 
@@ -810,7 +932,7 @@ func (g github) scriptlessPackages() []step {
 // a destroy reads.
 func (g github) prepare(environments []string, previews bool) job {
 	st := g.req.Stack
-	steps := []step{g.checkout(), g.install()}
+	steps := append([]step{g.checkout()}, g.install()...)
 	steps = append(steps, g.packages()...)
 	bun := false
 	for _, env := range g.req.Environments {
@@ -826,7 +948,7 @@ func (g github) prepare(environments []string, previews bool) job {
 	if bun {
 		builds = append(builds, g.typeScriptWorkspace())
 	}
-	args := append([]string{"superschematic", "stack", "prepare"}, environments...)
+	args := append([]string{g.cli, "stack", "prepare"}, environments...)
 	args = append(args, "--stack", st.Dir, "--dir", `"$RUNNER_TEMP/prepared"`)
 	builds = append(builds, step{name: "Prepare " + strings.Join(environments, ", "), run: strings.Join(args, " ")})
 	cond := fmt.Sprintf("github.event_name != 'pull_request' || (%s && %s)", notClosed, sameRepository)
@@ -930,7 +1052,7 @@ func (g github) bundled() []deployable {
 // graph, and writes each server's entrypoint and Dockerfile, which a
 // deploy builds the server's image from.
 func (g github) build() step {
-	return step{name: "Build the services", run: "superschematic build-all " + g.req.Stack.ServicesRoot}
+	return step{name: "Build the services", run: g.cli + " build-all " + g.req.Stack.ServicesRoot}
 }
 
 // buildSteps are the steps of a cloud job that builds the services before
@@ -950,7 +1072,7 @@ func (g github) buildSteps() []step {
 // names since it runs from the repository root, reading what the prepare
 // job made (D47, amended).
 func (g github) stackCommand(command, environment string, flags ...string) string {
-	args := append([]string{"superschematic", "stack", command, environment, "--stack", g.req.Stack.Dir, preparedFlag}, flags...)
+	args := append([]string{g.cli, "stack", command, environment, "--stack", g.req.Stack.Dir, preparedFlag}, flags...)
 	return strings.Join(args, " ")
 }
 
