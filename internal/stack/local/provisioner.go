@@ -1050,7 +1050,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 			return err
 		}
 		if b.server.Port != 0 && p.runner().PortInUse(b.server.Port) {
-			return fmt.Errorf("local: server %s: port %d is in use, by another program or a server an earlier run left behind; stop it, or give %s another port with its port setting", b.server.Deployable, b.server.Port, b.server.Deployable)
+			return fmt.Errorf("local: %s %s: port %d is in use, by another program or a server an earlier run left behind; stop it, or give %s another port with its port setting", b.server.what(), b.server.Deployable, b.server.Port, b.server.Deployable)
 		}
 		c := p.out()
 		stdout, stderr := c.writer(b.server.Deployable), c.writer(b.server.Deployable)
@@ -1099,6 +1099,14 @@ func toolOf(language string) string {
 		return "cargo"
 	}
 	return "go"
+}
+
+// article is the indefinite article of what: "an app", "a worker".
+func article(what string) string {
+	if strings.HasPrefix(what, "a") {
+		return "an"
+	}
+	return "a"
 }
 
 // rustCrate is the crate of a Rust server, worker or job: its node's ID,
@@ -1195,7 +1203,7 @@ func rustBinary(dir, what string) (string, error) {
 	case 1:
 		name = manifest.Bin[0].Name
 	default:
-		return "", fmt.Errorf("%s declares %d binaries; a %s's crate builds one", path, len(manifest.Bin), what)
+		return "", fmt.Errorf("%s declares %d binaries; %s %s's crate builds one", path, len(manifest.Bin), article(what), what)
 	}
 	if !binaryNamePattern.MatchString(name) {
 		return "", fmt.Errorf("%s names no binary cargo builds: its [package] name, or its one [[bin]]'s, is %q", path, name)
@@ -1348,23 +1356,36 @@ func (p *Provisioner) waitReady(ctx context.Context, k string, s *Server) error 
 		}
 	}
 	url := s.URL + s.Readiness
+	if s.Readiness == ReadinessListening {
+		url = s.URL
+	}
 	deadline := time.Now().Add(p.readyTimeout())
 	for {
 		select {
 		case <-rs.proc.Done():
-			return fmt.Errorf("local: server %s exited before it was ready: %s", s.Deployable, exitReason(rs.proc.Err()))
+			return fmt.Errorf("local: %s %s exited before it was ready: %s", s.what(), s.Deployable, exitReason(rs.proc.Err()))
 		default:
 		}
-		code, err := p.runner().Get(ctx, url)
-		if err == nil && code == 200 {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			reason := fmt.Sprintf("status %d", code)
-			if err != nil {
-				reason = err.Error()
+		if s.Readiness == ReadinessListening {
+			// An app is ready once it listens on its port (D78).
+			if p.runner().PortInUse(s.Port) {
+				return nil
 			}
-			return fmt.Errorf("local: server %s is not ready at %s after %s: %s", s.Deployable, url, p.readyTimeout(), reason)
+			if time.Now().After(deadline) {
+				return fmt.Errorf("local: %s %s does not listen at %s after %s; it listens on the port in %s", s.what(), s.Deployable, url, p.readyTimeout(), PortVariable)
+			}
+		} else {
+			code, err := p.runner().Get(ctx, url)
+			if err == nil && code == 200 {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				reason := fmt.Sprintf("status %d", code)
+				if err != nil {
+					reason = err.Error()
+				}
+				return fmt.Errorf("local: %s %s is not ready at %s after %s: %s", s.what(), s.Deployable, url, p.readyTimeout(), reason)
+			}
 		}
 		select {
 		case <-rs.proc.Done():
