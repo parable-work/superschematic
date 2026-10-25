@@ -327,16 +327,16 @@ func TestTheConsoleFixturesBuild(t *testing.T) {
 
 // TestTheConsolePagesConfig: outputs.topcoat.pages.engine and .identity,
 // and [extension.topcoat]'s pages_engine and pages_identity, take what
-// they declare and refuse anything else; the identity pages, which are not
-// built yet, say so in the build log of a crate whose pages are on, and
-// neither the engine's nor the identity pages are asked for when their key
-// turns them off. TestTheConsolePagesTheEngine holds the engine pages'
-// build log.
+// they declare and refuse anything else; a crate whose pages are on writes
+// src/engine_pages.rs and src/identity_pages.rs when their key turns them
+// on, and neither, nor asks for them in its build log, when the key turns
+// them off. TestTheConsolePagesTheEngine and
+// TestTheIdentityPagesAreWrittenAsDeclared hold their build logs.
 func TestTheConsolePagesConfig(t *testing.T) {
 	// logOf builds service with pages as its outputs.topcoat.pages, or
-	// with no outputs.topcoat for nil, under names, and gives its build log
-	// and whether its crate has pages.
-	built := false
+	// with no outputs.topcoat for nil, under names, and gives its build log;
+	// wrote then says whether the crate has the file src/<file>.
+	var crateDir string
 	logOf := func(service string, pages map[string]any, names registry.Naming) string {
 		t.Helper()
 		outputs := rustOutputs()
@@ -349,21 +349,26 @@ func TestTheConsolePagesConfig(t *testing.T) {
 		if _, err := buildWithNaming(t, names, service, root, outputs, &log); err != nil {
 			t.Fatalf("build %s with pages %v: %v", service, pages, err)
 		}
-		_, err := os.Stat(filepath.Join(topcoat.Dir(root, service), "src", "pages.rs"))
-		built = err == nil
+		crateDir = topcoat.Dir(root, service)
 		return log.String()
 	}
-	identity := "  - topcoat: no sign-in, account, users or roles pages under /console: the identity pages are not built yet\n"
-	names := registry.DefaultNaming()
-	if log := logOf(engineService, map[string]any{"enabled": true, "engine": false}, names); strings.Contains(log, "no engine pages") {
-		t.Errorf("pages.engine false still asks for the engine pages:\n%s", log)
+	wrote := func(file string) bool {
+		_, err := os.Stat(filepath.Join(crateDir, "src", file))
+		return err == nil
 	}
-	if log := logOf(identityPagesService, map[string]any{"enabled": true, "identity": map[string]any{"signUp": true}}, names); !strings.Contains(log, identity) {
-		t.Errorf("pages.identity { signUp } does not ask for the identity pages:\n%s", log)
+	names := registry.DefaultNaming()
+	if logOf(engineService, map[string]any{"enabled": true}, names); !wrote("engine_pages.rs") {
+		t.Errorf("pages on did not write the engine pages")
+	}
+	if log := logOf(engineService, map[string]any{"enabled": true, "engine": false}, names); strings.Contains(log, "no engine pages") || wrote("engine_pages.rs") {
+		t.Errorf("pages.engine false still asks for the engine pages, written %v:\n%s", wrote("engine_pages.rs"), log)
+	}
+	if logOf(identityPagesService, map[string]any{"enabled": true, "identity": map[string]any{"signUp": true}}, names); !wrote("identity_pages.rs") {
+		t.Errorf("pages.identity { signUp } did not write the identity pages")
 	}
 	for _, off := range []any{false, map[string]any{"enabled": false, "signUp": true}} {
-		if log := logOf(identityPagesService, map[string]any{"enabled": true, "identity": off}, names); strings.Contains(log, "no sign-in") {
-			t.Errorf("pages.identity %v still asks for the identity pages:\n%s", off, log)
+		if log := logOf(identityPagesService, map[string]any{"enabled": true, "identity": off}, names); strings.Contains(log, "no sign-in") || wrote("identity_pages.rs") {
+			t.Errorf("pages.identity %v still asks for the identity pages, written %v:\n%s", off, wrote("identity_pages.rs"), log)
 		}
 	}
 	for _, pages := range []map[string]any{
@@ -382,8 +387,8 @@ func TestTheConsolePagesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseNaming: %v", err)
 	}
-	if log := logOf(engineService, nil, table); !built || strings.Contains(log, "no engine pages") {
-		t.Errorf("pages_engine = false in the table: pages written %v, and the engine pages asked for:\n%s", built, log)
+	if log := logOf(engineService, nil, table); !wrote("pages.rs") || wrote("engine_pages.rs") || strings.Contains(log, "no engine pages") {
+		t.Errorf("pages_engine = false in the table: pages written %v, engine pages written %v, and asked for:\n%s", wrote("pages.rs"), wrote("engine_pages.rs"), log)
 	}
 	for table, want := range map[string]string{
 		"services = [\"a\"]\npages_engine = false":                                            "pages_engine sets the pages pages_prefix turns on, and the table has no pages_prefix",
