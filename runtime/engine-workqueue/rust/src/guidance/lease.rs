@@ -74,11 +74,13 @@ pub(crate) fn guidance(config: &LeaseConfig, target: &DescribeTarget) -> Behavio
     let fenced = said(None, Some(fenced_dont.clone()), None, errors(&fenced_codes));
     // The writes Lease's guard holds while a lease is active: updates,
     // deletes and other behaviors' writing instance operations, but the
-    // exempt ones and Queue's refresh.
+    // exempt ones, Queue's refresh and those beside the instance (D77),
+    // which ask no guard but their own behavior's.
     let mut operations: Vec<(String, OperationGuidance)> = Vec::new();
     for operation in &target.operations {
         if operation.behavior.as_deref() == Some("Lease")
             || !operation.writes
+            || operation.beside
             || operation.scope == OperationScope::Schema
             || operation.name == "create"
         {

@@ -362,7 +362,7 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a core behavior config its schema rejects", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [
 		{"name": "Workflow", "config": {"states": [], "transitions": []}}]}`},
 	{"a missing required core behavior config", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Workflow"}]}`},
-	{"a config for a core behavior that takes none", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Comments", "config": {"threads": true}}]}`},
+	{"a core behavior config with a key its schema lacks", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Comments", "config": {"threads": true}}]}`},
 	{"an unregistered behavior", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}`},
 	{"an unregistered behavior in a document", "extended", `{"types": {"Item": {"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}}}`},
 	{"a behavior config its schema rejects", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 0}}]}`},

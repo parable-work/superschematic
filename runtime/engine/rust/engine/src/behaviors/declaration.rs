@@ -12,6 +12,10 @@
 //! preconditionSchema an object schema with `additionalProperties: false`.
 //! Each veto code is lowercase snake case, listed once. A field may say it
 //! is volatile (D56): it can move without an event of its own instance.
+//! An instance operation that writes may say it is beside the instance
+//! (D77): it writes only its behavior's own storage, so it leaves the
+//! instance's seq alone, and with `"log": false` appends no event. A
+//! behavior that declares one declares every field volatile.
 //! The compiler's registry refuses the same declarations, with the same
 //! wording.
 //!
@@ -49,13 +53,15 @@ const DECLARATION_KEYS: [&str; 10] = [
 ];
 const FIELD_KEYS: [&str; 3] = ["name", "description", "volatile"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
-const OPERATION_KEYS: [&str; 7] = [
+const OPERATION_KEYS: [&str; 9] = [
     "name",
     "description",
     "paramsSchema",
     "resultSchema",
     "writes",
     "scope",
+    "beside",
+    "log",
     "invocationPolicy",
 ];
 
@@ -179,6 +185,13 @@ pub struct OperationDeclaration {
     /// Whether it changes stored state.
     pub writes: bool,
     pub scope: OperationScope,
+    /// Whether it runs beside the instance (D77): it writes only its
+    /// behavior's own tables and columns, takes no sequence of the
+    /// instance and runs no other behavior's guard.
+    pub beside: bool,
+    /// Whether it appends an event; false only for a beside operation that
+    /// declares `"log": false`.
+    pub log: bool,
     /// The MCP invocation policy of its tool (D11); absent for the policy's
     /// default.
     pub invocation_policy: Option<String>,
@@ -263,6 +276,8 @@ impl BehaviorDeclaration {
                     } else {
                         OperationScope::Instance
                     },
+                    beside: operation.get("beside") == Some(&Value::Bool(true)),
+                    log: operation.get("log") != Some(&Value::Bool(false)),
                     invocation_policy: text(operation, "invocationPolicy"),
                 })
                 .collect(),
@@ -339,6 +354,7 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
     }
     check_fields(members.get("fields"), &mut problems);
     check_operations(members.get("operations"), &mut problems);
+    check_beside_fields(members, &mut problems);
     if let Some(precondition) = members.get("preconditionSchema") {
         match precondition {
             Value::Object(schema) if schema.get("type") == Some(&Value::from("object")) => {
@@ -514,6 +530,7 @@ fn check_operations(operations: Option<&Value>, problems: &mut Vec<String>) {
                 ));
             }
         }
+        check_beside(members, &at, problems);
         if !members.get("resultSchema").is_some_and(is_schema) {
             problems.push(format!("{at} has no resultSchema"));
         }
@@ -526,6 +543,63 @@ fn check_operations(operations: Option<&Value>, problems: &mut Vec<String>) {
             _ => problems.push(format!(
                 "{at} paramsSchema must be an object schema (\"type\": \"object\")"
             )),
+        }
+    }
+}
+
+// check_beside holds an operation's beside and log to their rule: each a
+// boolean; a beside operation writes and runs on an instance; only a beside
+// one appends no event.
+fn check_beside(members: &Map<String, Value>, at: &str, problems: &mut Vec<String>) {
+    for key in ["beside", "log"] {
+        if members.get(key).is_some_and(|flag| !flag.is_boolean()) {
+            problems.push(format!("{at} {key} is a boolean"));
+        }
+    }
+    let beside = members.get("beside") == Some(&Value::Bool(true));
+    if beside {
+        if members.get("writes") != Some(&Value::Bool(true)) {
+            problems.push(format!(
+                "{at} is beside the instance and does not write: a beside operation declares \"writes\": true"
+            ));
+        }
+        if members.get("scope").and_then(Value::as_str) == Some("schema") {
+            problems.push(format!(
+                "{at} is beside the instance and has scope \"schema\": a beside operation runs on an instance"
+            ));
+        }
+    } else if members.get("log") == Some(&Value::Bool(false)) {
+        problems.push(format!(
+            "{at} sets \"log\": false and is not beside the instance: only a beside operation appends no event"
+        ));
+    }
+}
+
+// check_beside_fields holds a behavior that declares a beside operation to
+// volatile fields: a beside operation appends no move of a field, so every
+// field the behavior declares is computed at the read.
+fn check_beside_fields(members: &Map<String, Value>, problems: &mut Vec<String>) {
+    let Some(Value::Array(operations)) = members.get("operations") else {
+        return;
+    };
+    let Some(beside) = operations.iter().find_map(|operation| {
+        (operation.get("beside") == Some(&Value::Bool(true)))
+            .then(|| operation.get("name").and_then(Value::as_str))
+            .flatten()
+    }) else {
+        return;
+    };
+    let Some(Value::Array(fields)) = members.get("fields") else {
+        return;
+    };
+    for field in fields {
+        if field.get("volatile") == Some(&Value::Bool(true)) {
+            continue;
+        }
+        if let Some(name) = field.get("name").and_then(Value::as_str) {
+            problems.push(format!(
+                "field {name} is not volatile, and operation {beside} is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves"
+            ));
         }
     }
 }
@@ -644,6 +718,49 @@ mod tests {
             check_declaration(&json!({})),
             ["name undefined must match ^(?:[A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*$"]
         );
+    }
+
+    #[test]
+    fn a_beside_operation_writes_on_an_instance_beside_volatile_fields() {
+        let none = json!({"type": "object", "additionalProperties": false});
+        let problems = check_declaration(&json!({
+            "name": "test.Chat",
+            "fields": [{"name": "count", "volatile": true}, {"name": "last"}],
+            "operations": [
+                {"name": "post", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": true},
+                {"name": "peek", "paramsSchema": none, "resultSchema": true, "beside": true},
+                {"name": "sweep", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": true, "scope": "schema"},
+                {"name": "mark", "paramsSchema": none, "resultSchema": true, "writes": true, "log": false},
+                {"name": "odd", "paramsSchema": none, "resultSchema": true, "writes": true, "beside": 1, "log": "no"}
+            ]
+        }));
+        assert_eq!(
+            problems,
+            [
+                "operation peek is beside the instance and does not write: a beside operation declares \"writes\": true",
+                "operation sweep is beside the instance and has scope \"schema\": a beside operation runs on an instance",
+                "operation mark sets \"log\": false and is not beside the instance: only a beside operation appends no event",
+                "operation odd beside is a boolean",
+                "operation odd log is a boolean",
+                "field last is not volatile, and operation post is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves",
+            ]
+        );
+        let declaration = BehaviorDeclaration::parse(
+            r#"{"name": "test.Chat", "fields": [{"name": "count", "volatile": true}],
+                "operations": [
+                    {"name": "post", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true, "beside": true},
+                    {"name": "markRead", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true, "beside": true, "log": false},
+                    {"name": "rename", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true}
+                ]}"#,
+        )
+        .unwrap();
+        let flags = |name: &str| {
+            let operation = declaration.operation(name).unwrap();
+            (operation.beside, operation.log)
+        };
+        assert_eq!(flags("post"), (true, true));
+        assert_eq!(flags("markRead"), (true, false));
+        assert_eq!(flags("rename"), (false, true));
     }
 
     #[test]

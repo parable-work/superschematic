@@ -109,6 +109,12 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 				} else {
 					traits = append(traits, "on an instance")
 				}
+				if op.Beside {
+					traits = append(traits, "beside the instance")
+					if !op.Logged() {
+						traits = append(traits, "no event")
+					}
+				}
 				fmt.Fprintf(&b, "- `%s` (%s)", op.Name, strings.Join(traits, ", "))
 				if op.Description != "" {
 					b.WriteString(": " + cell(op.Description))

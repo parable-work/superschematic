@@ -1145,6 +1145,9 @@ fn describe_target(target: &DescribeTarget) -> Value {
                 out.insert("behavior".into(), Value::from(behavior.as_str()));
             }
             out.insert("writes".into(), Value::Bool(operation.writes));
+            if operation.beside {
+                out.insert("beside".into(), Value::Bool(true));
+            }
             out.insert("scope".into(), Value::from(operation.scope.as_str()));
             Value::Object(out)
         }).collect::<Vec<_>>(),
@@ -1701,6 +1704,7 @@ fn event_of(value: &Value) -> EngineEvent {
             .and_then(Value::as_str)
             .map(str::to_owned),
         seq: value.get("seq").and_then(Value::as_i64),
+        beside: value.get("beside") == Some(&Value::Bool(true)),
         version: value.get("version").and_then(Value::as_i64),
         actor: text("actor"),
         service: value

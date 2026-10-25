@@ -18,6 +18,7 @@ import {
   EngineError,
   IncompatibleChangeError,
   OperationParamsError,
+  PreconditionsError,
   SchemaDocumentError,
   type Engine,
   type EngineOptions,
@@ -177,14 +178,15 @@ for (const driver of drivers) {
       const update = veto(() => engine.instances.update(other, 'Job', 'j1', { title: 'Mine' }));
       assert.deepEqual([update.behavior, update.action, update.reason], ['Lease', 'update', `another principal holds its lease, until ${iso(T0 + 60000)}`]);
       assert.equal(veto(() => engine.instances.delete(other, 'Job', 'j1')).action, 'delete');
-      assert.equal(veto(() => invoke(engine, other, 'comment', { body: 'Taking over.' })).action, 'comment');
       assert.equal(veto(() => invoke(engine, other, 'transition', { to: 'running' })).action, 'transition');
+      // An operation beside the instance asks Lease nothing (D77): another principal posts under the lease.
       // A read-only operation is no change, and Lease's own operations check their callers themselves.
-      assert.deepEqual(invoke(engine, other, 'listComments'), { items: [], next: null });
+      assert.equal((invoke(engine, other, 'post', { body: 'Taking over?' }) as { id: number }).id, 1);
+      assert.equal((invoke(engine, other, 'listMessages') as { items: Array<{ author: string }> }).items[0].author, 'otto');
       assert.deepEqual(invoke(engine, other, 'expire'), { expired: false });
 
       engine.instances.update(worker, 'Job', 'j1', { title: 'Build the site' });
-      invoke(engine, worker, 'comment', { body: 'Started.' });
+      invoke(engine, worker, 'post', { body: 'Started.' });
       invoke(engine, worker, 'transition', { to: 'running' });
       assert.equal(statusOf(engine), 'running');
       // A write does not renew the lease: only a heartbeat does.
@@ -192,14 +194,13 @@ for (const driver of drivers) {
     });
 
     test('an operation the config exempts, and a principal with overridePermission, pass while another holds the lease', () => {
-      const { engine } = world({ exempt: ['Comments.comment'], overridePermission: 'jobs.override' });
+      const { engine } = world({ exempt: ['Workflow.transition'], overridePermission: 'jobs.override' });
       invoke(engine, worker, 'acquire');
-      assert.equal((invoke(engine, other, 'comment', { body: 'Is it done yet?' }) as { id: number }).id, 1);
-      assert.equal(veto(() => invoke(engine, other, 'transition', { to: 'running' })).behavior, 'Lease');
-      engine.instances.update(operator, 'Job', 'j1', { title: 'Renamed by an operator' });
-      invoke(engine, operator, 'transition', { to: 'running' });
-      assert.deepEqual(engine.instances.get(alice, 'Job', 'j1')?.data.title, 'Renamed by an operator');
+      invoke(engine, other, 'transition', { to: 'running' });
       assert.equal(statusOf(engine), 'running');
+      assert.equal(veto(() => engine.instances.update(other, 'Job', 'j1', { title: 'Mine' })).behavior, 'Lease');
+      engine.instances.update(operator, 'Job', 'j1', { title: 'Renamed by an operator' });
+      assert.deepEqual(engine.instances.get(alice, 'Job', 'j1')?.data.title, 'Renamed by an operator');
     });
 
     test("an expired holder no one has expired yet no longer holds the instance: its writes and its release are refused, and others' go through", () => {
@@ -208,7 +209,7 @@ for (const driver of drivers) {
       clock.advance(60000);
       const reason = `the caller's lease expired at ${iso(T0 + 60000)}, so it no longer holds the instance`;
       assert.equal(veto(() => engine.instances.update(worker, 'Job', 'j1', { title: 'Late' })).reason, reason);
-      assert.equal(veto(() => invoke(engine, worker, 'comment', { body: 'Late.' })).reason, reason);
+      assert.equal(veto(() => invoke(engine, worker, 'transition', { to: 'running' })).reason, reason);
       assert.equal(veto(() => invoke(engine, worker, 'release', {}, 'j1', 1)).reason, `its lease expired at ${iso(T0 + 60000)}; expire applies the expiry`);
       engine.instances.update(other, 'Job', 'j1', { title: 'Picked up' });
       assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.title, 'Picked up');
@@ -529,7 +530,14 @@ for (const driver of drivers) {
       assert.deepEqual([update.behavior, update.action, update.vetoCode, update.vetoDetails], ['Lease', 'update', 'token_stale', { token: 1, current: 3 }]);
       assert.equal(update.reason, 'token 1 is stale: the lease is at token 3');
       assert.equal(veto(() => invoke(engine, worker, 'transition', { to: 'done' }, 'j1', 1)).vetoCode, 'token_stale');
-      assert.equal(veto(() => invoke(engine, worker, 'comment', { body: 'Done, I think.' }, 'j1', 1)).vetoCode, 'token_stale');
+      // A post is beside the instance: Lease's guard, which reads the token, is not asked, so a token
+      // presented for it would fence nothing and is refused; a post that presents none is the holder's.
+      const fencedPost = thrown(() => invoke(engine, worker, 'post', { body: 'Done, I think.' }, 'j1', 1), PreconditionsError);
+      assert.deepEqual(
+        fencedPost.issues.map((issue) => issue.path),
+        ['/Lease']
+      );
+      assert.equal((invoke(engine, worker, 'post', { body: 'Done, I think.' }) as { id: number }).id, 1);
       assert.equal(veto(() => engine.instances.delete(worker, 'Job', 'j1', fenced(1))).vetoCode, 'token_stale');
       // Whoever calls: an operator with overridePermission who presents a stale token is refused too.
       assert.equal(veto(() => engine.instances.update(operator, 'Job', 'j1', { title: 'Stale' }, fenced(2))).vetoCode, 'token_stale');
@@ -539,7 +547,7 @@ for (const driver of drivers) {
       // Without requireToken, a write that presents no token is the principal's, which holds the lease.
       engine.instances.update(worker, 'Job', 'j1', { title: 'Unfenced' });
       // A read-only operation presents nothing that can be stale.
-      assert.deepEqual(invoke(engine, worker, 'listComments', {}, 'j1', 1), { items: [], next: null });
+      assert.equal((invoke(engine, worker, 'listMessages', {}, 'j1', 1) as { items: unknown[] }).items.length, 1);
       // The heartbeat, the acknowledgement and the release of the old lease are refused the same way.
       assert.equal(veto(() => invoke(engine, worker, 'heartbeat', {}, 'j1', 1)).vetoCode, 'token_stale');
       assert.equal(veto(() => invoke(engine, worker, 'release', {}, 'j1', 1)).vetoCode, 'token_stale');
@@ -554,8 +562,8 @@ for (const driver of drivers) {
       assert.equal((invoke(engine, other, 'acquire', {}, 'j1', 2) as { token: number }).token, 3);
     });
 
-    test("with requireToken, a write under an active lease presents the current token, the holder's own included; exempt and read-only operations, an override and Lease's own operations are not held to it", () => {
-      const { engine, token } = retaken({ requireToken: true, exempt: ['Comments.comment'], overridePermission: 'jobs.override' });
+    test("with requireToken, a write under an active lease presents the current token, the holder's own included; operations beside the instance, read-only ones, an override and Lease's own operations are not held to it", () => {
+      const { engine, token } = retaken({ requireToken: true, overridePermission: 'jobs.override' });
       const bare = veto(() => engine.instances.update(worker, 'Job', 'j1', { title: 'Bare' }));
       assert.deepEqual([bare.vetoCode, bare.reason], ['token_required', "its config requires every write under the lease to present the lease's token as Lease's precondition"]);
       assert.equal(veto(() => invoke(engine, worker, 'transition', { to: 'done' })).vetoCode, 'token_required');
@@ -563,9 +571,10 @@ for (const driver of drivers) {
       // Another principal is refused for holding no lease, before any token.
       assert.equal(veto(() => engine.instances.update(other, 'Job', 'j1', { title: 'Mine' })).vetoCode, 'held_by_another');
       engine.instances.update(worker, 'Job', 'j1', { title: 'Fenced' }, fenced(token));
-      invoke(engine, other, 'comment', { body: 'Exempt.' });
-      invoke(engine, worker, 'comment', { body: 'Exempt for the holder too.' });
-      assert.equal((invoke(engine, worker, 'listComments') as { items: unknown[] }).items.length, 2);
+      // A post is beside the instance, so neither another principal nor the holder presents the token for one.
+      invoke(engine, other, 'post', { body: 'Beside.' });
+      invoke(engine, worker, 'post', { body: 'Beside, for the holder too.' });
+      assert.equal((invoke(engine, worker, 'listMessages') as { items: unknown[] }).items.length, 2);
       engine.instances.update(operator, 'Job', 'j1', { title: 'Overridden' });
       assert.deepEqual(invoke(engine, worker, 'heartbeat', {}, 'j1', token), { expiresAt: T0 + 120000, directives: [] });
       assert.deepEqual(invoke(engine, other, 'expire'), { expired: false });
@@ -918,7 +927,7 @@ for (const driver of drivers) {
         engine,
         jobsDocument([
           { name: 'Workflow', config: jobFlow },
-          { name: 'Lease', config: { ...requeue, ttlMs: 10000, heartbeatMs: 5000, exempt: ['Comments.comment'], maxHoldField: 'timeLimitMs' } },
+          { name: 'Lease', config: { ...requeue, ttlMs: 10000, heartbeatMs: 5000, exempt: ['Workflow.transition'], maxHoldField: 'timeLimitMs' } },
           { name: 'Comments' },
         ])
       );

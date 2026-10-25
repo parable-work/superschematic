@@ -45,28 +45,39 @@ fn ticket_document() -> Value {
     document
 }
 
+// off_runtime runs a call on the engine off the test's runtime: the
+// Postgres client blocks on a runtime of its own, which cannot start
+// inside another.
+fn off_runtime<T>(call: impl FnOnce() -> T) -> T {
+    tokio::task::block_in_place(call)
+}
+
 fn create(engine: &Engine, id: &str, body: &str) {
-    engine
-        .instances()
-        .create(
-            &alice(),
-            "Ticket",
-            &json!({"subject": "Card", "body": body}),
-            CreateOptions {
-                id: Some(id),
-                ..Default::default()
-            },
-        )
-        .expect("create");
+    off_runtime(|| {
+        engine
+            .instances()
+            .create(
+                &alice(),
+                "Ticket",
+                &json!({"subject": "Card", "body": body}),
+                CreateOptions {
+                    id: Some(id),
+                    ..Default::default()
+                },
+            )
+            .expect("create")
+    });
 }
 
 fn data_of(engine: &Engine, id: &str, field: &str) -> Value {
-    engine
-        .instances()
-        .get(&alice(), "Ticket", id, Default::default())
-        .expect("get")
-        .and_then(|record| record.data.get(field).cloned())
-        .unwrap_or(Value::Null)
+    off_runtime(|| {
+        engine
+            .instances()
+            .get(&alice(), "Ticket", id, Default::default())
+            .expect("get")
+            .and_then(|record| record.data.get(field).cloned())
+            .unwrap_or(Value::Null)
+    })
 }
 
 async fn until(check: impl Fn() -> bool) {
@@ -93,14 +104,16 @@ fn the_deriver_fills_stale_fields_settles_a_panic_as_a_failure_wakes_on_a_commit
                 BackgroundOptions::default(),
             );
             let engine = background.wait().await.expect("the engine opens");
-            engine
-                .schemas()
-                .define(&alice(), ticket_document(), DefineOptions::default())
-                .expect("define");
-            engine
-                .schemas()
-                .publish(&alice(), "Ticket", SchemaTarget::default())
-                .expect("publish");
+            off_runtime(|| {
+                engine
+                    .schemas()
+                    .define(&alice(), ticket_document(), DefineOptions::default())
+                    .expect("define");
+                engine
+                    .schemas()
+                    .publish(&alice(), "Ticket", SchemaTarget::default())
+                    .expect("publish");
+            });
             create(&engine, "t1", "Refused at checkout.");
 
             let seen = Arc::new(Mutex::new(Vec::new()));
@@ -149,11 +162,13 @@ fn the_deriver_fills_stale_fields_settles_a_panic_as_a_failure_wakes_on_a_commit
             create(&engine, "t2", "Locked out.");
             until(|| data_of(&engine, "t2", "category") != Value::Null).await;
             let failed = || {
-                engine
-                    .instances()
-                    .invoke_schema(&deriver(), "Ticket", "failedDerivations", &json!({}), None)
-                    .expect("failedDerivations")["items"]
-                    .clone()
+                off_runtime(|| {
+                    engine
+                        .instances()
+                        .invoke_schema(&deriver(), "Ticket", "failedDerivations", &json!({}), None)
+                        .expect("failedDerivations")["items"]
+                        .clone()
+                })
             };
             until(|| failed().as_array().is_some_and(|items| items.len() == 1)).await;
             assert_eq!(
@@ -173,6 +188,8 @@ fn the_deriver_fills_stale_fields_settles_a_panic_as_a_failure_wakes_on_a_commit
                 ["t1.category", "t1.summary", "t2.category", "t2.summary"]
             );
             background.shutdown().await;
+            // The last hold on the engine closes its storage as it drops.
+            off_runtime(move || drop(engine));
         });
     }
 }

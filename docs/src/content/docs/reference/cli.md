@@ -704,6 +704,7 @@ exports:
 | `<T>Behaviors` | an instance's behaviors as a read returns them: by behavior name, each behavior that declares a field, with its fields `readonly`, optional where the engine can leave one out |
 | `<T>Patch` | a merge patch of the own fields |
 | `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
+| `<T>CommentMessage`, `<T>CommentBlock` | a `Comments` message as every operation that returns one gives it, and a block of one, where the type composes `Comments` |
 | `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
 | `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
 | `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |
@@ -713,7 +714,8 @@ exports:
 only type, and `<Schema>` the schema's name in PascalCase. A behavior's
 config narrows its declaration's shapes for the core's behaviors:
 `Workflow`'s states, `Links`' names and targets, `Dependencies`' blocker
-schemas, `Rollups`' values, `Revisions`' patches and `Variants`' types.
+schemas, `Rollups`' values, `Revisions`' patches, the kinds of block
+`Comments` lets a post give and `Variants`' types.
 Another behavior, an extension's among them, is typed by its declaration,
 and its fields hold any JSON. A scalar is typed by the JSON its values
 are on the wire (`Temporal.DateTime` a string), not by its scalar

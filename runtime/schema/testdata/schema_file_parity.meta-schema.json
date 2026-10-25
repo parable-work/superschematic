@@ -881,6 +881,45 @@
             "properties": {
               "config": {
                 "additionalProperties": false,
+                "properties": {
+                  "blocks": {
+                    "description": "The block kinds a post or an edit may give; every kind when absent, none when empty.",
+                    "items": {
+                      "enum": [
+                        "ref",
+                        "action"
+                      ]
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "editWindowMs": {
+                    "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "maxBodyLength": {
+                    "description": "The longest body a post or an edit may give, in code points; 40000 when absent.",
+                    "maximum": 40000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "moderatePermission": {
+                    "description": "The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "pinPermission": {
+                    "description": "The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "resolvePermission": {
+                    "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }

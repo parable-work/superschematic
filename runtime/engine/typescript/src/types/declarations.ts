@@ -74,6 +74,15 @@ export interface BehaviorOperationDeclaration {
    * JSON module types it; checkDeclaration refuses any other value.
    */
   readonly scope?: string;
+  /**
+   * True for an instance operation that writes beside the instance (D77):
+   * only its behavior's own tables and columns, so it moves no sequence
+   * of the instance and asks no other behavior's guard. A behavior that
+   * declares one declares every field volatile.
+   */
+  readonly beside?: boolean;
+  /** False for a beside operation that appends no event; absent, it appends one. */
+  readonly log?: boolean;
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }

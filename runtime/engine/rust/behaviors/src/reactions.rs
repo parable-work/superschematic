@@ -1500,6 +1500,11 @@ impl Behavior for Reactions {
 }
 
 fn react(_: &Reactions, cx: &ReactionCx<'_, ReactionsConfig>, event: &EngineEvent) -> Result<()> {
+    // A beside operation's event moves no field (D77), so no rule hears
+    // it.
+    if event.beside {
+        return Ok(());
+    }
     let config = cx.config();
     let id = instance_id(event);
     // The instance before the event, for the changes rules that need it:

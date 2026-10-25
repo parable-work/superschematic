@@ -373,6 +373,7 @@ pub(crate) fn describe_target(
             name: (*name).to_owned(),
             behavior: None,
             writes: matches!(*name, "create" | "update" | "delete"),
+            beside: false,
             scope: OperationScope::Instance,
         })
         .collect();
@@ -382,6 +383,7 @@ pub(crate) fn describe_target(
                 name: operation.name.clone(),
                 behavior: Some(bound.behavior.name.clone()),
                 writes: operation.writes,
+                beside: operation.beside,
                 scope: operation.scope,
             });
         }

@@ -33,6 +33,7 @@ pub fn operation(name: &str, behavior: Option<&str>, writes: bool) -> DescribedT
         name: name.to_owned(),
         behavior: behavior.map(str::to_owned),
         writes,
+        beside: false,
         scope: OperationScope::Instance,
     }
 }
