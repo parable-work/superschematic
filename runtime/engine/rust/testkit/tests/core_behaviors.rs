@@ -359,7 +359,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
         let mut behaviors = record.behaviors.clone();
         behaviors.insert(
             "Comments".to_owned(),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}}),
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []}),
         );
         assert_eq!(
             replayed,
