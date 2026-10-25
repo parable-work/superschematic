@@ -27,3 +27,72 @@ types:
       - name: title
         typeRef: { name: string }
         required: true
+  # A request two people sign off before it is approved: the Workflow and
+  # Approvals panels' type. Its display labels its states and the moves out
+  # of open; the move out of approved is unlabeled, so the panel offers it
+  # by the state it enters.
+  Request:
+    name: Request
+    description: A request, which two people sign off before it is approved.
+    role: DBTable
+    display:
+      noun: Request
+      plural: Requests
+      titleField: title
+      states:
+        open: { label: Open, tone: active }
+        approved: { label: Approved, tone: success }
+        rejected: { label: Rejected, tone: danger }
+        closed: { label: Closed, tone: muted }
+      transitions:
+        open: { approved: Approve, rejected: Reject }
+    behaviors:
+      - name: Workflow
+        config:
+          states: [open, approved, rejected, closed]
+          transitions:
+            - { from: open, to: approved }
+            - { from: open, to: rejected }
+            - { from: approved, to: closed }
+          outcomes: { rejected: failure }
+      - name: Approvals
+        config:
+          gates:
+            approved: { count: 2, permission: requests.approve }
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+  # A section of a document, the content of a Document's version graph.
+  Section:
+    name: Section
+    role: EmbeddedStruct
+    fields:
+      - name: heading
+        typeRef: { name: string }
+        required: true
+      - name: body
+        typeRef: { name: string }
+  # A document whose sections are versioned (D32): the Branches panel's
+  # type. Its template field reaches Section, which the engine document
+  # holds only as a type a field reaches.
+  Document:
+    name: Document
+    description: A document, whose sections are drafted, committed and released.
+    role: DBTable
+    display:
+      noun: Document
+      plural: Documents
+      titleField: title
+    behaviors:
+      - name: Branches
+        config:
+          kinds:
+            section: { type: Section }
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+      - name: template
+        description: The section a new one starts from.
+        typeRef: { name: Section }
