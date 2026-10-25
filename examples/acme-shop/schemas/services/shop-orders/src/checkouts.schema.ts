@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Default, Nullable, Secret, Validate } from "@superschematic/schema";
+import { Default, Nullable, Secret, Validate, display } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 import {
   Authenticated,
@@ -45,6 +45,7 @@ export abstract class CheckoutLineView {
   quantity: Generic.Int64;
   // pending, held, committed, released or returned (Holds.items).
   state: string;
+  @display({ currency: "GBP" })
   unitPriceCents: Nullable<Generic.Int64>;
 }
 
@@ -57,7 +58,8 @@ export abstract class CheckoutView {
   lines: CheckoutLineView[];
   // The pickup slot it holds, when it is collected.
   pickupAt: Nullable<Temporal.DateTime>;
-  // What it owes, in pence, once its lines are held.
+  // What it owes, in pence, once its lines are held, in its currency.
+  @display({ currency: { field: "currency" } })
   dueCents: Generic.Int64;
   currency: Nullable<string>;
   // unpaid, pending, authorized, paid, partiallyRefunded or refunded
@@ -79,11 +81,13 @@ export abstract class CheckoutPayment {
   attemptId: string;
   intentId: string;
   clientSecret: string;
+  @display({ currency: { field: "currency" } })
   amountCents: Generic.Int64;
   currency: string;
 }
 
 export abstract class RequestRefundInput {
+  @display({ currency: "GBP" })
   amountCents: Validate<Generic.Int64, { min: 1 }>;
   reason: Validate<string, { minLength: 1; maxLength: 500 }>;
 }
@@ -94,6 +98,7 @@ export abstract class RefundView {
   number: Nullable<string>;
   // requested, approved, issued, rejected or failed.
   status: string;
+  @display({ currency: "GBP" })
   amountCents: Generic.Int64;
   reason: string;
 }

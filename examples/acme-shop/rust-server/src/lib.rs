@@ -158,8 +158,9 @@ async fn add_user(
 
 /// The role named `name`, granting `permissions` and no others: the one a
 /// user added before created, rewritten when it grants anything else, or
-/// a new one.
-async fn role(users: &Service, name: &str, permissions: &[&str]) -> Result<Role, Box<dyn Error>> {
+/// a new one. The Topcoat app gives its staff their back office's roles
+/// with it.
+pub async fn role(users: &Service, name: &str, permissions: &[&str]) -> Result<Role, Box<dyn Error>> {
     let store = users.store();
     let wanted: Vec<String> = permissions.iter().map(|&p| p.to_owned()).collect();
     let existing = store

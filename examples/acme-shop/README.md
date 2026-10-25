@@ -40,7 +40,7 @@ kind, decorators and auth provider.
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its catalog, orders and reviews in memory, its checkouts and acmepay's webhook unserved (501), since only the stack's Go server sells through the engine, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`), which mounts `shop-db`'s engine at `/engine`, on a SQLite file the app opens (`ENGINE_DB`, `shop.engine.db` unless set), though the app keeps its own orders and sells nothing through the engine yet: a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources, in place when Topcoat's runtime is loaded; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`), which mounts `shop-db`'s engine at `/engine`, on a SQLite file the app opens (`ENGINE_DB`, `shop.engine.db` unless set), whose types the console pages at `/console/engine` for staff, though the app keeps its own orders and sells nothing through the engine: a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources, in place when Topcoat's runtime is loaded; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `schemas/dist/bun.lock`, `schemas/dist/Cargo.lock` | the lockfiles of `schemas/dist`'s Bun and Cargo workspaces, the generated files committed, so the storefront's and `shop-stock`'s images and every install and build take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
@@ -164,7 +164,29 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
   columns' headers linking it in their order. Its lists are live
   (`pages_live` in `superschematic.toml`): with Topcoat's runtime loaded,
   a filter, a search, a header, a page's links and its size render the
-  list again in place.
+  list again in place;
+- `/console/engine` pages `shop-db`'s engine types for staff, each call
+  made as the signed-in caller under `shop-db`'s engine policy: an
+  Inventory's stock with forms to receive, adjust and count it and its
+  movements, a CollectionPoint's week, closures and bookings, a Checkout's
+  holds and payment, and a Refund's sign-offs and moves;
+- `/console/users` and `/console/roles` administer the shop's users and
+  roles, for staff who hold `identity.users.*` and `identity.roles.*`.
+
+`shop-orders`' amounts are in pence, and say so with
+`@display({ currency: "GBP" })`, or `{ field: "currency" }` beside a
+currency field, so the pages show them as money: `GBP 39.98`, in
+`<data value="3998">`, and the refund form takes a decimal. The engine
+pages' panels show the commerce amounts, which name their currency, the
+same way.
+
+The app sells nothing through the engine: the shop's checkouts are the
+stack's, on `shop-orders`' Go server, and this engine has no payment
+adapter. Its back office shows what is written to it, which the app's
+tests (`topcoat/tests/back_office.rs`) do as the stack's `shop-orders` and
+acmepay's adapter would: an Inventory, a CollectionPoint, a Checkout that
+held and paid for two anvils, and a Refund of it, which two staff who hold
+`refunds.approve` sign off before it moves to approved.
 
 `shop-orders`' lists sort by an argument, `sort` (`SortBy`, D60 amended):
 the orders by `placedAt`, the default, or `totalCents`, the products by
@@ -239,7 +261,13 @@ operation needs a signed-in shopper shows a Sign in button, which opens
 the sign-in page and then comes back to the page: sign in as
 grace@example.com, a shopper, with the password in `topcoat/src/main.rs`,
 or as ada@example.com, staff, who see and cancel every customer's orders
-on the same pages. The JSON API at `/api` admits the same session.
+on the same pages, and hold the back office's roles (`BACK_OFFICE_ROLES`
+in `topcoat/src/lib.rs`): `staff` (`orders.any`), `refunds`
+(`refunds.approve`), `stock` (`stock.write`), `collection-points`
+(`calendar.manage`) and `admin` (`identity.users.*`, `identity.roles.*`).
+The console links to this sign-in page, which the app's settings name,
+rather than the identity pages' own `/console/sign-in`, and signs out at
+`/console/sign-out`. The JSON API at `/api` admits the same session.
 
 ### The Topcoat app on SQLite
 
