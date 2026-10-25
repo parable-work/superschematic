@@ -10132,7 +10132,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
+Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10148,7 +10148,20 @@ Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
    the typed clients. Deleting an instance keeps its conversation's
    high-water marks, so a re-created instance never reuses a message id.
 2. Primitive 2, signals, on SQLite and Postgres and in the stream, with
-   `typing`, `viewing` and streamed replies.
+   `typing`, `viewing` and streamed replies. Built. Signals are
+   `runtime/engine/rust/engine/src/signals.rs` (the hub, the queues and
+   the limiter) and `storage/src/signals.rs` (the carriers), the route and
+   `signals=1` in `api/stream.rs`, and `cx.signal` in the operation
+   context; `testkit/tests/signals.rs` and `replicas_signals.rs` hold them
+   on both databases and across engines on one Postgres database. A
+   stream reads the log at least once a heartbeat however many signals
+   reach it, so an engine without a listener still sees other processes'
+   commits, and it asks the policy about a schema's signals again at each
+   read. Comments' streamed replies are `comments/drafts.rs` and
+   migration 3, held by `testkit/tests/core_comments_drafts.rs` and the
+   TypeScript suite, which reassembles a reply from its drafts over HTTP;
+   the typed clients carry each behavior's signals as types, a guard and a
+   send helper per signal a caller may send.
 3. Primitive 3, namespace operations, with the inbox, read state and
    deliveries.
 4. Primitive 4, acting for a subject, in the principal, the events,
