@@ -224,7 +224,7 @@ func checkCheckout(dir string) error {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			hint := ""
 			if rel == initSuperscalarTypeScript {
-				hint = "; run make setup in it, which checks superscalar out under third_party"
+				hint = "; run make setup in it, which checks superscalar out under third_party, or without Rust scripts/superscalar-dep.sh --prebuilt, which stages it prebuilt"
 			}
 			return fmt.Errorf("%s is no superschematic checkout ready to build against: it has no %s%s", displayPath(dir), rel, hint)
 		}
