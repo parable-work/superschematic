@@ -205,6 +205,9 @@ func TestDepsAndScaffoldCompile(t *testing.T) {
 			Headers: []string{ir.ServiceAuthorizationHeader, "X-Serverless-Authorization"},
 		}},
 		"DEPS_MEDIA_BUCKET": ir.BucketConnection{Name: "acme-shop-deps-media"},
+		"DEPS_CACHE_MEMORY_STORE": ir.MemoryStoreConnection{
+			Store: "deps-cache", URL: "rediss://10.1.2.3:6379", CA: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n", Auth: ir.MemoryStoreAuthIAM,
+		},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {
@@ -243,6 +246,9 @@ func TestTheImplementationBuildsFromDeps(t *testing.T) {
 	}
 	if b := cfg.DepsMediaBucket; b.Name != "acme-shop-deps-media" || b.Endpoint != "" {
 		t.Errorf("DepsMediaBucket = %+v", b)
+	}
+	if m := cfg.DepsCacheMemoryStore; !m.Enabled() || !m.TLS() || m.Store != "deps-cache" || m.Auth != "iam" {
+		t.Errorf("DepsCacheMemoryStore = %+v", m)
 	}
 	impls, err := impl.New(api.Deps{Config: *cfg})
 	if err != nil {

@@ -295,6 +295,8 @@ async fn the_implementation_builds_from_deps_and_answers_501() {
     assert_eq!(config.deps_rust_pricing_service.url, "https://deps-rust-pricing.run.app");
     assert_eq!(config.deps_media_bucket.name, "acme-shop-deps-media");
     assert_eq!(config.deps_media_bucket.endpoint, None);
+    // No variable of deps-cache's field is set: a disabled store (D75).
+    assert!(config.deps_cache_memory_store.is_none());
     assert!(config.deps_rust_shop_callers.issuers.is_empty());
     assert_eq!(config.deps_rust_shop_cors.origins, ["https://shop.example.com"]);
     assert!(!config.deps_rust_shop_identity.cookie.secure);

@@ -100,12 +100,14 @@ export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
   CREDENTIAL_SOURCES,
+  MEMORY_STORE_AUTHS,
   SERVICE_AUTHORIZATION_HEADER,
   StackConfigError,
   loadBucket,
   loadCallers,
   loadCors,
   loadDatabase,
+  loadMemoryStore,
   loadService,
   serviceCredentialFor,
 } from './stackconfig.js';
@@ -123,6 +125,8 @@ export {
 export type { CorsApi, CorsDecision, CorsOperation, CorsPolicy } from './cors.js';
 export type {
   BucketConnection,
+  MemoryStoreAuth,
+  MemoryStoreConnection,
   CloudSqlConnection,
   D1Connection,
   Database,

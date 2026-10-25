@@ -230,6 +230,7 @@ test('the implementation builds from Deps and answers 501', async () => {
   expect(config.DEPS_TS_PRICING_SERVICE.credential?.source).toBe('google-id-token');
   expect(config.DEPS_TS_SHOP_CALLERS).toEqual({ issuers: [] });
   expect(config.DEPS_MEDIA_BUCKET).toEqual({ name: 'acme-shop-deps-media' });
+  expect(config.DEPS_CACHE_MEMORY_STORE).toEqual({ store: 'deps-cache', url: 'redis://127.0.0.1:26379/0', auth: 'none' });
   const deps: Deps = {
     config,
     db: {} as Deps['db'],
@@ -332,6 +333,7 @@ func TestTypeScriptDepsAndScaffoldCompile(t *testing.T) {
 		}},
 		ir.CallersField("deps-ts-shop"): ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{}},
 		"DEPS_MEDIA_BUCKET":             ir.BucketConnection{Name: "acme-shop-deps-media"},
+		"DEPS_CACHE_MEMORY_STORE":       ir.MemoryStoreConnection{Store: "deps-cache", URL: "redis://127.0.0.1:26379/0", Auth: ir.MemoryStoreAuthNone},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {
