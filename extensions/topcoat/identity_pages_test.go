@@ -47,7 +47,10 @@ func identityPagesCopy(t *testing.T, edit func(schema string) string) string {
 // sign-up only when pages.identity.signUp or the API's
 // @userSessions({ register: true }) asks for it, the build log saying why
 // it is left out; pages.identity false writes none; and a resource whose
-// pages take one of their paths leaves them out, which the log says.
+// pages take one of their paths leaves them out, which the log says. The
+// pages that sign in, sign up and change a password take the rate limit
+// of the API's route that does the same, or, on an API without it, one of
+// their own at the route's rate.
 func TestTheIdentityPagesAreWrittenAsDeclared(t *testing.T) {
 	noSignUp := "  - topcoat: no sign-up page under /console: neither pages.identity.signUp nor the API's @userSessions({ register: true }) opens registration\n"
 	build := func(dir string, outputs map[string]any) (log string, pages string, ok bool) {
@@ -70,9 +73,33 @@ func TestTheIdentityPagesAreWrittenAsDeclared(t *testing.T) {
 	if strings.Contains(log, "the identity pages are not built yet") {
 		t.Errorf("the log still says the identity pages are not built:\n%s", log)
 	}
+	for _, want := range []string{
+		"const SIGN_IN_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_LOGIN;",
+		"const CHANGE_PASSWORD_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_CHANGE_PASSWORD;",
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("the default pages lack %s", want)
+		}
+	}
 	log, pages, ok = build(fixture, signUpOutputs())
 	if !ok || !strings.Contains(pages, signUp) || strings.Contains(log, "no sign-up page") {
 		t.Errorf("pages.identity { signUp: true }: identity pages written %v, sign-up in them %v, log:\n%s", ok, strings.Contains(pages, signUp), log)
+	}
+	own := `const SIGN_UP_LIMIT: &OperationInfo = &OperationInfo { namespace: "topcoat", name: "signUp", method: "POST", path: "/console/sign-up", requires_auth: false, permissions: &[], require_ownership: false, manual: false, rate_limit: Some(5), service: None };`
+	if !strings.Contains(pages, own) {
+		t.Errorf("sign-up without the API's register route lacks its own limit %s", own)
+	}
+	noLogin := identityPagesCopy(t, func(schema string) string {
+		return strings.Replace(schema, "userSessions: {}", "userSessions: { noLogin: true }", 1)
+	})
+	_, pages, _ = build(noLogin, pagesOutputs())
+	for _, want := range []string{
+		`const SIGN_IN_LIMIT: &OperationInfo = &OperationInfo { namespace: "topcoat", name: "signIn", method: "POST", path: "/console/sign-in", requires_auth: false, permissions: &[], require_ownership: false, manual: false, rate_limit: Some(10), service: None };`,
+		`const CHANGE_PASSWORD_LIMIT: &OperationInfo = &OperationInfo { namespace: "topcoat", name: "changePassword", method: "POST", path: "/console/account", requires_auth: false, permissions: &[], require_ownership: false, manual: false, rate_limit: Some(10), service: None };`,
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("@userSessions({ login: false }): the pages lack their own limit %s", want)
+		}
 	}
 	registers := identityPagesCopy(t, func(schema string) string {
 		return strings.Replace(schema, "userSessions: {}", "userSessions: { register: true }", 1)
@@ -80,6 +107,9 @@ func TestTheIdentityPagesAreWrittenAsDeclared(t *testing.T) {
 	log, pages, ok = build(registers, pagesOutputs())
 	if !ok || !strings.Contains(pages, signUp) || strings.Contains(log, "no sign-up page") {
 		t.Errorf("@userSessions({ register: true }): identity pages written %v, sign-up in them %v, log:\n%s", ok, strings.Contains(pages, signUp), log)
+	}
+	if want := "const SIGN_UP_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_REGISTER;"; !strings.Contains(pages, want) {
+		t.Errorf("@userSessions({ register: true }): the pages lack %s", want)
 	}
 
 	off := rustOutputs()
@@ -109,23 +139,35 @@ func TestTheIdentityPagesAreWrittenAsDeclared(t *testing.T) {
 // with the flag, a taken login 409; an admin adds users and roles, grants
 // and revokes a role, disables, enables and sets a password, and edits
 // and deletes a role, a malformed permission 422 and one the admin does
-// not hold 403 at the form; and a member is refused the users and roles
-// pages (403), whose links their nav does not show.
+// not hold 403 at the form; a member is refused the users and roles
+// pages (403), whose links their nav does not show; and the 11th sign-in
+// or password change in a minute, or the 6th sign-up, is refused 429 with
+// Retry-After. The crate with sign-up is built over a copy of the fixture
+// whose @userSessions has login: false, so its pages take their own
+// limiters; the one without takes the API's routes', which the JSON login
+// shares.
 func TestTheConsoleSignsInAndAdministers(t *testing.T) {
 	ddl, err := os.ReadFile("../../runtime/http/testdata/identity/sqlite/create.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
+	noLogin := identityPagesCopy(t, func(schema string) string {
+		return strings.Replace(schema, "userSessions: {}", "userSessions: { noLogin: true }", 1)
+	})
 	for _, variant := range []struct {
-		name    string
-		outputs map[string]any
-		signUp  string
+		name     string
+		dir      string
+		outputs  map[string]any
+		signUp   string
+		apiLogin string
 	}{
-		{"without sign-up", pagesOutputs(), "false"},
-		{"with sign-up", signUpOutputs(), "true"},
+		{"without sign-up", "", pagesOutputs(), "false", "true"},
+		{"with sign-up, without the API's login", noLogin, signUpOutputs(), "true", "false"},
 	} {
 		t.Run(variant.name, func(t *testing.T) {
-			cargoTestCrateWith(t, identityPagesService, identityPagesAppTest+"\nconst SIGN_UP: bool = "+variant.signUp+";\n", crateOptions{
+			consts := "\nconst SIGN_UP: bool = " + variant.signUp + ";\nconst API_LOGIN: bool = " + variant.apiLogin + ";\n"
+			cargoTestCrateWith(t, identityPagesService, identityPagesAppTest+consts, crateOptions{
+				dir:             variant.dir,
 				features:        []string{"identity-sqlite"},
 				devDependencies: `rusqlite = { version = "0.40.2", features = ["bundled"] }` + "\n",
 				files:           map[string]string{"identity.sql": string(ddl)},
@@ -139,7 +181,8 @@ func TestTheConsoleSignsInAndAdministers(t *testing.T) {
 // Topcoat crate, beside tests/identity.sql, the DDL of
 // fixture-user-model-db that the identity runtimes' stores run against
 // (runtime/http/testdata). The test appends SIGN_UP, whether the crate was
-// built with the sign-up page.
+// built with the sign-up page, and API_LOGIN, whether its API serves the
+// login and changePassword routes.
 const identityPagesAppTest = `use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -205,6 +248,7 @@ async fn app() -> Router {
 struct Reply {
     status: StatusCode,
     location: Option<String>,
+    retry_after: Option<String>,
     cookies: Vec<String>,
     body: String,
 }
@@ -240,11 +284,34 @@ async fn send(router: &Router, method: &str, uri: &str, cookie: Option<&str>, fo
     let response = router.handle(request.body(body).unwrap()).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let location = headers.get("location").map(|value| value.to_str().unwrap().to_string());
+    let retry_after = headers.get("retry-after").map(|value| value.to_str().unwrap().to_string());
     let cookies = headers.get_all("set-cookie").iter().map(|value| value.to_str().unwrap().to_string()).collect();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(bytes.to_vec()).unwrap();
     enter::check_page(uri, &headers, &body);
-    Reply { status, location, cookies, body }
+    Reply { status, location, retry_after, cookies, body }
+}
+
+// Signs in through the API's JSON login route, with a wrong password: its
+// status.
+async fn json_login(router: &Router) -> StatusCode {
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header("host", "app.example.com")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"login": "member@example.com", "password": "wrong horse battery"}"#))
+        .unwrap();
+    router.handle(request).await.status()
+}
+
+// A refusal past a rate limit: 429, Retry-After, the message above the
+// form, and no cookie.
+fn assert_limited(reply: &Reply) {
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS, "{}", reply.body);
+    assert!(reply.retry_after.as_deref().is_some_and(|seconds| seconds.parse::<u64>().is_ok_and(|seconds| seconds > 0)), "{:?}", reply.retry_after);
+    assert!(reply.body.contains(r#"<p class="form-error">Too many attempts: try again in "#), "{}", reply.body);
+    assert!(reply.cookies.is_empty(), "{:?}", reply.cookies);
 }
 
 fn encode(value: &str) -> String {
@@ -338,6 +405,63 @@ async fn a_caller_signs_in_back_to_next_and_out() {
     let reply = send(&router, "GET", "/console/account", Some(&member), &[]).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
     assert!(reply.body.contains(r#"href="/console/sign-in?next=%2Fconsole%2Faccount""#), "{}", reply.body);
+}
+
+// Sign-in meets the login route's rate limit, 10 a minute per client: the
+// 11th is refused, its right password unchecked. Where the API serves the
+// route, the page takes the route's limiter, so its JSON login and the
+// page share one budget.
+#[tokio::test]
+async fn the_eleventh_sign_in_in_a_minute_is_refused() {
+    let router = app().await;
+    let wrong = [("login", "member@example.com"), ("password", "wrong horse battery")];
+    let json = if API_LOGIN { 4 } else { 0 };
+    for _ in 0..json {
+        assert_eq!(json_login(&router).await, StatusCode::UNAUTHORIZED);
+    }
+    for _ in json..10 {
+        let reply = send(&router, "POST", "/console/sign-in", None, &wrong).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    }
+    let right = [("login", "member@example.com"), ("password", PASSWORD), ("next", "/console/notes")];
+    let reply = send(&router, "POST", "/console/sign-in", None, &right).await;
+    assert_limited(&reply);
+    assert!(reply.body.contains(r#"value="member@example.com""#) && !reply.body.contains(PASSWORD), "{}", reply.body);
+    if API_LOGIN {
+        assert_eq!(json_login(&router).await, StatusCode::TOO_MANY_REQUESTS);
+    }
+}
+
+// Changing the password meets the changePassword route's rate limit, 10 a
+// minute per client.
+#[tokio::test]
+async fn the_eleventh_password_change_in_a_minute_is_refused() {
+    let router = app().await;
+    let member = sign_in(&router, "member@example.com", PASSWORD).await;
+    for _ in 0..10 {
+        let reply = send(&router, "POST", "/console/account", Some(&member), &[("current", "not the password"), ("password", "a new password")]).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    }
+    let reply = send(&router, "POST", "/console/account", Some(&member), &[("current", PASSWORD), ("password", "a new password")]).await;
+    assert_limited(&reply);
+    assert!(reply.body.contains("<h1>Account</h1>"), "{}", reply.body);
+    sign_in(&router, "member@example.com", PASSWORD).await;
+}
+
+// Signing up meets the register route's rate limit, 5 a minute per client.
+#[tokio::test]
+async fn the_sixth_sign_up_in_a_minute_is_refused() {
+    if !SIGN_UP {
+        return;
+    }
+    let router = app().await;
+    for at in 0..5 {
+        let login = format!("new{at}@example.com");
+        let reply = send(&router, "POST", "/console/sign-up", None, &[("login", &login), ("password", PASSWORD)]).await;
+        assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    }
+    let reply = send(&router, "POST", "/console/sign-up", None, &[("login", "new5@example.com"), ("password", PASSWORD)]).await;
+    assert_limited(&reply);
 }
 
 #[tokio::test]

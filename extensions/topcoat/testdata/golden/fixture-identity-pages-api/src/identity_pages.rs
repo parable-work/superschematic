@@ -22,10 +22,17 @@
 //! origin policy, and a post a session cookie signs passes the runtime's
 //! cross-origin check (403 `cross_origin`), as the JSON API's does.
 //!
+//! Signing in, signing up and changing a password each take a token from
+//! the rate limit of the API's route that does the same (D50), counting
+//! the client as the route does (`client_key`), so a client has one
+//! budget on both. A page whose API serves no such route has a limiter of
+//! its own at the route's rate. Past the limit, the form renders again
+//! with 429 and `Retry-After`.
+//!
 //! The identity store has no call that lists a user's sessions or ends one
 //! of them (D50), so no page does.
 
-use crate::api::runtime::ApiError;
+use crate::api::runtime::{ApiError, OperationInfo};
 use crate::api::runtime::identity::{
     self, ChangePasswordInput, CreateUserInput, CurrentUser, IdentityPrincipal, IdentityRole, IdentityUser, IssuedSession,
     LoginInput, RoleInput, Service, SetPasswordInput, Transport,
@@ -37,7 +44,7 @@ use serde_json::Value;
 use topcoat::context::{Cx, memoize};
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
-use topcoat::router::header::SET_COOKIE;
+use topcoat::router::header::{RETRY_AFTER, SET_COOKIE};
 use topcoat::router::request::{parts, uri};
 use topcoat::router::response::response_headers;
 use topcoat::router::{HeaderValue, StatusCode, page, path_param};
@@ -53,6 +60,11 @@ const USERS: &str = "/console/users";
 const NEW_USER: &str = "/console/users/new";
 const ROLES: &str = "/console/roles";
 const NEW_ROLE: &str = "/console/roles/new";
+
+/// Sign-in's rate limit: the login route's, `ACCOUNT_LOGIN`.
+const SIGN_IN_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_LOGIN;
+/// Changing a password's rate limit: the changePassword route's, `ACCOUNT_CHANGE_PASSWORD`.
+const CHANGE_PASSWORD_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_CHANGE_PASSWORD;
 
 path_param!(pub user_id);
 path_param!(pub role_id);
@@ -230,6 +242,21 @@ fn require_password(errors: &mut FormErrors, name: &str, password: &str) {
     }
 }
 
+/// Takes a token from the client's bucket (`client_key`) of `limit`'s
+/// limiter in the app's registry, as the route does; past the limit, the
+/// refusal 429 with `Retry-After`, which the form renders above its
+/// controls.
+fn limited(cx: &Cx, limit: &OperationInfo) -> Result<(), Refusal> {
+    let setup = crate::setup(cx).map_err(|err| Refusal::from_api(&err))?;
+    let Some(limiter) = setup.rate_limits.of(limit) else {
+        return Ok(());
+    };
+    limiter.take(&crate::client_key(cx)).map_err(|retry_after| {
+        response_headers(cx).append(RETRY_AFTER, HeaderValue::from(retry_after));
+        Refusal::from_api(&ApiError::too_many_requests(format!("Too many attempts: try again in {retry_after} seconds")))
+    })
+}
+
 /// The 422 of a form's errors, or nothing.
 fn parsed(errors: FormErrors) -> Result<(), Refusal> {
     if errors.is_empty() { Ok(()) } else { Err(Refusal::from(errors)) }
@@ -386,6 +413,7 @@ pub async fn identity_signing_in_page(cx: &Cx, Form(form): Form<SignInForm>) -> 
 }
 
 async fn sign_in_with(cx: &Cx, form: &SignInForm) -> Result<(), Refusal> {
+    limited(cx, SIGN_IN_LIMIT)?;
     let mut errors = FormErrors::default();
     require(&mut errors, "login", &form.login);
     require(&mut errors, "password", &form.password);
@@ -496,6 +524,7 @@ async fn me(cx: &Cx) -> Result<CurrentUser, Refusal> {
 }
 
 async fn change_password(cx: &Cx, form: &ChangePasswordForm) -> Result<(), Refusal> {
+    limited(cx, CHANGE_PASSWORD_LIMIT)?;
     let caller = needs_caller(cx).await?;
     let mut errors = FormErrors::default();
     require(&mut errors, "current", &form.current);
