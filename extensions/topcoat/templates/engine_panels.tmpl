@@ -13,13 +13,18 @@
 //!   and the caller's own sign-off or withdraw form.
 //! - Branches (D32) shows the refs, primary first, a ref's commits newest
 //!   first (`?ref=`), a diff of two commits (`?from=&to=`), the release
-//!   log, and the writes: branch, commit, merge, release and discard.
+//!   log, and the writes: branch; a draft's save, commit, seal, rebase,
+//!   revert, merge and discard; and a tagged commit's release.
 //!
-//! A panel's form posts its operation's parameters by name, with the
-//! instance's `expectedSeq`, to the instance's operation route, as the
-//! generic form does. A panel reads the engine, as Branches does, in-process
-//! on the blocking pool as the page's caller, so the engine's policy decides
-//! what it shows; with no caller it reads nothing.
+//! A panel offers only the operations the engine pages offer the caller
+//! (`engine_pages::operations`). Its forms post the operation's parameters
+//! by name, with the instance's `expectedSeq`, to the instance's operation
+//! route: Branches' writes are the generic form (`engine_pages::
+//! operation_form`) with the refs and versions it read filled in and
+//! hidden; Workflow's moves, Approvals' sign-offs and a commit's release are
+//! buttons of the panel's own. A panel reads the engine, as Branches does,
+//! in-process on the blocking pool as the page's caller, so the engine's
+//! policy decides what it shows; with no caller it reads nothing.
 
 use std::sync::Arc;
 
@@ -29,11 +34,8 @@ use topcoat::context::Cx;
 use topcoat::router::request::uri;
 use topcoat::view::{BoxView, ViewExt, view};
 
+use crate::engine_pages::{EngineOperation, instance_href, operation_form, operation_href, operations};
 use crate::pages::{decode, encode};
-
-/// Where the engine's pages are served: an instance's page is
-/// `{ENGINE}/{schema}/{id}`, and its operations post under it.
-const ENGINE: &str = {{ rustString (printf "%s%s" .Pages.Prefix engineMount) }};
 
 /// The panel of `behavior` on `record`'s page: `describe` is the type's
 /// describe document, whose `behaviors` give each one's config, fields and
@@ -43,21 +45,47 @@ const ENGINE: &str = {{ rustString (printf "%s%s" .Pages.Prefix engineMount) }};
 /// that read them returns it.
 pub async fn panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
     match behavior {
-        "Workflow" => Some(workflow_panel(cx, describe, record)),
+        "Workflow" => Some(workflow_panel(cx, describe, record).await),
         "Approvals" => Some(approvals_panel(cx, describe, record).await),
-        "Branches" => Some(branches_panel(cx, record).await),
+        "Branches" => Some(branches_panel(cx, describe, record).await),
         _ => commerce_panel(cx, behavior, describe, record).await,
     }
 }
 
+/// Whether the panel of `behavior`, a core one (Workflow, Approvals or
+/// Branches), shows `operation` itself, as a form or as what it reads, so
+/// the instance's page need not list it again: Workflow's transition,
+/// Approvals' sign-off and its withdrawal, and Branches' writes but none of
+/// its reads besides refs, releases, history and diff. The instance's page
+/// lists every other operation of theirs as the generic form.
+pub fn core_shows(behavior: &str, operation: &str) -> bool {
+    CORE_SHOWN.iter().any(|(name, operations)| *name == behavior && operations.contains(&operation))
+}
+
+/// The operations each core panel shows itself, by behavior.
+const CORE_SHOWN: &[(&str, &[&str])] = &[
+    ("Workflow", &["transition"]),
+    ("Approvals", &["signOff", "withdrawSignOff"]),
+    (
+        "Branches",
+        &["branch", "save", "commit", "seal", "merge", "rebase", "revert", "releaseCommit", "discard", "refs", "releases", "history", "diff"],
+    ),
+];
+
 /// The page of `record`, under which its operations post.
 fn item_href(record: &InstanceRecord) -> String {
-    format!("{ENGINE}/{}/{}", encode(&record.schema), encode(&record.id))
+    instance_href(&record.schema, &record.id)
 }
 
 /// The route `operation` of `record` posts to.
-fn operation_href(record: &InstanceRecord, operation: &str) -> String {
-    format!("{}/operations/{}", item_href(record), encode(operation))
+fn op_href(record: &InstanceRecord, operation: &str) -> String {
+    operation_href(&record.schema, Some(&record.id), operation)
+}
+
+/// The instance operation `name` of `offered`, the operations the caller is
+/// offered: none when the caller is not offered it.
+fn offer(offered: &[EngineOperation], name: &str) -> Option<EngineOperation> {
+    offered.iter().find(|operation| operation.name == name && !operation.schema_scope).cloned()
 }
 
 /// The config the type gives `behavior`: its entry's in the describe
@@ -98,12 +126,20 @@ struct Move {
 /// The Workflow panel: the state by its display label and tone, a button
 /// per transition the display labels out of it, and a form whose choices
 /// are the moves out of it the display does not label, by the state each
-/// enters.
-fn workflow_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
+/// enters. It offers a caller only the moves they may make: none when they
+/// are not offered `transition`, nor a move whose `permission` no
+/// permission of theirs covers.
+async fn workflow_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
+    let offered = offer(&operations(cx, describe).await, "transition").is_some();
+    let held = caller_principal(cx).await.map(|caller| caller.permissions).unwrap_or_default();
+    let may = |transition: &Value| {
+        offered && transition["permission"].as_str().is_none_or(|permission| held.iter().any(|have| covers(have, permission)))
+    };
     let status = record.behavior_field("Workflow", "status").and_then(Value::as_str).map(str::to_owned);
     let label = status.as_deref().map_or_else(|| "No status".to_owned(), |status| state_label(describe, status));
     let tone = status.as_deref().and_then(|status| describe["display"]["states"][status]["tone"].as_str()).map(str::to_owned);
     let labels = status.as_deref().map_or(&Value::Null, |status| &describe["display"]["transitions"][status]);
+    let mut leaves = false;
     let mut buttons = Vec::new();
     let mut others = Vec::new();
     for transition in config_of(describe, "Workflow")["transitions"].as_array().into_iter().flatten() {
@@ -113,15 +149,19 @@ fn workflow_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> 
         if Some(from) != status.as_deref() {
             continue;
         }
-        let action = operation_href(record, "transition");
+        leaves = true;
+        if !may(transition) {
+            continue;
+        }
+        let action = op_href(record, "transition");
         let seq = record.seq.to_string();
         match labels[to].as_str().filter(|label| !label.is_empty()) {
             Some(label) => buttons.push(Move { action, seq, to: to.to_owned(), label: label.to_owned() }),
             None => others.push((to.to_owned(), state_label(describe, to))),
         }
     }
-    let stays = buttons.is_empty() && others.is_empty();
-    let other = (!others.is_empty()).then(|| (operation_href(record, "transition"), record.seq.to_string(), others));
+    let stays = !leaves;
+    let other = (!others.is_empty()).then(|| (op_href(record, "transition"), record.seq.to_string(), others));
     view! { cx =>
         <section class="ss-panel" data-behavior="Workflow">
             <h2>"Workflow"</h2>
@@ -182,6 +222,8 @@ struct Gate {
 /// whose permissions do not cover the gate's; the engine refuses each.
 async fn approvals_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
     let caller = caller_principal(cx).await;
+    let offered = operations(cx, describe).await;
+    let (signs, withdraws) = (offer(&offered, "signOff").is_some(), offer(&offered, "withdrawSignOff").is_some());
     let status = record.behavior_field("Workflow", "status").and_then(Value::as_str);
     let signed_of = record.behavior_field("Approvals", "gates");
     let mut gates = Vec::new();
@@ -195,15 +237,15 @@ async fn approvals_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceReco
         let permission = gate["permission"].as_str().unwrap_or_default();
         let signing = match &caller {
             None => Signing::Nothing,
-            Some(caller) if signed.contains(&caller.subject) => {
-                Signing::Withdraw(operation_href(record, "withdrawSignOff"), record.seq.to_string())
+            Some(caller) if signed.contains(&caller.subject) && withdraws => {
+                Signing::Withdraw(op_href(record, "withdrawSignOff"), record.seq.to_string())
             }
             Some(_) if status == Some(state.as_str()) => Signing::Not("It is in this state, so no sign-off is taken for it."),
             Some(caller) if gate["excludeCreator"] != false && caller.subject == record.created_by => {
                 Signing::Not("You created it, so you cannot sign off for this state.")
             }
-            Some(caller) if caller.permissions.iter().any(|held| covers(held, permission)) => {
-                Signing::SignOff(operation_href(record, "signOff"), record.seq.to_string())
+            Some(caller) if signs && !signed.contains(&caller.subject) && caller.permissions.iter().any(|held| covers(held, permission)) => {
+                Signing::SignOff(op_href(record, "signOff"), record.seq.to_string())
             }
             Some(_) => Signing::Nothing,
         };
@@ -294,19 +336,48 @@ struct ChangeRow {
     after: String,
 }
 
-/// The selected ref's writes: commit, merge into its parent and discard,
-/// each a route and its hidden parameters. A primary line takes none, and
-/// a sealed draft only the merge.
-struct Writes {
-    commit: Option<(String, String, String)>,
-    merge: Option<(String, String, String, String, String)>,
-    discard: Option<(String, String, String)>,
+/// A write of the Branches panel: the generic form of its operation, with
+/// the parameters the panel read filled in and hidden, and what it writes
+/// to, said before it.
+struct Write {
+    schema: String,
+    id: String,
+    seq: i64,
+    operation: EngineOperation,
+    values: Vec<(String, String)>,
+    hidden: Vec<String>,
+    said: String,
 }
 
+impl Write {
+    /// The form of `name`, when the caller is offered it, with `values`
+    /// held.
+    fn of(offered: &[EngineOperation], record: &InstanceRecord, name: &str, values: &[(&str, &str)], said: String) -> Option<Write> {
+        Some(Write {
+            schema: record.schema.clone(),
+            id: record.id.clone(),
+            seq: record.seq,
+            operation: offer(offered, name)?,
+            values: values.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect(),
+            hidden: values.iter().map(|(name, _)| (*name).to_owned()).collect(),
+            said,
+        })
+    }
+}
+
+/// How many commits of a ref's history the Branches panel shows at a time,
+/// newest first: `?skip=` pages to older ones.
+const HISTORY_PAGE: usize = 50;
+
+/// How many rows of a diff the Branches panel shows; it says how many more
+/// there are.
+const DIFF_ROWS: usize = 200;
+
 /// The parameters of a Branches read the page's query asks for: `ref`,
-/// `from` and `to`, each decoded, an empty one absent.
-fn graph_query(cx: &Cx) -> (Option<String>, Option<String>, Option<String>) {
-    let (mut selected, mut from, mut to) = (None, None, None);
+/// `from` and `to`, each decoded, an empty one absent, and `skip`, how many
+/// of the newest commits the history passes over.
+fn graph_query(cx: &Cx) -> (Option<String>, Option<String>, Option<String>, usize) {
+    let (mut selected, mut from, mut to, mut skip) = (None, None, None, 0);
     for pair in uri(cx).query().unwrap_or_default().split('&') {
         let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
         let value = decode(&value.replace('+', " "));
@@ -317,10 +388,11 @@ fn graph_query(cx: &Cx) -> (Option<String>, Option<String>, Option<String>) {
             "ref" => selected = Some(value),
             "from" => from = Some(value),
             "to" => to = Some(value),
+            "skip" => skip = value.parse().unwrap_or_default(),
             _ => {}
         }
     }
-    (selected, from, to)
+    (selected, from, to, skip)
 }
 
 /// A commit's or a ref's id as the panel shows it: its first eight
@@ -368,8 +440,10 @@ fn items_of(result: Value, key: &str) -> Vec<Value> {
 
 /// Reads the version graph of `record` as `principal`: its refs, its
 /// release log, the history of `selected` (else of the primary line), and
-/// the diff of `from` and `to` with the earlier commit's tree. Called on
-/// the blocking pool.
+/// the diff of `from` and `to`, two commits of that history, with the
+/// earlier commit's tree when the diff updates or deletes an entity, so a
+/// reader cannot have the panel diff or materialize any commit of the
+/// instance. Called on the blocking pool.
 fn read_graph(
     engine: &Engine,
     principal: &Principal,
@@ -388,10 +462,17 @@ fn read_graph(
         .map(str::to_owned)
         .or(primary)
         .map(|selected| read("history", json!({ "ref": selected })).map(|result| items_of(result, "commits")));
+    let shown = |id: &str| history.as_ref().and_then(|history| history.as_ref().ok()).is_some_and(|commits| commits.iter().any(|commit| commit["id"] == id));
     let (diff, before) = match span {
+        Some((from, to)) if !shown(from) || !shown(to) => {
+            (Some(Err("Compare two commits of the history shown.".to_owned())), None)
+        }
         Some((from, to)) => {
             let diff = read("diff", json!({ "from": from, "to": to }));
-            let before = diff.is_ok().then(|| read("materialize", json!({ "commit": from })).ok()).flatten();
+            let rewrites = diff.as_ref().ok().and_then(|diff| diff["changes"].as_array()).is_some_and(|changes| {
+                changes.iter().any(|change| change["operation"] != "ADD")
+            });
+            let before = rewrites.then(|| read("materialize", json!({ "commit": from })).ok()).flatten();
             (Some(diff), before)
         }
         None => (None, None),
@@ -404,10 +485,13 @@ fn read_graph(
 /// of the primary line, newest first, each commit with a link to its
 /// changes and, when tagged, a release button; the diff of the query's
 /// `from` and `to` as a table of path, change, before and after; the
-/// release log, with `behaviors.Branches.release`; and the writes: the
-/// selected draft's commit, merge into its parent and discard, and a
-/// branch form.
-async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> {
+/// release log, with `behaviors.Branches.release`; and the writes the
+/// caller is offered: a branch of the selected ref, and the selected
+/// draft's save, commit, seal, rebase, revert, merge into its parent and
+/// discard, each the generic form with the ref and its version filled in
+/// and hidden. Its other reads, compose, materialize and released, are the
+/// generic forms the instance's page lists (`core_shows`).
+async fn branches_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
     let Some(principal) = caller_principal(cx).await else {
         return panel_message(cx, "Branches", "Sign in to see its branches.".to_owned());
     };
@@ -415,7 +499,9 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
         return panel_message(cx, "Branches", "The app does not host the engine.".to_owned());
     };
     let engine = Arc::clone(&setup.engine);
-    let (selected, from, to) = graph_query(cx);
+    let offered = operations(cx, describe).await;
+    let releases_offered = offer(&offered, "releaseCommit").is_some();
+    let (selected, from, to, skip) = graph_query(cx);
     let owned = record.clone();
     let (query_ref, query_from, query_to) = (selected.clone(), from.clone(), to.clone());
     let read = tokio::task::spawn_blocking(move || {
@@ -466,8 +552,15 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
         None => (Vec::new(), None),
     };
     let ref_query = selected.as_deref().map(|id| format!("ref={}&", encode(id))).unwrap_or_default();
+    let total = history.len();
+    let skip = skip.min(total.saturating_sub(1) / HISTORY_PAGE * HISTORY_PAGE);
+    let newer = (skip > 0).then(|| format!("{item}?{ref_query}skip={}", skip.saturating_sub(HISTORY_PAGE)));
+    let older = (skip + HISTORY_PAGE < total).then(|| format!("{item}?{ref_query}skip={}", skip + HISTORY_PAGE));
+    let counted = (total > HISTORY_PAGE).then(|| format!("Commits {} to {} of {total}, newest first.", skip + 1, (skip + HISTORY_PAGE).min(total)));
     let commits: Vec<CommitRow> = history
         .iter()
+        .skip(skip)
+        .take(HISTORY_PAGE)
         .map(|commit| {
             let id = commit["id"].as_str().unwrap_or_default();
             CommitRow {
@@ -482,7 +575,8 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
                     .map(|parent| format!("{item}?{ref_query}from={}&to={}", encode(parent), encode(id))),
                 release: commit["sequence"]
                     .as_i64()
-                    .map(|_| (operation_href(record, "releaseCommit"), release_version.clone())),
+                    .filter(|_| releases_offered)
+                    .map(|_| (op_href(record, "releaseCommit"), release_version.clone())),
             }
         })
         .collect();
@@ -501,6 +595,7 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
         };
         (selected.clone().unwrap_or_default(), choices(from.as_deref(), 1), choices(to.as_deref(), 0))
     });
+    let diff_len = graph.diff.as_ref().and_then(|diff| diff.as_ref().ok()).and_then(|diff| diff["changes"].as_array()).map(Vec::len);
     let changes: Option<Result<Vec<ChangeRow>, String>> = graph.diff.map(|diff| {
         diff.and_then(|diff| {
             let Some(listed) = diff["changes"].as_array() else {
@@ -508,6 +603,7 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
             };
             Ok(listed
                 .iter()
+                .take(DIFF_ROWS)
                 .map(|change| {
                     let kind = change["kind"].as_str().unwrap_or_default();
                     let key = change["entityKey"].as_str().unwrap_or_default();
@@ -532,32 +628,48 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
                 .collect())
         })
     });
+    let left_out = diff_len
+        .filter(|len| *len > DIFF_ROWS)
+        .map(|len| match len - DIFF_ROWS {
+            1 => "1 more change is not shown.".to_owned(),
+            more => format!("{more} more changes are not shown."),
+        });
     let span = from.zip(to).map(|(from, to)| format!("Changes from {} to {}", short(&from), short(&to)));
     let (diff_rows, diff_message) = match changes {
         Some(Ok(rows)) => (rows, None),
         Some(Err(message)) => (Vec::new(), Some(message)),
         None => (Vec::new(), None),
     };
-    let writes = chosen.filter(|entry| !entry["parent"].is_null() && entry["discarded"] != true).map(|entry| {
-        let id = entry["id"].as_str().unwrap_or_default().to_owned();
+    let mut writes = Vec::new();
+    if let Some(id) = selected.as_deref() {
+        writes.extend(Write::of(&offered, record, "branch", &[("fromRef", id)], format!("A new draft of {}.", name_of(id))));
+    }
+    if let Some(entry) = chosen.filter(|entry| !entry["parent"].is_null() && entry["discarded"] != true) {
+        let id = entry["id"].as_str().unwrap_or_default();
         let version = entry["version"].to_string();
+        let name = name_of(id);
         let sealed = entry["sealed"] == true;
-        let parent = entry["parent"].as_str().unwrap_or_default();
-        let merge = refs.iter().find(|other| other["id"] == parent).map(|target| {
-            (
-                operation_href(record, "merge"),
-                id.clone(),
-                parent.to_owned(),
-                target["version"].to_string(),
-                format!("Merge into {}", name_of(parent)),
-            )
-        });
-        Writes {
-            commit: (!sealed).then(|| (operation_href(record, "commit"), id.clone(), version.clone())),
-            merge,
-            discard: (!sealed).then(|| (operation_href(record, "discard"), id, version)),
+        if !sealed {
+            let held = [("ref", id), ("version", version.as_str())];
+            writes.extend(Write::of(&offered, record, "save", &held, format!("Saves rows on {name}, at version {version}.")));
+            writes.extend(Write::of(&offered, record, "commit", &held, format!("Commits {name} at version {version}.")));
+            writes.extend(Write::of(&offered, record, "seal", &held, format!("Commits {name} and seals it: it takes no more writes.")));
+            let rebase = [("draft", id), ("version", version.as_str())];
+            writes.extend(Write::of(&offered, record, "rebase", &rebase, format!("Moves {name} onto its parent's head.")));
+            writes.extend(Write::of(&offered, record, "revert", &held, format!("Gives {name} an earlier commit's tree, and commits it.")));
         }
-    });
+        let parent = entry["parent"].as_str().unwrap_or_default();
+        if let Some(target) = refs.iter().find(|other| other["id"] == parent) {
+            let target_version = target["version"].to_string();
+            let said = format!("Merges {name} into {}.", name_of(parent));
+            let values = [("source", id), ("target", parent), ("targetVersion", target_version.as_str())];
+            writes.extend(Write::of(&offered, record, "merge", &values, said));
+        }
+        if !sealed {
+            let said = format!("Discards {name}, which frees its name.");
+            writes.extend(Write::of(&offered, record, "discard", &[("ref", id), ("version", &version)], said));
+        }
+    }
     let released = release.map_or_else(|| "Not released yet.".to_owned(), |release| format!("Release {release} is current."));
     let (releases, releases_error) = match graph.releases {
         Ok(releases) => (releases, None),
@@ -574,16 +686,6 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
             )
         })
         .collect();
-    let branch_froms: Vec<(String, String, bool)> = refs
-        .iter()
-        .filter(|entry| entry["discarded"] != true)
-        .map(|entry| {
-            let id = entry["id"].as_str().unwrap_or_default();
-            (id.to_owned(), entry["name"].as_str().unwrap_or(id).to_owned(), selected.as_deref() == Some(id))
-        })
-        .collect();
-    let branch_action = operation_href(record, "branch");
-    let branch_seq = record.seq.to_string();
     let seq = record.seq.to_string();
     view! { cx =>
         <section class="ss-panel" data-behavior="Branches">
@@ -614,6 +716,9 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
             }
             if let Some(message) = history_error {
                 <p class="ss-refusal">(message)</p>
+            }
+            if let Some(counted) = counted {
+                <p class="ss-count">(counted)</p>
             }
             if commits.is_empty() {
                 <p class="ss-empty">"It has no commits."</p>
@@ -658,6 +763,16 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
                     </tbody>
                 </table>
             }
+            if newer.is_some() || older.is_some() {
+                <nav class="ss-pager" aria-label="Commits">
+                    if let Some(href) = newer {
+                        <a rel="prev" href=(href)>"Newer commits"</a>
+                    }
+                    if let Some(href) = older {
+                        <a rel="next" href=(href)>"Older commits"</a>
+                    }
+                </nav>
+            }
             if let Some((selected, froms, tos)) = compare {
                 <form method="get" action=(item.clone()) class="ss-compare">
                     <input type="hidden" name="ref" value=(selected)>
@@ -701,48 +816,24 @@ async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> 
                             }
                         </tbody>
                     </table>
-                }
-            }
-            if let Some(writes) = writes {
-                if let Some((action, id, version)) = writes.commit {
-                    <form method="post" action=(action) class="ss-commit">
-                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
-                        <input type="hidden" name="ref" value=(id)>
-                        <input type="hidden" name="version" value=(version)>
-                        <label>"Message " <input type="text" name="message" maxlength="10000"></label>
-                        <label><input type="checkbox" name="tag" value="true">" Tag it, so it can be released"</label>
-                        <button type="submit">"Commit"</button>
-                    </form>
-                }
-                if let Some((action, source, target, version, label)) = writes.merge {
-                    <form method="post" action=(action) class="ss-merge">
-                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
-                        <input type="hidden" name="source" value=(source)>
-                        <input type="hidden" name="target" value=(target)>
-                        <input type="hidden" name="targetVersion" value=(version)>
-                        <label>"Message " <input type="text" name="message" maxlength="10000"></label>
-                        <button type="submit">(label)</button>
-                    </form>
-                }
-                if let Some((action, id, version)) = writes.discard {
-                    <form method="post" action=(action) class="ss-discard">
-                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
-                        <input type="hidden" name="ref" value=(id)>
-                        <input type="hidden" name="version" value=(version)>
-                        <button type="submit">"Discard"</button>
-                    </form>
-                }
-            }
-            <form method="post" action=(branch_action) class="ss-branch">
-                <input type="hidden" name="expectedSeq" value=(branch_seq)>
-                <label>"Name " <input type="text" name="name" required="" maxlength="200"></label>
-                <label>" from " <select name="fromRef">
-                    for (id, name, chosen) in branch_froms {
-                        <option value=(id) selected=(chosen)>(name)</option>
+                    if let Some(left_out) = left_out {
+                        <p class="ss-count">(left_out)</p>
                     }
-                </select></label>
-                <button type="submit">"Branch"</button>
-            </form>
+                }
+            }
+            for write in writes {
+                <div class="ss-write">
+                    <p class="ss-hint">(write.said)</p>
+                    operation_form(
+                        schema: write.schema,
+                        id: Some(write.id),
+                        seq: Some(write.seq),
+                        operation: write.operation,
+                        values: write.values,
+                        hidden: write.hidden,
+                    )
+                </div>
+            }
             <h3>"Releases"</h3>
             if let Some(message) = releases_error {
                 <p class="ss-refusal">(message)</p>

@@ -30,7 +30,7 @@ types:
   # A request two people sign off before it is approved: the Workflow and
   # Approvals panels' type. Its display labels its states and the moves out
   # of open; the move out of approved is unlabeled, so the panel offers it
-  # by the state it enters.
+  # by the state it enters, and only to a caller holding requests.close.
   Request:
     name: Request
     description: A request, which two people sign off before it is approved.
@@ -53,7 +53,7 @@ types:
           transitions:
             - { from: open, to: approved }
             - { from: open, to: rejected }
-            - { from: approved, to: closed }
+            - { from: approved, to: closed, permission: requests.close }
           outcomes: { rejected: failure }
       - name: Approvals
         config:
@@ -74,8 +74,7 @@ types:
       - name: body
         typeRef: { name: string }
   # A document whose sections are versioned (D32): the Branches panel's
-  # type. Its template field reaches Section, which the engine document
-  # holds only as a type a field reaches.
+  # type.
   Document:
     name: Document
     description: A document, whose sections are drafted, committed and released.
@@ -93,6 +92,3 @@ types:
       - name: title
         typeRef: { name: string }
         required: true
-      - name: template
-        description: The section a new one starts from.
-        typeRef: { name: Section }
