@@ -91,10 +91,15 @@ Version sites (relative to the repository root):
                                       .../extensions/gcp vX.Y.Z and
                                       .../extensions/cloudflare vX.Y.Z (its
                                       tests')
-  extensions/topcoat/go.mod           require .../superschematic vX.Y.Z and
-                                      .../superschematic/ir vX.Y.Z
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
+                                      .../extensions/gcp vX.Y.Z,
+                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/pulumi vX.Y.Z
+  extensions/topcoat/go.mod           require .../superschematic vX.Y.Z,
+                                      .../superschematic/ir vX.Y.Z,
+                                      .../cmd/superschematic vX.Y.Z (the
+                                      official extensions its binary links),
                                       .../extensions/gcp vX.Y.Z,
                                       .../extensions/cloudflare vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
@@ -138,7 +143,9 @@ ENGINE_ADDON_TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-ar
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z. cmd/superschematic, the installed binary, links the core and the
-# official extensions, so it comes last.
+# official extensions, so it comes after them, and extensions/topcoat, whose
+# binary links the official extensions from cmd/superschematic's list
+# (D78), last.
 GO_MODULES = [
     "ir",
     "runtime/schema/go",
@@ -150,8 +157,8 @@ GO_MODULES = [
     "extensions/gcp",
     "extensions/cloudflare",
     "extensions/pulumi",
-    "extensions/topcoat",
     "cmd/superschematic",
+    "extensions/topcoat",
 ]
 
 SEMVER = re.compile(
@@ -474,7 +481,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "cloudflare", "topcoat"):
+    for ext in ("gcp", "cloudflare"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",
@@ -503,6 +510,23 @@ def sites():
             [
                 (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
+            ],
+            "gomod",
+        )
+    )
+    # extensions/topcoat requires the installed binary's module, whose
+    # official list superschematic-topcoat links (D78), and through it the
+    # official extensions.
+    out.append(
+        (
+            ROOT / "extensions" / "topcoat" / "go.mod",
+            [
+                (go_require_pattern(GO_MODULE), 1),
+                (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/cmd/superschematic"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),

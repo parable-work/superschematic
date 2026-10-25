@@ -144,8 +144,10 @@ var sourceCLIs = map[string]string{"topcoat": "extensions/topcoat"}
 // unless an app of the stack names an extension its build needs (D78),
 // which the released superschematic does not link, and whose build
 // superschematic refuses. The binary that links an extension e is
-// superschematic-e, as the refusal says, so the workflow runs that one in
-// every job, built from the release's commit. An extension whose binary
+// superschematic-e, as the refusal says: the official extensions
+// superschematic links, with e beside them, so it builds every service the
+// released binary does. The workflow runs that one in every job, built
+// from the release's commit. An extension whose binary
 // superschematic's repository does not hold, and apps that name two
 // extensions between them, which no one binary links, are refused: the
 // workflow would refuse the stack's build on every run.
