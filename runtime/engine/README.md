@@ -2530,7 +2530,8 @@ A field its declaration marks `"volatile": true` can move without an
 event of its own instance: the engine computes it at the read, from
 other instances, the clock or the config. The core's are
 `Dependencies.blocked`, `Links.targets` (whose `latest` and `stale` read
-the target), `Rollups.values`, and the work queue's `Lease.active` and
+the target), `Rollups.values`, Comments' three (which its operations
+beside the instance move), and the work queue's `Lease.active` and
 `Budget.meters` (a daily meter starts again at a read). The log holds
 such a field as the instance's last event found it, the describe
 document marks it, and `Reactions`' `changes`, which hears a field
@@ -2848,19 +2849,57 @@ back.
 
 #### Comments
 
-Comments on the instance, each a reply to one of its comments or not.
+A conversation on the instance (D77): messages, each top-level or a reply
+in the thread of a top-level one, one level deep, which their authors
+edit and delete, others react to and pin, and whose threads are resolved
+and reopened. `rust/behaviors/src/comments-contract.md` is the contract
+the behavior, the generators and the corpora implement: every record,
+parameter, check and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | none |
-| Fields | `commentCount` |
-| Operations | `comment({ body, replyTo? })` -> the comment, writes; `listComments({ limit?, cursor? })` -> a page, read-only |
-| Guards | none; `comment`'s `replyTo` must name a comment of the same instance (`invalid_argument`), and `body` must hold a non-space character, at most 10000 code points |
-| Events | `comment`'s operation event, `patch: { behaviors: { Comments: { commentCount } } }` |
-| `configChange` | added to a schema with instances, which start with none; not removed from one, since their comments would stay behind |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent), `editWindowMs` (at least 1000; an author's edit after it is refused), `blocks` (the kinds a post or an edit may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit and delete another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent) |
+| Fields | all volatile: `messages`, the posted messages, top-level and replies; `lastMessageAt`, when the latest posted one was posted, absent while there is none; `threads`, `{ open, resolved }`, the posted top-level messages |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `not_author`, `edit_window_passed`, `too_many_edits`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post appends none, and the reads none |
+| `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
-A comment is `{ id, replyTo?, body, createdBy, createdAt }`: the caller's
-subject and the engine clock's time.
+A message's record is `{ id, thread?, quotes?, author, via?, state, body,
+blocks, mentions, reactions, createdAt, editedAt?, edits, pinned }`, and
+a top-level message's adds `replies`, `lastReplyAt?`, `participants` (the
+latest ten authors of its thread's posted messages) and `resolved?: { by,
+at }`. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
+caller's subject and `via` the calling service's deployable (D37); the
+times are the engine clock's. `reactions` holds each emoji's `count` and
+whether the caller is one of them (`mine`); in an event it is the
+actor's. A block is a reference to an instance the caller may read
+(`{ kind: "ref", schema, id }`) or an action's progress (`{ kind:
+"action", title, status, data? }`); `mentions` are subjects, recorded and
+nothing more in batch 1.
+
+`clientId` makes a post safe to retry: a post with one the caller has
+used returns that message as it is now and writes nothing. `edit` keeps
+what it does not give, and `listEdits` reads what each edit replaced.
+`deleteMessage` empties a message and keeps its place: its id, its
+author, its thread and its replies stay. `purge`, which needs
+`moderatePermission`, removes a message for good, a top-level one with
+its whole thread. A post into a resolved thread leaves it resolved.
+
+`listMessages` pages the top-level messages, or with `thread` that
+thread's replies and its top-level message as `root`, always in
+ascending id order: with no anchor the latest page, `before` an older
+one, `after` a newer one, and `around` a page about one message. `before`
+and `after` in the result are the anchors of the pages either side, null
+at an end.
+
+Its storage is migration 2 (`conversation`): `comment_messages`,
+`comment_edits`, `comment_reactions` and `comment_conversations`, the
+last holding each instance's counters and the counts the fields read
+beside the instance column `count`. The migration moves version 1's
+comments, a chain of replies, into threads one level deep: a comment's
+thread is the root of its chain, and it quotes the comment it replied to
+when that was a reply.
 
 #### Revisions
 
@@ -3484,18 +3523,18 @@ or moved that link here while its status is one: a later change that
 moves neither, an update say, does not set it off again.
 
 `changes` hears a field of the instance itself move, its own or a
-behavior's, by the field's qualified name (`Comments.commentCount`,
+behavior's, by the field's qualified name (`Revisions.pendingProposals`,
 `acme.Rating.count`), with a member path after it for a field whose
 value is an object (`Lease.ended.reason`): the behavior is the longest of
 the type's behavior names that prefixes it. A rule on `Workflow.status`
 with `to` hears what an `enters` rule does, and one with `from` hears a
 state left. A ticket escalated when its priority turns urgent, and
-triaged at its first comment:
+triaged at its first proposal:
 
 ```json
 { "name": "Reactions", "config": { "rules": [
     { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
-    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+    { "when": { "changes": { "field": "Revisions.pendingProposals", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
 ```
 
 - A create moves each field it gives from absent, so `to` fires on a
@@ -4968,7 +5007,7 @@ module of its own (in `rust/behaviors` and
 | Behavior | What it says |
 | --- | --- |
 | `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; that `transition` sets `enteredAt`, create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
-| `Comments` | the thread; `comment` and `listComments` |
+| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
 | `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
 | `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |

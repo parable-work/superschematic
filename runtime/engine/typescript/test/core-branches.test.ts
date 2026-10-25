@@ -593,15 +593,16 @@ for (const driver of drivers) {
     test("another behavior's writing operation is a first write too, and gives an older instance its primary line", () => {
       const { engine } = openBranches(driver);
       const before = recipeDocument(null);
-      before.types.Recipe.behaviors = [{ name: 'Comments' }];
+      const revisions = { name: 'Revisions', config: { review: { permission: 'recipes.review' } } };
+      before.types.Recipe.behaviors = [revisions];
       publish(engine, before);
       engine.instances.create(alice, 'Recipe', { title: 'Old soup' }, { id: 'old' });
       const after = recipeDocument();
-      after.types.Recipe.behaviors = [{ name: 'Comments' }, ...(after.types.Recipe.behaviors ?? [])];
+      after.types.Recipe.behaviors = [revisions, ...(after.types.Recipe.behaviors ?? [])];
       publish(engine, after);
       const old = new Calls(engine, 'old', bob);
       assert.deepEqual(old.refs(), []);
-      engine.instances.invoke(bob, 'Recipe', 'old', 'comment', { body: 'Needs salt.' });
+      engine.instances.invoke(bob, 'Recipe', 'old', 'propose', { patch: { title: 'Salted soup' } });
       assert.deepEqual(
         old.refs().map((ref) => [ref.name, ref.createdBy]),
         [['main', bob.subject]]

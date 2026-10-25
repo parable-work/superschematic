@@ -41,9 +41,9 @@ export const policy: AccessPolicy = ({ principal, action, schema, operation }) =
   if (action === 'define' || action === 'publish') {
     return hasAnyPermission(principal.permissions, [`schemas.${action}`]);
   }
-  // A reader may comment on a note and propose a change to it, but not
-  // change it.
-  if (action === 'write' && (operation === 'comment' || operation === 'propose')) {
+  // A reader may post on a note, reply and react, and propose a change to
+  // it, but not change it.
+  if (action === 'write' && (operation === 'post' || operation === 'react' || operation === 'unreact' || operation === 'propose')) {
     return hasAnyPermission(principal.permissions, [`${schema}.read`]);
   }
   return hasAnyPermission(principal.permissions, [`${schema}.${action}`]);

@@ -1145,6 +1145,9 @@ fn describe_target(target: &DescribeTarget) -> Value {
                 out.insert("behavior".into(), Value::from(behavior.as_str()));
             }
             out.insert("writes".into(), Value::Bool(operation.writes));
+            if operation.beside {
+                out.insert("beside".into(), Value::Bool(true));
+            }
             out.insert("scope".into(), Value::from(operation.scope.as_str()));
             Value::Object(out)
         }).collect::<Vec<_>>(),

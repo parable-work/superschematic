@@ -332,7 +332,7 @@ ascending id order.
 
 | # | Refusal | When |
 |---|---------|------|
-| 1 | `invalid_argument` at the later one's pointer (`/before` or `/after`), `must not be given with <the earlier one>` | more than one of `around`, `before`, `after`, taken in that order |
+| 1 | `invalid_argument` at the later one's pointer (`/before` or `/after`), `must not be given with <the earlier one>` | more than one of `around`, `before`, `after`, taken in that order; one issue, for the first two given (all three is `/before`, `must not be given with around`) |
 | 2 | `no_message` | `thread` names no present message |
 | 3 | `not_a_thread` | `thread` names a reply |
 | 4 | `no_message` | `around` names no message of the listing (absent, purged, or a message outside it: a reply when listing top-level messages, or a message of another thread) |
@@ -367,7 +367,8 @@ Read-only. The record, a deleted message's included. Refusal: `no_message`.
 Read-only. What the message held before each edit, by edit number
 ascending, paged with the engine's `page_request` and `page` over the
 edit number (`limit` 1..500, 50 when absent; `cursor` the previous page's
-`next`; a cursor it did not write is `invalid_argument` at `/cursor`).
+`next`; a cursor it did not write is `invalid_argument` at `/cursor`,
+checked before the message is looked up).
 Items `{ edit, body, blocks, mentions, by, at }`: the message's values
 before edit number `edit`, and who made that edit and when. A deleted
 message has none. Refusal: `no_message`.
