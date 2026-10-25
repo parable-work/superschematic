@@ -42,7 +42,7 @@ Every member is optional; `{}` and no config are the same.
 | Member | Type | When absent | Meaning |
 |--------|------|-------------|---------|
 | `maxBodyLength` | integer 1..40000 | 40000 | the longest `body` a `post` or an `edit` gives, in Unicode code points |
-| `editWindowMs` | integer >= 1000 | no window | an author's `edit` is refused once `now - createdAt > editWindowMs`; a caller who moderates is not held to it. `deleteMessage` has no window |
+| `editWindowMs` | integer >= 1000 | no window | an author's `edit` is refused once `now - createdAt > editWindowMs` (batch 2: `postedAt`); a caller who moderates is not held to it. `deleteMessage` has no window |
 | `blocks` | unique array of `"ref"`, `"action"` | every kind | the kinds a `post` or an `edit` may give; `[]` allows none |
 | `moderatePermission` | string | nobody moderates | edit and delete another's message, edit past the window, purge |
 | `pinPermission` | string | anyone the policy lets call `pin` | pin and unpin |
@@ -77,7 +77,7 @@ members in this order, absent members left out:
 | `edits` | integer | always | how many edits it has had; 0 once deleted |
 | `pinned` | boolean | always | false once deleted |
 | `replies` | integer | top-level | how many replies of the thread are `posted` |
-| `lastReplyAt` | integer | top-level, with a posted reply | the greatest `createdAt` of the thread's posted replies |
+| `lastReplyAt` | integer | top-level, with a posted reply | the greatest `createdAt` of the thread's posted replies (batch 2: the greatest `postedAt` of its standing replies) |
 | `participants` | array of strings | top-level | see below |
 | `resolved` | `{ by, at }` | top-level, resolved | who resolved the thread and when |
 
@@ -156,7 +156,7 @@ Three kinds, as the other behaviors refuse:
 | `not_in_thread` | `{ message, thread }`: the message `quotes` names, and the post's `thread` |
 | `deleted` | `{ message }` |
 | `not_author` | `{ message, author }`: for a thread, the top-level message and its author |
-| `edit_window_passed` | `{ message, createdAt, editWindowMs }` |
+| `edit_window_passed` | `{ message, createdAt, editWindowMs }` (batch 2: `postedAt` in place of `createdAt`) |
 | `too_many_edits` | `{ message, max: 500 }` |
 | `already_reacted` | `{ message, emoji }` |
 | `not_reacted` | `{ message, emoji }` |
@@ -225,7 +225,7 @@ the record after the edit.
 | 4 | `no_message` | `message` names no present message |
 | 5 | `deleted` | the message is deleted |
 | 6 | `not_author` | the caller is not its author and does not moderate |
-| 7 | `edit_window_passed` | the config sets `editWindowMs`, the caller does not moderate, and `now - createdAt > editWindowMs` |
+| 7 | `edit_window_passed` | the config sets `editWindowMs`, the caller does not moderate, and `now - createdAt > editWindowMs` (batch 2: `postedAt`) |
 | 8 | `too_many_edits` | the message has 500 edits |
 | 9 | `block_not_allowed` | as for post |
 | 10 | `ref_not_found` | a ref block new to the message (see Blocks) |
@@ -394,7 +394,7 @@ give these values):
 | Field | Value | Read from | Moved by |
 |-------|-------|-----------|----------|
 | `messages` | integer: the conversation's `posted` messages, top-level and replies | the instance column `count` | post, deleteMessage, purge |
-| `lastMessageAt` | the greatest `createdAt` of a `posted` message; absent while there is none | `comment_conversations.last_message_at` | post, deleteMessage, purge |
+| `lastMessageAt` | the greatest `createdAt` of a `posted` message; absent while there is none (batch 2: the greatest `postedAt` of a standing message) | `comment_conversations.last_message_at` | post, deleteMessage, purge |
 | `threads` | `{ open, resolved }`: `posted` top-level messages with `resolved_at` NULL, and with it set | `comment_conversations.open_threads`, `.resolved_threads` | post (top-level), deleteMessage and purge (top-level), resolve, reopen |
 
 An instance with no `comment_conversations` row reads `lastMessageAt`
@@ -507,7 +507,7 @@ A beside event carries the record, so a client that watches one
 instance's events can show the conversation without reading. What the
 record of one message does not carry, a client derives: on a reply's
 `post`, the top-level message's `replies` grows by one, `lastReplyAt`
-becomes the reply's `createdAt` and its author moves to the front of
+becomes the reply's `createdAt` (batch 2: its `postedAt`, which a `finish` or an `interrupt` event's record carries too) and its author moves to the front of
 `participants` (at most 10); on a reply's `deleteMessage` or `purge`, a
 client that needs the top-level message's members exactly reads it with
 `getMessage`.
@@ -530,7 +530,9 @@ with them.
   its id and its place in the listing, and its *draft*, the text its
   `appendDraft`s added, in order.
 - A message *stands* while it is `posted` or `interrupted`: it holds text
-  its author wrote, and the counts count it.
+  its author wrote, and the counts count it. Its `postedAt` is when it
+  came to stand: a `post`'s `now`, or the `now` of the `finish` or the
+  `interrupt` of a message `begin` started.
 - Lengths are in Unicode code points, as `maxBodyLength` is: a draft's
   length, an `offset`, the result's `length`. A JavaScript client counts
   them with `Array.from(text).length`, never `text.length`.
@@ -547,11 +549,19 @@ with them.
 | Member | Type | When absent | Meaning |
 |--------|------|-------------|---------|
 | `composeTimeoutMs` | integer 5000..3600000 | 60000 | how long a composing message's author may append nothing before the runner interrupts it ("The schedule") |
+| `maxDrafts` | integer 1..50 | 5 | the most composing messages one subject may have on an instance at once; `begin` refuses another (`too_many_drafts`) |
+
+`editWindowMs` (batch 1) counts from the message's `postedAt`, not its
+`createdAt`: an author's `edit` is refused once
+`now - postedAt > editWindowMs`. For a posted message the two are the
+same; a streamed reply's window opens at its `finish` or `interrupt`.
 
 `maxBodyLength` also bounds the draft: an `appendDraft` that would make it
 longer is refused, and `finish` checks the body it posts against it. A
 config narrowed while a message is composing leaves its draft as it is;
 `finish` without `body` then refuses it, and `interrupt` keeps it whole.
+Lowering `maxDrafts` leaves a caller's composing messages as they are;
+its next `begin` is refused until it has fewer than the new maximum.
 
 ### The record
 
@@ -565,10 +575,11 @@ Amends batch 1's table:
 | `blocks`, `mentions` | `[]` while composing and once interrupted, until an edit gives them |
 | `reactions` | `{}` while composing (nothing can react to it) |
 | `createdAt` | for a message `begin` started, the `begin`'s `now`; it never changes, so the message keeps its place |
+| `postedAt` | new, integer, right after `createdAt`: when the message came to stand ("Terms"); for a post, equal to `createdAt`. Absent while composing, and on a message deleted while composing or interrupted with no text; a message deleted after it stood keeps it, as it keeps `createdAt`. An author's edit that moves an interrupted message to `posted` leaves it |
 | `editedAt`, `edits` | absent and 0 while composing |
 | `pinned` | false while composing |
 | `replies` | how many replies of the thread *stand* |
-| `lastReplyAt` | the greatest `createdAt` of the thread's standing replies |
+| `lastReplyAt` | the greatest `postedAt` of the thread's standing replies |
 | `participants` | the distinct `author`s of the thread's *standing* messages, ordered as batch 1 orders them |
 
 The SQL of "participants" and every count of batch 1 read
@@ -578,7 +589,8 @@ The SQL of "participants" and every count of batch 1 read
 stands) and no `resolved`. The record carries no draft length and no
 `lastAppendAt`: a reader counts the body's code points.
 
-The members are in batch 1's order; batch 2 adds none.
+The members are in batch 1's order, with `postedAt` between `createdAt`
+and `editedAt`.
 
 ### Signals
 
@@ -683,13 +695,24 @@ record.
 | 7 | `not_in_thread` | as post's |
 | 8 | `deleted` | `quotes` names a deleted message |
 | 9 | `composing` `{ message: quotes }` | `quotes` names a composing message |
+| 10 | `too_many_drafts` `{ composing, max }` | the caller already has `maxDrafts` (5 when absent) or more composing messages on the instance; `composing` how many, `max` the config's `maxDrafts` |
+
+Refusal 10 comes after what the call names, so a `begin` that names a
+missing thread learns that first, and after the retry, so a retry of a
+`begin` that made the caller's fifth draft still returns it. It counts
+through `comment_messages_composing`:
+
+```sql
+SELECT COUNT(*) AS composing FROM <comment_messages>
+ WHERE namespace = ? AND schema = ? AND id = ? AND author = ? AND last_append_at IS NOT NULL
+```
 
 Writes: `message` = the conversation's `last_message + 1`, which becomes
 `last_message` (the conversation row inserted when absent, as `post`
 does); the row with `thread`, `quotes`, `author` = subject, `via`,
 `state = 'composing'`, `body = ''`, `blocks = '[]'`, `mentions = '[]'`,
-`created_at = now`, `edited_at` NULL, `edits = 0`, `pinned = 0`,
-`client_id`, `resolved_*` NULL, `draft_length = 0`,
+`created_at = now`, `posted_at` NULL, `edited_at` NULL, `edits = 0`,
+`pinned = 0`, `client_id`, `resolved_*` NULL, `draft_length = 0`,
 `last_append_at = now`. No count moves: `messages`, `lastMessageAt` and
 `threads` stay; `composing` gains the caller when it held no composing
 message.
@@ -746,11 +769,10 @@ reply's does.
 Writes: `state = 'posted'`; `body` = `body` when given, else the draft;
 `blocks` and `mentions` as given (`'[]'` when absent); the message's
 `comment_drafts` rows deleted; `draft_length` and `last_append_at` NULL.
-`created_at` stays. A `body` given in place of the draft drops the draft;
-it is not an edit (`edits` stays 0). Then the counts, as a post of a
-message whose `createdAt` is the message's: `messages + 1`, `open + 1`
-for a top-level message, `last_message_at` the greater of itself and
-`created_at`.
+`posted_at = now`; `created_at` stays. A `body` given in place of the
+draft drops the draft; it is not an edit (`edits` stays 0). Then the
+counts, as a post's: `messages + 1`, `open + 1` for a top-level message,
+`last_message_at` the greater of itself and `now`.
 
 #### `interrupt({ message })`
 
@@ -770,10 +792,11 @@ schedule calls it. Ask `cx.can(moderatePermission)` only when the first
 two conditions of refusal 3 hold.
 
 Writes, when the draft has text: `state = 'interrupted'`, `body` = the
-draft, whole, even past a narrowed `maxBodyLength`; `blocks` and
-`mentions` stay `'[]'`; then the counts as `finish` moves them. When the
-draft has no text: `state = 'deleted'`, `body = ''`, as `deleteMessage`
-leaves a message, and no count moves. Both: the message's
+draft, whole, even past a narrowed `maxBodyLength`; `posted_at = now`;
+`blocks` and `mentions` stay `'[]'`; then the counts as `finish` moves
+them. When the draft has no text: `state = 'deleted'`, `body = ''`, as
+`deleteMessage` leaves a message, `posted_at` stays NULL, and no count
+moves. Both: the message's
 `comment_drafts` rows deleted, `draft_length` and `last_append_at` NULL;
 `created_at` stays.
 
@@ -781,9 +804,9 @@ leaves a message, and no count moves. Both: the message's
 
 | Operation | Batch 2 |
 |-----------|---------|
-| `post` | refusals 1 to 13 below |
-| `edit` | after refusal 5 (`deleted`), `composing` `{ message }` for a composing message. An interrupted message is edited as a posted one, the window counted from its `createdAt`; an edit whose caller is its author also sets `state = 'posted'` (the author has said what it meant), and a moderator's edit of another's leaves it `interrupted`. No count moves: both stand |
-| `deleteMessage` | a composing message may be deleted, by its author or a moderator, as any message: the author's way to drop a draft. It also deletes the message's `comment_drafts` rows and sets `draft_length` and `last_append_at` NULL. No count moves for a composing message, which did not stand; an interrupted one leaves the counts as a posted one does |
+| `post` | refusals 1 to 13 below; writes `posted_at = now`, equal to `created_at` |
+| `edit` | after refusal 5 (`deleted`), `composing` `{ message }` for a composing message. Refusal 7, `edit_window_passed`, counts from `postedAt`: `now - postedAt > editWindowMs`, with details `{ message, postedAt, editWindowMs }` in place of batch 1's `createdAt`. An interrupted message is edited as a posted one; an edit whose caller is its author also sets `state = 'posted'` (the author has said what it meant), and a moderator's edit of another's leaves it `interrupted`. No count moves: both stand |
+| `deleteMessage` | keeps `posted_at`, as it keeps `created_at`. A composing message may be deleted, by its author or a moderator, as any message: the author's way to drop a draft. It also deletes the message's `comment_drafts` rows and sets `draft_length` and `last_append_at` NULL. No count moves for a composing message, which did not stand; an interrupted one leaves the counts as a posted one does |
 | `purge` | also deletes every purged message's `comment_drafts` rows; a top-level message's composing replies are purged with its thread |
 | `react`, `unreact` | after refusal 2 (`deleted`), `composing` `{ message }` |
 | `pin` | after refusal 3 (`deleted`), `composing` `{ message }`. `unpin` is unchanged: a composing message is not pinned, so `not_pinned` covers it |
@@ -823,6 +846,10 @@ New veto codes:
 | `not_composing` | `{ message, state }`: `appendDraft`, `finish` or `interrupt` of a message that is not composing, and its state |
 | `not_idle` | `{ message, author, lastAppendAt, composeTimeoutMs }` |
 | `draft_too_long` | `{ message, length, append, maxBodyLength }` |
+| `too_many_drafts` | `{ composing, max }`: how many composing messages the caller has on the instance, and the config's `maxDrafts` |
+
+`edit_window_passed`'s details become `{ message, postedAt,
+editWindowMs }` (batch 1 gave `createdAt`).
 
 `not_author` also covers `appendDraft` and `finish` of another's composing
 message, with batch 1's details `{ message, author }`.
@@ -834,7 +861,7 @@ Batch 1's three now count the messages that *stand*:
 | Field | Value | Moved by |
 |-------|-------|----------|
 | `messages` | the standing messages, top-level and replies (the instance column `count`) | post, finish, interrupt (to `interrupted`), deleteMessage and purge of a standing message |
-| `lastMessageAt` | the greatest `createdAt` of a standing message | the same |
+| `lastMessageAt` | the greatest `postedAt` of a standing message | the same |
 | `threads` | `{ open, resolved }` of the standing top-level messages | post, finish and interrupt of a top-level message, deleteMessage and purge of a standing top-level one, resolve, reopen |
 | `composing` | an array of strings, always present: each subject with a composing message on the instance, once, ordered by the least id of its composing messages, ascending; `[]` while there is none | begin, finish, interrupt, deleteMessage and purge of a composing message |
 
@@ -854,12 +881,16 @@ a `begin` event adds its author, and a `finish`, `interrupt`,
 author unless the client holds another composing message of theirs.
 
 `Moves::leaving` and the recount of `last_message_at` read *stands* where
-batch 1 reads posted.
+batch 1 reads posted, and the recount reads `MAX(posted_at)` where batch 1
+reads `MAX(created_at)`; `Moves::posted_at` is the `posted_at` written,
+the call's `now`. `lastReplyAt` reads `MAX(posted_at)` of the thread's
+standing replies.
 
 ### Migration 3, `drafts`
 
 `BehaviorMigration::new(3, "drafts")`. It creates one table and, in `up`,
-adds two columns and two indexes to `comment_messages`
+adds three columns and two indexes to `comment_messages` and fills one
+column
 (`ALTER TABLE ... ADD COLUMN`, `CREATE INDEX ... WHERE`, each index named
 through `sql.table(name)` as Links names its own), the same on both
 dialects:
@@ -868,12 +899,16 @@ dialects:
 |---------------------------|------|-------|
 | `draft_length` | integer | the draft's length in code points while composing; NULL otherwise |
 | `last_append_at` | integer | the `now` of the message's `begin` or latest `appendDraft` while composing; NULL otherwise |
+| `posted_at` | integer | when the message came to stand (the record's `postedAt`); NULL while composing and on a message that never stood |
 
 Exactly while a message is composing, `state = 'composing'`,
 `draft_length` is not NULL and `last_append_at` is not NULL; every write
 that moves a message out of composing sets both NULL in the same
 statement. Existing rows get NULL for both: no message composes before
-batch 2. `state` keeps no CHECK.
+batch 2. `up` then sets `posted_at = created_at` on every existing row
+(`UPDATE <comment_messages> SET posted_at = created_at`): each was posted
+by a post, the deleted ones included, so each stood from its
+`created_at`. `posted_at` stays nullable. `state` keeps no CHECK.
 
 | Index on `comment_messages` | Columns | Where | Read by |
 |-----------------------------|---------|-------|---------|

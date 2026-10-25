@@ -7,7 +7,7 @@
     "properties": {
       "maxBodyLength": { "description": "The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points; 40000 when absent.", "type": "integer", "minimum": 1, "maximum": 40000 },
       "editWindowMs": {
-        "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+        "description": "How long after a message's postedAt its author may edit it, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
         "type": "integer",
         "minimum": 1000
       },
@@ -16,6 +16,12 @@
         "type": "integer",
         "minimum": 5000,
         "maximum": 3600000
+      },
+      "maxDrafts": {
+        "description": "The most composing messages one subject may have on an instance at once; begin refuses another. 5 when absent.",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
       },
       "blocks": {
         "description": "The block kinds a post, an edit or a finish may give; every kind when absent, none when empty.",
@@ -34,7 +40,7 @@
   },
   "fields": [
     { "name": "messages", "description": "How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.", "volatile": true },
-    { "name": "lastMessageAt", "description": "The greatest createdAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.", "volatile": true },
+    { "name": "lastMessageAt", "description": "The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.", "volatile": true },
     { "name": "threads", "description": "The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.", "volatile": true },
     {
       "name": "composing",
@@ -140,12 +146,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -165,7 +172,7 @@
     },
     {
       "name": "begin",
-      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
+      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -216,12 +223,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -362,12 +370,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -436,12 +445,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -462,7 +472,7 @@
     },
     {
       "name": "edit",
-      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
+      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -555,12 +565,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -628,12 +639,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -730,12 +742,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -806,12 +819,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -879,12 +893,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -952,12 +967,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -1025,12 +1041,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -1098,12 +1115,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -1182,12 +1200,13 @@
                     }
                   }
                 },
-                "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+                "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+                "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
                 "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
                 "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
                 "pinned": { "type": "boolean" },
                 "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-                "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+                "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
                 "participants": {
                   "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
                   "type": "array",
@@ -1252,12 +1271,13 @@
                   }
                 }
               },
-              "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+              "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+              "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
               "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
               "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
               "pinned": { "type": "boolean" },
               "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-              "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+              "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
               "participants": {
                 "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
                 "type": "array",
@@ -1325,12 +1345,13 @@
               }
             }
           },
-          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.", "type": "integer" },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
           "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
-          "lastReplyAt": { "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
           "participants": {
             "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
             "type": "array",
@@ -1479,7 +1500,7 @@
       "code": "not_author",
       "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread); or appendDraft or finish of another's composing message, which nobody but its author writes. details: message, author."
     },
-    { "code": "edit_window_passed", "description": "An edit by the message's author more than the config's editWindowMs after it was posted. details: message, createdAt, editWindowMs." },
+    { "code": "edit_window_passed", "description": "An edit by the message's author more than the config's editWindowMs after its postedAt. details: message, postedAt, editWindowMs." },
     { "code": "too_many_edits", "description": "An edit of a message that has been edited 500 times. details: message, max." },
     { "code": "already_reacted", "description": "react with an emoji the caller has already given the message. details: message, emoji." },
     { "code": "not_reacted", "description": "unreact of an emoji the caller has not given the message. details: message, emoji." },
@@ -1494,6 +1515,7 @@
       "code": "not_idle",
       "description": "interrupt of another's composing message, by a caller without moderatePermission, whose author appended less than the config's composeTimeoutMs ago. details: message, author, lastAppendAt, composeTimeoutMs."
     },
+    { "code": "too_many_drafts", "description": "begin by a caller that has the config's maxDrafts composing messages on the instance already. details: composing, how many it has; max." },
     { "code": "draft_too_long", "description": "appendDraft whose text would make the draft longer than the config's maxBodyLength. details: message, length, append, maxBodyLength." },
     { "code": "not_configured", "description": "purge on a type whose config names no moderatePermission. details: permission, \"moderatePermission\"." }
   ]

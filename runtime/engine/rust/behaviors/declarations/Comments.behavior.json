@@ -22,13 +22,19 @@
         "type": "integer"
       },
       "editWindowMs": {
-        "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+        "description": "How long after a message's postedAt its author may edit it, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
         "minimum": 1000,
         "type": "integer"
       },
       "maxBodyLength": {
         "description": "The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points; 40000 when absent.",
         "maximum": 40000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "maxDrafts": {
+        "description": "The most composing messages one subject may have on an instance at once; begin refuses another. 5 when absent.",
+        "maximum": 50,
         "minimum": 1,
         "type": "integer"
       },
@@ -58,7 +64,7 @@
     },
     {
       "name": "lastMessageAt",
-      "description": "The greatest createdAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.",
+      "description": "The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.",
       "volatile": true
     },
     {
@@ -225,7 +231,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -241,7 +247,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -260,6 +266,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -345,7 +355,7 @@
     },
     {
       "name": "begin",
-      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
+      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -400,7 +410,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -416,7 +426,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -435,6 +445,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -710,7 +724,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -726,7 +740,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -745,6 +759,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -877,7 +895,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -893,7 +911,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -912,6 +930,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -997,7 +1019,7 @@
     },
     {
       "name": "edit",
-      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
+      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1136,7 +1158,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -1152,7 +1174,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -1171,6 +1193,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -1303,7 +1329,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -1319,7 +1345,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -1338,6 +1364,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -1520,7 +1550,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -1536,7 +1566,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -1555,6 +1585,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -1695,7 +1729,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -1711,7 +1745,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -1730,6 +1764,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -1862,7 +1900,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -1878,7 +1916,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -1897,6 +1935,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -2029,7 +2071,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -2045,7 +2087,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -2064,6 +2106,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -2196,7 +2242,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -2212,7 +2258,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -2231,6 +2277,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -2363,7 +2413,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -2379,7 +2429,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -2398,6 +2448,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -2565,7 +2619,7 @@
                   "type": "string"
                 },
                 "createdAt": {
-                  "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+                  "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
                   "type": "integer"
                 },
                 "editedAt": {
@@ -2581,7 +2635,7 @@
                   "type": "integer"
                 },
                 "lastReplyAt": {
-                  "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+                  "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
                   "type": "integer"
                 },
                 "mentions": {
@@ -2600,6 +2654,10 @@
                 },
                 "pinned": {
                   "type": "boolean"
+                },
+                "postedAt": {
+                  "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+                  "type": "integer"
                 },
                 "quotes": {
                   "description": "The id of the message of the thread the reply quotes.",
@@ -2714,7 +2772,7 @@
                 "type": "string"
               },
               "createdAt": {
-                "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+                "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
                 "type": "integer"
               },
               "editedAt": {
@@ -2730,7 +2788,7 @@
                 "type": "integer"
               },
               "lastReplyAt": {
-                "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+                "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
                 "type": "integer"
               },
               "mentions": {
@@ -2749,6 +2807,10 @@
               },
               "pinned": {
                 "type": "boolean"
+              },
+              "postedAt": {
+                "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+                "type": "integer"
               },
               "quotes": {
                 "description": "The id of the message of the thread the reply quotes.",
@@ -2887,7 +2949,7 @@
             "type": "string"
           },
           "createdAt": {
-            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds.",
+            "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.",
             "type": "integer"
           },
           "editedAt": {
@@ -2903,7 +2965,7 @@
             "type": "integer"
           },
           "lastReplyAt": {
-            "description": "On a top-level message: the greatest createdAt of its thread's posted or interrupted replies; absent while it has none.",
+            "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.",
             "type": "integer"
           },
           "mentions": {
@@ -2922,6 +2984,10 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "postedAt": {
+            "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.",
+            "type": "integer"
           },
           "quotes": {
             "description": "The id of the message of the thread the reply quotes.",
@@ -3273,7 +3339,7 @@
     },
     {
       "code": "edit_window_passed",
-      "description": "An edit by the message's author more than the config's editWindowMs after it was posted. details: message, createdAt, editWindowMs."
+      "description": "An edit by the message's author more than the config's editWindowMs after its postedAt. details: message, postedAt, editWindowMs."
     },
     {
       "code": "too_many_edits",
@@ -3318,6 +3384,10 @@
     {
       "code": "not_idle",
       "description": "interrupt of another's composing message, by a caller without moderatePermission, whose author appended less than the config's composeTimeoutMs ago. details: message, author, lastAppendAt, composeTimeoutMs."
+    },
+    {
+      "code": "too_many_drafts",
+      "description": "begin by a caller that has the config's maxDrafts composing messages on the instance already. details: composing, how many it has; max."
     },
     {
       "code": "draft_too_long",
