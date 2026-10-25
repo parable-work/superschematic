@@ -42,6 +42,8 @@
 {{- end }}
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
+{{- else if .HasViews }}
+//! `views` writes an amount in its currency (`money_text`).
 {{- end }}
 {{- if .References }}
 //! `references` names what a value that refers to an item holds (D61): a
@@ -94,7 +96,7 @@ pub mod references;
 {{- if .HasRecords }}
 mod wire;
 {{- end }}
-{{- if .Views }}
+{{- if .HasViews }}
 pub mod views;
 {{- end }}
 {{- if .Engine }}

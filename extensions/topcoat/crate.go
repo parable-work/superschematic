@@ -673,9 +673,11 @@ func (c *crate) RecordsUseWire() bool {
 	return false
 }
 
-// HasForms reports whether the crate has a form of either kind, an input
-// form or an argument form, so it writes forms.rs.
-func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+// HasForms reports whether the crate writes forms.rs: it has a form of
+// either kind, an input form or an argument form, or pages, which read a
+// refusal's errors from it (Refusal, FormErrors) whether or not a page
+// submits a form.
+func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 || c.Pages != nil }
 
 // HasChoices reports whether a form or a display component takes the app's
 // choices, so the crate writes choices.rs, which forms.rs re-exports.
@@ -940,7 +942,7 @@ func (c *crate) write(dir string) error {
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
-	if len(c.Views) > 0 {
+	if c.HasViews() {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
 	if c.References != nil {
