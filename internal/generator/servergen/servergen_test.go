@@ -80,8 +80,9 @@ const (
 // order is the order a build-all builds the fixture in, cloudStack left
 // out: shop-orders calls shop-api, so its server builds after shop-api's
 // SDK. shop-media, the bucket shop-orders and shop-reviews list, builds
-// nothing (D54).
-var order = []string{"shop-db", "shop-media", "shop-api", "shop-orders", "shop-reviews", "shop-stack"}
+// nothing (D54); shop-cache, the memory store shop-orders lists, builds its
+// Go definitions before it (D75).
+var order = []string{"shop-db", "shop-media", "shop-cache", "shop-api", "shop-orders", "shop-reviews", "shop-stack"}
 
 // apis are the services of order the stacks serve, in order.
 var apis = order[:len(order)-1]
@@ -200,7 +201,7 @@ func generated(repoRoot string, stacks ...string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	for _, stack := range stacks {
 		for _, server := range []string{"Storefront", "shop-api", expireOrders, fulfilOrders} {
-			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.CORSFile, servergen.BucketsFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+			for _, file := range []string{servergen.MainFile, servergen.CloudSQLFile, servergen.CORSFile, servergen.BucketsFile, servergen.MemoryStoresFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 				files[filepath.Join("server", stack, server, file)] = filepath.Join(servergen.ServerDir(out, stack, server), file)
 			}
 		}
@@ -952,7 +953,9 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	const siteOrigin = "https://shop-web.acme.dev"
 	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
 	storefrontEnv := append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)
-	storefront := start(t, binaries["Storefront"], storefrontEnv...)
+	// shop-cache is nowhere either: the server starts, /readyz waits for
+	// no store, and the export route's rate limit counts in process (D75).
+	storefront := start(t, binaries["Storefront"], append(storefrontEnv, memoryStoreVariables(t, "SHOP_CACHE_MEMORY_STORE", "redis://127.0.0.1:9/0")...)...)
 	// A preflight to shop-orders from the site is answered; one from
 	// another origin is not, but goes on to shop-orders' router, which
 	// allows no OPTIONS, nor one to shop-reviews, which no site calls.
@@ -967,6 +970,9 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	// shop-orders' manual route reaches the scaffold's handler, which
 	// RegisterRoutes mounted from Config.ManualRoutes (D51).
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1/export", http.StatusNotImplemented, "Order.ExportOrder")
+	if !strings.Contains(storefront.out.String(), "the memory store is unavailable at open") {
+		t.Errorf("Storefront did not log shop-cache unavailable:\n%s", storefront.out.String())
+	}
 	storefront.send(t, http.MethodPost, "/api/orders", `{"algorithm":"RSA_OAEP_256","payload":"c2t1"}`, http.StatusBadRequest, "Failed to decrypt request payload")
 	storefront.expect(t, http.MethodGet, "/api/openapi.json", http.StatusOK, "/api/orders/{id}")
 	storefront.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound)
@@ -1214,6 +1220,93 @@ func TestBucketsReachTheEmulator(t *testing.T) {
 	if out, err := test.CombinedOutput(); err != nil || !strings.Contains(string(out), "--- PASS: TestBucketOnTheEmulator") {
 		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
 	}
+}
+
+// TestMemoryStoresOnRedis: Storefront, whose APIs list shop-cache, links
+// go-redis through the memorystores.go its build wrote, which vets and
+// passes testdata/memorystores_test.go: against a fake server that refuses
+// CLIENT, over TLS with auth iam and a fake metadata server, a server that
+// is not there, and, with Docker, a Valkey container of the test's own,
+// which SUPERSCHEMATIC_TEST_MEMORY_STORE names unless the environment
+// names one (D75).
+func TestMemoryStoresOnRedis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, paths)
+	dir := servergen.ServerDir(filepath.Join(repoRoot, "schemas", "dist"), "shop-stack", "Storefront")
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
+	}
+	goCommand(t, dir, "vet", ".")
+	unit, err := os.ReadFile(filepath.Join("testdata", "memorystores_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memorystores_test.go"), unit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goCommand(t, dir, "mod", "tidy")
+
+	server := os.Getenv("SUPERSCHEMATIC_TEST_MEMORY_STORE")
+	if server == "" && exec.Command("docker", "info").Run() == nil {
+		port := freePort(t)
+		name := "servergen-memorystore-" + port
+		run := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "--publish", "127.0.0.1:"+port+":6379", local.DefaultMemoryStoreImage)
+		if out, err := run.CombinedOutput(); err != nil {
+			t.Logf("run %s: %v\n%s; the tests against a real server skip", local.DefaultMemoryStoreImage, err, out)
+		} else {
+			t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", name).Run() })
+			deadline := time.Now().Add(time.Minute)
+			for exec.Command("docker", "exec", name, "valkey-cli", "ping").Run() != nil {
+				if time.Now().After(deadline) {
+					t.Fatal("Valkey did not answer in a minute")
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			server = "redis://127.0.0.1:" + port + "/2"
+		}
+	}
+	test := exec.Command("go", "test", "-v", "-count=1", "-run", "^TestMemoryStore", ".")
+	test.Dir = dir
+	test.Env = append(os.Environ(), "SUPERSCHEMATIC_TEST_MEMORY_STORE="+server, "PWD="+dir)
+	out, err := test.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test in %s: %v\n%s", dir, err, out)
+	}
+	for _, name := range []string{"TestMemoryStoreSendsNoClientCommand", "TestMemoryStoreDownAtOpen", "TestMemoryStoreRefusals"} {
+		if !strings.Contains(string(out), "--- PASS: "+name) {
+			t.Errorf("%s did not pass:\n%s", name, out)
+		}
+	}
+	if server != "" {
+		for _, name := range []string{"TestMemoryStoreOnRedis", "TestMemoryStoreReconnects"} {
+			if !strings.Contains(string(out), "--- PASS: "+name) {
+				t.Errorf("%s did not pass against %s:\n%s", name, server, out)
+			}
+		}
+	}
+}
+
+// memoryStoreVariables are the variables of the memory store field named
+// field holding a connection to url with no auth, as ir.DerivedVariables
+// encodes one (D75).
+func memoryStoreVariables(t *testing.T, field, url string) []string {
+	t.Helper()
+	vars, err := ir.DerivedVariables(field, ir.MemoryStoreConnection{Store: "shop-cache", URL: url, Auth: ir.MemoryStoreAuthNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := make([]string, len(vars))
+	for i, v := range vars {
+		env[i] = fmt.Sprintf("%s=%v", v.Name, v.Value)
+	}
+	return env
 }
 
 // cloudSQLVariables are the variables of the database field named field
