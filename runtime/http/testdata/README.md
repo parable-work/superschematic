@@ -204,6 +204,18 @@ they are equal or the required one continues it after a dot (`orders`
 covers `orders.read`, not `ordersx` or `order`). Refused, the route
 answers 403 `forbidden`.
 
+### userWrites
+
+`{name, held, roles, want}`: no one sets the password of, disables or
+enables a user who holds what they do not. A caller whose permissions are
+`held` may write a user holding `roles` (each `{name, permissions}`) when
+`want.allowed`; `want.uncovered` lists, in the order of the roles'
+effective permissions (`effectivePermissions`) and once each, the ones no
+held permission covers, by the rule of `grants`. Refused, the route
+answers 403 `forbidden` with `details.permissions` the uncovered ones, after
+`users.write` is checked, and a password's rule, and 404 for a user that
+is not there.
+
 ### capabilities
 
 `{routes, callers}`. `routes` are the route requirements a server passes:

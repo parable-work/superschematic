@@ -26,8 +26,10 @@
 //!   the credentialed CORS of the trusted origins ([`CorsLayer`]).
 //! - Roles: the permission form ([`valid_permission`]), a principal's
 //!   permissions ([`effective_permissions`]), the rule that no one grants
-//!   what they do not hold ([`uncovered`]), and capabilities over the
-//!   router's operation table ([`Route`], [`capabilities_of`]).
+//!   what they do not hold ([`uncovered`]), nor sets the password of,
+//!   disables or enables a user who holds it ([`uncovered_user`]), and
+//!   capabilities over the router's operation table ([`Route`],
+//!   [`capabilities_of`]).
 //! - [`Store`], and [`SqlStore`], its implementation for Postgres and
 //!   SQLite built from the schema's identity descriptor, over a SQL
 //!   [`Client`]: [`TokioPostgres`] with the `identity-postgres` feature,
@@ -81,7 +83,9 @@ pub use password::{
     check_password, hash_password, hash_password_with_salt, verify_password, Argon2Params,
     HashError, MalformedHash, Verified, KEY_BYTES, PASSWORD_SCALAR, SALT_BYTES,
 };
-pub use permissions::{capabilities_of, effective_permissions, uncovered, valid_permission, Route};
+pub use permissions::{
+    capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
+};
 pub use scalars::{parse_uuid, uuid_to_base62, Scalars};
 pub use service::{
     Capabilities, ChangePasswordInput, Clock, CreateUserInput, CurrentUser, IdentityPrincipal,
