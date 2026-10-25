@@ -6,11 +6,15 @@
 //! engine's crate, and runs the core's behaviors.
 //!
 //! The app opens the engine in the background, retrying until its database
-//! answers, and defines and publishes the database's engine document as
-//! the API's server does, under the engine's lock, writing nothing when the
-//! live versions have its hash. Its main waits for it to open before it
-//! calls the app's `serve`, whose parts hold it (D78). It mounts none of the
-//! engine's routes: the app's program serves what it serves of the engine.
+//! answers, and deploys nothing, which the API's server does: the engine
+//! opens once the live version of each schema of the database's engine
+//! document has the hash of the one this app was built with, and until
+//! then each attempt logs the schemas that differ. So an app image from
+//! another build than the server's never publishes its own document; it
+//! waits for a server that deploys it. Its main waits for the engine to
+//! open before it calls the app's `serve`, whose parts hold it (D78). It
+//! mounts none of the engine's routes: the app's program serves what it
+//! serves of the engine.
 //!
 //! The engine is synchronous: it opens, deploys and answers on tokio's
 //! blocking pool, and lets go of its database off the async threads.
@@ -65,8 +69,8 @@ impl Document {
 /// event, which only a started runner prunes, while it holds the runner's
 /// lock: a connection string as it is, or a Cloud SQL instance over the
 /// socket Cloud Run mounts for it, an access token from the metadata server
-/// as each new connection's password. Once it opens, it deploys the document
-/// before it reports the engine ready. Each attempt that fails is logged
+/// as each new connection's password. It opens once the live versions are
+/// the document's, which the API's server deploys. Each attempt that fails is logged
 /// with the wait before the next.
 pub fn open(
     service: &'static str,
@@ -122,24 +126,22 @@ pub fn open(
             let dialect = format!("{:?}", engine.dialect());
             tracing::info!(engine = service, namespace = %namespace, dialect, "engine open");
         })
-        .setup(move |engine| deploy(service, engine, &document));
+        .setup(move |engine| deployed(service, engine, &document));
     Ok(Background::open(options, background))
 }
 
-/// Defines and publishes the document's schemas in its namespace, as the
-/// engine's own principal, before the engine is ready: a schema whose live
-/// version has the document's hash is left as it is, and a changed one
-/// becomes its next version if the compatibility rule allows it.
-fn deploy(service: &str, engine: &Arc<Engine>, document: &Document) -> Result<(), BoxError> {
-    for schema in engine.deploy(&document.schemas, Some(&document.namespace))? {
-        tracing::info!(
-            engine = service,
-            schema = %schema.name,
-            version = schema.version,
-            defined = schema.defined,
-            published = schema.published,
-            "engine schema deployed"
-        );
+/// Refuses the engine until the live version of each of the document's
+/// schemas has its hash: the app deploys nothing (D78), so it waits for
+/// its API's server, which deploys the document, and an app built from
+/// another document than the live one never serves over it.
+fn deployed(service: &str, engine: &Arc<Engine>, document: &Document) -> Result<(), BoxError> {
+    let undeployed = engine.undeployed(&document.schemas, Some(&document.namespace))?;
+    if undeployed.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "the live version of {} in the engine of {service} is not the one this app was built with; the API's server deploys it",
+        undeployed.join(", ")
+    )
+    .into())
 }

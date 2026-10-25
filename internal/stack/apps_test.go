@@ -37,8 +37,8 @@ var backoffice = stacktest.AppOf(stacktest.ShopOrders, "Backoffice")
 // platform in its API's Rust, serves and calls what its API does, takes
 // its API's sql and http edges through the app platform's connectors and
 // its API's config, with the env its API's server is given, runs, and
-// rolls out after shop-api, which its API calls. It is not exposed unless
-// the stack says so.
+// rolls out after shop-api, which its API calls, and after Orders, its
+// API's server (D78). It is not exposed unless the stack says so.
 func TestAppDeployable(t *testing.T) {
 	s, services := appShop()
 	env := mustResolve(t, assemble(t), s, services, "Staging")
@@ -74,10 +74,16 @@ func TestAppDeployable(t *testing.T) {
 	if svc := env.Resources.Resource(backofficeApp + ".service"); svc == nil || svc.Properties["public"] != false || svc.Properties["language"] != "rust" {
 		t.Errorf("service = %+v, want a private Rust service", svc)
 	}
+	waves := map[string]int{}
 	for _, step := range env.DeployOrder {
-		if step.Step == ir.StepRollout && slices.Contains(step.Deployables, backofficeApp) && step.Wave != 2 {
-			t.Errorf("the app rolls out in %+v, want wave 2, after shop-api, which it calls", step)
+		if step.Step == ir.StepRollout {
+			for _, name := range step.Deployables {
+				waves[name] = step.Wave
+			}
 		}
+	}
+	if waves[backofficeApp] != 3 || waves["Orders"] != 2 || waves["shop-api"] != 1 {
+		t.Errorf("rollout waves %v: want the app in wave 3, after Orders, its API's server, whose start deploys what the app's engine waits for, and Orders after shop-api, which both call", waves)
 	}
 }
 
