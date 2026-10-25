@@ -106,6 +106,7 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
 }
 {{- end }}
 {{- template "viewsTime" . }}
+{{- template "viewsMoney" . }}
 {{- range .EnumLabels }}
 
 /// Labels a value of `{{ .Name }}`: its member's title, else its name in

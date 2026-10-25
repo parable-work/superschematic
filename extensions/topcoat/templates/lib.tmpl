@@ -59,6 +59,15 @@
 //! registers them, and `pages::Settings` in its app context names its
 //! sign-in page and its choices.
 {{- end }}
+{{- if .EnginePages }}
+//! `engine_pages` serves the engine's types under `{{ .Pages.Prefix }}{{ engineMount }}`, an
+//! instance's behaviors in `engine_panels`' panels, each page calling the
+//! engine in-process as its caller.
+{{- end }}
+{{- if .IdentityPages }}
+//! `identity_pages` signs a caller in and out under `{{ .Pages.Prefix }}`, and
+//! administers users and roles, through the identity runtime's `Service`.
+{{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
@@ -90,6 +99,15 @@ pub mod views;
 {{- end }}
 {{- if .Engine }}
 pub mod engine;
+{{- end }}
+{{- if .EnginePages }}
+pub mod engine_pages;
+{{- end }}
+{{- if .EnginePanels }}
+pub mod engine_panels;
+{{- end }}
+{{- if .IdentityPages }}
+pub mod identity_pages;
 {{- end }}
 
 /// The service's API crate: its `Implementations`, `Args` structs and

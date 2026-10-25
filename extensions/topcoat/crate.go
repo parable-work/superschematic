@@ -74,6 +74,23 @@ type crate struct {
 	// opens in-process on SQLite and mounts at /engine (D58), nil when its
 	// database is none (engine.go).
 	Engine *engineModel
+	// EnginePages are the pages of the engine's types under
+	// <prefix>/engine, nil unless the pages are on and the crate mounts an
+	// engine (engine_pages.go); EnginePanels the panels its instance pages
+	// show per behavior, set whenever EnginePages is (engine_panels.go).
+	EnginePages  *enginePagesModel
+	EnginePanels *enginePanelsModel
+	// IdentityPages are sign-in, sign-out, the account, users and roles
+	// pages, nil unless the pages are on and the API authenticates with the
+	// identity runtime (identity_pages.go).
+	IdentityPages *identityPagesModel
+	// Money reports that a display component shows an amount by its
+	// currency (money.go). ScalarCrate is the scalar crate, which gives each
+	// currency's minor units, and ScalarPath its directory from the
+	// crate's, empty when [paths] names none, as for the types crates.
+	Money       bool
+	ScalarCrate string
+	ScalarPath  string
 	// hosting gives the crates of the API dependencies one app hosts
 	// beside the service (D61, amended), each read the first time a
 	// reference's options operation is the dependency's.
@@ -527,8 +544,49 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 			return nil, err
 		}
 	}
+	if err := out.consoleModules(c, api, cfg, schemas); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
+
+// consoleModules sets the models of the console's own pages, the engine's
+// and the identity runtime's, the engine's behavior panels, and money,
+// each from what newCrate built before, then what the pages share with
+// them (hookPages).
+func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustAPI, cfg Config, schemas schemaSet) error {
+	var err error
+	if c.EnginePages, err = enginePagesOf(ctx, cfg, c); err != nil {
+		return err
+	}
+	if c.EnginePanels, err = enginePanelsOf(ctx, c); err != nil {
+		return err
+	}
+	if c.EnginePages != nil && c.EnginePanels == nil {
+		return fmt.Errorf("topcoat: %s has engine pages without their panels, which an instance's page calls", c.SchemaName)
+	}
+	if c.IdentityPages, err = identityPagesOf(ctx, api, cfg, c); err != nil {
+		return err
+	}
+	if c.Money, err = moneyOf(ctx, schemas, c); err != nil {
+		return err
+	}
+	c.ScalarCrate = ctx.Options.Naming.ScalarRustCrate
+	if scalar := ctx.Options.Paths.ScalarRust; scalar != "" {
+		rel, err := filepath.Rel(Dir(ctx.Options.OutputRoot, c.SchemaName), scalar)
+		if err != nil {
+			return fmt.Errorf("topcoat: path to the scalar crate: %w", err)
+		}
+		c.ScalarPath = filepath.ToSlash(rel)
+	}
+	c.hookPages()
+	return nil
+}
+
+// WritesMoney reports whether views.rs writes money_text: a display
+// component shows money, or the engine's panels may (a Holds' or a
+// Payments' amounts). Cargo.toml then depends on the scalar crate.
+func (c *crate) WritesMoney() bool { return c.Money || c.EnginePanels != nil }
 
 // schemasOf is the service's schema and its dependencies', in which a
 // result type and the types it nests are declared.
@@ -894,13 +952,22 @@ func (c *crate) write(dir string) error {
 	if c.Engine != nil {
 		files = append(files, struct{ template, path string }{"engine.tmpl", filepath.Join("src", "engine.rs")})
 	}
+	if c.EnginePages != nil {
+		files = append(files, struct{ template, path string }{"engine_pages.tmpl", filepath.Join("src", "engine_pages.rs")})
+	}
+	if c.EnginePanels != nil {
+		files = append(files, struct{ template, path string }{"engine_panels.tmpl", filepath.Join("src", "engine_panels.rs")})
+	}
+	if c.IdentityPages != nil {
+		files = append(files, struct{ template, path string }{"identity_pages.tmpl", filepath.Join("src", "identity_pages.rs")})
+	}
 	tmpl, err := parseTemplates()
 	if err != nil {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs", "engine_pages.rs", "engine_panels.rs", "identity_pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

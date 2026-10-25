@@ -99,7 +99,7 @@ const engineAppTest = `use std::sync::Arc;
 use async_trait::async_trait;
 use http::request::Parts;
 use schemas_fixture_engine_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
-use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation};
+use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation, NotesListNotesArgs};
 use schemas_fixture_engine_api_topcoat::{engine, PageAuthenticator, RouterBuilderFixtureEngineApiExt, Setup};
 use topcoat::context::{Cx, app_context};
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
@@ -139,6 +139,10 @@ struct Notes;
 impl NotesImplementation for Notes {
     async fn note_count(&self, _ctx: RequestContext) -> Result<types::NoteCount, ApiError> {
         Ok(types::NoteCount { count: 0.0 })
+    }
+
+    async fn list_notes(&self, _ctx: RequestContext, _args: NotesListNotesArgs) -> Result<Vec<types::NoteTitle>, ApiError> {
+        Ok(Vec::new())
     }
 }
 

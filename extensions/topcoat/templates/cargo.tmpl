@@ -32,14 +32,20 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 {{- end }}
 {{- if .ControlledPages }}
-# The timeout of a page's or a procedure's route controls.
-tokio = { version = "1.52.2", features = ["time"] }
+# The timeout of a page's or a procedure's route controls{{ if .EnginePages }}, and the
+# blocking pool the engine's pages call the engine on{{ end }}.
+tokio = { version = "1.52.2", features = [{{ if .EnginePages }}"rt", {{ end }}"time"] }
 {{- else if .ControlledProcedures }}
-# The timeout of a procedure's route controls.
-tokio = { version = "1.52.2", features = ["time"] }
+# The timeout of a procedure's route controls{{ if .EnginePages }}, and the blocking
+# pool the engine's pages call the engine on{{ end }}.
+tokio = { version = "1.52.2", features = [{{ if .EnginePages }}"rt", {{ end }}"time"] }
 {{- else if .ControlledPicks }}
-# The timeout of a picker's route controls.
-tokio = { version = "1.52.2", features = ["time"] }
+# The timeout of a picker's route controls{{ if .EnginePages }}, and the blocking pool
+# the engine's pages call the engine on{{ end }}.
+tokio = { version = "1.52.2", features = [{{ if .EnginePages }}"rt", {{ end }}"time"] }
+{{- else if .EnginePages }}
+# The blocking pool the engine's pages call the engine on.
+tokio = { version = "1.52.2", features = ["rt"] }
 {{- end }}
 topcoat = { version = "0.10", features = ["tower"] }
 {{- with .Engine }}
@@ -52,5 +58,13 @@ topcoat = { version = "0.10", features = ["tower"] }
 axum = { version = "0.8.9", default-features = false }
 {{- if not (or $.HasRecords $.HasForms) }}
 serde_json = "1.0.149"
+{{- end }}
+{{- end }}
+{{- if .WritesMoney }}
+# Each currency's minor units, by which views.rs formats an amount.
+{{- if .ScalarPath }}
+{{ .ScalarCrate }} = { path = "{{ .ScalarPath }}" }
+{{- else }}
+{{ .ScalarCrate }} = "0.1.0"
 {{- end }}
 {{- end }}

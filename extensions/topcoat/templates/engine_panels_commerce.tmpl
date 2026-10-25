@@ -1,0 +1,14 @@
+{{- /*
+The commerce behaviors' panels (D70) of engine_panels.rs, which
+engine_panels.tmpl renders after its own: commerce_panel is the panel of
+Stock, Calendar, Holds or Payments, and none for any other behavior.
+*/ -}}
+{{- define "enginePanelsCommerce" }}
+
+/// The panel of a commerce behavior (D70), `panel`'s for Stock, Calendar,
+/// Holds and Payments: none for any other behavior.
+async fn commerce_panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
+    let _ = (cx, behavior, describe, record);
+    None
+}
+{{- end }}

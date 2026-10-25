@@ -1,0 +1,16 @@
+{{- /*
+The function of views.rs that writes an amount in its currency, which
+views.tmpl renders after the time functions: written when a display
+component or an engine panel shows money (WritesMoney).
+*/ -}}
+{{- define "viewsMoney" }}
+{{- if .WritesMoney }}
+
+/// An amount of `currency`'s minor units as a reader reads it: the code, a
+/// space, then the amount. Each currency's minor units are not applied yet,
+/// so it shows the whole number of them.
+pub fn money_text(amount: i64, currency: &str) -> String {
+    format!("{currency} {amount}")
+}
+{{- end }}
+{{- end }}
