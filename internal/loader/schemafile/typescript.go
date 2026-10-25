@@ -196,7 +196,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 		propAt := at + "/properties/" + key
 		var typ string
 		switch {
-		case key == "extensions":
+		case key == "extensions" && !isList(props[key]):
 			if err := d.openSlot(props[key], propAt); err != nil {
 				return err
 			}
@@ -378,6 +378,14 @@ func (d *declarations) typeOf(schema any, at string) (string, error) {
 	default:
 		return "", fmt.Errorf("%s: unsupported schema type %v", at, node["type"])
 	}
+}
+
+// isList reports whether a property's schema is an array's: an
+// "extensions" property that lists names, such as App's (D78), is an
+// ordinary property, not a slot a registry closes.
+func isList(schema any) bool {
+	node, ok := schema.(map[string]any)
+	return ok && node["type"] == "array"
 }
 
 // openSlot checks that an extensions or documents property is the object

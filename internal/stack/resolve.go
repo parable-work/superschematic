@@ -143,12 +143,13 @@ type resolver struct {
 	deployables map[string]*deployable
 	// byService maps a member service to the deployable that hosts or
 	// serves it; byJob maps a job, `<api>/<job>`, to its deployable, and
-	// byWorker a worker, `<api>/<worker>` (D53), and byDeriver a deriver,
-	// `<api>/<deriver>` (D74).
+	// byWorker a worker, `<api>/<worker>` (D53), byDeriver a deriver,
+	// `<api>/<deriver>` (D74), and byApp an app, `<api>/<app>` (D78).
 	byService map[string]string
 	byJob     map[string]string
 	byWorker  map[string]string
 	byDeriver map[string]string
+	byApp     map[string]string
 	edges     map[string]*edge
 
 	// produced are the resources producers returned, in order.
@@ -176,6 +177,8 @@ type deployable struct {
 	worker *ir.Worker
 	// deriver is a deriver's declaration, nil for every other kind (D74).
 	deriver *ir.Deriver
+	// app is an app's declaration, nil for every other kind (D78).
+	app *ir.App
 }
 
 // settings are a deployable's settings merged over the environment chain.
@@ -200,7 +203,7 @@ type settings struct {
 	// enabled: what the environment chain sets, the later over the
 	// earlier. workerFrom names the environment that set each (D53). An
 	// engine's runner takes enabled alone (D58). A deriver takes enabled,
-	// instances and concurrency (D74).
+	// instances and concurrency (D74). An app takes enabled alone (D78).
 	instances, maxInstances, concurrency *int
 	workerFrom                           map[string]string
 }
@@ -236,6 +239,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.defaultDeployables()
 	r.defaultWorkers()
 	r.defaultDerivers()
+	r.defaultApps()
 	r.defaultRunners()
 	r.applySettings()
 	r.place()
@@ -246,6 +250,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.scheduleJobs()
 	r.runWorkers()
 	r.runDerivers()
+	r.runApps()
 	r.runRunners()
 	if r.failed() {
 		return nil
@@ -661,6 +666,8 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 		return nil, false
 	case ref.Runner:
 		return r.resolveRunnerRef(where, ref)
+	case ref.App != "":
+		return r.resolveAppRef(where, ref)
 	case ref.Deriver != "":
 		return r.resolveDeriverRef(where, ref)
 	case ref.Worker != "":
@@ -750,7 +757,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
+			if r.applyAppSettings(where, env.Name, d, entry) || r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
@@ -793,7 +800,7 @@ func (r *resolver) applySettings() {
 // sets on the server reaches the job too. A key the server takes for
 // another API it serves is left out of the job's fields when they are
 // bound, not refused. A worker takes its API's server's env as a job does
-// (D53), and so does a deriver (D74).
+// (D53), and so do a deriver (D74) and an app (D78).
 func (r *resolver) inheritServerEnv() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -805,6 +812,8 @@ func (r *resolver) inheritServerEnv() {
 			api = d.res.Worker.API
 		case d.res.Kind == ir.DeployableDeriver && d.res.Deriver != nil:
 			api = d.res.Deriver.API
+		case d.res.Kind == ir.DeployableApp && d.res.App != nil:
+			api = d.res.App.API
 		default:
 			continue
 		}
@@ -903,7 +912,7 @@ func (r *resolver) place() {
 					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s", res.Kind, name, r.target.Name, res.Kind, why)
 					continue
 				}
-				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a %s; place it with a settings platform", res.Kind, name, r.target.Name, res.Kind)
+				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for %s %s; place it with a settings platform", res.Kind, name, r.target.Name, article(res.Kind), res.Kind)
 				continue
 			}
 		}
@@ -919,7 +928,7 @@ func (r *resolver) place() {
 		res.Platform = platformName
 		d.platform = platform
 		switch res.Kind {
-		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp:
 			r.placeServer(d)
 		case ir.DeployableRunner:
 			r.placeRunner(d)
@@ -955,6 +964,9 @@ func (r *resolver) placeServer(d *deployable) {
 	if d.res.Kind == ir.DeployableDeriver && lang == registry.APILanguageGo {
 		return // runDerivers refuses a Go API's deriver, whatever its platform runs
 	}
+	if d.res.Kind == ir.DeployableApp && lang != registry.APILanguageRust {
+		return // runApps refuses a Go or TypeScript API's app, whatever its platform runs
+	}
 	if !slices.Contains(d.platform.Languages, d.res.Language) {
 		msg := fmt.Sprintf("%s %s is a %s %s, and platform %s runs only %s", d.res.Kind, d.res.Name, d.res.Language, d.res.Kind, d.platform.Name, strings.Join(d.platform.Languages, ", "))
 		if scope := unbuiltDeployable(d.res.Kind, d.res.Language); scope != "" {
@@ -962,10 +974,10 @@ func (r *resolver) placeServer(d *deployable) {
 		}
 		r.fail(CodeUnrealizable, "%s", msg)
 	}
-	if reason := d.platform.NoIdentity; reason != "" && d.res.Kind == ir.DeployableServer {
+	if reason := d.platform.NoIdentity; reason != "" && (d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp) {
 		for _, served := range d.res.Services {
 			if svc := r.services[served.Name]; svc != nil && svc.Identity {
-				r.fail(CodeUnrealizable, "server %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Name, svc.Name, d.platform.Name, reason)
+				r.fail(CodeUnrealizable, "%s %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Kind, d.res.Name, svc.Name, d.platform.Name, reason)
 			}
 		}
 	}
@@ -1092,16 +1104,16 @@ func (r *resolver) placeDatabase(d *deployable) {
 }
 
 // expose marks the deployables reachable from outside the environment:
-// the servers the stack exposes, and every site, which is always exposed,
-// whether the stack names it or not (D55).
+// the servers and the apps (D78) the stack exposes, and every site, which
+// is always exposed, whether the stack names it or not (D55).
 func (r *resolver) expose() {
 	for i, ref := range r.stack.Expose {
 		d, ok := r.resolveDeployableRef(fmt.Sprintf("expose[%d] (%s)", i, ref), ref)
 		if !ok {
 			continue
 		}
-		if d.res.Kind != ir.DeployableServer && d.res.Kind != ir.DeployableSite {
-			r.fail(CodeExposeNotServer, "stack %s exposes %s, a %s; only a server or a site is exposed", r.stack.Name, d.res.Name, d.res.Kind)
+		if d.res.Kind != ir.DeployableServer && d.res.Kind != ir.DeployableSite && d.res.Kind != ir.DeployableApp {
+			r.fail(CodeExposeNotServer, "stack %s exposes %s, a %s; only a server, a site or an app is exposed", r.stack.Name, d.res.Name, d.res.Kind)
 			continue
 		}
 		d.res.Exposed = true
@@ -1264,6 +1276,15 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 	return out
 }
 
+// article is the indefinite article of a deployable kind's name: an app,
+// a server.
+func article(kind ir.DeployableKind) string {
+	if strings.ContainsRune("aeiou", rune(kind[0])) {
+		return "an"
+	}
+	return "a"
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -1306,6 +1327,11 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 		deriver := *d.Deriver
 		deriver.Schemas = slices.Clone(d.Deriver.Schemas)
 		c.Deriver = &deriver
+	}
+	if d.App != nil {
+		app := *d.App
+		app.Extensions = slices.Clone(d.App.Extensions)
+		c.App = &app
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))

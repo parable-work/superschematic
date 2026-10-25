@@ -34,8 +34,9 @@ const (
 	// (D63).
 	Provider = "fake"
 
-	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
-	// Postgres databases.
+	// RunPlatform runs Go, TypeScript and Rust servers, the last the
+	// servers of the Rust APIs whose apps AppPlatform runs (D78);
+	// SQLPlatform runs Postgres databases.
 	RunPlatform = "fake.run"
 	SQLPlatform = "fake.sql"
 
@@ -70,6 +71,15 @@ const (
 	DeriverSQLConnector    = "fake.deriver-sql"
 	DeriverHTTPConnector   = "fake.deriver-run"
 	DeriverBucketConnector = "fake.deriver-storage"
+
+	// AppPlatform runs Rust apps as a service, as gcp runs a server on
+	// Cloud Run (D78); AppSQLConnector, AppHTTPConnector and
+	// AppBucketConnector connect it, whose edges are its API's, as a job's
+	// connectors do.
+	AppPlatform        = "fake.app"
+	AppSQLConnector    = "fake.app-sql"
+	AppHTTPConnector   = "fake.app-run"
+	AppBucketConnector = "fake.app-storage"
 
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
@@ -291,7 +301,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		}
 	}
 	for _, spec := range []registry.PlatformSpec{
-		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript),
+		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust),
 		server(EdgePlatform, registry.APILanguageTypeScript),
 		{
 			Name:      BundlePlatform,
@@ -377,6 +387,28 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerDeriver,
 		},
+		{
+			Name:      AppPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableApp,
+			Languages: []string{registry.APILanguageRust},
+			Settings:  json.RawMessage(serverSettings),
+			NameOf:    serverName,
+			// An app turned off runs no service, so it has no address.
+			AddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "url"}
+			},
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return publicAddress(ctx, ctx.Deployable.Name+".service")
+			},
+			Lower: lowerApp,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
@@ -403,6 +435,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: AppSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: AppPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: AppHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: AppPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: AppBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: AppPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -434,6 +469,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableWorker:   WorkerPlatform,
 			ir.DeployableRunner:   RunnerPlatform,
 			ir.DeployableDeriver:  DeriverPlatform,
+			ir.DeployableApp:      AppPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -916,6 +952,22 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
 	return out, nil
+}
+
+// lowerApp lowers an app (D78) as a server: an account, the secrets it
+// reads, and a service that runs its image, with a route when it is
+// exposed. An app the environment turns off lowers to its account and
+// secrets alone, and runs nothing.
+func lowerApp(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.App == nil {
+		return registry.Lowered{}, fmt.Errorf("app %s has no run", d.Name)
+	}
+	if !d.App.Enabled {
+		out, _, _, err := lowerAccount(ctx)
+		return out, err
+	}
+	return lowerServer(ctx)
 }
 
 // lowerDatabase lowers a database to an instance and a database per
