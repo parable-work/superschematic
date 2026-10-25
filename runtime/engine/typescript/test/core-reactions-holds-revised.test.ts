@@ -301,8 +301,8 @@ for (const driver of drivers) {
   describe(`Reactions: revised (${driver})`, () => {
     test("a spec's new revision moves the work pinned to an earlier one, as the runner, and nothing else moves it", () => {
       const engine = specs();
-      // A comment is no revision.
-      engine.instances.invoke(alice, 'Spec', 'sp1', 'comment', { body: 'Looks right' });
+      // A post is no revision.
+      engine.instances.invoke(alice, 'Spec', 'sp1', 'post', { body: 'Looks right' });
       engine.runner.runDue();
       assert.deepEqual(['w1', 'w2'].map((id) => status(engine, 'Work', id)), ['todo', 'todo']);
       engine.instances.update(alice, 'Spec', 'sp1', { title: 'v2' });

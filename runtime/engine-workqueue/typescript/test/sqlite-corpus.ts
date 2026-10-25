@@ -1,10 +1,13 @@
 // The engine file the TypeScript engine wrote, as data the engine opens
 // (D58): runtime/engine/testdata/sqlite/typescript.sql, with every core
 // and work-queue behavior in use, frozen at the cutover as the last file
-// that engine wrote, and the reads expected.json holds. writeCorpus runs
-// the script that wrote it, on the engine today; dumpDatabase writes a file
-// as SQL text, one statement per line, loadDatabase loads that text into an
-// empty file, and readCorpus makes the reads.
+// that engine wrote, and the reads expected.json holds of it once the
+// engine has migrated it. writeCorpus runs the script that wrote it, on the
+// engine today, whose Comments posts beside the instance (D77) where the
+// TypeScript engine's commented, so the file it writes reads as
+// written.json holds; dumpDatabase writes a file as SQL text, one
+// statement per line, loadDatabase loads that text into an empty file, and
+// readCorpus makes the reads.
 // runtime/engine/testdata/sqlite/README.md gives the format and the
 // script.
 import { createHash } from 'node:crypto';
@@ -161,12 +164,12 @@ function script(engine: Engine, clock: { now: number }): void {
   // through a proposal and published.
   tick();
   engine.instances.create(p.wes, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
-  invoke(p.wes, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
+  invoke(p.wes, 'documents', 'doc-1', 'post', { body: 'First pass is up.' });
   invoke(p.wes, 'documents', 'doc-1', 'transition', { to: 'review' });
   invoke(p.wes, 'documents', 'doc-1', 'propose', { patch: { body: 'The plan, in full.' }, note: 'Adds the body.' });
   tick();
   invoke(p.rae, 'documents', 'doc-1', 'approve', { proposal: 1 });
-  invoke(p.rae, 'documents', 'doc-1', 'comment', { body: 'Approved the body.', replyTo: 1 });
+  invoke(p.rae, 'documents', 'doc-1', 'post', { body: 'Approved the body.', thread: 1 });
   invoke(p.pat, 'documents', 'doc-1', 'transition', { to: 'published' });
 
   // Dependencies, Links and Rollups: tasks of a project wait on each
@@ -370,7 +373,8 @@ export function readCorpus(engine: Engine): Read[] {
   const operation = (schema: string, id: string, name: string, params: Record<string, unknown> = {}, namespace = 'default'): void => {
     read('alice', 'instances.invoke', [schema, id, name, params, { namespace }], () => engine.instances.invoke(alice, schema, id, name, params, { namespace }));
   };
-  operation('documents', 'doc-1', 'listComments');
+  operation('documents', 'doc-1', 'listMessages');
+  operation('documents', 'doc-1', 'listMessages', { thread: 1 });
   operation('documents', 'doc-1', 'listRevisions');
   operation('documents', 'doc-1', 'listProposals');
   operation('tasks', 'build', 'listBlockers');
@@ -393,13 +397,18 @@ export function readCorpus(engine: Engine): Read[] {
   return reads;
 }
 
-/** renderReads writes expected.json: its members on lines of their own, and each read on one. */
-export function renderReads(reads: readonly Read[]): string {
+/**
+ * renderReads writes expected.json, the reads of typescript.sql, or with
+ * written written.json, the reads of the file the script writes today:
+ * its members on lines of their own, and each read on one.
+ */
+export function renderReads(reads: readonly Read[], written = false): string {
   const principals = Object.fromEntries(Object.entries(PRINCIPALS).map(([name, principal]) => [name, principal]));
   const head = {
-    name: 'typescript',
-    description:
-      'What runtime/engine-workqueue/typescript/test/sqlite-corpus.ts reads from typescript.sql loaded into a file and opened with the core and work-queue behaviors, at the clock below.',
+    name: written ? 'written' : 'typescript',
+    description: written
+      ? 'What runtime/engine-workqueue/typescript/test/sqlite-corpus.ts reads from the file its script writes on the engine today, opened with the core and work-queue behaviors, at the clock below.'
+      : 'What runtime/engine-workqueue/typescript/test/sqlite-corpus.ts reads from typescript.sql loaded into a file and opened with the core and work-queue behaviors, at the clock below.',
     open: OPTIONS,
     clock: END,
     principals,
