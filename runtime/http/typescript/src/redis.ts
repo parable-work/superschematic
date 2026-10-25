@@ -178,7 +178,10 @@ class RedisMemoryStore implements MemoryStore {
   private healthTimer: ReturnType<typeof setTimeout> | undefined;
   private backoff: number;
   private subscriber: Client | undefined;
-  private readonly channels = new Map<string, { declaration: string; handlers: Set<MessageHandler>; listener: (message: Buffer) => void }>();
+  /** What to subscribe to: each channel's handlers, by full name. The subscriber connection follows it. */
+  private readonly channels = new Map<string, { declaration: string; handlers: Set<MessageHandler> }>();
+  /** The one listener node-redis holds for every channel, so it holds at most one per channel. */
+  private readonly listener = (message: Buffer, channel: Buffer): void => this.dispatch(channel.toString(), message);
 
   constructor(
     private readonly connection: MemoryStoreConnection,
@@ -318,26 +321,21 @@ class RedisMemoryStore implements MemoryStore {
     if (this.closed) throw new MemoryStoreUnavailableError(this.name, 'closed');
     const name = this.full(ref);
     let channel = this.channels.get(name);
+    const first = channel === undefined;
     if (!channel) {
-      const handlers = new Set<MessageHandler>();
-      channel = {
-        declaration: ref.declaration,
-        handlers,
-        listener: (message: Buffer) => this.dispatch(ref.declaration, handlers, message),
-      };
+      channel = { declaration: ref.declaration, handlers: new Set() };
       this.channels.set(name, channel);
-      await this.subscribeChannel(name, channel.listener);
     }
+    // The handler is held before the SUBSCRIBE goes out, so an unsubscribe
+    // of another handler meanwhile leaves the channel to it.
     channel.handlers.add(handler);
     const held = channel;
+    if (first) await this.subscribeChannel(name);
     return {
       unsubscribe: async () => {
         if (!held.handlers.delete(handler) || held.handlers.size > 0 || this.channels.get(name) !== held) return;
         this.channels.delete(name);
-        const subscriber = this.subscriber;
-        if (subscriber?.isReady) {
-          await within(subscriber.unsubscribe(name, held.listener, true), this.timings.opMs, 'UNSUBSCRIBE').catch(() => undefined);
-        }
+        await this.unsubscribeChannel(name);
       },
     };
   }
@@ -409,31 +407,70 @@ class RedisMemoryStore implements MemoryStore {
     throw new MemoryStoreUnavailableError(this.name, 'not connected', { cause: new Error(this.scrub(last)) });
   }
 
-  /** Opens the subscriber connection on first use, and subscribes name on it. */
-  private async subscribeChannel(name: string, listener: (message: Buffer) => void): Promise<void> {
+  /**
+   * Subscribes to name on the subscriber connection, which opens on first
+   * use. A connection that is not ready subscribes to every channel once it
+   * is (resubscribe). The channel stays in the map whatever SUBSCRIBE
+   * answers.
+   */
+  private async subscribeChannel(name: string): Promise<void> {
     if (!this.subscriber) {
       const subscriber = this.client.duplicate();
       this.subscriber = subscriber;
       this.watchClient(subscriber, 'subscriber');
       subscriber.on('ready', () => {
-        // node-redis subscribes again to what it holds; a channel it was
-        // offline for is subscribed here.
-        for (const [channel, held] of this.channels) {
-          subscriber.subscribe(channel, held.listener, true).catch(() => undefined);
-        }
+        if (!this.closed) this.resubscribe(subscriber);
       });
       subscriber.connect().catch(() => undefined);
+      return;
     }
     const subscriber = this.subscriber;
     if (!subscriber.isReady) return;
     try {
-      await within(subscriber.subscribe(name, listener, true), this.timings.opMs, 'SUBSCRIBE');
+      await within(subscriber.subscribe(name, this.listener, true), this.timings.opMs, 'SUBSCRIBE');
     } catch (error) {
       this.logger.debug('memory store subscribe deferred until the subscriber connection returns', { error: this.scrub(error) });
     }
   }
 
-  private dispatch(declaration: string, handlers: Set<MessageHandler>, message: Buffer): void {
+  /**
+   * Unsubscribes from name. The command goes to node-redis whether or not
+   * the connection is up: node-redis drops its listener only once the
+   * server confirms, and resubscribes to what it holds on a reconnect. A
+   * failed reconnect drops the command it queued, so resubscribe leaves
+   * every channel the map no longer holds.
+   */
+  private async unsubscribeChannel(name: string): Promise<void> {
+    const subscriber = this.subscriber;
+    if (!subscriber) return;
+    const done = subscriber.unsubscribe(name, this.listener, true).catch(() => undefined);
+    if (subscriber.isReady) await within(done, this.timings.opMs, 'UNSUBSCRIBE').catch(() => undefined);
+  }
+
+  /**
+   * Makes what a ready subscriber connection holds the map's channels:
+   * node-redis has subscribed again to what it held, which may lack a
+   * channel subscribed while it was down, or hold one whose UNSUBSCRIBE a
+   * failed reconnect dropped.
+   */
+  private resubscribe(subscriber: Client): void {
+    const held = subscriber.getPubSubListeners('CHANNELS');
+    for (const name of [...held.keys()]) {
+      if (!this.channels.has(name)) subscriber.unsubscribe(name, this.listener, true).catch(() => undefined);
+    }
+    for (const name of this.channels.keys()) {
+      // A channel node-redis marks as unsubscribing, whose UNSUBSCRIBE is
+      // queued or was dropped, is subscribed again after it.
+      if (held.get(name)?.unsubscribing !== false) {
+        subscriber.subscribe(name, this.listener, true).catch(error => this.logger.debug('memory store resubscribe failed', { error: this.scrub(error) }));
+      }
+    }
+  }
+
+  private dispatch(name: string, message: Buffer): void {
+    const channel = this.channels.get(name);
+    if (!channel) return;
+    const { declaration, handlers } = channel;
     const data = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
     for (const handler of [...handlers]) {
       try {
