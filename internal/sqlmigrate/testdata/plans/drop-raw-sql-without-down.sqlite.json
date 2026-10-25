@@ -1,0 +1,28 @@
+{
+  "dialect": "sqlite",
+  "expanded": "c8289c089da68c60e24572ab360e851303c998a55b483f8da240007c7239151e",
+  "from": "c8289c089da68c60e24572ab360e851303c998a55b483f8da240007c7239151e",
+  "hash": "42adc9b53c7167a7d9953c4c8bdac3d65875ed9ce7643c564fa24c11ebea2102",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/order_code_lower",
+          "reason": "The raw SQL order_code_lower is no longer declared and has no down: nothing undoes what it made; drop that by hand.",
+          "subject": "rawSql/order_code_lower"
+        }
+      ],
+      "index": 1,
+      "op": "undoRawSQL",
+      "phase": "contract",
+      "statements": [],
+      "subject": "rawSql/order_code_lower",
+      "transactional": true
+    }
+  ],
+  "to": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "toModel": null,
+  "version": 1
+}

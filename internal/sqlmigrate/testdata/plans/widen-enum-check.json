@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "from": "df40fd297610200f7cf2ca8e2ed3ae41af45502a3e9dc1b4f5cb170f72ec0397",
+  "hash": "7c6fd79c24670fc5d4b5c18cc62602d1932ce94478ee1fcda35ea0b07cedf463",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT ck_order_status",
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_status CHECK (status IN ('placed', 'shipped', 'cancelled')) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "validateCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_status"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    }
+  ],
+  "to": "ace37edb57b083aab123729d3a95a25062b3c5e2778ea0b4087e2a5b24b873e0",
+  "toModel": null,
+  "version": 1
+}

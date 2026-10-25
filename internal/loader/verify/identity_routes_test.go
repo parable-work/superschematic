@@ -187,7 +187,7 @@ func TestUserModelRoutes(t *testing.T) {
 			db: func(db *ir.Schema) {
 				addAccountField(db, &ir.FieldDef{Name: "plan", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
 			},
-			want: "Account's @userSessions({ register: true }) and AccountAdmin's @userAdministration create users with their key, login and name alone, and Account.plan in the authDb users is required and has no default; make it optional or give it a @default",
+			want: "Account's @userSessions({ register: true }) and AccountAdmin's @userAdministration create users with their key, login and name alone, and Account.plan in the authDb users is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member",
 		},
 		{
 			name: "a required field and administration alone",
@@ -227,6 +227,17 @@ func TestUserModelRoutes(t *testing.T) {
 				plan := "free"
 				addAccountField(db, &ir.FieldDef{Name: "plan", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &plan})
 			},
+		},
+		// A default the column cannot carry leaves the decoders to fill
+		// it, which the routes' insert does not run (D78).
+		{
+			name: "a required field with a default its column cannot carry",
+			db: func(db *ir.Schema) {
+				db.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "UUID"}}
+				owner := "00000000-0000-4000-8000-000000000001"
+				addAccountField(db, &ir.FieldDef{Name: "owner", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Default: &owner})
+			},
+			want: "Account.owner in the authDb users is required and has no default its column carries",
 		},
 		{
 			name: "a generated field",

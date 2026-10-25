@@ -38,7 +38,9 @@ func (h serviceHandle) MarshalJSON() ([]byte, error) {
 const maxEvalDepth = 16
 
 // evaluateExpression statically evaluates a decorator or config argument.
-// Only literals are supported: strings, numbers, booleans, null, arrays,
+// Only literals are supported: strings (a template literal too, when it
+// has no substitution, as @rawSql's multi-line SQL), numbers, booleans,
+// null, arrays,
 // object literals, enum member references, service sentinel constants
 // (identifiers whose initializer is a service({...}) call) and, in a
 // decorator argument, classes named as values. Anything computed is
@@ -61,7 +63,7 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 	}
 
 	switch node.Kind {
-	case kindStringLiteral:
+	case kindStringLiteral, kindNoSubstitutionTemplate:
 		return node.Text(), nil
 
 	case kindNumericLiteral:

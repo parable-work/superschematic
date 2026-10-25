@@ -136,7 +136,7 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
-		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
+		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars ||
 		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
@@ -194,16 +194,31 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		for i, k := range idx.Keys {
 			keys[i] = quote(k)
 		}
+		var options []string
+		if idx.Unique {
+			options = append(options, "unique: true")
+		}
+		for _, opt := range []struct{ key, value string }{
+			{"name", idx.Name}, {"method", idx.Method}, {"ops", idx.Ops}, {"where", idx.Where}, {"expression", idx.Expression},
+		} {
+			if opt.value != "" {
+				options = append(options, opt.key+": "+quote(opt.value))
+			}
+		}
+		if idx.Concurrently != nil {
+			options = append(options, fmt.Sprintf("concurrently: %t", *idx.Concurrently))
+		}
 		opts := ""
 		switch {
-		case idx.Name != "" && idx.Unique:
-			opts = fmt.Sprintf(", { unique: true, name: %s }", quote(idx.Name))
-		case idx.Name != "":
-			opts = fmt.Sprintf(", { name: %s }", quote(idx.Name))
-		case idx.Unique:
+		case len(options) == 1 && idx.Unique:
 			opts = ", true"
+		case len(options) > 0:
+			opts = ", { " + strings.Join(options, ", ") + " }"
 		}
 		fmt.Fprintf(&e.body, "@%s<%s>([%s]%s)\n", e.use("index"), def.Name, strings.Join(keys, ", "), opts)
+	}
+	for _, raw := range def.RawSQL {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("rawSql"), rawSQLArgs(raw))
 	}
 	if def.Source != nil {
 		e.emitSourceDecorator(def)
@@ -631,4 +646,30 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 // isZeroField reports whether a FieldDef has been fully cleared.
 func isZeroField(fd *ir.FieldDef) bool {
 	return reflect.DeepEqual(fd, &ir.FieldDef{})
+}
+
+// rawSQLArgs renders @rawSql's options object, its SQL as template literals
+// when they span lines (D78).
+func rawSQLArgs(raw ir.RawSQLDef) string {
+	sql := func(s string) string {
+		if strings.Contains(s, "\n") && !strings.ContainsAny(s, "`\\") && !strings.Contains(s, "${") {
+			return "`" + s + "`"
+		}
+		return quote(s)
+	}
+	parts := []string{"id: " + quote(raw.ID), "up: " + sql(raw.Up)}
+	if raw.Down != "" {
+		parts = append(parts, "down: "+sql(raw.Down))
+	}
+	if raw.After != "" {
+		parts = append(parts, "after: "+quote(raw.After))
+	}
+	if len(raw.Dialects) > 0 {
+		dialects := make([]string, len(raw.Dialects))
+		for i, d := range raw.Dialects {
+			dialects[i] = quote(d)
+		}
+		parts = append(parts, "dialects: ["+strings.Join(dialects, ", ")+"]")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }

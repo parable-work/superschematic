@@ -1,0 +1,48 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "f7b03f7dcc1e1b3597baa594d97ce3004cf2a8e34c9ef9f45a9270d265b9c970",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/order_code_lower",
+          "reason": "The raw SQL order_code_lower (Order) runs for the first time; the planner cannot judge what it does.",
+          "subject": "rawSql/order_code_lower"
+        }
+      ],
+      "index": 1,
+      "op": "runRawSQL",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code))"
+      ],
+      "subject": "rawSql/order_code_lower",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/customer_totals",
+          "reason": "The raw SQL customer_totals (Order) runs for the first time; the planner cannot judge what it does.",
+          "subject": "rawSql/customer_totals"
+        }
+      ],
+      "index": 2,
+      "op": "runRawSQL",
+      "phase": "expand",
+      "statements": [
+        "DROP MATERIALIZED VIEW IF EXISTS customer_totals",
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS customer_totals AS SELECT customer_id, sum(total) AS total FROM \"order\" GROUP BY customer_id"
+      ],
+      "subject": "rawSql/customer_totals",
+      "transactional": true
+    }
+  ],
+  "to": "76ca7144daa1af3af104dad916d96c1c0d9cd9afeb1bb0fe4caecde11923631b",
+  "toModel": null,
+  "version": 1
+}

@@ -151,6 +151,15 @@ func sqliteDefault(def, pg string) (string, error) {
 	if parsePGType(pg).array && def == "'{}'" {
 		return "'[]'", nil
 	}
+	// A boolean is an INTEGER, 1 or 0, as the runtimes write it (D78).
+	if parsePGType(pg).base == "BOOLEAN" {
+		switch strings.ToLower(def) {
+		case "true":
+			return "1", nil
+		case "false":
+			return "0", nil
+		}
+	}
 	if m := pgJSONLiteral.FindStringSubmatch(def); m != nil {
 		return m[1], nil
 	}
@@ -185,15 +194,20 @@ func sqliteAffinity(t string) string {
 // gives it: text is not a JSON array, Postgres parses text as JSON where
 // SQLite's json_quote would wrap it, and Postgres converts no list to or
 // from anything else. So each of them is impossible: the operator changes
-// the column by hand and adopts the new model (D27). A list is TEXT
-// whatever its element, so a list's change is its element's
-// (sqliteListConvert).
+// the column by hand and adopts the new model (D27). Text that becomes a
+// JSON value is the exception: a rebuild parses it with json(), which
+// fails on text that is not JSON, as Postgres's cast to JSONB does
+// (sqliteCopySQL; D78, for a @jsonField field a compiler before it stored
+// as text). A list is TEXT whatever its element, so a list's change is its
+// element's (sqliteListConvert).
 func (sqliteDialect) convert(from, to *Column) conversion {
 	switch {
 	case from.Holds == holdsList && to.Holds == holdsList:
 		return sqliteListConvert(from.Element, to.Element)
 	case from.Holds == to.Holds:
 		return sqliteConvert(from.Type, to.Type)
+	case from.Holds == "" && to.Holds == holdsJSON && sqliteAffinity(from.Type) == sqliteText:
+		return conversion{kind: convertMayFail}
 	case from.Holds == holdsJSON && to.Holds == "":
 		c := sqliteConvert(from.Type, to.Type)
 		if c.kind == convertSame {

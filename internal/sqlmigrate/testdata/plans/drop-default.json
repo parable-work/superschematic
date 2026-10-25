@@ -1,0 +1,22 @@
+{
+  "dialect": "postgres",
+  "expanded": "f0257eac9b3de0182ec9aa0763eff59e6c3638db0b17355cdb51327f9d194115",
+  "from": "f0257eac9b3de0182ec9aa0763eff59e6c3638db0b17355cdb51327f9d194115",
+  "hash": "5859ef104a29a06737f0bffb9900a6ff1dd145c74c33134732c000777f87d032",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropDefault",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN total DROP DEFAULT"
+      ],
+      "subject": "table/order/column/total",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}

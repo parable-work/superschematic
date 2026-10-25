@@ -299,9 +299,14 @@ export interface Import {
 }
 
 export interface IndexDef {
+  concurrently?: boolean;
+  expression?: string;
   keys: string[];
+  method?: string;
   name?: string;
+  ops?: string;
   unique?: boolean;
+  where?: string;
 }
 
 export interface Job {
@@ -487,6 +492,14 @@ export interface RawHeritage {
   implements?: string[];
 }
 
+export interface RawSQLDef {
+  after?: string;
+  dialects?: string[];
+  down?: string;
+  id: string;
+  up: string;
+}
+
 export interface ReferenceDef {
   label?: string;
   options?: string;
@@ -614,6 +627,7 @@ export interface TypeDef {
   projection?: ProjectionDef;
   queue?: QueueDef;
   rawHeritage?: RawHeritage;
+  rawSql?: RawSQLDef[];
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
   server?: ServerDecl;
   source?: SourceRef;

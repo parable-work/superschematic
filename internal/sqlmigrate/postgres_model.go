@@ -7,6 +7,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -116,9 +117,22 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		return nil, err
 	}
 	m.Graphs = graphs
+	m.RawSQL = modelRawSQL(out.RawSQL)
 
 	m.sort()
 	return m, nil
+}
+
+// modelRawSQL is the model's raw SQL, in the order it runs.
+func modelRawSQL(pieces []sqlutil.RawSQL) []*RawSQL {
+	var out []*RawSQL
+	for _, p := range pieces {
+		out = append(out, &RawSQL{
+			ID: p.ID, Origin: p.Origin, Position: p.Position, After: p.After,
+			Statements: append([]string{}, p.Statements...), Down: append([]string(nil), p.Down...), Checksum: p.Checksum,
+		})
+	}
+	return out
 }
 
 // entityTable is a DB type's table. The primary key and each UNIQUE clause
@@ -193,7 +207,15 @@ func entityTable(t *sqlgen.Table, ns *pgNamespace) (*Table, error) {
 			return nil, err
 		}
 		table.Indexes = append(table.Indexes, &Index{
-			Name: idx.Name, Columns: columns, Method: idx.Type, Unique: idx.Unique, Where: idx.Where,
+			Name: idx.Name, Columns: columns, Method: idx.Type, Opclass: idx.Opclass, Unique: idx.Unique, Where: idx.Where,
+			Expression: idx.Expression, InTransaction: idx.InTransaction,
+		})
+	}
+	for _, check := range t.Checks {
+		spec := check.Spec
+		table.Checks = append(table.Checks, &Check{
+			Name: check.Name, Column: check.Column, In: append([]string(nil), spec.In...),
+			Min: spec.Min, Max: spec.Max, MinLength: spec.MinLength, MaxLength: spec.MaxLength,
 		})
 	}
 	if len(t.SearchFields) > 0 {
@@ -341,6 +363,7 @@ func (m *Model) sort() {
 		sort.Slice(t.Uniques, func(i, j int) bool { return t.Uniques[i].Name < t.Uniques[j].Name })
 		sort.Slice(t.ForeignKeys, func(i, j int) bool { return t.ForeignKeys[i].Name < t.ForeignKeys[j].Name })
 		sort.Slice(t.Indexes, func(i, j int) bool { return t.Indexes[i].Name < t.Indexes[j].Name })
+		sort.Slice(t.Checks, func(i, j int) bool { return t.Checks[i].Name < t.Checks[j].Name })
 		sort.Slice(t.Partitions, func(i, j int) bool { return t.Partitions[i].Name < t.Partitions[j].Name })
 	}
 	sort.Slice(m.Functions, func(i, j int) bool { return m.Functions[i].Name < m.Functions[j].Name })

@@ -59,13 +59,16 @@ func ElementType(typeName string, scalarTypes map[string]string) string {
 	return "TEXT"
 }
 
-// ColumnType returns the PostgreSQL column type for an IR field. Maps,
-// @jsonField values and arrays of arrays (T[][]) are JSONB. A T[][] is never
-// a native multi-dimensional array: Postgres requires those to be
-// rectangular, and a list of lists is often ragged. A list is a native array
-// of its element's type.
-func ColumnType(field *ir.FieldDef, scalarTypes map[string]string) string {
-	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays {
+// ColumnType returns the PostgreSQL column type for an IR field of schema.
+// Maps, @jsonField values and arrays of arrays (T[][]) are JSONB. A
+// @jsonField value is a field marked JsonField<T> or a field whose type is a
+// @jsonField class, alone or in a list: the Go ORM marshals either as one
+// JSON document (D78). A T[][] is never a native multi-dimensional array:
+// Postgres requires those to be rectangular, and a list of lists is often
+// ragged. A list is a native array of its element's type. A nil schema
+// knows no @jsonField class.
+func ColumnType(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]string) string {
+	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays || IsJSONFieldType(schema, field.TypeRef.Name) {
 		return "JSONB"
 	}
 	element := ElementType(field.TypeRef.Name, scalarTypes)
@@ -73,4 +76,14 @@ func ColumnType(field *ir.FieldDef, scalarTypes map[string]string) string {
 		return element + "[]"
 	}
 	return element
+}
+
+// IsJSONFieldType reports whether name is a @jsonField class of schema: a
+// type stored as JSON in its parent's column, never a table of its own.
+func IsJSONFieldType(schema *ir.Schema, name string) bool {
+	if schema == nil {
+		return false
+	}
+	td := schema.Types[name]
+	return td != nil && td.JsonField
 }

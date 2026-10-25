@@ -23,6 +23,9 @@ CREATE TABLE {{ $table.QuotedName }} (
 {{- if $table.Unique }}{{ range $table.Unique }},
   UNIQUE ({{ join . ", " }}){{ end }}
 {{- end }}
+{{- range $table.Checks }},
+  CONSTRAINT {{ .Name }} CHECK ({{ .Expression }})
+{{- end }}
 );
 {{- if $table.SearchFields }}
 
@@ -111,12 +114,14 @@ ALTER TABLE {{ $jt.QuotedName }}
 {{- end }}
 {{- end }}
 
+{{- template "rawSQL" (rawSQLAt .RawSQL "tables") }}
+
 -- Create indexes
 {{- range $table := .Tables }}
 {{- if $table.Indexes }}
 {{- range $idx := $table.Indexes }}
 
-CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ join $idx.Columns ", " }}){{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
+CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ $idx.Elements }}){{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
 {{- end }}
 {{- end }}
 {{- if $table.SearchFields }}
@@ -164,5 +169,19 @@ CREATE INDEX idx_{{ $table.Name }}_search_trgm ON {{ $table.QuotedName }} USING 
 CREATE SCHEMA IF NOT EXISTS {{ $view.QuotedPool }};
 
 {{ projectionViewDDL $view }}
+{{- end }}
+{{- end }}
+{{- template "rawSQL" (rawSQLAt .RawSQL "indexes") }}
+{{- define "rawSQL" }}
+{{- if .Pieces }}
+
+-- Raw SQL the schema declares (@rawSql), {{ .Where }}
+{{- range $piece := .Pieces }}
+
+-- {{ $piece.ID }} ({{ $piece.Origin }}{{ if $piece.After }}, after {{ $piece.After }}{{ end }})
+{{- range $piece.Statements }}
+{{ . }};
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

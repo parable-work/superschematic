@@ -27,8 +27,8 @@ func QueueTableName(name string) string {
 }
 
 // convertQueueToTable builds the table of the queue typeDef declares.
-func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping map[string]string, compositeDefaults map[string]*ir.CompositeDefaultDef) (Table, error) {
-	message, err := convertTypeToTable(typeDef, schema, scalarMapping, compositeDefaults)
+func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string]*ir.Schema, scalarMapping map[string]string, compositeDefaults map[string]*ir.CompositeDefaultDef) (Table, error) {
+	message, err := convertTypeToTable(typeDef, schema, deps, scalarMapping, compositeDefaults)
 	if err != nil {
 		return Table{}, err
 	}
@@ -83,7 +83,7 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping m
 			Where:   sqlutil.QuoteIdentifier(ir.QueueColumnState) + " = '" + idx.state + "'",
 		})
 	}
-	return Table{
+	table := Table{
 		Name:         name,
 		QuotedName:   sqlutil.QuoteIdentifier(name),
 		OriginalName: typeDef.Name,
@@ -93,5 +93,11 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping m
 		Unique:       [][]string{},
 		ForeignKeys:  []ForeignKey{},
 		Indexes:      indexes,
-	}, nil
+		Checks:       message.Checks,
+	}
+	// The queue's table follows the tables whose checks Generate names.
+	if err := assignCheckNames(&table); err != nil {
+		return Table{}, err
+	}
+	return table, nil
 }

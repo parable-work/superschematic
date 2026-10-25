@@ -1,6 +1,10 @@
 package sqlmigrate
 
-import "strings"
+import (
+	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
+)
 
 // op names an operation. It is the Op of the step a change renders to; a
 // dialect that renders a change as several steps names the others itself.
@@ -26,6 +30,9 @@ const (
 	opAddUnique        op = "addUnique"
 	opAddForeignKey    op = "addForeignKey"
 	opReplaceFK        op = "replaceForeignKey"
+	opAddCheck         op = "addCheck"
+	opReplaceCheck     op = "replaceCheck"
+	opRunRawSQL        op = "runRawSQL"
 	opCreateFunction   op = "createFunction"
 	opReplaceFunction  op = "replaceFunction"
 	opCreateTrigger    op = "createTrigger"
@@ -37,6 +44,8 @@ const (
 	opGraphContent     op = "changeGraphContent"
 	opSetNotNull       op = "setNotNull"
 	opDropDefault      op = "dropDefault"
+	opDropCheck        op = "dropCheck"
+	opUndoRawSQL       op = "undoRawSQL"
 	opDropView         op = "dropView"
 	opDropTrigger      op = "dropTrigger"
 	opDropFunction     op = "dropFunction"
@@ -51,7 +60,8 @@ const (
 // and adds, then alterations, then indexes, constraints, functions,
 // triggers, views and comments, then the changes of a version graph's
 // content that change no table. Contract runs tightenings, then drops in
-// reverse dependency order (D27).
+// reverse dependency order (D27). rankOf places the raw SQL between them
+// (D78).
 var rank = map[op]int{
 	opCreateExtension:  0,
 	opCreateSchema:     1,
@@ -65,11 +75,14 @@ var rank = map[op]int{
 	opAddColumn:        8,
 	opDropNotNull:      9,
 	opSetDefault:       9,
+	opDropCheck:        9,
 	opAlterColumnType:  10,
 	opRegenerateColumn: 10,
 	opCreateIndex:      11,
 	opReplaceIndex:     11,
 	opAddUnique:        12,
+	opAddCheck:         12,
+	opReplaceCheck:     12,
 	opAddForeignKey:    13,
 	opReplaceFK:        13,
 	opCreateFunction:   14,
@@ -80,10 +93,12 @@ var rank = map[op]int{
 	opCreateView:       16,
 	opReplaceView:      16,
 	opCommentOnTable:   17,
+	opRunRawSQL:        17,
 	opGraphContent:     18,
 
 	opSetNotNull:     20,
 	opDropDefault:    20,
+	opUndoRawSQL:     20,
 	opDropView:       30,
 	opDropTrigger:    31,
 	opDropFunction:   32,
@@ -92,6 +107,21 @@ var rank = map[op]int{
 	opDropIndex:      35,
 	opDropColumn:     36,
 	opDropTable:      37,
+}
+
+// rankOf is c's place in its phase: its op's rank, scaled so the raw SQL
+// sits between ranks. A piece that runs after the tables runs after the
+// alterations and before the indexes; one that runs after every object,
+// after the comments; and a removed piece's down after the tightenings,
+// before any drop (D78).
+func rankOf(c *change) int {
+	switch {
+	case c.op == opRunRawSQL && c.raw.Position == ir.RawSQLAfterTables:
+		return rank[opAlterColumnType]*10 + 5
+	case c.op == opRunRawSQL, c.op == opUndoRawSQL:
+		return rank[c.op]*10 + 5
+	}
+	return rank[c.op] * 10
 }
 
 // change is one difference between two models, in terms every dialect
@@ -127,6 +157,15 @@ type change struct {
 	constraint *Constraint
 	foreignKey *ForeignKey
 	oldFK      *ForeignKey
+	// check is a check the change adds or replaces, oldCheck the one it
+	// replaces or drops; newColumn is set when the check's column is one the
+	// plan adds, which a dialect's ADD COLUMN may declare it on.
+	check     *Check
+	oldCheck  *Check
+	newColumn bool
+	// raw is a piece of raw SQL the change runs, oldRaw one it undoes.
+	raw        *RawSQL
+	oldRaw     *RawSQL
 	index      *Index
 	function   *Function
 	oldFunc    *Function
@@ -212,6 +251,8 @@ func triggerSubject(table, name string) string {
 }
 
 func viewSubject(v *View) string { return "view/" + v.Schema + "." + v.Name }
+
+func rawSQLSubject(id string) string { return "rawSql/" + id }
 
 // addHazard adds a hazard of class to c, or appends reason to the one c
 // already has of that class and reader.

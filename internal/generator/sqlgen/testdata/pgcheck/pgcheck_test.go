@@ -18,7 +18,8 @@
 // TestPruneHistoryDropOnPostgres (prune_history_test.go) checks that drop.sql
 // drops the prune functions create.sql makes. TestConcurrentCreateOnPostgres
 // (concurrent_create_test.go) applies create.sql from several connections
-// at once.
+// at once. TestDDLOnPostgres (ddl_test.go) checks the defaults, checks,
+// SET NULL relations, indexes and raw SQL of D78.
 package pgcheck
 
 import (

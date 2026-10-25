@@ -2,6 +2,7 @@ package sqlmigrate
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
@@ -36,7 +37,7 @@ type planCase struct {
 	readersAfter  []Read
 	// viewOwner is the new version's outputs.sql.viewOwner.
 	viewOwner string
-	// noConverge leaves the case out of the Postgres convergence test, and
+	// noConverge leaves the case out of the convergence tests, and
 	// noSeed applies it to tables with no rows, each with the reason.
 	noConverge string
 	noSeed     string
@@ -247,6 +248,13 @@ var planCases = []planCase{
 	{name: "retype-column-narrow", after: func(s *ir.Schema) {
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}
 	}},
+	// A field whose type is a @jsonField class was a TEXT column before
+	// D78 and is JSONB now: the plan casts the text, which fails on text
+	// that is not JSON.
+	{name: "retype-text-to-jsonb",
+		before: func(s *ir.Schema) { addShippingAddress(s, stringRef) },
+		after:  func(s *ir.Schema) { addShippingAddress(s, ir.TypeRef{Name: "Address"}) },
+		noSeed: "the seeded text is not JSON"},
 	{name: "make-column-required", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "note").Required = true
 	}},
@@ -301,6 +309,11 @@ var planCases = []planCase{
 	{name: "change-on-delete", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "customer").Relation.OnDelete = "CASCADE"
 	}},
+	// A nullable relation's rows lose the reference, not the row, when the
+	// referenced row goes (D78).
+	{name: "change-on-delete-to-set-null",
+		before: func(s *ir.Schema) { addLineProduct(s, "CASCADE") },
+		after:  func(s *ir.Schema) { addLineProduct(s, "SET NULL") }},
 	// Expand renames the foreign key with its column, so contract replaces
 	// it under its new name.
 	{name: "rename-column-and-change-on-delete", after: func(s *ir.Schema) {
@@ -382,6 +395,74 @@ var planCases = []planCase{
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 
+	// Defaults and checks (D78).
+	{name: "add-default", after: func(s *ir.Schema) {
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+	{name: "drop-default", before: func(s *ir.Schema) {
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+	// A deployment built before D78 held the enum as text with no check.
+	{name: "add-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, stringRef) },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "add-column-with-check", after: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "widen-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped", "cancelled") }},
+	{name: "narrow-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped", "cancelled") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "change-validate-check",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) },
+		after:  func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(50) }},
+	{name: "drop-validate-check",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) }},
+	// A column contract drops takes its check with it.
+	{name: "drop-checked-column", before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) },
+		after: func(s *ir.Schema) { dropField(s, "Order", "note") }},
+
+	// Richer indexes (D78).
+	{name: "add-expression-index", after: func(s *ir.Schema) {
+		typeNamed(s, "Customer").Indexes = []ir.IndexDef{{Keys: []string{"email"}, Name: "email_lower", Expression: "lower(email)"}}
+	}},
+	{name: "add-index-in-transaction", after: func(s *ir.Schema) {
+		no := false
+		typeNamed(s, "OrderLine").Indexes = []ir.IndexDef{{Keys: []string{"sku"}, Concurrently: &no}}
+	}},
+	{name: "add-partial-brin-index", noSQLite: "sqlite has no BRIN index", after: func(s *ir.Schema) {
+		typeNamed(s, "Order").Indexes = append(typeNamed(s, "Order").Indexes,
+			ir.IndexDef{Keys: []string{"placedAt"}, Method: ir.IndexMethodBRIN, Where: "total > 0"})
+	}},
+	{name: "add-opclass-index", noSQLite: "sqlite has no operator classes", after: func(s *ir.Schema) {
+		typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"title"}, Name: "title_trgm", Method: ir.IndexMethodGIN, Ops: "gin_trgm_ops"}}
+	}},
+
+	// Raw SQL (D78).
+	{name: "add-raw-sql", after: addOrderRawSQL},
+	{name: "change-raw-sql", before: addOrderRawSQL, after: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		// An index whose definition changes is dropped first: CREATE INDEX
+		// IF NOT EXISTS keeps the one it finds.
+		typeNamed(s, "Order").RawSQL[1].Up = "DROP INDEX IF EXISTS order_code_lower;\n" +
+			"CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code), placed_at)"
+	}},
+	{name: "drop-raw-sql", before: addOrderRawSQL},
+	// With no down, nothing undoes the piece: a step with no SQL says so.
+	{name: "drop-raw-sql-without-down", before: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		typeNamed(s, "Order").RawSQL[1].Down = ""
+	}, noConverge: "a piece with no down leaves what it made, which create.sql of the new version does not make"},
+	// SQLite rebuilds order, which drops the index the raw SQL made on it,
+	// so the phase ends by running the raw SQL again.
+	{name: "raw-sql-after-rebuild", before: addOrderRawSQL, after: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+
 	// Projections.
 	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		s.Types["CustomerDirectory"] = &ir.TypeDef{
@@ -429,6 +510,60 @@ func addSupplierAndWarehouse(s *ir.Schema) {
 		{Name: "city", TypeRef: stringRef, Required: true},
 		{Name: "supplier", TypeRef: ir.TypeRef{Name: "Supplier"}, Relation: &ir.RelationDef{Type: "Supplier", OnDelete: "CASCADE"}},
 	}}
+}
+
+// statusRef is the OrderStatus enum addOrderStatus declares.
+var statusRef = ir.TypeRef{Name: "OrderStatus"}
+
+// addOrderStatus adds the OrderStatus enum with the values given and
+// Order.status, a nullable field typed ref.
+func addOrderStatus(s *ir.Schema, ref ir.TypeRef, values ...string) {
+	enum := &ir.EnumDef{Name: "OrderStatus"}
+	for _, v := range values {
+		enum.Values = append(enum.Values, ir.EnumValueDef{Name: strings.ToUpper(v[:1]) + v[1:], SerializedAs: v})
+	}
+	if len(values) == 0 {
+		enum.Values = []ir.EnumValueDef{{Name: "Placed", SerializedAs: "placed"}}
+	}
+	s.Enums["OrderStatus"] = enum
+	addField(s, "Order", &ir.FieldDef{Name: "status", TypeRef: ref})
+}
+
+// addOrderRawSQL declares two pieces of raw SQL on Order: a materialized
+// view of each customer's total, on Postgres alone, and an index over an
+// expression, which runs after the tables on both dialects.
+func addOrderRawSQL(s *ir.Schema) {
+	typeNamed(s, "Order").RawSQL = []ir.RawSQLDef{
+		{
+			ID:       "customer_totals",
+			Dialects: []string{"postgres"},
+			Up: "DROP MATERIALIZED VIEW IF EXISTS customer_totals;\n" +
+				"CREATE MATERIALIZED VIEW IF NOT EXISTS customer_totals AS SELECT customer_id, sum(total) AS total FROM \"order\" GROUP BY customer_id",
+			Down: "DROP MATERIALIZED VIEW IF EXISTS customer_totals",
+		},
+		{
+			ID:    "order_code_lower",
+			After: ir.RawSQLAfterTables,
+			Up:    "CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code))",
+			Down:  "DROP INDEX IF EXISTS order_code_lower",
+		},
+	}
+}
+
+// addLineProduct adds OrderLine.product, a nullable relation to Product
+// with the onDelete action given.
+func addLineProduct(s *ir.Schema, onDelete string) {
+	addField(s, "OrderLine", &ir.FieldDef{Name: "product", TypeRef: ir.TypeRef{Name: "Product"}, Relation: &ir.RelationDef{Type: "Product", OnDelete: onDelete}})
+}
+
+// addShippingAddress adds the @jsonField class Address and Order.shipTo,
+// typed ref: Address, or what the field was stored as before D78.
+func addShippingAddress(s *ir.Schema, ref ir.TypeRef) {
+	s.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleDBTable, JsonField: true, Fields: []*ir.FieldDef{
+		{Name: "line1", TypeRef: stringRef, Required: true},
+		{Name: "city", TypeRef: stringRef, Required: true},
+	}}
+	addField(s, "Order", &ir.FieldDef{Name: "shipTo", TypeRef: ref})
 }
 
 // renameCustomerToBuyer renames Order.customer, which a foreign key, an

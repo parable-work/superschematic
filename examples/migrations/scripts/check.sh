@@ -21,12 +21,16 @@
 #      v2 means to lose, and --allow of each hazard lets it pass;
 #   3. SQLite: a database built from v1's create.sql, with rows, adopts v1's
 #      model; after apply --phase expand, servers of both versions can
-#      write comments, the reminders are numbers and status shows the
-#      contract pending; apply --phase contract drops comment.legacy_id;
+#      write comments, the reminders are numbers, the project v1 wrote
+#      takes the new status column's default and its check refuses a value
+#      outside the enum (D78), and status shows the contract pending;
+#      apply --phase contract drops comment.legacy_id;
 #      the database is then at v2's model, a plan from it has no steps, a
 #      second apply does nothing, and a database with no recorded model
 #      refuses the plan;
-#   4. Postgres, when the URL is set: step 3's apply on Postgres;
+#   4. Postgres, when the URL is set: step 3's apply on Postgres, where the
+#      raw SQL's materialized view counts the open task and refreshes
+#      concurrently (D78);
 #   5. the copies under testdata/generated/ match this run byte for byte.
 set -euo pipefail
 
@@ -113,7 +117,7 @@ done
 cat "$OUT/quoted/plan.postgres.sql"
 # SQLite cannot convert the reminders in place: it rebuilds task, and
 # comment with it, since comment references task.
-grep -q '^-- Step 2, expand, copyTable table/comment$' "$OUT/quoted/plan.sqlite.sql"
+grep -q '^-- Step 3, expand, copyTable table/comment$' "$OUT/quoted/plan.sqlite.sql"
 
 echo "==> --fail-on destructive, then --allow"
 # Postgres's cast of the reminders fails on text that is not a number
@@ -155,6 +159,10 @@ apply_plan() {
   superschematic-migrate status --service tasks-db --database-url "$url" | steady >"$OUT/status-expanded.$dialect.txt"
   grep -q '(expand done; contract pending; ' "$OUT/status-expanded.$dialect.txt"
   test "$("$sql" "SELECT summary, remind_before FROM task")" = "Write the changelog|$reminders"
+  # A column v2 adds with a default and an enum's check (D78): the project
+  # v1 wrote takes the default, and a value outside the enum is refused.
+  test "$("$sql" "SELECT status FROM project")" = active
+  fails "$OUT/status-check.$dialect.txt" "$sql" "UPDATE project SET status = 'paused'"
   # Between the phases, a v1 server still writes legacy_id and leaves out
   # mentions, and a v2 server leaves out legacy_id.
   "$sql" "INSERT INTO comment (task_id, body, legacy_id) SELECT id, 'Written by v1', 'TRK-8' FROM task"
@@ -211,6 +219,10 @@ if [[ -n "$PG_ADMIN_URL" ]]; then
   psql "$PG_URL" -q -v ON_ERROR_STOP=1 -f "$OUT/v1-dist/sql/tasks-db/create.sql" >/dev/null
   seed postgres_sql false '{15,60}'
   apply_plan postgres_sql "$PG_URL" postgres '{}' '{15,60}'
+  # The raw SQL's materialized view, on Postgres alone, counts the open
+  # task, and its unique index lets it refresh concurrently (D78).
+  test "$(postgres_sql "SELECT open_tasks FROM project_open_tasks")" = 1
+  postgres_sql "REFRESH MATERIALIZED VIEW CONCURRENTLY project_open_tasks"
 else
   echo "==> Postgres: skipped; set SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL to run it"
 fi

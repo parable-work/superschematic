@@ -37,3 +37,34 @@ func TestListDefaultsCreateSQLOnPostgres(t *testing.T) {
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)
 }
+
+// TestDDLCreateSQLOnPostgres applies the create.sql and drop.sql generated
+// for fixture-ddl-db to a real Postgres; testdata/pgcheck's
+// TestDDLOnPostgres holds the checks: the defaults a raw INSERT takes, the
+// checks that refuse an enum's other values and a Validate bound's
+// outside, the relations SET NULL clears, the expression and partial
+// indexes, and the raw SQL's materialized view (D78). Set
+// SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestDDLCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-ddl-db's create.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-ddl-db"))
+	if err != nil {
+		t.Fatalf("load fixture-ddl-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-ddl-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestDDLOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}

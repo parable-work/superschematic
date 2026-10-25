@@ -92,6 +92,17 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return p.addUnique(c), nil
 	case opAddForeignKey, opReplaceFK:
 		return p.foreignKey(c), nil
+	case opAddCheck, opReplaceCheck:
+		return p.check(c), nil
+	case opDropCheck:
+		return one(stepFor(c, "ALTER TABLE "+q(c.table)+" DROP CONSTRAINT "+q(c.oldCheck.Name))), nil
+	case opRunRawSQL:
+		return one(stepFor(c, c.raw.Statements...)), nil
+	case opUndoRawSQL:
+		if len(c.oldRaw.Down) == 0 {
+			return noSQL(c), nil
+		}
+		return one(stepFor(c, c.oldRaw.Down...)), nil
 	case opCreateFunction:
 		return one(stepFor(c, c.function.Definition)), nil
 	case opReplaceFunction:
@@ -165,6 +176,9 @@ func createTableSQL(t *Table) []string {
 	}
 	for _, u := range t.Uniques {
 		lines = append(lines, "  CONSTRAINT "+q(u.Name)+" UNIQUE ("+quoteList(u.Columns)+")")
+	}
+	for _, c := range t.Checks {
+		lines = append(lines, "  CONSTRAINT "+q(c.Name)+" CHECK ("+c.spec().Expression(q)+")")
 	}
 	create := "CREATE TABLE " + q(t.Name) + " (\n" + strings.Join(lines, ",\n") + "\n)"
 	if t.PartitionBy != "" {
@@ -274,6 +288,11 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 	columns := make([]string, len(idx.Columns))
 	for i, col := range idx.Columns {
 		columns[i] = q(col)
+	}
+	if idx.Expression != "" {
+		columns = []string{"(" + idx.Expression + ")"}
+	}
+	for i := range columns {
 		if idx.Opclass != "" {
 			columns[i] += " " + idx.Opclass
 		}
@@ -291,17 +310,22 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 
 // index creates or replaces an index. On a table the previous version has
 // it is built concurrently, outside a transaction, except on a partitioned
-// table, where Postgres cannot.
+// table, where Postgres cannot, and for an index that declares
+// concurrently: false (D78).
 func (postgresDialect) index(c *change) *Step {
 	name := q(c.index.Name)
-	if c.created || c.partitioned {
+	if c.created || c.partitioned || c.index.InTransaction {
 		var statements []string
 		if c.op == opReplaceIndex {
 			statements = append(statements, "DROP INDEX "+name)
 		}
 		step := stepFor(c, append(statements, indexSQL(c.table, c.index, false))...)
-		if !c.created {
+		switch {
+		case c.created:
+		case c.partitioned:
 			blocking(step, fmt.Sprintf("%s is partitioned, so the index is built without CONCURRENTLY and blocks writes to it for the length of the build.", c.table))
+		default:
+			blocking(step, fmt.Sprintf("The index declares concurrently: false, so it is built inside the step's transaction and blocks writes to %s for the length of the build.", c.table))
 		}
 		return step
 	}
@@ -360,6 +384,26 @@ func (postgresDialect) foreignKey(c *change) rendered {
 	add := stepFor(c, append(statements, foreignKeySQL(c.table, fk, true))...)
 	validate := stepFor(c, "ALTER TABLE "+q(c.table)+" VALIDATE CONSTRAINT "+q(fk.Name))
 	validate.Op = "validateForeignKey"
+	return rendered{steps: []*Step{add, validate}, main: 1}
+}
+
+// check adds or replaces a CHECK constraint (D78). On a table the plan
+// creates, CREATE TABLE declares it. On a table the previous version has,
+// it is added NOT VALID, which takes its lock only briefly, and validated in
+// a step of its own, which reads the table without blocking writes.
+func (postgresDialect) check(c *change) rendered {
+	ck := c.check
+	if c.created {
+		return rendered{}
+	}
+	table, name := q(c.table), q(ck.Name)
+	var statements []string
+	if c.op == opReplaceCheck {
+		statements = append(statements, "ALTER TABLE "+table+" DROP CONSTRAINT "+name)
+	}
+	add := stepFor(c, append(statements, "ALTER TABLE "+table+" ADD CONSTRAINT "+name+" CHECK ("+ck.spec().Expression(q)+") NOT VALID")...)
+	validate := stepFor(c, "ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name)
+	validate.Op = "validateCheck"
 	return rendered{steps: []*Step{add, validate}, main: 1}
 }
 

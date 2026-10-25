@@ -4232,19 +4232,38 @@
     "IndexDef": {
       "additionalProperties": false,
       "properties": {
+        "concurrently": {
+          "type": "boolean"
+        },
+        "expression": {
+          "default": "",
+          "type": "string"
+        },
         "keys": {
           "items": {
             "type": "string"
           },
           "type": "array"
         },
+        "method": {
+          "default": "",
+          "type": "string"
+        },
         "name": {
+          "default": "",
+          "type": "string"
+        },
+        "ops": {
           "default": "",
           "type": "string"
         },
         "unique": {
           "default": false,
           "type": "boolean"
+        },
+        "where": {
+          "default": "",
+          "type": "string"
         }
       },
       "required": [
@@ -4951,6 +4970,37 @@
       },
       "type": "object"
     },
+    "RawSQLDef": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "default": "",
+          "type": "string"
+        },
+        "dialects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "down": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "up": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "up"
+      ],
+      "type": "object"
+    },
     "ReferenceDef": {
       "additionalProperties": false,
       "properties": {
@@ -5465,6 +5515,13 @@
         },
         "rawHeritage": {
           "$ref": "#/$defs/RawHeritage"
+        },
+        "rawSql": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RawSQLDef"
+          },
+          "type": "array"
         },
         "role": {
           "enum": [
