@@ -322,7 +322,7 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 		"Payments.voidPayment": "confirm",
 		"publish":              "ask",
 		"acme.Rating.rate":     "ask",
-		"Comments.comment":     "ask",
+		"Comments.post":        "ask",
 	}})
 	for _, want := range []string{
 		"outputs.engine.tools.invocation: ",
@@ -336,8 +336,8 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 			t.Errorf("Build = %v, want it refused saying %q", err, want)
 		}
 	}
-	if err != nil && strings.Contains(err.Error(), "Comments.comment") {
-		t.Errorf("Build refused Comments.comment, an operation of a composed behavior: %v", err)
+	if err != nil && strings.Contains(err.Error(), "Comments.post") {
+		t.Errorf("Build refused Comments.post, an operation of a composed behavior: %v", err)
 	}
 
 	// A schema that composes Payments or Stock names a policy for each of

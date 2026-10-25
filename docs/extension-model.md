@@ -893,7 +893,7 @@ shape is `BehaviorDeclaration`:
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), `beside` and `log` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
@@ -902,6 +902,16 @@ by id, or `schema`, the schema as a whole with no instance, which an
 engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
 and as a tool that takes its parameters and no `id` (D16, amended).
 `RegisterBehavior` refuses any other value, and the engine does too.
+
+An instance operation that writes may say `"beside": true`: it writes
+only its behavior's own tables and columns, so an engine moves no
+sequence of the instance for it, asks no other behavior's guard, and
+appends an operation event of no sequence; with `"log": false` it
+appends none (D77; "Instances and events" under "Behaviors" in
+`runtime/engine/README.md`). `RegisterBehavior` refuses a beside
+operation that does not write or has scope `schema`, `"log": false` on
+one that is not beside, and a behavior with a beside operation and a
+field that is not volatile, and the engine does too.
 
 A field carries a name, a description and whether it is volatile, no
 type. A field's type can depend on the behavior's config, and the loader
@@ -1141,7 +1151,7 @@ engine; without them the engine refuses a schema that composes one.
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
 | `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
-| `Comments` | none | `commentCount` | `comment`, `listComments` |
+| `Comments` | `maxBodyLength`, `editWindowMs`, `blocks` (`ref`, `action`), `moderatePermission`, `pinPermission`, `resolvePermission`, optional | `messages`, `lastMessageAt`, `threads` (all volatile) | `post`, `edit`, `deleteMessage`, `purge`, `react`, `unreact`, `pin`, `unpin`, `resolve`, `reopen`, each beside the instance (D77), and `listMessages`, `getMessage`, `listEdits`, `listReactions` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |

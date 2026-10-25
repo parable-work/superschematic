@@ -284,7 +284,7 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 | Fields | `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries`, `ended`, under `Lease`; a list filters on `Lease.holder`, null for a free instance |
 | Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
 | Schedule | `expire`, every `sweepMs`, on the runner |
-| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Comments.comment"`), read-only ones, Queue's `refresh`, and principals with `overridePermission` |
+| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Revisions.propose"`), read-only ones, operations beside the instance (Comments' `post`), Queue's `refresh`, and principals with `overridePermission` |
 
 - **The token is a fencing counter, not a secret.** It advances at every
   acquire, release and expiry. A write presents it as Lease's

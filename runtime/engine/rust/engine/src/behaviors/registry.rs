@@ -56,6 +56,11 @@ pub(crate) struct OperationSpec {
     pub declaration: OperationDeclaration,
     pub writes: bool,
     pub scope: OperationScope,
+    /// Whether it runs beside the instance (D77).
+    pub beside: bool,
+    /// Whether it appends an event: false only for a beside operation that
+    /// declares `"log": false`.
+    pub log: bool,
     pub params: AjvSchema,
     pub result: AjvSchema,
 }
@@ -295,6 +300,8 @@ fn compile(
                 declaration: operation.clone(),
                 writes: operation.writes,
                 scope: operation.scope,
+                beside: operation.beside,
+                log: operation.log,
                 params,
                 result,
             });
