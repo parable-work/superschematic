@@ -229,7 +229,7 @@ export abstract class Dev {}
 
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443 },
+  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443, memoryStorePort: 56379 },
   settings: [{ of: ShopApi, port: 8080, env: { LOG_LEVEL: "debug" } }, { of: Backend, port: 8081 }],
 })
 export abstract class PinnedDev {}

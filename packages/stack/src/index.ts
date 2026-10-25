@@ -28,14 +28,22 @@ export interface Targets {
 /**
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
- * port of the environment's Postgres container and of its storage emulator
- * (D54), a server's and a site's settings its port, and a database, a job,
- * a worker, a bucket, an engine's runner (D58), a deriver (D74) and a
- * memory store (D75) take no settings. A port left out is derived from
+ * port of the environment's Postgres container, of its storage emulator
+ * (D54) and of its memory stores' Valkey container (D75), a server's and a
+ * site's settings its port, and a database, a job, a worker, a bucket, an
+ * engine's runner (D58), a deriver (D74) and a memory store (D75) take no
+ * settings. A port left out is derived from
  * the stack, the environment and the deployable.
  */
 export interface LocalTarget {
-  values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
+  values: {
+    postgresImage?: string;
+    postgresPort?: number;
+    storageImage?: string;
+    storagePort?: number;
+    memoryStoreImage?: string;
+    memoryStorePort?: number;
+  };
   server: { port?: number };
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   database: {};
