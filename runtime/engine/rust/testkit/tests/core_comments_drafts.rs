@@ -2,7 +2,8 @@
 //! and interrupt, every refusal in its order; the composing and
 //! interrupted states, postedAt and the composing field; maxDrafts and
 //! composeTimeoutMs, an empty append as a keepalive, and the schedule
-//! interrupting idle drafts on the runner's clock; batch 1's operations as
+//! interrupting idle drafts on the runner's clock, and failing visibly
+//! while the policy refuses the runner write; batch 1's operations as
 //! batch 2 amends them; the draft signal reaching a stream opened with
 //! signals after the commit, its offsets in code points, typing and
 //! viewing from a caller, and a reader that rebuilds the body from a read
@@ -11,7 +12,7 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -19,12 +20,13 @@ use serde_json::{json, Value};
 use superschematic_engine::api::{start_stream_with, EventStream, Pull, StreamOptions};
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::{
-    Behavior, BehaviorSet, Clock, ConfigTarget, CreateOptions, DefineOptions, Engine,
-    EngineErrorCode, EngineEvent, EventsAfter, Hooks, Principal, ReadEvents, Result, RunnerOptions,
-    SchemaTarget, SendSignal, WriteOptions,
+    AccessRequest, Behavior, BehaviorSet, Clock, ConfigTarget, CreateOptions, DefineOptions,
+    Engine, EngineErrorCode, EngineEvent, EventsAfter, Hooks, Policy, Principal, ReadEvents,
+    Result, RunnerOptions, ScheduleState, ScheduleStatus, SchemaTarget, SendSignal, WriteOptions,
 };
 use support::{
-    alice, code, issue, issues_of, named, refusal, schema_document, targets, veto, Target,
+    alice, code, issue, issues_of, named, refusal, schema_document, targets, veto, RecordingPolicy,
+    Target,
 };
 
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -953,6 +955,110 @@ fn the_schedule_interrupts_idle_drafts_on_the_runners_clock() {
             world.engine.clock().advance(1250).unwrap();
         }
         assert_eq!(world.message(busy)["body"], json!("Still going"));
+        world.engine.shutdown();
+    }
+}
+
+// interrupt_schedule is what the runner's status lists of Comments'
+// interrupt schedule on Review.
+fn interrupt_schedule(engine: &Engine) -> ScheduleStatus {
+    engine
+        .runner()
+        .status()
+        .expect("the runner's status")
+        .schedules
+        .into_iter()
+        .find(|schedule| {
+            schedule.behavior == "Comments"
+                && schedule.schedule == "interrupt"
+                && schedule.schema == "Review"
+        })
+        .expect("Comments' interrupt schedule")
+}
+
+#[test]
+fn a_runner_the_policy_refuses_write_fails_the_schedule_and_interrupts_once_it_may() {
+    for target in targets("comments_drafts_schedule_refused") {
+        // The runner may read, and write only once granted; everyone else
+        // may do anything.
+        let grant = Arc::new(Mutex::new(false));
+        let granted = Arc::clone(&grant);
+        let policy = RecordingPolicy::new(move |request: &AccessRequest<'_>| {
+            request.principal().subject != "runner"
+                || request.action() == "read"
+                || *granted.lock().unwrap()
+        });
+        let engine = target
+            .open_core_with(|options| {
+                options.clock = Clock::Manual(1000);
+                options.runner = Some(RunnerOptions::new(runner()));
+                options.policy = Some(Policy::custom(policy));
+            })
+            .shared();
+        publish(&engine, json!({"composeTimeoutMs": 5000}));
+        create(&engine, "r1");
+        let world = World { engine };
+        // The runner finds the schedule, which runs an interval later.
+        world
+            .engine
+            .runner()
+            .run_due()
+            .expect("the runner's first pass");
+        let id = world.begin(&bob(), json!({}));
+        world.append(&bob(), id, "Something");
+        world.set_clock(7000);
+        assert_eq!(world.engine.runner().run_due().unwrap().failed, 1);
+        let status = interrupt_schedule(&world.engine);
+        assert_eq!(
+            (status.state, status.failures, status.error.as_deref()),
+            (
+                ScheduleState::Retrying,
+                1,
+                Some("forbidden: runner may not call interrupt (write) on Review in namespace default")
+            )
+        );
+        // The failed run wrote nothing: the draft still composes.
+        let record = world.message(id);
+        assert_eq!(
+            (&record["state"], &record["body"]),
+            (&json!("composing"), &json!("Something"))
+        );
+        assert!(!world
+            .events()
+            .iter()
+            .any(|event| event.change["operation"] == "interrupt"));
+        // Once the policy lets the runner write, the next run interrupts
+        // the idle draft, and the schedule is active again.
+        *grant.lock().unwrap() = true;
+        world.set_clock(
+            status
+                .next
+                .expect("a retrying schedule runs next at a time"),
+        );
+        assert_eq!(world.engine.runner().run_due().unwrap().failed, 0);
+        let now = world.engine.clock().now();
+        let record = world.message(id);
+        assert_eq!(
+            (&record["state"], &record["body"], &record["postedAt"]),
+            (&json!("interrupted"), &json!("Something"), &json!(now))
+        );
+        let status = interrupt_schedule(&world.engine);
+        assert_eq!(
+            (status.state, status.failures, status.error),
+            (ScheduleState::Active, 0, None)
+        );
+        let interrupts: Vec<Value> = world
+            .events()
+            .iter()
+            .filter(|event| event.change["operation"] == "interrupt")
+            .map(|event| json!([event.actor, event.change["params"], event.cause]))
+            .collect();
+        assert_eq!(
+            interrupts,
+            [
+                json!(["runner", {"message": id}, {"behavior": "Comments", "schedule": "interrupt", "depth": 1}])
+            ]
+        );
         world.engine.shutdown();
     }
 }
