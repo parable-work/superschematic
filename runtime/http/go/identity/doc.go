@@ -26,8 +26,9 @@
 //     credentialed CORS middleware for them (CORS).
 //   - Roles: the permission form (ValidPermission), a principal's
 //     permissions (EffectivePermissions), the rule that no one grants what
-//     they do not hold (Uncovered), and capabilities over the route
-//     requirements a server passes (Route, CapabilitiesOf).
+//     they do not hold (Uncovered), nor sets the password of, disables or
+//     enables a user who holds it (UncoveredUser), and capabilities over
+//     the route requirements a server passes (Route, CapabilitiesOf).
 //   - Store, and SQLStore, its database/sql implementation for Postgres
 //     and SQLite, built from the schema's identity descriptor.
 //   - Service, the operations over a Store, a Config and a clock, and its

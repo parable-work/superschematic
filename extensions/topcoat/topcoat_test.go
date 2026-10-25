@@ -505,8 +505,10 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // its multiline hint. Enter in each form presses its default button, the
 // hidden one ahead of every row button (enterHelper). An amount in a
 // literal currency is a decimal control, read as minor units, refusing a
-// third decimal for GBP and any for JPY; one in a currency field is a
-// whole number with a hint (D44, amended). Its AccountKey,
+// third decimal for GBP and any for JPY, and whatever else its pattern
+// refuses, and it takes none of the app's choices; one in a currency
+// field is a whole number with a hint, read as digits alone (D44,
+// amended). Its AccountKey,
 // whose fields are a secret one and a @uiHidden one, is an empty record
 // that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
@@ -1744,7 +1746,9 @@ async fn booking_form_with_choices() -> topcoat::Result<impl View> {
     form.rooms.push(RoomRequestForm { room_id: Some(BOOKED.to_owned()), ..RoomRequestForm::new() });
     let choices = Choices::new()
         .with("rooms.roomId", [(GARDEN, "Garden room"), (ATTIC, "Attic")])
-        .with("rooms[1].roomId", [(ATTIC, "Attic, the last one")]);
+        .with("rooms[1].roomId", [(ATTIC, "Attic, the last one")])
+        .with("deposit", [("2500", "GBP 25.00"), ("5000", "GBP 50.00")])
+        .with("extraCharge", [("450", "Late checkout")]);
     Ok(view! { <form method="post">booking_input_fields(form: form, choices: choices)</form> })
 }
 
@@ -2219,10 +2223,28 @@ async fn an_amount_in_a_literal_currency_is_a_decimal() {
         assert!(tip_control.contains(tip_error), "{tip_control}");
     }
     // A sign the deposit's bounds refuse, Finance.Money's at least 0, is
-    // refused by the input's rules.
-    let (status, _, html, calls) = book_with(&booking_with(&[("deposit", "-1.00")])).await;
-    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
-    assert!(control(&html, "deposit").contains(r#"aria-invalid="true""#), "{html}");
+    // refused, as its pattern refuses it, -0 too.
+    for deposit in ["-1.00", "-0"] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("deposit", deposit)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{deposit}: {html}");
+        assert!(control(&html, "deposit").contains(r#"aria-invalid="true""#), "{deposit}: {html}");
+    }
+    // The parse refuses what the pattern refuses: a point after a JPY
+    // amount, and space around an amount.
+    for (deposit, tip, deposit_error, tip_error) in [("4.50", "4.", "", "must be a whole amount"), (" 4.50", "4", "must be an amount", "")] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("deposit", deposit), ("tip", tip)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{deposit} {tip}: {html}");
+        let (deposit_control, tip_control) = (control(&html, "deposit"), control(&html, "tip"));
+        assert_eq!(deposit_control.contains("aria-invalid"), !deposit_error.is_empty(), "{deposit_control}");
+        assert!(deposit_control.contains(deposit_error) && tip_control.contains(tip_error), "{deposit_control} {tip_control}");
+    }
+    // An amount in a currency field's minor units is digits alone: 12.00,
+    // which a number input takes for twelve, is refused, as is 1.2e1.
+    for extra in ["12.00", "1.2e1", "12.5"] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("extraCharge", extra)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{extra}: {html}");
+        assert!(control(&html, "extraCharge").contains("must be a whole number of minor units"), "{extra}: {html}");
+    }
 }
 
 /// An amount as its decimal control holds it, and an item's amount as a
@@ -2256,6 +2278,12 @@ async fn the_apps_choices_render_a_select() {
     assert!(third.contains(&format!(r#"<option value="{BOOKED}" selected="">{BOOKED}</option>"#)), "{third}");
     // A field the app names no choices for is the input.
     assert!(control(&html, "guest.name").contains(r#"<input id="booking-input-guest-name""#), "{html}");
+    // An amount in a literal currency takes no choices: a choice's value is
+    // minor units, as the API sends it, which its decimal control would
+    // read as a decimal. One in a currency field's minor units takes them.
+    let deposit = control(&html, "deposit");
+    assert!(deposit.contains(r#"<input id="booking-input-deposit" name="deposit" type="text" inputmode="decimal""#) && !deposit.contains("GBP 25.00"), "{deposit}");
+    assert!(control(&html, "extraCharge").contains(r#"<option value="450">Late checkout</option>"#), "{html}");
 }
 
 #[test]

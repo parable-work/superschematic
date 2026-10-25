@@ -22,10 +22,17 @@
 //! origin policy, and a post a session cookie signs passes the runtime's
 //! cross-origin check (403 `cross_origin`), as the JSON API's does.
 //!
+//! Signing in, signing up and changing a password each take a token from
+//! the rate limit of the API's route that does the same (D50), counting
+//! the client as the route does (`client_key`), so a client has one
+//! budget on both. A page whose API serves no such route has a limiter of
+//! its own at the route's rate. Past the limit, the form renders again
+//! with 429 and `Retry-After`.
+//!
 //! The identity store has no call that lists a user's sessions or ends one
 //! of them (D50), so no page does.
 
-use crate::api::runtime::ApiError;
+use crate::api::runtime::{ApiError, OperationInfo};
 use crate::api::runtime::identity::{
     self, ChangePasswordInput, CreateUserInput, CurrentUser, IdentityPrincipal, IdentityRole, IdentityUser, IssuedSession,
     LoginInput, RoleInput, Service, SetPasswordInput, Transport,
@@ -37,7 +44,7 @@ use serde_json::Value;
 use topcoat::context::{Cx, memoize};
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
-use topcoat::router::header::SET_COOKIE;
+use topcoat::router::header::{RETRY_AFTER, SET_COOKIE};
 use topcoat::router::request::{parts, uri};
 use topcoat::router::response::response_headers;
 use topcoat::router::{HeaderValue, StatusCode, page, path_param};
@@ -53,6 +60,11 @@ const USERS: &str = "/console/users";
 const NEW_USER: &str = "/console/users/new";
 const ROLES: &str = "/console/roles";
 const NEW_ROLE: &str = "/console/roles/new";
+
+/// Sign-in's rate limit: the login route's, `ACCOUNT_LOGIN`.
+const SIGN_IN_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_LOGIN;
+/// Changing a password's rate limit: the changePassword route's, `ACCOUNT_CHANGE_PASSWORD`.
+const CHANGE_PASSWORD_LIMIT: &OperationInfo = &crate::api::operations::ACCOUNT_CHANGE_PASSWORD;
 
 path_param!(pub user_id);
 path_param!(pub role_id);
@@ -172,8 +184,10 @@ fn allowed(service: &Service, caller: &IdentityPrincipal, name: &str) -> Result<
 
 /// A refusal of the service's as a form shows it (`Refusal::from_api`),
 /// but for one that names permissions (`details.permissions`): a role's
-/// that are malformed (422), or that the caller does not hold and so may
-/// not give (403). Its message lists them, at the control `at`.
+/// that are malformed (422), that the caller does not hold and so may not
+/// give (403), or that a user holds and the caller does not, so may not
+/// set their password, disable or enable them (403). Its message lists
+/// them, at the control `at`.
 fn refusal_of(err: &ApiError, at: &str) -> Refusal {
     let named: Vec<&str> = err
         .details
@@ -228,6 +242,21 @@ fn require_password(errors: &mut FormErrors, name: &str, password: &str) {
     } else if let Err(reason) = identity::check_password(password) {
         errors.add(name, reason);
     }
+}
+
+/// Takes a token from the client's bucket (`client_key`) of `limit`'s
+/// limiter in the app's registry, as the route does; past the limit, the
+/// refusal 429 with `Retry-After`, which the form renders above its
+/// controls.
+fn limited(cx: &Cx, limit: &OperationInfo) -> Result<(), Refusal> {
+    let setup = crate::setup(cx).map_err(|err| Refusal::from_api(&err))?;
+    let Some(limiter) = setup.rate_limits.of(limit) else {
+        return Ok(());
+    };
+    limiter.take(&crate::client_key(cx)).map_err(|retry_after| {
+        response_headers(cx).append(RETRY_AFTER, HeaderValue::from(retry_after));
+        Refusal::from_api(&ApiError::too_many_requests(format!("Too many attempts: try again in {retry_after} seconds")))
+    })
 }
 
 /// The 422 of a form's errors, or nothing.
@@ -386,6 +415,7 @@ pub async fn identity_signing_in_page(cx: &Cx, Form(form): Form<SignInForm>) -> 
 }
 
 async fn sign_in_with(cx: &Cx, form: &SignInForm) -> Result<(), Refusal> {
+    limited(cx, SIGN_IN_LIMIT)?;
     let mut errors = FormErrors::default();
     require(&mut errors, "login", &form.login);
     require(&mut errors, "password", &form.password);
@@ -496,6 +526,7 @@ async fn me(cx: &Cx) -> Result<CurrentUser, Refusal> {
 }
 
 async fn change_password(cx: &Cx, form: &ChangePasswordForm) -> Result<(), Refusal> {
+    limited(cx, CHANGE_PASSWORD_LIMIT)?;
     let caller = needs_caller(cx).await?;
     let mut errors = FormErrors::default();
     require(&mut errors, "current", &form.current);
@@ -775,7 +806,8 @@ async fn user_answer(id: String, shown: UserShown) -> topcoat::Result<impl View>
 }
 
 /// Disables the user, which ends their sessions, then goes back to their
-/// page (303).
+/// page (303); a user who holds a permission the caller does not is
+/// refused (403) at the form.
 #[page(POST "/console/users/{user_id}/disable")]
 pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -784,7 +816,8 @@ pub async fn identity_disable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { user_answer(id: id, shown: shown) })
 }
 
-/// Enables the user, then goes back to their page (303).
+/// Enables the user, then goes back to their page (303); a user who holds
+/// a permission the caller does not is refused (403) at the form.
 #[page(POST "/console/users/{user_id}/enable")]
 pub async fn identity_enable_user_page(cx: &Cx) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -797,7 +830,7 @@ async fn set_disabled(cx: &Cx, id: &str, disabled: bool) -> Result<(), Refusal> 
     let caller = needs_caller(cx).await?;
     let service = service(cx)?;
     let done = if disabled { service.disable_user(&caller, id).await } else { service.enable_user(&caller, id).await };
-    done.map(drop).map_err(|err| Refusal::from_api(&err))
+    done.map(drop).map_err(|err| refusal_of(&err, "access"))
 }
 
 /// The set-password form as a browser sends it.
@@ -808,7 +841,8 @@ pub struct SetPasswordForm {
 }
 
 /// Sets the user's password, which ends their sessions, then goes back to
-/// their page (303).
+/// their page (303); a user who holds a permission the caller does not is
+/// refused (403) at the password.
 #[page(POST "/console/users/{user_id}/password")]
 pub async fn identity_set_password_page(cx: &Cx, Form(form): Form<SetPasswordForm>) -> topcoat::Result<impl View> {
     let id = path_param::<UserId>(cx).to_owned();
@@ -823,7 +857,7 @@ async fn set_password(cx: &Cx, id: &str, form: &SetPasswordForm) -> Result<(), R
     require_password(&mut errors, "password", &form.password);
     parsed(errors)?;
     let input = SetPasswordInput { password: form.password.clone() };
-    service(cx)?.set_user_password(&caller, id, &input).await.map_err(|err| Refusal::from_api(&err))
+    service(cx)?.set_user_password(&caller, id, &input).await.map_err(|err| refusal_of(&err, "password"))
 }
 
 /// The grant and revoke forms as a browser sends them: the role's id.
@@ -878,7 +912,9 @@ async fn user_details(page: UserPage, failed: Failed) -> topcoat::Result<impl Vi
     let held: Vec<(String, String)> = user.roles.iter().map(|role| (role.id.clone(), role.name.clone())).collect();
     let grantable: Vec<(String, String)> = grantable.into_iter().map(|role| (role.id, role.name)).collect();
     let (access, password, granting, revoking) = (failed.of("access"), failed.of("password"), failed.of("grant"), failed.of("revoke"));
-    let (access_messages, password_messages) = (unshown(&access, &[]), unshown(&password, &["password"]));
+    let mut access_messages = unshown(&access, &["access"]);
+    access_messages.extend(access.of("access"));
+    let password_messages = unshown(&password, &["password"]);
     let (grant_messages, revoke_messages) = (unshown(&granting, &["role"]), unshown(&revoking, &[]));
     Ok(view! {
         <h1>(heading)</h1>

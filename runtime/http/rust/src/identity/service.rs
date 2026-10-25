@@ -20,14 +20,14 @@ use super::config::{Config, ConfigError};
 use super::cross_origin::{check_cross_origin, request_host};
 use super::errors::{
     cross_origin, field_refusal, forbidden, internal, invalid_credentials, invalid_permissions,
-    not_held, store_error, unauthenticated, FieldErrors, CODE_UNAUTHORIZED,
+    not_covered, not_held, store_error, unauthenticated, FieldErrors, CODE_UNAUTHORIZED,
 };
 use super::json;
 use super::password::{
     check_password, dummy_hash, hash_password, verify_password, Argon2Params, Verified,
 };
 use super::permissions::{
-    capabilities_of, effective_permissions, uncovered, valid_permission, Route,
+    capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
 };
 use super::store::{NewSession, NewUser, Role, Store, StoreError, User};
 use super::time::format_rfc3339;
@@ -896,7 +896,8 @@ impl Service {
             .map_err(|err| store_error(err, "User"))
     }
 
-    /// Disables a user and revokes their sessions (`users.write`).
+    /// Disables a user and revokes their sessions (`users.write`). The
+    /// caller's permissions must cover each of the user's.
     pub async fn disable_user(
         &self,
         caller: &IdentityPrincipal,
@@ -905,7 +906,8 @@ impl Service {
         self.set_disabled(caller, id, true).await
     }
 
-    /// Enables a disabled user (`users.write`).
+    /// Enables a disabled user (`users.write`). The caller's permissions
+    /// must cover each of the user's.
     pub async fn enable_user(
         &self,
         caller: &IdentityPrincipal,
@@ -921,6 +923,7 @@ impl Service {
         disabled: bool,
     ) -> Result<IdentityUser, ApiError> {
         self.require(caller, PERMISSION_USERS_WRITE)?;
+        self.covers(caller, id).await?;
         self.store
             .set_disabled(id, disabled, self.now())
             .await
@@ -929,6 +932,7 @@ impl Service {
     }
 
     /// Sets a user's password and revokes their sessions (`users.write`).
+    /// The caller's permissions must cover each of the user's.
     pub async fn set_user_password(
         &self,
         caller: &IdentityPrincipal,
@@ -939,11 +943,36 @@ impl Service {
         let mut errors = FieldErrors::default();
         check_password_field(&mut errors, "password", &input.password);
         errors.check()?;
+        self.covers(caller, id).await?;
         let hash = self.hash(&input.password).await?;
         self.store
             .set_password(id, &hash, self.now(), None)
             .await
             .map_err(|err| store_error(err, "User"))
+    }
+
+    /// Refuses a write to the user with `id` unless the caller's
+    /// permissions cover every permission the user holds through their
+    /// roles ([`uncovered_user`]): 404 for no such user, 403 listing the
+    /// ones not covered. Whoever sets a user's password signs in as them,
+    /// and whoever enables or disables them gives or takes their
+    /// permissions, so no one does either to a user who holds what they do
+    /// not.
+    async fn covers(&self, caller: &IdentityPrincipal, id: &str) -> Result<(), ApiError> {
+        let user = self
+            .store
+            .get_user(id)
+            .await
+            .map_err(|err| store_error(err, "User"))?;
+        let missing = uncovered_user(
+            &caller.permissions,
+            user.roles.iter().map(|role| role.permissions.as_slice()),
+        );
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(not_covered(missing))
+        }
     }
 
     /// Every role, by name (`roles.read`).

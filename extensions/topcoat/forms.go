@@ -98,7 +98,9 @@ type formField struct {
 	// date, time, datetime-local, or textarea (JSON text).
 	Control string
 	// Read is the helper that reads the control's value as the input's
-	// JSON: text, integer, number, boolean, date_time or json_text.
+	// JSON: text, integer, number, boolean, date_time or json_text; for an
+	// amount, minor_amount (its currency a field) or money_<code> and
+	// signed_money_<code> (its currency a literal).
 	Read string
 	// Attrs are the control's static attributes from the field's rules,
 	// `required` aside: ` minlength="2"`.
@@ -112,8 +114,11 @@ type formField struct {
 	Choosable bool
 	// Currency is the literal currency of an amount a decimal control
 	// holds (D44, amended): its control is text, read as the currency's
-	// minor units by money_<code>; empty for any other control.
+	// minor units by money_<code>, or signed_money_<code> when its bounds
+	// take a negative amount; empty for any other control.
 	Currency string
+	// Signed reports whether an amount's decimal control takes a sign.
+	Signed bool
 	// Default is the Rust expression of the field's value in a new form.
 	Default string
 
@@ -402,37 +407,43 @@ func (b *formBuilder) kindOf(f *formField, owner *ir.TypeDef, field *ir.FieldDef
 // would call.
 func (c *crate) HoldsForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
 
-// FormCurrencies are the literal currencies of the amounts the forms take
-// as decimals (D44, amended), sorted: forms.rs writes money_<code> for
-// each, and the decimal helpers once.
+// FormCurrencies are the readers of the amounts the forms take as
+// decimals (D44, amended), sorted by reader: forms.rs writes money_<code>
+// for each literal currency of an amount without a sign and
+// signed_money_<code> for each of one with, and the decimal helpers once.
 func (c *crate) FormCurrencies() []formCurrency {
 	seen := map[string]bool{}
 	var out []formCurrency
 	for _, st := range c.FormStructs {
 		for _, f := range st.Fields {
-			if f.Currency != "" && !seen[f.Currency] {
-				seen[f.Currency] = true
-				out = append(out, formCurrency{Code: f.Currency, Read: f.Read})
+			if f.Currency != "" && !seen[f.Read] {
+				seen[f.Read] = true
+				out = append(out, formCurrency{Code: f.Currency, Read: f.Read, Signed: f.Signed})
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+	sort.Slice(out, func(i, j int) bool { return out[i].Read < out[j].Read })
 	return out
 }
 
-// formCurrency is a currency a form reads an amount in: its code and its
-// reader, money_<code>.
+// formCurrency is a reader of an amount in a literal currency: its code,
+// its reader, money_<code> or signed_money_<code>, and whether it takes a
+// sign.
 type formCurrency struct {
-	Code string
-	Read string
+	Code   string
+	Read   string
+	Signed bool
 }
 
 // money makes the control of an amount in a literal currency a decimal
 // one (D44, amended): text with inputmode="decimal", labeled with its code
-// and patterned by its decimals, which money_<code> reads as minor units.
-// An amount whose currency is a field keeps its whole-number input, since
-// the field may be unset or changed in the same form, and its hint names
-// that field.
+// and patterned by its decimals, which money_<code> reads as minor units,
+// and which takes none of the app's choices, whose values are minor units
+// as the API sends them. An amount whose currency is a field keeps its
+// whole-number input, since the field may be unset or changed in the same
+// form, and its hint names that field; minor_amount reads it as digits
+// alone, refusing the decimal a number input would take for a whole
+// number (12.00).
 func (b *formBuilder) money(f *formField, owner *ir.TypeDef, field *ir.FieldDef) {
 	if f.Read != "integer" {
 		return
@@ -445,8 +456,11 @@ func (b *formBuilder) money(f *formField, owner *ir.TypeDef, field *ir.FieldDef)
 			minimum = orFloat(minimum, scalar.Minimum)
 		}
 		signed := minimum == nil || *minimum < 0
-		f.Currency = currency.code
+		f.Currency, f.Signed, f.Choosable = currency.code, signed, false
 		f.Control, f.Read = "text", "money_"+strings.ToLower(currency.code)
+		if signed {
+			f.Read = "signed_" + f.Read
+		}
 		f.Label += " (" + currency.code + ")"
 		attrs := []string{`inputmode="decimal"`, fmt.Sprintf("pattern=(decimal_pattern(%s, %t))", rustString(currency.code), signed)}
 		if field.Placeholder != "" {
@@ -454,6 +468,7 @@ func (b *formBuilder) money(f *formField, owner *ir.TypeDef, field *ir.FieldDef)
 		}
 		f.Attrs = joinAttrs(attrs)
 	case currency.sibling != nil:
+		f.Read = "minor_amount"
 		hint := "In minor units of " + labelOf(currency.sibling)
 		if f.Hint == "" {
 			f.Hint = hint

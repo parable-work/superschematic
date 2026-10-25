@@ -12,10 +12,11 @@ import {
   identityNotFound,
   invalidCredentials,
   invalidPermissions,
+  notCovered,
   unauthenticated,
 } from './errors.js';
 import { dummyHash, hashPassword, passwordProblem, verifyPassword } from './password.js';
-import { capabilitiesOf, effectivePermissions, uncovered, validPermission, type IdentityRoute } from './permissions.js';
+import { capabilitiesOf, effectivePermissions, uncovered, uncoveredUser, validPermission, type IdentityRoute } from './permissions.js';
 import { IdentityStoreError, isStoreError, type IdentityStore, type StoredRole, type StoredUser } from './store.js';
 import { extractCredential, hashToken, newToken, type Transport } from './token.js';
 
@@ -489,18 +490,19 @@ export class IdentityService {
     }
   }
 
-  /** Disables a user and revokes their sessions (users.write). */
+  /** Disables a user and revokes their sessions (users.write). The caller's permissions must cover each of the user's. */
   disableUser(p: IdentityPrincipal, id: string): Promise<IdentityUser> {
     return this.setDisabled(p, id, true);
   }
 
-  /** Enables a disabled user (users.write). */
+  /** Enables a disabled user (users.write). The caller's permissions must cover each of the user's. */
   enableUser(p: IdentityPrincipal, id: string): Promise<IdentityUser> {
     return this.setDisabled(p, id, false);
   }
 
   private async setDisabled(p: IdentityPrincipal, id: string, disabled: boolean): Promise<IdentityUser> {
     this.require(p, PERMISSION_USERS_WRITE);
+    await this.covers(p, id);
     try {
       await this.store.setDisabled(id, disabled, this.now());
     } catch (error) {
@@ -509,18 +511,38 @@ export class IdentityService {
     return this.storedUser(id);
   }
 
-  /** Sets a user's password and revokes their sessions (users.write). */
+  /** Sets a user's password and revokes their sessions (users.write). The caller's permissions must cover each of the user's. */
   async setUserPassword(p: IdentityPrincipal, id: string, input: SetPasswordInput): Promise<void> {
     this.require(p, PERMISSION_USERS_WRITE);
     const f = new FieldErrors();
     checkPasswordField(f, 'password', input.password);
     f.throwIfAny();
+    await this.covers(p, id);
     const hash = await hashPassword(input.password, this.params);
     try {
       await this.store.setPassword(id, hash, this.now(), '');
     } catch (error) {
       throw storeProblem(error, 'User');
     }
+  }
+
+  /**
+   * Refuses a write to the user with id unless the caller's permissions
+   * cover every permission the user holds through their roles
+   * (uncoveredUser): 404 for no such user, 403 listing the ones not
+   * covered. Whoever sets a user's password signs in as them, and whoever
+   * enables or disables them gives or takes their permissions, so no one
+   * does either to a user who holds what they do not.
+   */
+  private async covers(p: IdentityPrincipal, id: string): Promise<void> {
+    let user: StoredUser;
+    try {
+      user = await this.store.getUser(id);
+    } catch (error) {
+      throw storeProblem(error, 'User');
+    }
+    const missing = uncoveredUser(p.permissions, user.roles);
+    if (missing.length > 0) throw notCovered(missing);
   }
 
   /** Lists every role, by name (roles.read). */

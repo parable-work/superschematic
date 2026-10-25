@@ -697,6 +697,23 @@ fn integer(value: Option<&str>) -> Read {
     }
 }
 {{- end }}
+{{- if .FormsUse "minor_amount" }}
+
+/// An amount in the minor units of a currency another field names (D44,
+/// amended): digits, after a `-` or not, refused otherwise. A number input
+/// takes `12.00` and `1.2e1` for twelve, but a member of staff who types a
+/// point means a decimal, which this control does not read.
+fn minor_amount(value: Option<&str>) -> Read {
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("must be a whole number of minor units");
+    }
+    text.parse::<i64>().map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
+}
+{{- end }}
 {{- if .FormCurrencies }}
 
 /// The minor-unit exponent of `currency` (D44, amended), from superscalar's
@@ -708,15 +725,18 @@ fn minor_units(currency: &str) -> usize {
 
 /// An amount typed as a decimal of `currency` (D44, amended), read as the
 /// whole number of its minor units the input holds: `4.5` and `4.50` of
-/// GBP are 450, and `4` is 400. Text that is no decimal, more decimals
-/// than the currency has, or an amount past an i64 is refused; a sign the
-/// field's bounds refuse, the input's rules refuse.
-fn money(value: Option<&str>, currency: &str) -> Read {
-    let Some(text) = value.map(str::trim) else {
+/// GBP are 450, and `4` is 400. It takes what its control's pattern
+/// (`decimal_pattern`) takes and refuses the rest: text that is no
+/// decimal, space around it, a sign when not `signed`, a point in an
+/// amount of a currency without decimals, and more decimals than the
+/// currency has. It refuses an amount past an i64 too.
+fn money(value: Option<&str>, currency: &str, signed: bool) -> Read {
+    let Some(text) = value else {
         return Ok(None);
     };
     let places = minor_units(currency);
     let (negative, digits) = match text.strip_prefix('-') {
+        Some(_) if !signed => return Err("must not be negative"),
         Some(rest) => (true, rest),
         None => (false, text),
     };
@@ -724,7 +744,7 @@ fn money(value: Option<&str>, currency: &str) -> Read {
     if whole.is_empty() && fraction.is_empty() || !whole.bytes().chain(fraction.bytes()).all(|byte| byte.is_ascii_digit()) {
         return Err("must be an amount");
     }
-    if fraction.len() > places {
+    if places == 0 && digits.contains('.') || fraction.len() > places {
         return Err(match places {
             0 => "must be a whole amount",
             1 => "must have at most 1 decimal place",
@@ -741,9 +761,9 @@ fn money(value: Option<&str>, currency: &str) -> Read {
 }
 {{- range .FormCurrencies }}
 
-/// An amount typed as a decimal of {{ .Code }}, read as its minor units.
+/// An amount typed as a decimal of {{ .Code }}, {{ if .Signed }}with a sign or not{{ else }}without a sign{{ end }}, read as its minor units.
 fn {{ .Read }}(value: Option<&str>) -> Read {
-    money(value, {{ rustString .Code }})
+    money(value, {{ rustString .Code }}, {{ .Signed }})
 }
 {{- end }}
 
