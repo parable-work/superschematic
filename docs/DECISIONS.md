@@ -10299,7 +10299,7 @@ routes are the project's.
 | `stack dev` runs the app as a process, built with cargo as a Rust server is, with `PORT` its `port` setting or a hashed port. It is ready once a TCP connection to its port succeeds, a dial alone, and never a GET of `/readyz`; `stack run`'s check of a running environment dials it the same way (`local: environment <env> is not running: app <name> does not listen at <url>`). gcp runs it as a Cloud Run service, `gcp.cloudrunapp`, with its own account, its API's Cloud SQL and egress, a TCP startup probe and a TCP liveness probe on its port, and public ingress when exposed. An app that is not exposed is internal-only with the invoker check on, and nothing grants `run.invoker`, so no one reaches it: expose an app that people use. An app turned off on gcp is its account, grants and secrets, with no service and no address. | HTTP probes, which the project's program would have to answer, since it owns every route; a local readiness that listens on the port to test it, which can take the port from the app as it binds |
 | cloudflare refuses an app the environment runs, through `TargetSpec.Unplaced`: `app shop-stock-backoffice: target cloudflare places no app: an app is the project's own Rust program, which serves HTTP until it is stopped, and cloudflare runs TypeScript Workers only; run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target`. An app turned off there is left out of the environment. | Cloudflare Containers, a platform D64 does not have; placing the app with another provider than its environment's, which mixed deploys will settle; refusing an app that is off, which would make every cloudflare environment of a stack unresolvable once one API declares an app |
 | `stack init` exposes every app of an API it deploys, as `{ of: <Api>, app: "<Class>" }` after the services, with `--expose` too, and its summary says `An app is always exposed: Backoffice of notes-api.` | Leaving it unexposed, where no one reaches it |
-| The Topcoat crate of an API that declares an app gains `RouterBuilder<Service>Ext::<service>_with_parts(parts)`. It takes any app's parts through `AppParts`, which each `<App>Parts` converts into, and sets the crate up as `<service>` would from them: the implementations, the engine the entrypoint opened on the stack's database as `Setup.engine`, and, for an API on the identity runtime, `IdentityPageAuthenticator::of(&parts.implementations)`. An API with an authenticator of its own passes its `PageAuthenticator` after the parts. It mounts the JSON API at `/api` and the engine's routes at `/engine`, as `<service>` does; an app that wants neither calls `<service>_without_api` with the parts' fields. `Setup` is unchanged. An app's `serve` binds `parts.addr` with tokio's `TcpListener` and calls `topcoat::serve(listener, router)`, never `topcoat::start`, which binds `HOST` and `PORT`, by default `127.0.0.1:3000`, so on Cloud Run it would listen on the container's loopback. The image carries no Topcoat asset bundle yet, so a live list is a GET form. | `topcoat::start`, which passes under `stack dev`, whose readiness dials loopback, and fails every gcp revision; bundling Topcoat's runtime in the image, which needs Topcoat's CLI in the build |
+| The Topcoat crate of an API that declares an app gains `RouterBuilder<Service>Ext::<service>_with_parts(parts)` and `<service>_with_parts_and_api(parts)`. Each takes any app's parts through `AppParts`, which each `<App>Parts` converts into, and sets the crate up from them: the implementations, the engine the entrypoint opened on the stack's database as `Setup.engine`, and, for an API on the identity runtime, `IdentityPageAuthenticator::of(&parts.implementations)`. An API with an authenticator of its own passes its `PageAuthenticator` after the parts. `_with_parts` serves the pages alone, as `<service>_without_api` does: they call the API and the engine in-process, and neither the JSON API nor the engine's routes are on the app's address, since a stack exposes an app apart from its API, and an app's address must not serve what the stack keeps internal. `_with_parts_and_api` mounts the JSON API at `/api` and the engine's routes at `/engine` too, as `<service>` does, for an app whose API the stack exposes as well, or which it keeps internal. `Setup` is unchanged. An app's `serve` binds `parts.addr` with tokio's `TcpListener` and calls `topcoat::serve(listener, router)`, never `topcoat::start`, which binds `HOST` and `PORT`, by default `127.0.0.1:3000`, so on Cloud Run it would listen on the container's loopback. The image carries no Topcoat asset bundle yet, so a live list is a GET form. | Mounting the JSON API and the engine's routes by default, which serves an API the stack keeps internal from the app's public address, its operations that need no caller and the engine's routes among them; `topcoat::start`, which passes under `stack dev`, whose readiness dials loopback, and fails every gcp revision; bundling Topcoat's runtime in the image, which needs Topcoat's CLI in the build |
 
 Status: built. Tests:
 - `internal/stack/apps_test.go` holds the kind, its edges, waves,
@@ -10333,10 +10333,16 @@ Status: built. Tests:
 - `extensions/topcoat`'s `TestTheCrateServesAStackApp` builds the crate
   of `fixture-app-api`, whose users are the core model's and whose
   database is an engine database, and runs `cargo clippy` and `cargo
-  test` over the real `BackofficeParts`: the parts set up the pages, the
-  JSON API and the engine, a note created through `/engine` is on the
-  parts' engine and its page, and `serve` answers on `parts.addr`. An API
-  with no app gets no `_with_parts`.
+  test` over the real `BackofficeParts`. With `_with_parts`, `/api` and
+  `/engine` answer 404, and a user who signs in through the sign-in page
+  reads the engine console. With `_with_parts_and_api`, the parts set up
+  the pages, the JSON API and the engine, and a note created through
+  `/engine` is on the parts' engine and its page. `serve` answers on
+  `parts.addr`, its pages and no `/api`. An API with no app gets no
+  `_with_parts`. `TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild`
+  compiles both methods for an API with an authenticator of its own,
+  which takes a `PageAuthenticator`, and for one without auth, neither
+  with an engine.
 
 acme:
 - shop-stock declares `Backoffice`, a Topcoat app over shop-stock's
@@ -10351,7 +10357,9 @@ acme:
   member of staff who holds `stock.write` in at `/stock/sign-in`,
   receives five units through the Stock panel's `receiveStock` form on
   `/stock/engine/Inventory/{id}`, sees the page list the delivery, and
-  reads the five more through shop-stock's `GetStock`.
+  reads the five more through shop-stock's `GetStock`. The Backoffice
+  serves its pages alone (`shop_stock_with_parts`): `/api/stock` and the
+  engine's routes answer 404 on its address.
 - `TestStackInitOverAcmeShop` inits the stack, app included, with the
   installed `superschematic`, and every environment resolves.
 
@@ -10378,24 +10386,40 @@ deploys a document, then a newer one, and sees each named while it is
 not the live version. `servergen`'s app goldens hold `engine.rs` and
 `main.rs`. The rule is reversible until the first release.
 
-### D47, amended: a stack whose app needs an extension builds the binary that links it in every CI job
+### D47, amended: the release ships `superschematic-topcoat`, which a stack's CI installs when an app of its services root needs Topcoat
 
-The release ships the installed `superschematic` alone, which refuses to
-build a stack whose app names an extension it does not link (D78,
-above). A workflow that installed it would fail on every run: in its
-check job's build, in its prepare job and in a deploy with `--prepared`,
-which builds images too.
+The installed `superschematic` refuses to build a stack whose app names
+an extension it does not link (D78, above). A workflow that installed it
+would fail on every run: in its check job's build, in its prepare job
+and in a deploy with `--prepared`, which builds images too. Every job
+builds the whole services root (`build-all`), so a stack with no app of
+its own fails the same way when another stack of its root has one: acme's
+`storefront-stack` builds `shop-stack`, whose Backoffice needs Topcoat.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| The renderer reads the extensions every app of the stack names, over every environment, an app that is off included, since the build refuses it in any environment. With none, every job installs `superschematic` as before. With one, `topcoat`, every job (check, prepare, plan, preview and deploy) runs `superschematic-topcoat` for the build, `stack prepare` and every stack command. | Installing the extension's binary in the prepare job alone, which leaves the check job's build and the deploy's image builds refused |
-| Each such job builds `superschematic-topcoat` from the release's commit, as the release builds `superschematic`. It downloads the release's `superschematic_<version>_linux-x64.tar.gz`, checks it against the release's `SHA256SUMS` and keeps it off the `PATH`; reads the commit the tarball's `BUILD_COMMIT` names; installs the release's static archives, checked against their digests, and sets up the Go the generated servers build with; fetches that commit by its hash (`git fetch --depth 1`) and checks that `HEAD` is it; and builds `extensions/topcoat/cmd/superschematic-topcoat` with `go build -trimpath -buildvcs=false` and every platform's archive digest stamped in (`-X .../internal/release.archiveDigests=...`), so what it generates pins what the release's binary would. Then it puts the binary on the `PATH`. It runs no project code. A workflow rendered by a binary built from a checkout names no release, and its install step fails, as `superschematic`'s does. | Releasing a `superschematic-topcoat` tarball, which puts a framework before 1.0 in every release; a binary from the commit at the head of the repository, which a workflow cannot pin |
-| The renderer refuses two stacks it cannot serve, with the reason, since the workflow's build would refuse them on every run: an extension whose binary superschematic's repository does not hold (`stack <stack>: app <App> of <api> needs the <ext> extension, and superschematic's release neither ships nor holds the source of a binary that links it, so the workflow's build would refuse the stack; build the stack's CI yourself with a binary that links it`), and apps that name two extensions between them (`stack <stack>: app ... needs ..., ...; one binary builds the stack in CI, and no superschematic-<extension> links more than one extension: give the apps one extension between them`). | Writing a workflow that fails on its first run |
+| The release ships `superschematic-topcoat` as it ships `superschematic`. `release.yml`'s build job builds both on each of the four runners, from their modules (`cmd/superschematic` and `extensions/topcoat/cmd/superschematic-topcoat`), with the same flags, against the same archives and with every platform's archive digest linked in. Each must run, report `<binary> version <version>` and hold the digests' string, which the step reads from the binary: `go version -m` records no `-ldflags` under `-trimpath`, so the check it made before never passed. Each is packed as `<binary>_<version>_<platform>.tar.gz` with its `BUILD_COMMIT`, `LICENSE` and README. `assemble` counts four of each, refuses a set built from more than one commit and lists them all in one `SHA256SUMS`. `internal/release` names the extensions the release ships a binary of (`ExtensionCLIs`) and the tarball's name (`CLIName`), and a test holds `release.yml` to them. | Building it from source in every CI job, which spends minutes per job, needs a commit the workflow reads from a file on the release page, and leaves the release never building the binary every topcoat stack's CI runs; leaving it out of the release, so that no binary a user can get writes a working workflow |
+| The renderer reads the extensions the apps need: the stack's own, over every environment, an app that is off included, since the build refuses it in any environment, and those of every other stack of the services root (`registry.CIRequest.RootApps`). The ci generator lists the root's directories that hold a schema config, loads each Stack among them and resolves its apps. With no extension, every job installs `superschematic` as before. With one the release ships a binary of, `topcoat`, every job (check, prepare, plan, preview and deploy) installs `superschematic-topcoat` the same way and runs it for the build, `stack prepare` and every stack command, and the header says why: `Every job runs superschematic-topcoat, the release's superschematic with the topcoat extension linked too: its build of the services root builds app Backoffice of shop-stock in stack shop-stack, which needs it.` | Building only the stack's closure (`build --with-deps`), which leaves the output root's Cargo and Bun workspaces, whose members are every stack's deployables, short of the other stacks', so their committed lockfiles no longer match; reading the stack's own apps alone, which gives a sibling stack the binary that refuses the root |
+| Each job's install downloads `<binary>_<version>_linux-x64.tar.gz` and the release's `SHA256SUMS`, checks one against the other, unpacks it, checks that the binary reports `<binary> version <version>` (`--version`, which both binaries have), and puts it on the `PATH`. The release is the version of the binary that rendered the workflow, whichever of the two did: both are built from one commit. The trust root is the core's: the release page and its `SHA256SUMS`. A workflow rendered by a binary built from a checkout names no release, and its install step fails, saying to render it again with a released `superschematic-topcoat`. One built from a tag's tree without the release's digests installs the release's binary, and the check job's archives step fails, as `superschematic`'s does. | Pinning each binary's digest in the workflow, which the rendering binary cannot know for the other binary |
+| A stack whose apps need two extensions between them, or an extension the release ships no binary of, is refused at render time, with the reason, since the workflow's build would refuse the root on every run: `stack <stack>: app <App> of <api> needs the <ext> extension, and superschematic's release ships no binary that links it, so the workflow's build would refuse the services root; build the stack's CI yourself with a binary that links it`, and `stack <stack>: app ... needs ..., ...; one binary builds the services root in CI, and no superschematic-<extension> links more than one extension: give the apps one extension between them`. | Writing a workflow that fails on its first run |
+| A stack with CI keys its build-cache entry on the root's other stacks too: each one's sources and those of the services its references depfile names, with what they reach through their configs. An app added to another stack's API then renders the stack's workflow again. | Keying it on its own inputs alone, which keeps a cached workflow that installs the binary the root's build refuses |
+| The workflow's messages name the binary it runs: the header's "build it again with", a local environment's note (`stack dev`), the bootstrap note, and the Rust lockfile's fix (`build-all`). | Naming `superschematic` everywhere, which refuses the build |
 
-Status: built. `cigen`'s `TestAnAppsExtensionBuildsTheBinaryThatLinksIt`
-renders a stack with a Topcoat app and runs actionlint over the
-workflow, and `TestAppsWhoseExtensionsNoBinaryLinksAreRefused` holds the
-two refusals. The rule is reversible until the first release.
+Status: built. `cigen`'s `TestAnAppsExtensionInstallsTheBinaryThatLinksIt`
+renders a stack with a Topcoat app, runs actionlint over the workflow and
+holds the install, the header, a checkout build's failing install and a
+digestless release's failing archives step.
+`TestTheRootsAppsChooseTheBinary` holds another stack's app choosing the
+binary and refusing a second extension, and
+`TestAnotherStacksAppChoosesTheBinary` builds a stack with no app in a
+root whose other stack's API declares a Topcoat app, through the ci
+generator. `TestAppsWhoseExtensionsNoBinaryLinksAreRefused` holds the two
+refusals. `buildcache`'s `TestACIStacksKeyIsTheRootsStacks` holds the
+key. `internal/release`'s `TestTheReleaseLinksTheDigests` holds
+`release.yml`'s build of both binaries, their version and digest checks,
+and their count in `assemble`; `cli`'s
+`TestVersionNamesTheBinaryAndItsRelease` holds `--version`. The rule is
+reversible until the first release.
 
 ### D44, amended: `superschematic-topcoat` is the installed binary with Topcoat linked beside the official extensions
 
@@ -10409,7 +10433,7 @@ needs Topcoat.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | The installed binary's extensions are listed by a package of their own, `cmd/superschematic/official` (`official.Extensions()`: gcp, cloudflare, and pulumi with each provider's pinned version). `cmd/superschematic` links that list, and `extensions/topcoat/cmd/superschematic-topcoat` links it with `topcoat.Extension{}` after it, so the two binaries never differ in what else they link. A project's own binary does the same: `cli.New(cli.Config{Name: ...}, append(official.Extensions(), topcoat.Extension{})...)`. | The core with Topcoat alone, which knows neither the gcp nor the cloudflare target, so it cannot build a tree with a stack on either; a copy of the list in the topcoat command, which drifts from the installed binary's |
-| `extensions/topcoat`'s module requires `cmd/superschematic`, and through it the official extensions, each replaced by its directory in the repository. `scripts/bump_version.py` sets those requires at a release and tags `extensions/topcoat` after `cmd/superschematic`. The installed `superschematic` still links no Topcoat. | Linking Topcoat into the installed binary, which D44 keeps out while Topcoat is before 1.0 |
+| `extensions/topcoat`'s module requires `cmd/superschematic`, and through it the official extensions, each replaced by its directory in the repository. `scripts/bump_version.py` sets those requires at a release, keeps the replaces, so `go install` refuses the command, and tags `extensions/topcoat` after `cmd/superschematic`. The release ships `superschematic-topcoat` beside `superschematic` (D47, amended above). The installed `superschematic` still links no Topcoat. | Linking Topcoat into the installed binary, which D44 keeps out while Topcoat is before 1.0 |
 
 Status: built. `cmd/superschematic`'s tests are unchanged and pass;
 acme's `check.sh` builds every service, `storefront-stack`'s cloudflare

@@ -64,11 +64,20 @@ official extensions (gcp, cloudflare and pulumi), links it (D44).
 beside those (D44, amended): it takes the same list from
 `cmd/superschematic/official`, so it builds and deploys everything
 `superschematic` does, and builds a stack whose app names `topcoat`
-(D78), which `superschematic` refuses:
+(D78), which `superschematic` refuses. Each release ships it beside
+`superschematic`, built the same way against the release's static
+archives, as `superschematic-topcoat_<version>_<platform>.tar.gz` in the
+same `SHA256SUMS` (D47, amended), and a stack's generated CI installs it
+for a services root with such an app. From a checkout:
 
 ```bash
 go build -o superschematic-topcoat ./cmd/superschematic-topcoat
 ```
+
+A binary built from a checkout names no release, so the workflow it
+writes for a stack cannot install one: write it with the released
+binary. `go install` refuses the command, since the module replaces its
+siblings by their directories.
 
 A project's own binary links it beside the official extensions, or its
 own, the same way, passing them to `cli.New`:
@@ -326,15 +335,20 @@ no Topcoat code for it, and a binary that does not link this extension
 refuses to build the stack: run `superschematic-topcoat`.
 
 For an API that declares an app, the crate gains
-`<service>_with_parts(parts)`, which takes any app's parts (through
-`AppParts`, which each `<App>Parts` converts into) and sets the crate up
-as `<service>` would: the implementations, the engine the entrypoint
-opened, in place of `engine::open` on SQLite, and, when the API
-authenticates with the identity runtime,
+`<service>_with_parts(parts)` and `<service>_with_parts_and_api(parts)`,
+which take any app's parts (through `AppParts`, which each `<App>Parts`
+converts into) and set the crate up from them: the implementations, the
+engine the entrypoint opened, in place of `engine::open` on SQLite, and,
+when the API authenticates with the identity runtime,
 `IdentityPageAuthenticator::of(&parts.implementations)`. An API whose
-users are its own passes its `PageAuthenticator` after the parts. It
-mounts the JSON API and the engine as `<service>` does. `serve` binds
-`parts.addr` and hands the listener to `topcoat::serve`:
+users are its own passes its `PageAuthenticator` after the parts.
+`_with_parts` serves the pages alone, which call the API and the engine
+in-process, as `<service>_without_api` does: a stack exposes an app apart
+from its API, so the app's address does not serve an API the stack keeps
+internal. `_with_parts_and_api` mounts the JSON API at `/api` and the
+engine's routes at `/engine` too, as `<service>` does, for an app whose
+API the stack exposes as well. `serve` binds `parts.addr` and hands the
+listener to `topcoat::serve`:
 
 ```rust
 pub async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
