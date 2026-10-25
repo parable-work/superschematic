@@ -61,7 +61,8 @@ serde_json = "1.0.149"
 {{- end }}
 {{- end }}
 {{- if .WritesMoney }}
-# Each currency's minor units, by which views.rs formats an amount.
+# Each currency's minor units, by which views.rs formats an amount and
+# forms.rs reads a decimal one.
 {{- if .ScalarPath }}
 {{ .ScalarCrate }} = { path = "{{ .ScalarPath }}" }
 {{- else }}

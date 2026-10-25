@@ -85,7 +85,7 @@ type crate struct {
 	// identity runtime (identity_pages.go).
 	IdentityPages *identityPagesModel
 	// Money reports that a display component shows an amount by its
-	// currency (money.go). ScalarCrate is the scalar crate, which gives each
+	// currency, or a form reads one as a decimal (money.go). ScalarCrate is the scalar crate, which gives each
 	// currency's minor units, and ScalarPath its directory from the
 	// crate's, empty when [paths] names none, as for the types crates.
 	Money       bool
@@ -584,8 +584,10 @@ func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustA
 }
 
 // WritesMoney reports whether views.rs writes money_text: a display
-// component shows money, or the engine's panels may (a Holds' or a
-// Payments' amounts). Cargo.toml then depends on the scalar crate.
+// component shows money, a form reads an amount as a decimal, or the
+// engine's panels may show money (a Holds' or a Payments' amounts).
+// Cargo.toml then depends on the scalar crate, which views.rs and forms.rs
+// read each currency's minor units from.
 func (c *crate) WritesMoney() bool { return c.Money || c.EnginePanels != nil }
 
 // schemasOf is the service's schema and its dependencies', in which a
