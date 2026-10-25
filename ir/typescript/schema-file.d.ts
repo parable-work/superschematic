@@ -35,6 +35,12 @@ export type Documents = { [document: string]: unknown };
  */
 export type SchemaFile = Document | TypeDef | EnumFile | UnionFile | ScalarFile | OperationSetFile;
 
+export interface App {
+  comment?: string;
+  extensions?: string[];
+  name: string;
+}
+
 export interface ArgumentDef {
   comment?: string;
   default?: string;
@@ -80,6 +86,7 @@ export interface DatabaseDecl {
 }
 
 export interface DeployableRef {
+  app?: string;
   deployable?: string;
   deriver?: string;
   job?: string;
@@ -130,6 +137,7 @@ export interface DisplayState {
 }
 
 export interface Document {
+  apps?: App[];
   comment?: string;
   derivers?: Deriver[];
   description?: string;

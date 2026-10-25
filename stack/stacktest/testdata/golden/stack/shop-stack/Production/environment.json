@@ -754,7 +754,7 @@
               }
             }
           ],
-          "image": "orders",
+          "image": "images.fake.test/orders",
           "language": "go",
           "name": "orders",
           "public": false
@@ -979,7 +979,7 @@
               }
             }
           ],
-          "image": "shop-api",
+          "image": "images.fake.test/shop-api",
           "language": "go",
           "minInstances": 1,
           "name": "shop-api",
@@ -1211,7 +1211,7 @@
               }
             }
           ],
-          "image": "shop-orders-fulfil-orders",
+          "image": "images.fake.test/shop-orders-fulfil-orders",
           "instances": 3,
           "language": "go",
           "memory": "1Gi",
@@ -1395,7 +1395,7 @@
               }
             }
           ],
-          "image": "shop-orders-ship-orders",
+          "image": "images.fake.test/shop-orders-ship-orders",
           "language": "go",
           "name": "shop-orders-ship-orders",
           "retries": 1,

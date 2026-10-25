@@ -246,6 +246,17 @@ type DeriverInput struct {
 	Name string
 }
 
+// AppInput is the app an app's entrypoint runs (D78).
+type AppInput struct {
+	// Name is the app's @app class.
+	Name string
+
+	// Implementation is the app's crate, the program the project writes
+	// at the naming file's [implementation_paths] rust_app template
+	// (ReadRustApp).
+	Implementation RustImplementation
+}
+
 // ServerDir is where the entrypoint of server in stack is written; a job's
 // is beside the servers', under the job's deployable name.
 func ServerDir(outputRoot, stack, server string) string {

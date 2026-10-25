@@ -69,7 +69,7 @@ resources:
           value: ${Orders-account.email}
         - name: STRIPE_KEY
           secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
-      image: orders
+      image: images.fake.test/orders
       language: go
       name: orders-${pr}
       public: false
@@ -152,7 +152,7 @@ resources:
           value: ${shop-media-bucket.name}
         - name: STRIPE_KEY
           secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
-      image: shop-api
+      image: images.fake.test/shop-api
       language: go
       name: shop-api-${pr}
       public: true
@@ -249,7 +249,7 @@ resources:
           value: ${shop-orders-fulfil-orders-account.email}
         - name: STRIPE_KEY
           secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
-      image: shop-orders-fulfil-orders
+      image: images.fake.test/shop-orders-fulfil-orders
       instances: 1
       language: go
       name: shop-orders-fulfil-orders-${pr}
@@ -326,7 +326,7 @@ resources:
           value: ${shop-orders-ship-orders-account.email}
         - name: STRIPE_KEY
           secret: ${parent-stack.outputs["secret.PaymentsSecrets.STRIPE_KEY.id"]}
-      image: shop-orders-ship-orders
+      image: images.fake.test/shop-orders-ship-orders
       language: go
       name: shop-orders-ship-orders-${pr}
       retries: 1

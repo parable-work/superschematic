@@ -28,7 +28,9 @@ import (
 //   - whether a DB is an engine database, a type of it composing a
 //     behavior, whose engine's runner is a deployable of the stack (D58);
 //   - an API's derivers, each a deployable of the stack, and a DB's
-//     engine types that compose Derived, which a deriver fills (D74).
+//     engine types that compose Derived, which a deriver fills (D74);
+//   - an API's apps, each a deployable of the stack, with the extensions
+//     its build needs (D78).
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -73,6 +75,13 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 				fact := *deriver
 				fact.Comment = ""
 				svc.Derivers = append(svc.Derivers, fact)
+			}
+		}
+		for _, app := range schema.Apps {
+			if app != nil {
+				fact := *app
+				fact.Comment = ""
+				svc.Apps = append(svc.Apps, fact)
 			}
 		}
 	case ir.SchemaKindDB:

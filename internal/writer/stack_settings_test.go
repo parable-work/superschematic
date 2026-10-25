@@ -34,3 +34,28 @@ func TestTSWriterWritesDeriverAndRunnerSettings(t *testing.T) {
 		}
 	}
 }
+
+// TestTSWriterWritesApps: an app is exposed, and set in an environment's
+// settings, beside its API's handle (D78), as the reader reads it back.
+func TestTSWriterWritesApps(t *testing.T) {
+	api := ir.ServiceRef{Name: "shop-stock", Kind: ir.SchemaKindAPI}
+	off := false
+	schema := ir.NewSchema("shop-stack", ir.SchemaKindStack)
+	schema.Types["Shop"] = &ir.TypeDef{Name: "Shop", Role: ir.RoleEmbeddedStruct, Stack: &ir.StackDecl{
+		Deploy: []ir.ServiceRef{api},
+		Expose: []ir.DeployableRef{{Service: &api}, {Service: &api, App: "Backoffice"}},
+	}}
+	schema.Types["Dev"] = &ir.TypeDef{Name: "Dev", Role: ir.RoleEmbeddedStruct, Environment: &ir.EnvironmentDecl{
+		Target:   "local",
+		Settings: []*ir.DeployableSettings{{Of: ir.DeployableRef{Service: &api, App: "Backoffice"}, Enabled: &off, Values: map[string]any{"port": float64(3000)}}},
+	}}
+	source := writtenSource(t, schema, FormatTS)
+	for _, want := range []string{
+		`expose: [ShopStock, { of: ShopStock, app: "Backoffice" }]`,
+		`{ of: ShopStock, app: "Backoffice", enabled: false, port: 3000 }`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("written TypeScript lacks %s:\n%s", want, source)
+		}
+	}
+}

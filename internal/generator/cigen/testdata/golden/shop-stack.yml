@@ -55,6 +55,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Install the static archives
         run: |
@@ -122,6 +124,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -182,6 +186,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -232,6 +238,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -282,6 +290,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -337,6 +347,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -388,6 +400,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

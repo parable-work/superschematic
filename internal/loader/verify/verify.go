@@ -232,6 +232,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkQueues(schema, r)
 	checkWorkers(schema, r)
 	checkDerivers(schema, r)
+	checkApps(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
