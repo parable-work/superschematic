@@ -17,6 +17,13 @@
 {{- else if .Background }}
 //! The {{ .Kind }} opens each engine in the background, retrying until its database
 //! answers, for its API's Deps; it deploys nothing, which the servers do.
+{{- else if .App }}
+//! The app opens the engine in the background, retrying until its database
+//! answers, and defines and publishes the database's engine document as
+//! the API's server does, under the engine's lock, writing nothing when the
+//! live versions have its hash. Its main waits for it to open before it
+//! calls the app's `serve`, whose parts hold it (D78). It mounts none of the
+//! engine's routes: the app's program serves what it serves of the engine.
 {{- else }}
 //! The server opens each engine in the background, retrying until its
 //! database answers, so it starts while the database is not up yet, as its

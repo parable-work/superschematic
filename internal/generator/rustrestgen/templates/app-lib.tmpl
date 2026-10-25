@@ -1,0 +1,21 @@
+//! The program of app {{ .App.Name }} of {{ .SchemaName }} (D78): the project's own HTTP
+//! program over the API, which a stack runs as a deployable of its own. The
+//! app's entrypoint, which the stack's build writes, builds its parts from
+//! the environment as the API's server builds its own, and calls `serve`.
+//!
+//! superschematic wrote this crate once, as a scaffold, because it was
+//! missing, and never writes it again: it is yours.
+
+use {{ .APICrateIdent }}::apps::{{ .App.Parts }};
+
+/// Serves the app on `parts.addr` until it stops, with the API's Deps and
+/// implementations{{ if .AppsEngine }}, and its engine{{ end }}, in `parts`. Return when the process
+/// should exit: an error fails it.
+///
+/// It serves nothing yet, and fails, saying so.
+pub async fn serve(parts: {{ .App.Parts }}) -> std::io::Result<()> {
+    Err(std::io::Error::other(format!(
+        "app {{ .App.Name }} of {{ .SchemaName }} does not serve {} yet: write its serve",
+        parts.addr
+    )))
+}

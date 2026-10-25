@@ -373,7 +373,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      RunnerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableRunner,
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			// A Rust API's engine runs its runner in Rust (D58), as its app
+			// does (D78).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerRunner,

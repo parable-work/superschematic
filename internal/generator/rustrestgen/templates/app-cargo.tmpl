@@ -1,0 +1,20 @@
+# The program of app {{ .App.Name }} of the {{ .SchemaName }} API (D78).
+#
+# superschematic wrote this crate once, as a scaffold, because it was
+# missing, and never writes it again: it is yours, and so is its name. Each
+# build of a stack copies it into the output root's impl/, with its path
+# dependencies re-based there, and the app's entrypoint depends on that copy
+# and calls its `serve` with the app's parts.
+[package]
+name = "{{ .Crate }}"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+# The generated API crate, whose apps::{{ .App.Parts }} `serve` takes.
+[dependencies]
+{{ .CrateName }} = { path = "{{ .APIPath }}" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]
