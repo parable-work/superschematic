@@ -50,7 +50,7 @@ CORE_BIN := bin/superschematic-core
 # cache entries, as they were. release.yml builds with the same two flags.
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
+.PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
         engine-rust-soak engine-archive engine-go engine-link-check engine-servers \
@@ -79,6 +79,16 @@ setup:
 	cd runtime/versiongraph/python && uv sync
 
 build: go-build $(BIN)
+
+# The CLI alone, for a checkout without Rust (D82): bin/superschematic and
+# the migration runner bin/superschematic-migrate, over superscalar's static
+# archive, the one thing the CLI links, which scripts/superscalar-dep.sh
+# --archive builds, or downloads prebuilt where cargo is missing. The
+# migration runner needs no cgo.
+cli:
+	scripts/superscalar-dep.sh --archive >/dev/null
+	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
+	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
 
 $(BIN): FORCE
 	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
