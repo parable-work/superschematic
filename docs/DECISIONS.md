@@ -10141,6 +10141,76 @@ moving Search's every-schema search onto namespace operations; a notifier
 and an agent dispatcher as stack workers; and a conversation UI. The rule is reversible until the first
 release.
 
+## D75. A memory store is a service of the core kind MemoryStore that APIs list in their config, whose schema declares each channel and key it carries, and which holds no fact
+
+Replicas of a server share nothing but their database. A rate limit's
+budget is each replica's own: the HTTP runtimes' default stores are in
+process, and the TypeScript runtime's `RateLimitStore` says that a shared
+budget needs "something shared (Redis, say)" that no project can declare.
+A request that waits for a commit another replica makes polls the
+database. A piece of work that every replica would otherwise do once, such
+as an audit event per window, needs a claim table. Each of these wants a
+store that every replica reaches, that is fast, and whose loss costs a
+sample, never a record.
+
+This entry adds that store. Three rules hold throughout.
+- The store never holds a fact. A channel carries a wake-up or a sample
+  that a replica can lose, and a key holds a counter or a claim that
+  expires. A fact stays in the database, and a waiter that hears a
+  wake-up reads the fact there.
+- The code works without the store. A disabled or unreachable store
+  refuses every call at once, and the caller takes the path it had before
+  the store existed. Readiness never waits for the store.
+- No job queue. Durable work that workers claim and retry is a queue (D53).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A memory store is a service of the core kind `MemoryStore`, with a sentinel, and an API lists the stores it uses in its config, `memoryStores: [ShopCache]`, as it lists `buckets`. Several APIs may share one. Each MemoryStore service in a stack is a deployable of kind `memoryStore`, and the API's server, jobs and workers each get a `memoryStore` edge to it. | A `@memoryStore` decorator on an API, which other APIs could reach only by calling the owner. A store declared in the stack, which no API's generator sees. One implicit store per stack, which gives two APIs with unrelated data one budget of memory and one failure. |
+| The store's own schema declares what it carries. `@channel` or `@key` on an abstract class declares one channel or key, as `@stack` and `@environment` declare on abstract classes in a Stack service: the class is a declaration and no type library emits it. The class's fields are the declaration's parts, in order, each a required scalar field that is not an object, a list or a map. `@channel({ payload: CursorSample })` names a type from a dependency of the store's schema as each message; a channel with no payload is a signal, whose name is the whole message. `@key({ use: "counter" \| "claim", ttlSeconds })` declares a key. | Declarations on empty classes in the API's own schema, which every type generator would then have to skip, and which ties a store that two APIs share to one of them. Parts as a list of names in the decorator, with no types, so a caller formats an id itself. A config-only service like a Bucket, with nowhere to put a part's type or a payload. |
+| A declaration's name is its class's name in kebab case; `name` in the decorator sets it, for a name that must outlive a rename of the class. A name, and each part's value at run time, is one segment: not empty, at most 128 bytes, without `:`, a glob character (`*`, `?`, `[`, `]`), `@` or a control character. A string part whose value breaks the rule is refused at the call, not escaped. | Escaping a part, which makes the names a reviewer reads differ from the values a caller passed. Free names, under which `a:b` and a part `b` of `a` are one key. |
+| Every key expires. A key sets exactly one of `ttlSeconds`, its TTL from the write that creates it, and `maxTtlSeconds`, the longest TTL a call may give it, for a key whose life depends on the call, such as a rate limit's window. Both are from 1 second to 7 days. A channel has neither. The verification pass refuses a key with neither, a channel with either, a payload type that is `@strictJSON`, and a part that is not a required scalar. | A key that lives until it is deleted, which makes the store hold a fact. A default TTL, which a reader of the declaration cannot see. |
+| A counter counts (`Increment`, which sets the TTL on the write that creates the key). A claim lets one caller do a piece of work once (`Claim`, a set-if-absent with the TTL, and `Delete` to give it back). A message is at most 64 KiB encoded. A channel's generated decoder ignores keys its payload type does not declare, at every depth, so replicas of two releases share a channel while a deploy rolls. | Get and set of a value, which is a cache of facts with its own invalidation, and the start of the store holding one. Lists, sets and streams, which no use above needs; each can be a `use` of its own later. |
+| A full name is `<store>:<declaration>`, then `:<part>` for each part. In a member of a parameterized environment it is `<store>@<member>:<declaration>…`. The store's name comes first, so stores that share one server locally, where channels belong to no database, do not meet. | A name without the store, which two stores on `stack dev`'s one container share. A database number per store, which pub/sub ignores. |
+| The core has no tenant scope. A project that keeps each tenant's data apart registers a check (`registry.RegisterCheck` on kind `MemoryStore`) that requires, for example, a first part that names the tenant, or a decorator of its own that gives the reason a declaration holds none. The inventory lists every declaration's parts, so a reviewer sees each scope. | A core `scope: "tenant" \| { global: reason }`, which names a tenant the core does not have: the engine's namespace is the closest, and a store's user need not be the engine. |
+| Each MemoryStore service's build writes typed definitions in each language its outputs name, and `inventory.json`: each declaration's symbol, kind, name pattern, parts with their scalars, payload or signal, TTL or maximum, and owning file. A definition's `For` takes the parts as typed arguments, in order, so a caller never formats a name: Go `shopcache.StockChanged.For(productID)`, TypeScript `shopCache.stockChanged.for(productId)`, Rust `shop_cache::STOCK_CHANGED.for_(product_id)`. A key with `maxTtlSeconds` has `ForTTL` instead, which refuses a TTL above the maximum. | Untyped definitions that a caller builds from strings. A definition per API, which writes a shared store's definitions twice. |
+| A memory store edge derives a field holding how to reach the store, `{SERVICE}_MEMORY_STORE` (`[derived_fields] memory_store`, `ir.MemoryStoreConnection`): the URL (`rediss://` on gcp, `redis://` locally), the server's CA in PEM when it has one, the authentication (`iam` or `none`), and the member's name when there is one. It holds no credential. An unset field is a disabled store. The Go, TypeScript and Rust runtimes read it, held to one encoding by the shared vectors (D51). | An AUTH string in the field, or in a secret the deploy writes, which breaks the rule that only `stack secrets set` writes a secret's value (D45). A URL and a CA in two fields, which can disagree. |
+| `Deps` gains one field per listed store, the runtime's `MemoryStore`: `Available`, a channel's `Publish` and `Subscribe`, and a key's `Increment`, `Claim` and `Delete`, all through the generated definitions. Open never fails for a store that is down: it pings once within one second and reconnects in the background with jittered backoff, and `Available` follows a health ping. While the store is unavailable, every call returns `ErrUnavailable` at once; one retry covers a stale pooled connection. A process has one subscriber connection per store, and one handler per channel, which wakes every local waiter. The runtime logs no URL and no part, and its metrics (`memorystore.connection.up`, publishes, receives, decode failures and key operations) carry the declaration's name alone. | A Redis client in `Deps`, whose commands let a caller write a key with no TTL. A store that blocks start-up until it connects, under which an outage of the store stops every deploy. Failing calls only after a timeout, which holds every request for its length while the store is down. |
+| The Redis client is linked only into a workload whose APIs list a store, as the GCS client is (D54, amended): go-redis in Go, the `redis` crate in Rust, and a client for TypeScript that subscribes, takes a token per connection and runs on Bun, chosen when the TypeScript runtime is built. Each runtime also has an in-process implementation for tests. The client sends no `CLIENT` command and asks for no maintenance notifications, which managed servers refuse. | One client per language that every generated module requires. A client that names its connection, which a managed server's refusal of `CLIENT SETNAME` turns into a failed connection. |
+| Waiting for another replica's commit takes one pattern. The replica that commits publishes on a channel whose parts name the row, after the commit. The waiter subscribes before it reads the row, reads it once for each wake-up, still reads it on a slow poll since a message can be lost, and polls as before while the store is unavailable. | A message that carries the row, which a waiter would trust over the database. Subscribing after the read, which misses a commit between the two. |
+| An API's config may name `rateLimitStore: ShopCache`, which adds the edge as listing it does. Its `@rateLimit` routes then count in the store, in each language: the sliding window that the Go runtime's httprate counts in process (the previous minute's count weighted by the part of it still in the window, plus this minute's), over two counter keys per operation, minute and client that the core declares in the store as `rate-limit`. The client's key is a SHA-256 in hex, so an IP address is not a part and not in the store. While the store is unavailable, each replica limits with its in-process store, as today. | A fixed window, which admits twice the limit across a window's edge. A token bucket, which needs a script on the server for each take, and is not what httprate's `LimitCounter`, the seam the Go runtime would plug a shared counter into, counts. The in-process token buckets of the TypeScript and Rust runtimes stay their defaults. |
+| On gcp a store is a `gcp:memorystore/instance:Instance` of Memorystore for Valkey, cluster mode disabled, one shard, with transit encryption `SERVER_AUTHENTICATION` and authorization `IAM_AUTH`, named after the project, the stack and the store. Its node type and replica count are gcp settings of its element, `SHARED_CORE_NANO` and one replica unless set. A workload reaches it through the environment's network (Direct VPC egress) and a Private Service Connect endpoint the instance creates, which needs a service connection policy for Memorystore on that network in the region. The connector grants the workload's account `roles/memorystore.dbConnectionUser` on the instance, and each new connection authenticates with that account's access token. The field's CA is the instance's managed server CA. Bootstrap enables the Memorystore and Network Connectivity APIs and gives `deployer` the roles to create both. | Memorystore for Redis with an AUTH string, which needs a secret that the deploy writes, and a password rotation that nothing performs. Memorystore for Redis Cluster, whose cluster client a single shard does not need. A store with no TLS, since a rate limit's key names a client. |
+| A member of a parameterized environment shares its parent's instance, and its names carry its own name. Its destroy deletes nothing: every key expires. | An instance per member, as a bucket is (D54), which costs an instance's hours for each preview. |
+| `stack dev` runs Valkey in a container of its own, one per environment, named for the checkout like the other containers (D30, amended), at the engine version the gcp platform pins, with no persistence and no TLS. `--remove-data` has nothing to remove. A test that needs a real server reads `SUPERSCHEMATIC_TEST_MEMORY_STORE`, which must name a loopback host and a database other than 0, so a test never touches the keys of a running `stack dev`. | A container per store, which is the same server several times. Running tests against whatever `REDIS_URL` names. |
+| An environment can run without a store: `settings: [{ of: ShopCache, enabled: false }]` creates nothing and leaves the field unset, so every workload opens a disabled store and takes its fallback paths. A platform that cannot realize a store refuses it unless the environment turns it off (D64, amended). The cloudflare target has no store platform, so it refuses a stack that places a store there with it on. | Deploying the store as disabled wherever a target has no platform for it, which turns a missing piece of infrastructure into a quiet change of behavior. A KV namespace or a Durable Object on cloudflare, whose counts and claims are not the store's (KV has no atomic increment), and which is a platform of its own to design. |
+| The engine does not use the store. Its runner and sweepers keep the database's polls and locks. | Waking the runner through a channel now. The engine runs on SQLite and on D1 too, where no store is, and its guarantees come from its database; an amendment can add a wake-up beside the poll once a store is built. |
+
+Status: proposed. Nothing is built.
+
+The build is three pull requests:
+1. The core, Go and the local target: the `MemoryStore` kind, its
+   sentinel and `superschematic new service --kind MemoryStore`; the
+   decorators in a `@superschematic/memory-store` package; the
+   verification rules; `memoryStores` and `rateLimitStore` on an API's
+   config; the deployable, the edge and `ir.MemoryStoreConnection`; the
+   Go runtime, its definitions generator and the inventory; the rate
+   limit's shared counter through httprate's `LimitCounter`; `stack dev`'s
+   Valkey container; `enabled: false`; and acme-shop, where `shop-api`
+   lists a store, counts its rate limits there, and wakes a waiter on
+   another replica.
+2. The TypeScript and Rust runtimes and generators, held to the Go ones
+   by the shared vectors, and the rate limit's shared store in each.
+3. The `gcp.memorystore` platform, its connector and network nodes, the
+   bootstrap roles and a policy rule that refuses a store without
+   transit encryption; then a live run.
+
+To check on the first live run: that Cloud Run reaches the Private
+Service Connect endpoint through the environment's egress, that a
+`SHARED_CORE_NANO` node accepts cluster mode disabled with one replica,
+and whether a long-lived connection, such as the subscriber's, must
+authenticate again before its access token expires.
+
+The rule is reversible until the first release.
+
 ## D74. A stack runs the derivers its engine types need, as deployables of their own over the project's typed answers
 
 D73 left a gap: nothing in a stack ran a deriver, so a type that composed
