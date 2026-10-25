@@ -9,7 +9,7 @@ import { Validate, behavior } from "@superschematic/schema";
     { from: "published", to: "archived" },
   ],
 })
-@behavior("Comments")
+@behavior("Comments", { editWindowMs: 900000, moderatePermission: "documents.moderate" })
 @behavior("Revisions", { review: { permission: "documents.review" } })
 export abstract class Document {
   title: Validate<string, { maxLength: 200 }>;

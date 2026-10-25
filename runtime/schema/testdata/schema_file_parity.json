@@ -951,11 +951,11 @@
       "error": "a missing required core behavior config: type \"Document\": behavior Workflow config: jsonschema validation failed with 'superschematic://behaviors/Workflow/config.json#'\n- at '': missing properties 'states', 'transitions'"
     },
     {
-      "name": "a config for a core behavior that takes none",
+      "name": "a core behavior config with a key its schema lacks",
       "registry": "core",
       "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [{\"name\": \"Comments\", \"config\": {\"threads\": true}}]}",
       "accept": false,
-      "error": "a config for a core behavior that takes none: type \"Document\": behavior Comments takes no config"
+      "error": "a core behavior config with a key its schema lacks: type \"Document\": behavior Comments config: jsonschema validation failed with 'superschematic://behaviors/Comments/config.json#'\n- at '': additional properties 'threads' not allowed"
     },
     {
       "name": "an unregistered behavior",

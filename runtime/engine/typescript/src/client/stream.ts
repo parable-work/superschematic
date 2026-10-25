@@ -35,6 +35,8 @@ export interface EventFilters {
   readonly behaviors?: readonly string[];
   /** No operation events of operations by these names (`heartbeat`). */
   readonly exclude?: readonly string[];
+  /** `false` drops beside operations' events (D77); `true` keeps only them. */
+  readonly beside?: boolean;
 }
 
 export interface SubscribeOptions extends EventFilters, CallOptions {
@@ -178,6 +180,9 @@ export function eventQuery(filters: EventFilters, after: number | 'head' | undef
   }
   if (filters.instanceId !== undefined) {
     query.push(['instanceId', filters.instanceId]);
+  }
+  if (filters.beside !== undefined) {
+    query.push(['beside', String(filters.beside)]);
   }
   for (const [name, values] of [
     ['kind', filters.kinds],

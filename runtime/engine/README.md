@@ -329,7 +329,7 @@ CREATE TABLE engine_events (
   namespace   TEXT    NOT NULL,
   schema      TEXT    NOT NULL,
   instance_id TEXT,                               -- null for a publish and a define
-  seq         INTEGER,                            -- per instance; null for a publish and a define
+  seq         INTEGER,                            -- per instance; null for a publish, a define and a beside operation's (migration 13)
   version     INTEGER,                            -- null for a define alone
   actor       TEXT    NOT NULL,
   at          INTEGER NOT NULL,
@@ -345,10 +345,15 @@ CREATE TABLE engine_events (
   -- value store (migration 9); null for none.
   value_refs     TEXT,
   CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
-  CHECK ((instance_id IS NULL) = (seq IS NULL)),
+  CHECK (instance_id IS NOT NULL OR seq IS NULL),
+  CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation'),
   CHECK ((kind = 'define') = (version IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, instance_id, seq)
+  WHERE instance_id IS NOT NULL;
+-- One instance's events in log order, its beside events among them
+-- (migration 13).
+CREATE INDEX engine_events_instance_cursor ON engine_events (namespace, schema, instance_id, cursor)
   WHERE instance_id IS NOT NULL;
 CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
 CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
@@ -932,16 +937,23 @@ for a define, the draft's hash and not its document, which the draft
 route serves. A define has no instance, no sequence and no version
 (`null`), since a draft has none; every define appends one, a draft that
 matches the live version included, so a reviewer watching the log learns
-a draft waits to be published. Applying each change in order to the
-create's instance gives the instance as a read returns it. The cursor
-orders the whole log; an instance's sequence runs 1, 2, 3, ... across
-its life, a re-create after a delete included. A delete never removes
-earlier events; only retention does ("Retention").
+a draft waits to be published. An operation beside the instance (D77,
+"Instances and events" under "Behaviors") appends an `operation` event
+of its instance with no sequence (`seq: null`) and `beside: true`, whose
+change is `{ behavior, operation, params, result }`: the operation's
+result in place of a patch, since it changes nothing a read of the
+instance returns; no other event has `beside`. Applying each change but
+a beside one in order to the create's instance gives the instance as a
+read returns it. The cursor orders the whole log; an instance's sequence
+runs 1, 2, 3, ... across its life, a re-create after a delete included,
+and a beside event takes none. A delete never removes earlier events;
+only retention does ("Retention").
 
 `engine.events.read(principal, { namespace, schema, instanceId, after,
-limit, kinds, behaviors, exclude })` returns `{ events, next, more }`:
+limit, kinds, behaviors, exclude, beside })` returns `{ events, next, more }`:
 the events after the cursor `after` in one namespace, optionally one
-schema and one instance, 50 by default and at most 500 scanned per page.
+schema and one instance, in cursor order (one instance's beside events
+among the rest), 50 by default and at most 500 scanned per page.
 Read on from `next`. Without a schema filter, events of schemas the
 principal may not read are skipped, so a page can hold fewer events than
 its limit while `more` is true. `engine.events.head()` is the cursor of
@@ -961,6 +973,10 @@ it, is `cursor_expired` ("Retention").
   kept when every filter given keeps it. A name that is not an event
   kind, a behavior name or an operation name, and an empty `kinds` or
   `behaviors`, which would keep nothing, are `invalid_argument`.
+- `beside: false` drops the events of operations beside their instance,
+  for a consumer that rebuilds instances from the log, and `beside: true`
+  keeps only them; a value that is not a boolean is `invalid_argument`.
+  It combines with the others as they do.
 - The filters run on the page a read scans, as the access check does: a
   page still scans at most its limit, and `next` is past every event it
   scanned, kept or dropped. A reader that goes on from `next` sees no
@@ -991,7 +1007,9 @@ a field of its `patch`, whose JSON is longer than the threshold holds a
 ref, `{ "$value": <hash>, "bytes": <n> }`, and the event lists the JSON
 pointers to them in `valueRefs` (`["/data/result"]`,
 `["/params/result", "/patch/data/result"]`,
-`["/behaviors/test.Shelf/seen"]`). A read returns the event as the
+`["/behaviors/test.Shelf/seen"]`); a beside operation's event keeps a
+long member of its `params` and a long `result` so (`["/params/body",
+"/result"]`). A read returns the event as the
 log keeps it, refs and all, and so does the stream; a client reads a
 value by its hash. A reaction gets the event the same way, and its
 `before()` puts the values back. An event written before migration 9
@@ -1214,10 +1232,11 @@ from, since another process's runner pruned meanwhile.
 - **A reaction reads on as before.** Each pruned instance event folds
   into its instance's base (`engine_event_bases`): the instance as the
   log had it after the event, behaviors' fields included, or none after
-  a delete, and the event's sequence. `before()` folds from the base and
-  the events still there, so it answers for every event a subscription
-  has yet to handle; for an event retention has pruned it is
-  `cursor_expired`. A create after a delete takes the sequence after the
+  a delete, and the event's sequence; a beside operation's event (D77)
+  changes nothing a base holds and folds into none. `before()` folds
+  from the base and the events still there, so it answers for every
+  event a subscription has yet to handle; for an event retention has
+  pruned it is `cursor_expired`. A create after a delete takes the sequence after the
   base's, so an instance's sequences never repeat and an old `If-Match`
   never matches a new life.
 - **Values go with their events.** A pruned event drops its value
@@ -1634,7 +1653,11 @@ has no `run`; a declaration of the wrong shape, with an operation named
 that does not compile; malformed migrations, columns or indexes, an index
 over a column no migration up to its own adds included; a filter on a
 field it does not declare, or a member of one whose name is not `<field>.<member>` with a camelCase member, or a column its migrations do not add; a veto code that is
-not lowercase snake case of at most 64 characters, or is listed twice.
+not lowercase snake case of at most 64 characters, or is listed twice;
+an operation beside the instance that does not write or has `scope:
+"schema"`, `"log": false` on an operation that is not beside, and a
+behavior with a beside operation and a field that is not volatile
+("Instances and events").
 An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
 same declared parameters and no alias reaches one and not the other; a
@@ -1909,6 +1932,10 @@ engine.instances.update(me, 'Item', id, { title: 'Desk' }, { preconditions: { 'a
   `update()` it makes, whose own guard request carries none.
 - A read-only operation's guards get them too; a patch that changes
   nothing asks no guard. A precondition fences a write.
+- A beside operation ("Instances and events") asks only its own
+  behavior's guard, so an entry for another behavior, which no guard
+  would read, is a `PreconditionsError` (`invalid_argument`) with its
+  issue at `/<Behavior>`, rather than a fence that holds nothing.
 
 ### Contexts
 
@@ -1948,7 +1975,10 @@ A context (initialize, afterChange, an operation) adds `columns.set()`,
 In a read-only operation `set`, `run`, `add`, `remove`, `stow` and
 `release` refuse, `call` and `invoke` reach only read-only operations,
 and `create` refuses; after a delete, `columns.get()` returns what the
-instance had and `set`, `add`, `remove`, `stow` and `call` refuse. There is no handle on the instances table beyond the
+instance had and `set`, `add`, `remove`, `stow` and `call` refuse. In a
+beside operation ("Instances and events") `add`, `remove` and `create`
+refuse, and `call` and `invoke` reach only beside and read-only
+operations. There is no handle on the instances table beyond the
 read-only relation, the event log, another behavior's storage or the
 connection: a status one behavior owns changes at another's request only
 through its operations, whose guards run, on this instance or another.
@@ -1967,8 +1997,9 @@ the call changed nothing:
   asked with `{ kind: 'update', patch, after, caller }`. A patch that changes nothing writes nothing.
   The access policy is not asked again, and no event is appended: the
   operation's event carries the change in its `patch`, and `afterChange`
-  gets `before`. A read-only operation's `update` refuses, and a called
-  operation's update rolls back with its savepoint. `data` reads the
+  gets `before`. A read-only operation's `update` refuses, and so does a
+  beside one's, with its call; a called operation's update rolls back
+  with its savepoint. `data` reads the
   fields as the operation's updates leave them.
 - `update(patch, { attribution })` (in Rust, `update_attributed(patch,
   attribution)`) also says where the values of the fields it writes came
@@ -2235,7 +2266,9 @@ instances it creates, each with its own event. A writing one's `sql`
 also writes the behavior's own tables (`sql.run`, on `sql.table(name)`),
 in the call's transaction, under the rule a schedule's writes keep
 ("Reactions and schedules"): `Search`'s `settleEmbeddings` stores vectors
-this way. A read-only one's `run` refuses (`BehaviorError`).
+this way. A read-only one's `run` refuses (`BehaviorError`). An
+operation beside the instance ("Instances and events") runs on an
+instance, and one declared with both is refused.
 
 ```ts
 engine.instances.invokeSchema(me, 'Order', 'summarize', { since: 0 });   // a schema-level operation of Order
@@ -2274,7 +2307,8 @@ export const ledger = defineBehavior<{ watch?: string[] }>({
 
 `react(context, event)` gets each committed instance event of a schema
 that composes the behavior, and of the schemas `watches(config, schema)`
-names for it, one at a time, in log order, per namespace; `event` is the
+names for it, one at a time, in log order, per namespace, beside
+operations' events among them ("Instances and events"); `event` is the
 event as `engine.events.read` returns it, with its `cause` when the
 runner's work wrote it. A schedule's `run(context)` runs once an
 interval on each schema that composes the behavior, in each namespace.
@@ -2497,7 +2531,8 @@ A field its declaration marks `"volatile": true` can move without an
 event of its own instance: the engine computes it at the read, from
 other instances, the clock or the config. The core's are
 `Dependencies.blocked`, `Links.targets` (whose `latest` and `stale` read
-the target), `Rollups.values`, and the work queue's `Lease.active` and
+the target), `Rollups.values`, Comments' three (which its operations
+beside the instance move), and the work queue's `Lease.active` and
 `Budget.meters` (a daily meter starts again at a read). The log holds
 such a field as the instance's last event found it, the describe
 document marks it, and `Reactions`' `changes`, which hears a field
@@ -2525,6 +2560,50 @@ changed in its behavior's own tables. An `update`, `delete` or
 operation that expects the sequence from before the operation is refused
 (`seq_mismatch`) before any guard is asked. A read-only operation checks
 `expectedSeq` against the sequence it reads and moves nothing.
+
+An operation whose declaration says `"beside": true` runs beside the
+instance (D77): a conversation's post, a reaction to a message, a read
+marker, which should not turn a busy instance's edits into 412s, nor
+wait on a lease another principal holds. It writes only its behavior's
+own columns and tables, so a behavior that declares one declares every
+field volatile, computed at the read from them; registration refuses a
+beside operation that does not write or has `scope: "schema"`, and a
+behavior that declares one and a field that is not volatile.
+
+```json
+{ "name": "post", "writes": true, "beside": true, "paramsSchema": { ... }, "resultSchema": { ... } }
+{ "name": "markRead", "writes": true, "beside": true, "log": false, "paramsSchema": { ... }, "resultSchema": true }
+```
+
+- The policy is asked `write` with its name, and its parameters and its
+  own behavior's preconditions are checked, as any writing operation's
+  are. Its own behavior's guard is asked, with that behavior's entry of
+  the preconditions; no other behavior's guard and no `guardReference`
+  is, since it changes nothing they protect. An active `Lease` on the
+  instance lets any principal's beside operation through.
+- It takes no sequence: the instance keeps its `seq`, so its `ETag`, and
+  its `updatedAt` and `updatedBy`. `expectedSeq` is checked against the
+  sequence it reads, as a read-only operation's is, and `operate` returns
+  that sequence. No `afterChange` and no `afterReferenceChange` runs.
+- It appends an `operation` event with `seq: null` and `beside: true`,
+  whose change is `{ behavior, operation, params, result }`, the result
+  in place of a patch ("The event log"). Replay, `before()` and retention's bases skip
+  it, and `Reactions`' rules, which hear fields, hear nothing of it; a
+  behavior's own `react` gets it with the rest, and `before()` of it is
+  the instance its sequenced events before it leave. `beside: false` in
+  a read of the log or the stream drops it.
+- `"log": false`, which only a beside operation may declare, appends no
+  event at all, for a write only its writer reads back. `unchanged()`
+  keeps its meaning: a beside call that says it changed nothing appends
+  no event either.
+- Its handler that reaches past its behavior's own storage, with
+  `update()`, a `call()` or `instances.invoke` of a writing operation
+  that is not beside, an `instances.invokeSchema` of a writing one,
+  `instances.create`, or `references.add` or `remove`, is refused with a
+  `BehaviorError`, and so is the whole call when the handler returns,
+  even one that went on past the refusal, which rolls it back. It may
+  call another beside operation and a read-only one, and the call
+  appends its one event.
 
 A write that changes nothing writes nothing (D16, amended). An update
 whose patch changes nothing asks no guard and appends nothing. A writing
@@ -2771,19 +2850,57 @@ back.
 
 #### Comments
 
-Comments on the instance, each a reply to one of its comments or not.
+A conversation on the instance (D77): messages, each top-level or a reply
+in the thread of a top-level one, one level deep, which their authors
+edit and delete, others react to and pin, and whose threads are resolved
+and reopened. `rust/behaviors/src/comments-contract.md` is the contract
+the behavior, the generators and the corpora implement: every record,
+parameter, check and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | none |
-| Fields | `commentCount` |
-| Operations | `comment({ body, replyTo? })` -> the comment, writes; `listComments({ limit?, cursor? })` -> a page, read-only |
-| Guards | none; `comment`'s `replyTo` must name a comment of the same instance (`invalid_argument`), and `body` must hold a non-space character, at most 10000 code points |
-| Events | `comment`'s operation event, `patch: { behaviors: { Comments: { commentCount } } }` |
-| `configChange` | added to a schema with instances, which start with none; not removed from one, since their comments would stay behind |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent), `editWindowMs` (at least 1000; an author's edit after it is refused), `blocks` (the kinds a post or an edit may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit and delete another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent) |
+| Fields | all volatile: `messages`, the posted messages, top-level and replies; `lastMessageAt`, when the latest posted one was posted, absent while there is none; `threads`, `{ open, resolved }`, the posted top-level messages |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `not_author`, `edit_window_passed`, `too_many_edits`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post appends none, and the reads none |
+| `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
-A comment is `{ id, replyTo?, body, createdBy, createdAt }`: the caller's
-subject and the engine clock's time.
+A message's record is `{ id, thread?, quotes?, author, via?, state, body,
+blocks, mentions, reactions, createdAt, editedAt?, edits, pinned }`, and
+a top-level message's adds `replies`, `lastReplyAt?`, `participants` (the
+latest ten authors of its thread's posted messages) and `resolved?: { by,
+at }`. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
+caller's subject and `via` the calling service's deployable (D37); the
+times are the engine clock's. `reactions` holds each emoji's `count` and
+whether the caller is one of them (`mine`); in an event it is the
+actor's. A block is a reference to an instance the caller may read
+(`{ kind: "ref", schema, id }`) or an action's progress (`{ kind:
+"action", title, status, data? }`); `mentions` are subjects, recorded and
+nothing more in batch 1.
+
+`clientId` makes a post safe to retry: a post with one the caller has
+used returns that message as it is now and writes nothing. `edit` keeps
+what it does not give, and `listEdits` reads what each edit replaced.
+`deleteMessage` empties a message and keeps its place: its id, its
+author, its thread and its replies stay. `purge`, which needs
+`moderatePermission`, removes a message for good, a top-level one with
+its whole thread. A post into a resolved thread leaves it resolved.
+
+`listMessages` pages the top-level messages, or with `thread` that
+thread's replies and its top-level message as `root`, always in
+ascending id order: with no anchor the latest page, `before` an older
+one, `after` a newer one, and `around` a page about one message. `before`
+and `after` in the result are the anchors of the pages either side, null
+at an end.
+
+Its storage is migration 2 (`conversation`): `comment_messages`,
+`comment_edits`, `comment_reactions` and `comment_conversations`, the
+last holding each instance's counters and the counts the fields read
+beside the instance column `count`. The migration moves version 1's
+comments, a chain of replies, into threads one level deep: a comment's
+thread is the root of its chain, and it quotes the comment it replied to
+when that was a reply.
 
 #### Revisions
 
@@ -3407,18 +3524,18 @@ or moved that link here while its status is one: a later change that
 moves neither, an update say, does not set it off again.
 
 `changes` hears a field of the instance itself move, its own or a
-behavior's, by the field's qualified name (`Comments.commentCount`,
+behavior's, by the field's qualified name (`Revisions.pendingProposals`,
 `acme.Rating.count`), with a member path after it for a field whose
 value is an object (`Lease.ended.reason`): the behavior is the longest of
 the type's behavior names that prefixes it. A rule on `Workflow.status`
 with `to` hears what an `enters` rule does, and one with `from` hears a
 state left. A ticket escalated when its priority turns urgent, and
-triaged at its first comment:
+triaged at its first proposal:
 
 ```json
 { "name": "Reactions", "config": { "rules": [
     { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
-    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+    { "when": { "changes": { "field": "Revisions.pendingProposals", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
 ```
 
 - A create moves each field it gives from absent, so `to` fires on a
@@ -4231,7 +4348,7 @@ the engine does not raise.
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | POST | `/namespaces/{namespace}/search` | `engine.search`, body: its parameters | 200, `{items, next}`, the hits of every schema that composes Search ("Search", "Across schemas") |
-| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=&beside=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
 | GET | `/namespaces/{namespace}/values/{hash}` | `values.get` | 200, `{hash, bytes, value}`, a value of the value store a schema the caller may read references ("The value store") |
 | GET | `/behaviors` | `tools.listBehaviors` | 200, a summary of each behavior the engine runs ("The behavior catalog") |
 | GET | `/behaviors/{name}` | `tools.describeBehavior` | 200, the behavior's document |
@@ -4441,7 +4558,9 @@ only that the instance exist; a weak tag never matches. An instance that does no
 `If-Match` says: RFC 9110 evaluates a precondition only where the request
 would otherwise succeed. A writing behavior operation moves `seq` too
 ("Instances and events" under "Behaviors"), so a tag read before it no
-longer matches, unless it changed nothing and said so.
+longer matches, unless it changed nothing and said so, or runs beside
+the instance (D77): its POST checks `If-Match` as a read-only
+operation's does and answers the `ETag` the instance had.
 
 `If-Match` cannot hold across writes that move `seq` while a caller
 works, a lease's heartbeats say. What a caller assumes of one behavior
@@ -4481,7 +4600,8 @@ data: {"cursor":41}
 - The stream starts after `Last-Event-ID`, which a reconnecting
   `EventSource` sends, else after `after` (a cursor, or `head` for no
   replay), else at the start of the log. `schema`, `instanceId`, `kind`,
-  `behavior` and `exclude` filter as on the JSON route; `limit` applies
+  `behavior`, `exclude` and `beside` (`true` or `false`) filter as on
+  the JSON route; `limit` applies
   to the JSON route only. With neither, or from 0, it replays from the
   namespace's floor ("Retention"). Any other start before the floor is
   the 410 `cursor_expired` problem, so a client knows to start again
@@ -4901,7 +5021,7 @@ module of its own (in `rust/behaviors` and
 | Behavior | What it says |
 | --- | --- |
 | `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; that `transition` sets `enteredAt`, create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
-| `Comments` | the thread; `comment` and `listComments` |
+| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
 | `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
 | `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |
@@ -4941,7 +5061,9 @@ process. The catalog serves them:
   `vetoes` as lists, empty when the declaration has none, and each
   operation's `scope`, `writes` and invocation policy, the declaration's
   or the default, under the policy's key after `writes`, as the describe
-  document writes it (D11). `configSchema`, `createParamsSchema` and
+  document writes it (D11); an operation beside the instance has
+  `"beside": true` after `writes`, and `"log": false` when it appends no
+  event (D77). `configSchema`, `createParamsSchema` and
   `preconditionSchema` are as declared, and absent when the behavior
   takes none. A name the engine does not run is `not_found`; one that is
   not a behavior name, `invalid_argument`.

@@ -9890,6 +9890,257 @@ linked instances, a stack worker that runs a deriver, and a check of
 sensitive fields as inputs. The rule is reversible until the first
 release.
 
+## D76. The agent skill lives in this repository, beside the compiler it describes
+
+The skill a coding agent reads to build *with* superschematic was kept in
+a repository of its own, on the reasoning that this one is for building
+superschematic, not using it. The two change together: D71 and D72 added
+the commands the skill's loop runs, and a skill released apart from them
+names commands its reader's binary lacks, or misses ones it has (the
+separate copy never learned `check`). The README now presents
+superschematic as the compiler a coding agent writes schemas for, and
+points its reader at the skill.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The skill is `agent/skills/superschematic/SKILL.md`, in a Claude Code plugin rooted at `agent/` (`agent/.claude-plugin/plugin.json`), and the repository root's `.claude-plugin/marketplace.json` publishes it, so `/plugin marketplace add parable-work/superschematic` installs it. Any agent that reads Agent Skills can copy the directory instead. | A repository of its own, which releases apart from the commands it names. `.claude/skills/` in this repository, which every agent working on superschematic itself would load. |
+| A pull request that changes a command the skill names (`init`, `new service`, `check`, `build`, `catalog`, `stack`, `migrate plan`) changes `SKILL.md` with it. | A periodic sync, which leaves the skill behind between syncs. |
+| The skill still holds no reference tables; it points at `superschematic catalog`, which prints them from the binary's registry, extensions included. | Tables copied into the skill, which drift and do not know a project's extensions. |
+
+Status: built. `agent/README.md` says how to install and change it.
+
+## D77. Comments is a conversation: threads, edits, reactions, mentions and streamed replies, over four engine primitives
+
+Comments (D16) is a list: `comment({ body, replyTo? })` adds a numbered
+comment to an instance, `listComments` pages through them, and
+`commentCount` counts them. Any type can compose it, which is what makes
+it worth more than any other behavior: a ticket, a change under review, a
+concern raised on one, an incident and a document all hold a discussion.
+But people now expect the discussion to work like a chat: threads, edits,
+deletes, reactions, mentions that reach the person or the agent named,
+read state, and an agent's reply that streams in as it is written. A
+project that wanted any of that wrote it again beside the engine, with no
+access policy, no event log and no search.
+
+Four things in the engine stand in the way, apart from what Comments
+itself lacks:
+- Every writing operation moves the instance's `seq` ("Instances and
+  events"), even with an empty patch. A busy thread on a ticket makes
+  every `If-Match` edit of the ticket a 412, and fills the ticket's own
+  sequence with chat.
+- Every writing operation runs the instance's guards. While an agent holds
+  a ticket's `Lease`, Lease vetoes every other principal's writing
+  operation (`held_by_another`), so nobody can comment on the work the
+  agent is doing unless each schema lists `comment` in Lease's `exempt`.
+- Everything that reaches a reader is an event, and every event is kept
+  until retention. Typing, who is looking, and the text of a reply being
+  written are worth nothing a second later, and a streamed reply written
+  as events is hundreds of events for one message.
+- A behavior operation runs on one instance or on one schema. "My
+  mentions" and "what is unread" span every schema in a namespace that
+  composes Comments. Only Search has a read across schemas, and it is
+  Search's own.
+
+And one in the principal: an agent that writes for a person is either the
+person (D37's service with an end user, whose events name the person
+alone) or itself. The message needs to say both: written by the reviewer
+agent, for the person who asked it.
+
+This entry adds four primitives to the engine and rebuilds Comments on
+them. Each primitive is general; Comments is the first behavior to use
+them.
+
+Three rules hold throughout.
+- A conversation is not the instance. Messages, reactions, read markers
+  and drafts live in Comments' tables. Writing them never moves the
+  instance's `seq`, `updatedAt` or `ETag`, never runs the instance's
+  guards, and never changes what a replay of the instance's events
+  rebuilds.
+- What others must see live is an event; what only its writer reads, or
+  what is stale in a second, is not. A post, an edit, a reaction and a
+  resolve append events. A read marker, a follow and a draft's text write
+  only Comments' tables. Typing, viewing and a draft's next chunk are
+  signals, which are never stored.
+- The engine calls nobody. A mention records who should hear of it; a
+  notifier or an agent dispatcher outside the engine claims those
+  deliveries and settles them, as a deriver settles derivations (D73).
+
+### Primitive 1: an operation beside the instance
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior operation's declaration may say `"beside": true`. It writes only its behavior's own tables and its own columns; a handler that calls `update()`, invokes an operation that is not beside, or creates or deletes an instance is a `BehaviorError`, which rolls the call back. | A flag per call, which every caller would have to know to pass. Letting a beside operation write own fields, which would put changes in the log that the instance's replay cannot see. |
+| A beside operation appends an `operation` event with `beside: true` and `seq: null`, whose change is `{ behavior, operation, params, result }`: the operation's result in place of a patch, since it changes nothing a read of the instance returns. The instance keeps its `seq`, its `ETag`, `updatedAt` and `updatedBy`; replay skips the event; `If-Match` is checked as for a read-only operation. | Taking the instance's next sequence, as today, which turns chat into 412s on the instance's edits. A second log for beside events, which every reader and the stream would merge by cursor. |
+| `"log": false` beside `"beside": true` appends no event at all, for a write only its writer reads back: a read marker, a follow, a draft's text. Each is still asked of the access policy and checked against the operation's params. | An event for every read marker, which writes one per message per reader into a log every subscriber scans. |
+| Instance guards do not run for a beside operation: it changes nothing a guard protects. The policy, the params, the behavior's own checks and its preconditions do. So a lease on a ticket does not stop a person commenting on it. | Each schema listing Comments' operations in `Lease.exempt`, and the next behavior with a guard needing the same. |
+| A behavior that declares a beside operation declares every field of its own volatile ("Instances and events"): the engine computes them at the read from the behavior's columns and tables, so no event has to carry their moves. The engine refuses to register a behavior that declares a beside operation and a field that is not volatile. | Checking at runtime whether a beside write moved a field, which the engine cannot see in a behavior's tables. |
+| `events.read` and the stream return beside events with the rest; `beside: false` as a filter drops them, for a consumer that rebuilds instances. Reactions' `changes` cannot hear one, since it moves no field, and a behavior's own `react` can. | Leaving them out of `instanceId` reads, which is where a client watching one ticket's conversation reads. |
+| A beside event is known by what it is, an `operation` of an instance with no `seq`; storage marks nothing. The log's check that an event has a seq exactly when it has an instance becomes two (engine migration 13): no seq without an instance, and an instance without a seq only for an operation. One instance's events are read by cursor, through an index on it, so its beside events come in log order among the rest. | A `beside` column, which says again what the seq already says. |
+| A beside operation's handler may not call `update()`, create an instance, change references, or invoke an operation that writes and is not beside; each is a `BehaviorError` that fails the call, even when the handler catches it. It may call another beside operation or a read-only one, and the outer call appends one event. | Letting the handler catch the refusal and go on, which leaves a call that tried to write the instance looking like one that did not. |
+
+### Primitive 2: signals
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A signal is a message about one instance that the engine delivers to the event streams open on it and does not keep. A behavior declares its signals, `signals: [{ name, paramsSchema, access }]`, `access` being `read` or `write`; the engine checks a signal's data against its schema, at most 4 KB of JSON, and asks the policy `access` with the operation `signal:<name>`. | Ephemeral events in the log with a short retention, which every cursor still has to scan past, and which replay sends to a client that reconnects an hour later. |
+| A caller sends one with `engine.signals.send(principal, { namespace, schema, instanceId, behavior, name, data })`, `POST .../instances/{id}/signals/{behavior}/{name}`. A behavior's operation sends one with `cx.signal(name, data)`, delivered after its call commits and dropped when it rolls back. The engine stamps `from`, the sender's subject, and `at`. | Signals only from operations, which a client's typing indicator would have to call a writing operation for. |
+| A stream opened with `signals=1` receives each signal on an instance its filters keep, which its principal may read, as an `event: signal` message with no `id:`, so `Last-Event-ID` and a reconnect's replay never see it. Without `signals=1` a stream is as it was. | A stream of its own for signals, which a client would open beside the event stream for every conversation it shows. |
+| Delivery is at most once and in no order with the events. On SQLite the in-process watcher carries it; on Postgres a `pg_notify` channel of its own, under that channel's 8000-byte payload limit, which is why a signal holds 4 KB. | A broker (Redis, NATS) beside the database, a dependency every stack would need for a typing indicator. |
+| The engine limits each principal's signals per instance (`signals.perSecond`, 20 when absent), and drops the rest with a 429 to a caller. | No limit, which lets one client fan out to every reader of a busy instance as fast as it can send. |
+
+### Primitive 3: namespace operations
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior operation may declare `scope: "namespace"`. It runs on the behavior's tables across every schema of the namespace that composes the behavior, which its behavior's tables already hold, keyed by schema (each behavior has one key per engine, "Storage"). `engine.behaviors.invoke(principal, behavior, operation, params, { namespace })`, `POST /namespaces/{namespace}/behaviors/{behavior}/operations/{operation}` and an MCP tool per operation call it. | A copy of Search's every-schema search for each behavior that needs one. |
+| Its `sql` has `sql.readable()`, a relation of the schemas that compose the behavior and that the caller may read, asked of the policy once per schema per call; a statement joins it, and a row of a schema the caller may not read never leaves the statement. A schema is skipped, never refused, as Search's every-schema search skips it. | Asking per row, which is a policy call per message in an inbox. Trusting the behavior to filter, which one missed join leaks. |
+| The policy is asked `{ principal, action, namespace, behavior, operation }`, a fourth kind of question beside the schema, namespace and listing ones. `permissionPolicy` allows a read one, whose rows `readable()` filters, and a writing one to a caller holding `<behavior>.<operation>`. A writing one writes only its behavior's tables and appends no event. | A namespace operation that appends events, which belong to no instance. |
+
+### Primitive 4: acting for a subject
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A principal may carry `actingFor: { subject }`: the person an agent or a service works for. The authenticator that admits the caller sets it (over HTTP, from the `Acting-For` header it chooses to honor), and the policy sees it and may refuse it. It adds no permissions: `can()` answers for the principal's own. | D37's service with an end user, whose events name the person as `actor` and lose which agent wrote. Token exchange (RFC 8693), which belongs to the identity provider and which v1 does not have (D37). |
+| An event a principal acting for someone wrote carries `for` beside `actor`; Provenance (D73) records `for` beside `by`; Comments records it on each message. | Writing the person into the agent's subject (`agent:reviewer@alice`), which makes every agent a new principal per person and every lease a new holder. |
+
+### Comments, rebuilt
+
+The behavior keeps its name, so a schema that composes Comments gets the
+conversation when its engine updates. A conversation is every message on
+one instance. A message is top-level or a reply in a thread, Slack's
+shape: a thread is one top-level message and its replies, one level deep,
+and a reply may `quote` another message of the thread.
+
+A message is `{ id, thread?, quotes?, author, for?, via?, state, body,
+blocks, mentions, reactions, createdAt, editedAt?, edits, pinned }`, and
+a top-level one adds `{ replies, lastReplyAt?, participants, resolved? }`.
+`id` is its number on the instance, 1, 2, 3, ..., as a comment's is;
+`via` is the calling service (D37); `state` is `composing`, `posted`,
+`interrupted` or `deleted`; `reactions` is by emoji `{ count, mine }`, as
+the caller reads it; `resolved` is `{ by, at }`.
+
+`body` is Markdown, at most 40000 code points. `blocks` are structured
+parts a client renders beside it, each checked against its kind:
+
+| Block | What it holds |
+|-------|---------------|
+| `code` | `{ repo, path, revision, lines: [from, to], snippet }`: a place in code at a revision, with the text captured when it was posted, so a reader sees it with no repository. `moveAnchor({ message, block, revision, lines })`, with `anchorPermission`, moves it to the same code at a newer revision and records where it was; finding where is a caller's job, a git extension's say, since the engine knows no repository |
+| `ref` | `{ schema, id }`: another instance, which the poster must be able to read when posting; a reader's own read decides whether it opens |
+| `attachment` | `{ uri, name, mediaType, bytes, sha256 }`: a file the deployment stored, in a bucket (D54) say, through an upload route of its own. The engine keeps the description, not the bytes |
+| `action` | `{ title, status, data }`: a card an agent posts for what it did, "ran the tests", `status` one of `running`, `succeeded`, `failed`, `data` at most 8 KB of JSON; an edit moves its status |
+
+Operations, each beside the instance (primitive 1):
+
+| Operation | What it does | Logged |
+|-----------|--------------|--------|
+| `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })` | posts a message, top-level or into `thread`; `clientId`, the caller's key, makes a retry return the message it posted | yes |
+| `begin({ thread?, quotes?, clientId? })` | starts a `composing` message, which holds its place in the thread and shows who is writing | yes |
+| `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }` | no |
+| `finish({ message, body?, blocks?, mentions? })` | posts a composing message, its body the draft when `body` is absent | yes |
+| `edit({ message, body?, blocks?, mentions? })` | its author, or `moderatePermission`, within `editWindowMs` when the config sets one; the text before is kept (`listEdits`) | yes |
+| `deleteMessage({ message })` | its author or `moderatePermission`: the message becomes `deleted`, its body and blocks cleared, its replies kept. Not `delete`, which every schema has | yes |
+| `purge({ message })` | `moderatePermission`: removes the message, its edits and its reactions from the tables; a top-level message's whole thread with it | yes |
+| `react({ message, emoji })`, `unreact({ message, emoji })` | at most 20 emoji on a message, each a name or a character of at most 32 code points | yes |
+| `pin({ message })`, `unpin({ message })` | `pinPermission` | yes |
+| `resolve({ thread })`, `reopen({ thread })` | the thread's author, or `resolvePermission` | yes |
+| `markRead({ upTo })`, `follow({ thread, on })` | the caller's read marker on the conversation, and whether the caller follows a thread; a poster follows each thread it posts in | no |
+| `listMessages({ thread?, around?, before?, after?, limit? })`, `getMessage({ message })`, `listEdits({ message })`, `listReactions({ message, emoji })` | read-only; a page of top-level messages, or a thread's, in either direction or around one message; a composing message's draft to a reader | - |
+
+Signals: `typing` (`{ thread? }`, `read`), `viewing` (`{}`, `read`), sent
+by a client every few seconds while it shows the conversation, and
+`draft`, which only `appendDraft` sends. A client works out who is typing
+and who is looking from the signals of the last few seconds; the engine
+holds no presence for them (the work queue's `Presence` is for a worker,
+durable and swept).
+
+Namespace operations (primitive 3):
+
+| Operation | What it does |
+|-----------|--------------|
+| `inbox({ kinds?, unread?, limit?, cursor? })` | the caller's mentions, the threads it follows that have new replies, and the conversations it has unread messages in, across every schema it may read, newest first |
+| `searchMessages({ query, limit?, cursor? })` | full text over posted messages' bodies, in each dialect's text search as Search's, across every schema the caller may read |
+| `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` | `deliverPermission`: claims deliveries not yet settled, under a token that lapses after `ttlMs`, so two notifiers never send one twice |
+| `settleDeliveries({ token, ids, outcome })` | `deliverPermission`: `sent`, `failed` (tried again until `maxAttempts`) or `dropped` |
+
+A delivery is one row per message and subject that should hear of it:
+each mentioned subject, and each follower of the thread but the author. A
+mention is a subject, as the client resolved it from what was typed: a
+person's, an agent's, or a group's (`role:<name>`), which the notifier
+expands. A deployment runs two claimers: a notifier that claims people's
+deliveries and sends them to chat, mail or a phone, and an agent
+dispatcher that claims `prefix: "agent:"` and puts each in its own work
+queue, from which an agent in a slot takes it and answers with `begin`,
+`appendDraft` and `finish`. A composing message whose author appends
+nothing for `composeTimeoutMs` (60000 when absent) becomes `interrupted`
+on the runner's schedule, its draft kept as its body, so a crashed agent
+leaves what it wrote and no message stuck as writing.
+
+Fields, all volatile (primitive 1): `messages`, the posted messages;
+`lastMessageAt`; `threads`, `{ open, resolved }`; `unread`, the caller's;
+`composing`, the subjects writing now. `commentCount` goes; a type's
+list shows `Comments.messages`.
+
+Config, all optional: `maxBodyLength`; `editWindowMs`; `composeTimeoutMs`;
+`blocks`, the kinds a message may hold (all four when absent);
+`moderatePermission`, `pinPermission`, `resolvePermission`,
+`anchorPermission`, `deliverPermission`; `maxAttempts` for deliveries (5
+when absent). `post` writes, so the policy is asked `write` with the
+operation `post`; a deployment whose readers may talk lets `post` through
+for a caller who may read the type.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A conversation is flat threads, one level, with `quotes` for a reply to a reply. | Replies to replies as a tree, as `replyTo` allows today: no chat people use works that way, and a tree of agents answering each other is unreadable. |
+| One conversation per instance, read by whoever may read the instance. A private discussion is an instance of its own, of a type whose policy is narrower. | An access rule per thread or per message, which puts a policy call in every page of messages. |
+| A logged event carries the message, body included, so a stream is all a client needs to show the conversation live. `purge` removes a message from the tables; the copies in events stay until retention prunes them, which a deployment that must forget sets accordingly. | Events that carry ids alone, which costs every watching client a read per message. Rewriting the log, which nothing in the engine does. |
+| A streamed reply is a composing message, its text written to the tables by unlogged appends and sent as signals; a reader who opens the conversation midway reads the draft so far, then follows the signals from its `offset`. | Each chunk an event, hundreds per reply. Signals alone, which a reader who joins late or misses one cannot catch up from. |
+| A mention, a follow and a delivery are rows; the engine never sends anything. | Reactions or a webhook in the engine, which would hold the namespace's writer while a request goes out (D73's reason, the same). |
+| Attachments are descriptions of files the deployment stores. | The value store, which keeps JSON in the database and is no place for a 20 MB log or a screenshot. |
+| `comment` and `listComments` are replaced by `post` and `listMessages`, and `commentCount` by `messages`; the scenario and HTTP corpora are recorded again. | Keeping the old names beside the new ones before a first release has anything that depends on them. |
+
+Each step below adds the storage it needs as a migration of its own.
+Migration 2 of Comments, the first step's, moves the comments into
+`comment_messages` (a message's `thread`, `quotes`, `state`, `via`,
+`blocks`, `mentions`, `edited_at`, `pinned` and `client_id` beside what a
+comment held) and adds `comment_edits`, `comment_reactions` and
+`comment_conversations`, which holds each conversation's counts: a
+migration has no relation over the instances, so it cannot backfill new
+instance columns, and a volatile field reads its counts from there. A
+comment that exists becomes a posted message: its thread the root of its
+`replyTo` chain, its `quotes` its `replyTo` when that is not the root.
+Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
+`comment_deliveries`, and the acting-for subject as `for_subject`, since
+`for` is reserved in both dialects. Every top-level message is a thread,
+so a comment with no replies can be resolved.
+
+Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
+1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
+   reactions, pins, threads and resolve on it, in the engine, the corpora
+   and the three bindings. Built. The engine's side is
+   `runtime/engine/rust/engine/src/behaviors/execution.rs` (`operate`'s
+   beside branch), `instances/mod.rs` (`run_beside`) and engine migration
+   13; `testkit/tests/behavior_beside.rs` holds it on both databases. A
+   beside operation refuses a precondition entry for any behavior but its
+   own (`invalid_argument`), since no other behavior's guard reads it.
+   Comments is `runtime/engine/rust/behaviors/src/comments/`, held to
+   `comments-contract.md` beside it by `testkit/tests/core_comments.rs`
+   and the TypeScript twin; the corpora are recorded again, and the
+   generators narrow its fields, its config's `blocks` and its records in
+   the typed clients. Deleting an instance keeps its conversation's
+   high-water marks, so a re-created instance never reuses a message id.
+2. Primitive 2, signals, on SQLite and Postgres and in the stream, with
+   `typing`, `viewing` and streamed replies.
+3. Primitive 3, namespace operations, with the inbox, read state and
+   deliveries.
+4. Primitive 4, acting for a subject, in the principal, the events,
+   Provenance and Comments.
+5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
+
+Left: listing a conversation's pinned messages; vectors over messages;
+moving Search's every-schema search onto namespace operations; a notifier
+and an agent dispatcher as stack workers; and a conversation UI. The rule is reversible until the first
+release.
+
 ## D74. A stack runs the derivers its engine types need, as deployables of their own over the project's typed answers
 
 D73 left a gap: nothing in a stack ran a deriver, so a type that composed
@@ -9952,22 +10203,3 @@ Status: built.
 Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
-
-## D76. The agent skill lives in this repository, beside the compiler it describes
-
-The skill a coding agent reads to build *with* superschematic was kept in
-a repository of its own, on the reasoning that this one is for building
-superschematic, not using it. The two change together: D71 and D72 added
-the commands the skill's loop runs, and a skill released apart from them
-names commands its reader's binary lacks, or misses ones it has (the
-separate copy never learned `check`). The README now presents
-superschematic as the compiler a coding agent writes schemas for, and
-points its reader at the skill.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| The skill is `agent/skills/superschematic/SKILL.md`, in a Claude Code plugin rooted at `agent/` (`agent/.claude-plugin/plugin.json`), and the repository root's `.claude-plugin/marketplace.json` publishes it, so `/plugin marketplace add parable-work/superschematic` installs it. Any agent that reads Agent Skills can copy the directory instead. | A repository of its own, which releases apart from the commands it names. `.claude/skills/` in this repository, which every agent working on superschematic itself would load. |
-| A pull request that changes a command the skill names (`init`, `new service`, `check`, `build`, `catalog`, `stack`, `migrate plan`) changes `SKILL.md` with it. | A periodic sync, which leaves the skill behind between syncs. |
-| The skill still holds no reference tables; it points at `superschematic catalog`, which prints them from the binary's registry, extensions included. | Tables copied into the skill, which drift and do not know a project's extensions. |
-
-Status: built. `agent/README.md` says how to install and change it.

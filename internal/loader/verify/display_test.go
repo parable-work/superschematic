@@ -42,7 +42,7 @@ func displaySchema(change func(*ir.TypeDef)) *ir.Schema {
 		Display: &ir.TypeDisplay{
 			Noun:          "Ticket",
 			TitleField:    "title",
-			SummaryFields: []string{"Workflow.status", "Comments.commentCount", "owner"},
+			SummaryFields: []string{"Workflow.status", "Comments.messages", "owner"},
 			States:        map[string]ir.DisplayState{"todo": {Label: "To do"}, "doing": {Label: "Do", ActiveForm: "Doing", Tone: ir.DisplayToneActive}},
 			Transitions:   map[string]map[string]string{"todo": {"doing": "Start"}, "doing": {"done": "Finish"}},
 		},
@@ -103,7 +103,7 @@ func TestDisplaysVerify(t *testing.T) {
 		}},
 		{"states without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = td.Behaviors[1:]
-			td.Display.SummaryFields = []string{"Comments.commentCount"}
+			td.Display.SummaryFields = []string{"Comments.messages"}
 		}, []string{prefix + "states and transitions label a Workflow's; the type does not compose Workflow"}},
 		{"transitions alone without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = nil

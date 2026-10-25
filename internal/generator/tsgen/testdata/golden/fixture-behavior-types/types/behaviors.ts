@@ -191,8 +191,12 @@ export interface TicketBehaviors {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many comments the instance has. */
-    readonly commentCount: number;
+    /** How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted. */
+    readonly messages: number;
+    /** When the latest posted message was posted, in epoch milliseconds; absent while there is none. */
+    readonly lastMessageAt?: number;
+    /** The posted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    readonly threads: { open: number; resolved: number };
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */

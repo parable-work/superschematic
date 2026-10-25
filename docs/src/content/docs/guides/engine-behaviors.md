@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -170,13 +170,19 @@ same.
   A behavior that adds no field, such as `Search` or `Constants`, has
   none.
 - **Volatile fields.** A field the engine computes at a read, from other
-  instances, the clock or the config, moves with no event of its own
-  instance: `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
-  `Lease.active` and `Budget.meters`. Its declaration says
-  `"volatile": true`, and so does the describe document.
+  instances, the clock or the config, or from what operations beside the
+  instance keep, moves with no event of its own instance:
+  `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
+  `Lease.active`, `Budget.meters`, and Comments' `messages`,
+  `lastMessageAt` and `threads`. Its declaration says `"volatile": true`,
+  and so does the describe document.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
-  its behaviors' fields took under `behaviors`.
+  its behaviors' fields took under `behaviors`. An operation beside the
+  instance, such as Comments' `post`, writes only its behavior's own
+  tables: its event has no `seq`, carries `beside: true` and the
+  operation's `result` in place of a patch, and leaves the instance's
+  ETag where it was.
 
 ### In the generated types
 
@@ -1154,13 +1160,13 @@ failed step while the first is still failed; `anyTerminal` would fail it
 again. An `all` over no step sets nothing off, so removing a run's last
 unfinished step completes it only when a passed step is left.
 
-A ticket escalates when its priority turns urgent, and is triaged at its
-first comment:
+A ticket escalates when its priority turns urgent, and is triaged once
+its severity is set:
 
 ```json
 { "name": "Reactions", "config": { "rules": [
     { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
-    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+    { "when": { "changes": { "field": "severity", "from": "unset" } }, "then": { "transition": "triaged" } } ] } }
 ```
 
 A rule reads the move from the event, so an update that gives the
@@ -1190,7 +1196,8 @@ claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
   the status that cycle, are refused when the schema is defined. So is a
   `changes` on a volatile field, one the engine computes at a read from
   other instances, the clock or the config (`Rollups.values`,
-  `Dependencies.blocked`, `Links.targets`), since no event records its
+  `Dependencies.blocked`, `Links.targets`) or that operations beside the
+  instance keep (`Comments.messages`), since no event records its
   moves, and on `Workflow.enteredAt`, which every move of the status
   moves.
 - Rules across instances can chain, a `holds` rule up a tree of tasks

@@ -1992,7 +1992,8 @@ fn behavior_summary(declaration: &BehaviorDeclaration) -> Value {
 }
 
 /// A behavior's document: its declaration with every list present and
-/// each operation's scope, whether it writes and its invocation policy
+/// each operation's scope, whether it writes (and runs beside the instance,
+/// and appends no event, when it does) and its invocation policy
 /// under the policy's key: the tool options' for it, else its
 /// declaration's, else the default.
 fn behavior_document(declaration: &BehaviorDeclaration, options: &ResolvedToolOptions) -> Value {
@@ -2030,6 +2031,14 @@ fn behavior_document(declaration: &BehaviorDeclaration, options: &ResolvedToolOp
                     }
                     entry.insert("scope".into(), Value::from(operation.scope.as_str()));
                     entry.insert("writes".into(), Value::Bool(operation.writes));
+                    // A beside operation says so, and so does one that
+                    // appends no event (D77).
+                    if operation.beside {
+                        entry.insert("beside".into(), Value::Bool(true));
+                    }
+                    if !operation.log {
+                        entry.insert("log".into(), Value::Bool(false));
+                    }
                     entry.insert(
                         policy.key.clone(),
                         Value::from(options.operation_invocation(

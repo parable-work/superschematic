@@ -68,8 +68,20 @@ describe('the describe document', () => {
         ['update', 'Update tickets'],
         ['delete', 'Delete tickets'],
         ['transition', 'tickets: transition'],
-        ['comment', 'tickets: comment'],
-        ['listComments', 'tickets: listComments'],
+        ['post', 'tickets: post'],
+        ['edit', 'tickets: edit'],
+        ['deleteMessage', 'tickets: deleteMessage'],
+        ['purge', 'tickets: purge'],
+        ['react', 'tickets: react'],
+        ['unreact', 'tickets: unreact'],
+        ['pin', 'tickets: pin'],
+        ['unpin', 'tickets: unpin'],
+        ['resolve', 'tickets: resolve'],
+        ['reopen', 'tickets: reopen'],
+        ['listMessages', 'tickets: listMessages'],
+        ['getMessage', 'tickets: getMessage'],
+        ['listEdits', 'tickets: listEdits'],
+        ['listReactions', 'tickets: listReactions'],
       ]
     );
     // Each title is its tool's.
@@ -162,7 +174,7 @@ describe('define holds a display to its type', () => {
 
   test("its summary fields are the type's own fields or its behaviors', by qualified name", () => {
     assert.deepEqual(
-      refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).summaryFields = ['Workflow.status', 'Comments.commentCount', 'status', 'ghost']))),
+      refusals(tickets((ticket) => ((ticket.display as Record<string, unknown>).summaryFields = ['Workflow.status', 'Comments.messages', 'status', 'ghost']))),
       [
         // A behavior's field by its name alone is no own field of the type.
         {
