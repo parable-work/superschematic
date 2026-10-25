@@ -410,10 +410,19 @@ async fn the_approvals_panel_offers_the_caller_their_sign_off() {
         has(&body, &["2 of 2 sign-offs", "<li>cy</li>"]);
         lacks(&body, &[">Sign off</button>", ">Withdraw my sign-off</button>"]);
     }
-    // In the gated state, no sign-off is taken for it.
+    // In the gated state, entered through the gate, the gate was met: its
+    // sign-offs were consumed, so it counts none and takes none. Past it,
+    // in closed, which only approved leads to, it was met too; rejected
+    // skipped it, so its gate still counts.
     let (_, body) = get(&router, "/panels/request?status=approved", Some("cy")).await;
-    has(&body, &["It is in this state, so no sign-off is taken for it."]);
-    lacks(&body, &[">Sign off</button>"]);
+    has(&body, &[r#"<p class="ss-met">Met: it entered Approved with its 2 sign-offs.</p>"#]);
+    lacks(&body, &[">Sign off</button>", "0 of 2 sign-offs", "No one has signed off.", "It is in this state"]);
+    let (_, body) = get(&router, "/panels/request?status=closed", Some("cy")).await;
+    has(&body, &["Met: it passed Approved with its 2 sign-offs."]);
+    lacks(&body, &["0 of 2 sign-offs"]);
+    let (_, body) = get(&router, "/panels/request?status=rejected", Some("cy")).await;
+    has(&body, &["0 of 2 sign-offs"]);
+    lacks(&body, &["Met:"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -629,7 +638,14 @@ async fn the_console_moves_a_request_after_two_sign_offs() {
     assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
     assert_eq!(location.as_deref(), Some(ITEM));
     let (_, body) = get(&router, ITEM, Some("bob")).await;
-    has(&body, &[r#"data-state="approved""#, ">Approved</p>", "Move to", r#"<option value="closed">Closed</option>"#]);
+    has(&body, &[
+        r#"data-state="approved""#,
+        ">Approved</p>",
+        "Move to",
+        r#"<option value="closed">Closed</option>"#,
+        "Met: it entered Approved with its 2 sign-offs.",
+    ]);
+    lacks(&body, &["0 of 2 sign-offs", "<li>bob</li>"]);
 }
 
 // Through the console's own pages: a draft's history and a diff on the
