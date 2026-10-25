@@ -54,6 +54,9 @@ var corpus = []roundtripFixture{
 	// each naming a queue it imports.
 	{name: "fixture-queue-db", dir: tsFixtures + "/fixture-queue-db", native: FormatTS},
 	{name: "fixture-queue-api", dir: tsFixtures + "/fixture-queue-api", native: FormatTS},
+	// An API's @deriver classes (D74), which every form writes as the
+	// schema's derivers, each naming the engine types it imports.
+	{name: "fixture-derived-api", dir: tsFixtures + "/fixture-derived-api", native: FormatTS},
 	// Operation @mcp, @icon and @docs replay keys in the data forms.
 	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both
@@ -503,9 +506,10 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 // their schema kinds, for the generated service configs (the verification
 // pass requires every imported service to be a declared dependency).
 var fixtureDependencyKinds = map[string]ir.SchemaKind{
-	"fixture-db":       ir.SchemaKindDB,
-	"fixture-queue-db": ir.SchemaKindDB,
-	"web-db":           ir.SchemaKindDB,
+	"fixture-db":         ir.SchemaKindDB,
+	"fixture-queue-db":   ir.SchemaKindDB,
+	"fixture-derived-db": ir.SchemaKindDB,
+	"web-db":             ir.SchemaKindDB,
 }
 
 // writeServiceConfig writes the minimal data-form service config, declaring

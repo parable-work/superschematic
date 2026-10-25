@@ -553,6 +553,667 @@
     "enums": null
   },
   {
+    "name": "Request",
+    "behaviors": "RequestBehaviors",
+    "structs": [
+      {
+        "name": "RequestBehaviors",
+        "doc": "RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.",
+        "members": [
+          {
+            "json": "Workflow",
+            "name": "Workflow",
+            "doc": "The fields of Workflow.",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestWorkflow"
+            },
+            "required": true
+          },
+          {
+            "json": "Derived",
+            "name": "Derived",
+            "doc": "The fields of Derived.",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerived"
+            },
+            "required": true
+          },
+          {
+            "json": "Provenance",
+            "name": "Provenance",
+            "doc": "The fields of Provenance.",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenance"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestWorkflow",
+        "doc": "RequestWorkflow holds the fields a Request's Workflow adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "status",
+            "name": "Status",
+            "doc": "The state the instance is in.",
+            "shape": {
+              "kind": "enum",
+              "ref": "RequestState"
+            },
+            "required": true
+          },
+          {
+            "json": "enteredAt",
+            "name": "EnteredAt",
+            "doc": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+            "shape": {
+              "kind": "integer"
+            }
+          }
+        ]
+      },
+      {
+        "name": "RequestDerived",
+        "doc": "RequestDerived holds the fields a Request's Derived adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "fields",
+            "name": "Fields",
+            "doc": "The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerivedFields"
+            },
+            "required": true
+          },
+          {
+            "json": "stale",
+            "name": "Stale",
+            "doc": "The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order.",
+            "shape": {
+              "kind": "array",
+              "elem": {
+                "kind": "string",
+                "values": [
+                  "category",
+                  "summary"
+                ]
+              }
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestDerivedFields",
+        "doc": "RequestDerivedFields types RequestDerived.fields.",
+        "members": [
+          {
+            "json": "category",
+            "name": "Category",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerivedFieldsCategory"
+            }
+          },
+          {
+            "json": "summary",
+            "name": "Summary",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerivedFieldsSummary"
+            }
+          }
+        ]
+      },
+      {
+        "name": "RequestDerivedFieldsCategory",
+        "doc": "RequestDerivedFieldsCategory types RequestDerivedFields.category.",
+        "members": [
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "model",
+            "name": "Model",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "overridden",
+            "name": "Overridden",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerivedFieldsCategoryOverridden"
+            }
+          },
+          {
+            "json": "settledAt",
+            "name": "SettledAt",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "settledBy",
+            "name": "SettledBy",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "sourceHash",
+            "name": "SourceHash",
+            "shape": {
+              "kind": "string"
+            }
+          }
+        ]
+      },
+      {
+        "name": "RequestDerivedFieldsCategoryOverridden",
+        "doc": "RequestDerivedFieldsCategoryOverridden types RequestDerivedFieldsCategory.overridden.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestDerivedFieldsSummary",
+        "doc": "RequestDerivedFieldsSummary types RequestDerivedFields.summary.",
+        "members": [
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "model",
+            "name": "Model",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "overridden",
+            "name": "Overridden",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestDerivedFieldsSummaryOverridden"
+            }
+          },
+          {
+            "json": "settledAt",
+            "name": "SettledAt",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "settledBy",
+            "name": "SettledBy",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "sourceHash",
+            "name": "SourceHash",
+            "shape": {
+              "kind": "string"
+            }
+          }
+        ]
+      },
+      {
+        "name": "RequestDerivedFieldsSummaryOverridden",
+        "doc": "RequestDerivedFieldsSummaryOverridden types RequestDerivedFieldsSummary.overridden.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenance",
+        "doc": "RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.",
+        "members": [
+          {
+            "json": "fields",
+            "name": "Fields",
+            "doc": "By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFields"
+            },
+            "required": true
+          },
+          {
+            "json": "inReview",
+            "name": "InReview",
+            "doc": "Whether any recorded field is proposed. A list filters on it.",
+            "shape": {
+              "kind": "boolean"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFields",
+        "doc": "RequestProvenanceFields types RequestProvenance.fields.",
+        "members": [
+          {
+            "json": "body",
+            "name": "Body",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsBody"
+            }
+          },
+          {
+            "json": "category",
+            "name": "Category",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsCategory"
+            }
+          },
+          {
+            "json": "subject",
+            "name": "Subject",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsSubject"
+            }
+          },
+          {
+            "json": "summary",
+            "name": "Summary",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsSummary"
+            }
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsBody",
+        "doc": "RequestProvenanceFieldsBody types RequestProvenanceFields.body.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "review",
+            "name": "Review",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsBodyReview"
+            }
+          },
+          {
+            "json": "source",
+            "name": "Source",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsBodyReview",
+        "doc": "RequestProvenanceFieldsBodyReview types RequestProvenanceFieldsBody.review.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "state",
+            "name": "State",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "proposed",
+                "accepted",
+                "rejected",
+                "edited"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsCategory",
+        "doc": "RequestProvenanceFieldsCategory types RequestProvenanceFields.category.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "review",
+            "name": "Review",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsCategoryReview"
+            }
+          },
+          {
+            "json": "source",
+            "name": "Source",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsCategoryReview",
+        "doc": "RequestProvenanceFieldsCategoryReview types RequestProvenanceFieldsCategory.review.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "state",
+            "name": "State",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "proposed",
+                "accepted",
+                "rejected",
+                "edited"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsSubject",
+        "doc": "RequestProvenanceFieldsSubject types RequestProvenanceFields.subject.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "review",
+            "name": "Review",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsSubjectReview"
+            }
+          },
+          {
+            "json": "source",
+            "name": "Source",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsSubjectReview",
+        "doc": "RequestProvenanceFieldsSubjectReview types RequestProvenanceFieldsSubject.review.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "state",
+            "name": "State",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "proposed",
+                "accepted",
+                "rejected",
+                "edited"
+              ]
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsSummary",
+        "doc": "RequestProvenanceFieldsSummary types RequestProvenanceFields.summary.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "json": "confidence",
+            "name": "Confidence",
+            "shape": {
+              "kind": "number"
+            }
+          },
+          {
+            "json": "review",
+            "name": "Review",
+            "shape": {
+              "kind": "struct",
+              "ref": "RequestProvenanceFieldsSummaryReview"
+            }
+          },
+          {
+            "json": "source",
+            "name": "Source",
+            "shape": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "RequestProvenanceFieldsSummaryReview",
+        "doc": "RequestProvenanceFieldsSummaryReview types RequestProvenanceFieldsSummary.review.",
+        "members": [
+          {
+            "json": "at",
+            "name": "At",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "by",
+            "name": "By",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
+            "json": "state",
+            "name": "State",
+            "shape": {
+              "kind": "string",
+              "values": [
+                "proposed",
+                "accepted",
+                "rejected",
+                "edited"
+              ]
+            },
+            "required": true
+          }
+        ]
+      }
+    ],
+    "enums": [
+      {
+        "name": "RequestState",
+        "doc": "RequestState is a state of a Request's Workflow.",
+        "members": [
+          {
+            "name": "New",
+            "value": "new"
+          },
+          {
+            "name": "Triage",
+            "value": "triage"
+          },
+          {
+            "name": "Assigned",
+            "value": "assigned"
+          }
+        ]
+      }
+    ]
+  },
+  {
     "name": "Ticket",
     "behaviors": "TicketBehaviors",
     "structs": [

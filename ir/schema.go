@@ -155,6 +155,11 @@ type Schema struct {
 	// not hold it.
 	Workers []*Worker `json:"workers,omitempty" yaml:"workers,omitempty"`
 
+	// Derivers lists the derivers an API service declares with `@deriver`,
+	// in declaration order (D74). A deriver's class is no type, so Types
+	// does not hold it.
+	Derivers []*Deriver `json:"derivers,omitempty" yaml:"derivers,omitempty"`
+
 	// Documents holds the loaded sidecar documents keyed by document name
 	// (the registered DocumentSpec.Name), each in canonical JSON (see
 	// [CanonicalJSON]). The registering extension owns the codec; typed

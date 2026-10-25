@@ -10229,3 +10229,370 @@ and whether a long-lived connection, such as the subscriber's, must
 authenticate again before its access token expires.
 
 The rule is reversible until the first release.
+
+### D48, amended: a field's display names the currency of the amount it holds
+
+`Finance.Money` is a whole number of a currency's minor units that names
+no currency. D70 settled that whatever holds an amount names its
+currency: a literal code, or an own `Finance.Currency` field, which a
+behavior's config says. An API type has no config, so a UI showed `450`
+where a reader expects `GBP 4.50`. The D44 amendment that left money
+unformatted (a submission keeps its route's status, above) did so
+because no scalar held a currency code. `Finance.Currency` now does, and
+acme's prices are `Generic.Int64` fields named `*Cents`, which no rule
+can read a currency from.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ir.FieldDisplay` gains `currency`, after `multiline` (`ir.DisplayCurrency`, `Code` or `Field`). It is either an ISO 4217 code (`@display({ currency: "GBP" })`) or a sibling field (`@display({ currency: { field: "currency" } })`), D70's two forms. The JSON and YAML forms write a code as a string and a field as `{ field }`, under the field's `display`. The TypeScript argument is `currency?: string \| { field: string }`. The schema-file JSON Schema's `FieldDisplay` takes `currency` as a string of three capital letters or `$defs/DisplayCurrency`, a closed object with a non-blank `field`, and `schemafile.replaceDisplayDefs` replaces both defs from the registered spec. `ValidateFieldDisplay` requires `multiline` or `currency`, and refuses a code that is not three capital letters (`display currency "gbp" is not an ISO 4217 code: three capital letters`), a blank field (`display currency must be a code or a non-blank field`) and both at once (`display currency is both a code and a field`). | A `Finance.Price` object scalar, which D70 rejected; a type-level `@display({ currency })`, which an object holding two currencies' amounts could not use; a currency in the app's settings, which the schema would not state |
+| The loader allows it on a field that holds an integer scalar, one whose JSON Schema type is `integer` (`Finance.Money`, `Generic.Int64`), or a list of them, but not a map, in a type, an input or a configurable trait's config. It refuses it on any other field: `type OrderView: field note takes @display currency, which is for an amount in minor units, but it is string`. A literal must be an active List One code, which Go's `ParseFinanceCurrency` checks over superscalar's core, in upper case: `usd` is refused, as the scalar refuses it (`... takes @display currency "usd", which is not an active ISO 4217 currency code`). A `{ field }` must name another field of the same type, by its name or its JSON key, that holds a single text value, a `Finance.Currency` or a string, optional or not. The amount itself, a missing field and a field of another type are each refused, the missing one with the type's fields listed. | Allowing it only on `Finance.Money`, which leaves acme's `Generic.Int64` `*Cents` fields unformatted until a scalar change that also moves their bounds; normalising the literal, which the scalar does not do; a `{ field }` held to `Finance.Currency` alone, which acme's `Nullable<string>` currency would fail |
+| A reader of the display takes a `Finance.Money` field without the hint whose type has exactly one `Finance.Currency` field as in that field's currency. A field the hint names wins. With two currency fields and no hint, the amount names none. The IR records only what the schema says: the rule is the reader's, which Topcoat's crate applies (D44, amended, below). | Always requiring the hint, which every type that pairs the two scalars would restate; inferring from a field's name, `*Cents` or `currency`, a rule no schema states; writing the inferred currency into the IR, which the writers would then write back as a hint the schema never had |
+| The engine's schema document copies a field whole (`enginedoc`), so an engine type's field keeps its hint, and the engine's meta-schema, rerecorded in `runtime/engine/testdata/scenarios/registry.json`, admits it. The engine's own amounts name their currency through their behavior's config (D70), and the engine reads no field's display; the console's engine pages read it from the type's live schema document (D44, amended, below). No type, SDK or server generator renders it. | Copying the hint into the engine's configs, which already know their currencies |
+
+Status: built in the core. `TestFieldDisplayCurrency` (`ir`) holds the
+JSON and YAML forms and each of `ValidateFieldDisplay`'s refusals.
+`TestFieldDisplayCurrenciesVerify` (`internal/loader/verify`, 14 cases)
+passes money in a code, an integer in XAU, a list of amounts and a
+sibling by its name or its JSON key, and refuses a map of money, a
+number, text, an unknown and a withdrawn code (HRK), a missing field,
+the amount itself, an integer field and a list of currencies. `TestDisplayCurrencyIsCheckedInTheDataForms`
+reads the YAML form through the whole loader,
+`TestDisplayCurrencyLoadsIntoIR` the TypeScript reader,
+`TestAFieldDisplayDecorator` the registered spec, and
+`TestDisplayDefsAreTheRegisteredArgs` the `DisplayCurrency` def. Seven
+new vectors in the schema-file parity corpus (`TestSchemaFileParityCorpus`)
+hold Go, Ajv and the Rust strict loader to one verdict.
+`TestFieldDisplayCurrencyRoundTrips` round-trips a code and a field
+through the TypeScript, JSON and YAML writers.
+`internal/tools/schemafiletypes` gains two `@ts-expect-error` cases.
+`TestDisplayChangesNoGeneratedFile` puts a currency on every integer
+field and finds every generated tree unchanged, but for the Rust types
+crate's IR copies. `TestDisplayThroughTheCommands` checks the
+`json-schema` def and a refusal through the binary. fixture-display is
+unchanged, since the engine's display tests assert its exact field list.
+acme's shop-orders states its amounts' currencies: `"GBP"` on
+`ProductView.priceCents`, `OrderLineView.unitPriceCents`,
+`OrderView.totalCents`, `CheckoutLineView.unitPriceCents`,
+`RequestRefundInput.amountCents` and `RefundView.amountCents`, and
+`{ field: "currency" }` on `CheckoutView.dueCents` and
+`CheckoutPayment.amountCents`. The rule is reversible until the first
+release.
+
+### D44, amended: the crate formats an amount by its currency, and a form takes it as a decimal
+
+The submission amendment's last row left money unformatted: no scalar
+named a currency, so neither the decimal places nor the code were known.
+A field now names its currency (D48, amended, above), and superscalar's
+Rust core gives each code's minor units
+(`superscalar::scalars::finance_currency::lookup`). This replaces that
+row.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A display component shows an amount whose currency is known as `<data value="450">GBP 4.50</data>`. The text is the code, a space, `-` before a negative amount, the whole part grouped by `,` in threes, then exactly the currency's minor units of decimals. It is the same for every reader, in English, as the time text is. A code that ISO 4217 gives no minor units (XAU) shows the whole number after its code. A currency that is no active code, an absent or empty field's or a lower-case one, shows the amount as a plain number, ungrouped. `views::money_text(amount, currency)` writes it, public, for a page's own markup. | A symbol (`£4.50`), which superscalar does not carry and which several currencies share (`$`); the server's locale, which is not the reader's; a formatting crate the crate does not otherwise need |
+| The minor units come from the scalar crate the types crates' validators already link (`Naming.ScalarRustCrate`, at the naming file's `[paths] scalar_rust`), read at run time, since Go's binding has no minor-units table. The crate's `Cargo.toml` names it only when views.rs formats an amount, forms.rs reads a decimal one, or the crate has engine panels. A crate that shows money but has no display component gets a views.rs that holds `money_text` alone. | A table of exponents written into each crate, which would drift from superscalar's |
+| An amount's currency is read when the component renders it: a literal is a constant, and a `{ field }` is that field of the same record, bound per record (`let currency_code = record.currency.clone();`) and per row inside a table, so a list of lines formats each line in its own currency. A `Finance.Money` field without the hint takes its type's one `Finance.Currency` field. Money does not read the app's choices. The build log names each amount a component still shows as a number, and why: `topcoat: <Type>.<field> shows as a number: it is Finance.Money, and names no currency: @display({ currency }) gives it one`, or `... its type has 2 Finance.Currency fields (a, b): @display({ currency: { field } }) names one`. | Choosing a currency per column, which a table of mixed currencies would misstate |
+| A form's amount with a literal currency is `<input type="text" inputmode="decimal">`, labeled with its code (`Deposit (GBP)`). Its `pattern` comes from `forms::decimal_pattern(code, signed)` at run time: at most the currency's decimals, and a leading `-` only when the field's bounds, or its scalar's, admit a negative amount. Its reader, `money_<code>` or `signed_money_<code>`, accepts exactly what the pattern accepts, and refuses at the field text that is no amount, surrounding space included (`must be an amount`), more decimals than the currency has (`must have at most 2 decimal places`; for JPY any `.`, `must be a whole amount`), a sign on an unsigned amount (`must not be negative`) and a value past `i64` (`is too large an amount`). A default in minor units shows in major units (`decimal_text(2500, "GBP")` is `25.00`), and an edit page fills the control from the item the same way (`held_decimal`), so saving it unchanged keeps the amount. Such an amount takes none of the app's choices, whose values are minor units, as the display components take none. | A decimal input for every amount, which cannot know its decimals before the currency field is read; minor units everywhere, which asks a member of staff for `450`; reading a choice's value as a decimal, which turned a choice of `2500` into GBP 2,500.00 |
+| An amount whose currency is a field, named or inferred, stays `type="number" step="1"`, with the hint `In minor units of <label>` after any description, since the other field may be unset or changed in the same form. Its reader, `minor_amount`, takes digits alone, with an optional `-`, and refuses `12.00` or `1.2e1` (`must be a whole number of minor units`), which a number input sends and the integer reader would take as 12. | The integer reader, which reads `12.00`, meant as twelve pounds, as 12 pence |
+
+Status: built in the Topcoat crate and acme.
+
+- `TestViewsRenderRecords` (`money_text_writes_an_amount_in_its_currency`,
+  `an_amount_shows_in_its_currency`): GBP, JPY, BHD, CLF and XAU, a
+  negative amount, grouping, `i64::MIN`, a lower-case or empty code, a
+  field currency per row of fixture-views-api's `Invoice` lines, an
+  absent field's plain number, and a line's inferred currency.
+- `TestFormsServeATopcoatApp` (`an_amount_in_a_literal_currency_is_a_decimal`,
+  `decimal_text_writes_an_amount_as_a_control_holds_it`, and
+  `the_apps_choices_render_a_select`): fixture-forms-api's
+  `BookingInput.deposit` (GBP, default 2500), `tip` (JPY) and
+  `extraCharge` (`{ field: "currency" }`). It parses a decimal, refuses a
+  third decimal for GBP and any for JPY, a negative deposit, `-0`, a
+  value too large and text that is no amount, shows the default as
+  `25.00`, and renders the minor-units hint. The deposit is a decimal
+  control however the app's choices name it, and `extraCharge` refuses
+  `12.00` and `1.2e1`. `TestAnAmountIsReadByItsCurrency`
+  holds each amount to its reader.
+- `TestAnEditPageHoldsAnAmountAsADecimal`: an edit page of a GBP
+  `amount` and GBP `tiers` shows `4.50`, `1.00` and `25.50`, and posting
+  it unchanged saves 450 and `[100, 2550]`.
+- `TestMoneyShapesTheComponents` reads views.rs, Cargo.toml and the build
+  log's line; `TestMoneyTextWithoutViews` and
+  `TestEnginePanelsWithoutViewsWriteMoneyText` write views.rs holding
+  `money_text` alone; `TestPagesWithoutAFormBuild` builds a crate with
+  pages and no form, whose forms.rs now holds `FormErrors` and `Refusal`
+  alone.
+- acme's console shows an order's total and each line's price as money,
+  `GBP 39.98` in `<data value="3998">`, and the products' prices
+  (`tests/app.rs`); the refund form takes a decimal.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console pages an engine database's types, each behavior's fields in a panel, and its operations as forms
+
+The crate mounts the engine of the API's engine database, and the doc
+comment of `engine.rs` says a page calls it in-process. No page did. The
+console paged only what the API's REST operations describe, so a member
+of staff could not see a checkout's holds, an item's stock or a refund's
+sign-offs without the JSON routes. The engine describes every type it
+holds: its fields, its behaviors' fields and configs, and each
+operation's parameters as JSON Schema. A console can therefore render any
+engine type without the generator knowing it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| When the pages are on, the crate mounts an engine and a route of the API authenticates a caller, `src/engine_pages.rs` serves the engine's types under `<prefix>/engine`: `/engine` (the types the caller may read), `/engine/{schema}` (a type's instances), `/engine/{schema}/{id}` (one instance), and a GET and a POST per operation under `operations/{operation}`, the type's or the instance's. `outputs.topcoat.pages.engine: false`, or `pages_engine = false` beside `pages_prefix` in `[extension.topcoat]`, turns them off. The build serves none, and its log says why, for an API whose routes authenticate no caller (`topcoat: no engine pages at /console/engine: no route of the API authenticates a caller, and a page calls the engine only as its caller, whom the engine's policy admits`), a path under `/engine`, where the crate mounts the engine's own routes, and a path where a collection of the API's own is served: the API's pages keep it. | Typed pages per engine type, generated from its schema, which a type defined after the build would lack; opt-in, when the console is already opt-in and the engine already mounted; the system principal for an API without callers, which would bypass the engine's policy; refusing the build over an API's `engine` collection, which would break an API that has one |
+| Every page calls the engine in-process, on the blocking pool, as the page's caller: the one the app's `PageAuthenticator` gives, mapped as `engine::routes` maps a request's (`Principal::new(subject, permissions).with_claims(claims)`). So the engine's policy decides what a page may read and do. No caller is 401, and no page acts as the system principal. With `IdentityPageAuthenticator` the caller is the session the JSON API reads. The API's `@rateLimit` and `@timeout` do not apply: a page is the app's route, as every console page is. Every POST also passes the console's own cross-origin check, as the identity runtime's rule makes it but trusting no other origin, before the engine is called: a post another site sent is 403 `cross_origin`, whatever the app's `PageAuthenticator` and Topcoat's origin policy let through, and not even the identity config's `trustedOrigins` is trusted for it. | The API's `Authenticator`, which a custom app's `PageAuthenticator` may establish apart from; calling the JSON routes at `/engine` over HTTP from the same process; a permission of the console's own; leaving cross-site posts that move stock or money to the `PageAuthenticator` |
+| A page reads the type's describe document. Its `display` gives the noun, the plural, the title field and the summary columns. A list pages by the engine's cursor and keeps `back` as the API's lists do (D44, amended), with a size form of 10, 50 (the engine's default) and 200 beside the size sent; the engine refuses more than 500. Its columns are the title field, linked, else the id, then the summary fields, own or a behavior's qualified name (`Stock.available`). The type's schema-scope operations follow as forms. | Every field as a column, so a type without a display shows its id alone; a page size of the console's own |
+| An instance's page shows its own fields, in the describe document's order, then one section per behavior in the type's order, then the operations no panel shows. A panel renders a behavior the crate knows: Workflow, Approvals, Branches, Stock, Calendar, Holds and Payments (`engine_panels::panel`). Any other behavior gets the generic panel, `<section class="ss-panel" data-behavior="X">`: its fields under its name, as the read returns them (D16), and its instance operations. A panel shows the operations `engine_panels::core_shows` or `commerce_shows` names, and the page lists the rest of that behavior's as generic forms, so each operation the caller is offered has a form once. An own amount shows as money (`views::money_text`) in the currency its field's `@display` names, a code or another own field, else, for a `Finance.Money` field, in the type's one `Finance.Currency` field's, as the API's views do (D48, amended, above). The describe document gives each field's scalar but not its display, so the page reads the type's live schema document for it, as the caller. | A plug-in the app registers per behavior, which the crate's layout would have to call by name; one flat list of fields, which D16 namespaced; a panel that claims all its behavior's operations, which left Branches' `save` with no form |
+| An operation's form is built at run time from its `params` JSON Schema, each control named by its bare parameter. A string is a text input with its lengths, an integer or a number a number input with its bounds, and an enum or a boolean a select. Any other property is a JSON textarea, and parameters that are not an object of properties one `params` textarea. A form that writes an instance sends the page's `expectedSeq`. A read-only operation is a GET, whose result renders on the page: an object as a description list, a list of objects as a table, anything else as text. A write is a POST, followed by 303 to the instance or the list. The form refuses a blank required value, a number that does not parse and JSON that does not parse with 422 at its control, before the engine is called. An invalid parameter the engine finds is 422 at its control. A veto is 409, with the behavior's code and reason as the form's message (`approvals_missing: ...`). A stale `expectedSeq` is 409, where the engine answers 412. A missing instance is 404, and a write sent by GET 405. A sent form that a panel owns renders again at the top of the page with its errors. | Forms only for operations whose parameters are flat, leaving Stock's and Calendar's out; a page per operation |
+| Which operations a caller is offered comes from the engine's tool manifest, built once per request. An operation the type does not declare, or the deployment hides (`tools.hidden` in the deployed engine document), has no form and is 404. One the policy refuses the caller, or an archived namespace, has none and is 403 with the engine's reason. An operation the engine hides from MCP alone, for a handle MCP would refuse (over 48 characters, not snake case, an engine tool's, or shared), is offered. | Treating every tool the manifest hides as absent, which left a type with a long name without its Approvals and Workflow forms; 404 for a policy refusal, which tells the caller nothing |
+| The panels. **Workflow** shows the state by its display label, a button per transition the display labels out of it, and the moves it does not label in one "Move to" select, each by its target's label; a move whose `permission` the caller does not hold is left out. **Approvals** shows each gate's sign-offs against its count and who signed, and, once the instance has entered the gated state through the gate, which consumes its sign-offs, that the gate was met (`Met: it entered Approved with its 2 sign-offs.`, or `passed` for a state past it), and the caller's sign-off form, or their withdraw form once they have signed, when their permissions cover the gate's and the gate does not exclude them as the creator. **Stock** shows on hand, held, available and low, the receive, adjust and count forms, each sending the page's `expectedSeq` so a double submit is 409 and not a second move, and the movements 20 at a time. **Calendar** shows the time zone, the capacity, the opening hours as a week, the closures, and the bookings of a range of dates (UTC, both days, a week from today by default), 20 at a time; its writes are the generic forms. **Holds** shows the state, the items with their unit prices as money, and the total as money, "Mixed currencies" when it is null and "Nothing priced" when no item has a price. **Payments** shows due, authorized, captured, refunded, outstanding and overpaid as money in its `currency`, the state and the attempts. On a refund instance it links to what it refunds; where another type refunds this one through Approvals it links to that type's list; otherwise it holds `refundPayment`'s form, whose amount is in minor units and whose idempotency key is made as the form renders, so a re-sent form refunds once and two forms refund twice. A panel offers only the operations the page offers the caller. | A commerce console separate from the engine console, which would page the same instances twice; buttons for transitions the display does not label, which a type with no display would lose; a refund key per page's seq, which made two refunds read at one seq one |
+| **Branches** shows the refs, primary first, each with its head and a link to its history (`?ref=`). It shows a ref's commits newest first, 50 at a time (`?skip=`), the release log and `behaviors.Branches.release`, and a diff of two commits of the history shown (`?from=&to=`) as a table of path, change, before and after, at most 200 rows. Its writes are the generic form (`engine_pages::operation_form`) with the refs and versions it read filled in and hidden: branch, and a draft's save, commit, seal, rebase, revert, merge and discard. A tagged commit's release is a button in its row. | Pages for D19's version-graph tables, which no API route serves; a graph drawing, which takes a script the console does not ship; the whole history on every view, which the engine reads without a limit |
+| The nav and the index gain "Engine" when the caller may read any type. The trail names an instance by its title field, else by its noun and id, and an operation in words. What a page reads of the engine renders on the server: no procedure hands it to the browser. | A nav entry per engine type, which a namespace of many types would crowd |
+
+Status: built in the Topcoat crate and acme. fixture-engine-db gains a
+`Request` with Workflow and Approvals (a gate of two `requests.approve`
+sign-offs, and an unlabeled move that needs `requests.close`) and a
+`Document` with Branches. fixture-engine-api turns its pages on and gets
+a golden. The extension's tests run cargo clippy `-D warnings` and cargo
+test through `Router::handle`, with `enter.rs` on every page.
+
+- `TestTheConsolePagesTheEngine`: the build log's three reasons and
+  `pages.engine: false`; the nav and the index for a reader, for a caller
+  with no permission (403) and for none (401); a list paged forward,
+  back and to the first, and a refused limit (400); an instance's fields,
+  its generic panel, its forms and its trail; a write (303), a stale
+  `expectedSeq` (409, the form kept as sent), 422 at a control for an
+  engine issue, a blank required value and a non-integer; a read's GET
+  result and a write sent by GET (405); a form from `operation_form`;
+  404 for a missing instance and a missing operation; and `panel_shows`.
+  `the_console_offers_what_the_deployment_and_the_policy_allow` deploys
+  `SupplierContractAmendmentRequest`, whose `withdrawSignOff` handle has
+  53 characters, signs off and withdraws (303), finds `listSignOffs`,
+  which the deployment hides, 404, and a reader's write 403.
+  `a_write_another_site_sent_is_refused` refuses a cross-site post, a
+  foreign Origin and `null` (403) with the origin policy off.
+  `an_instances_amounts_show_as_money` shows an own amount in its
+  display's code, in a sibling field's currency and in the type's one
+  `Finance.Currency` field's.
+- `TestTheEnginePanels`: `the_workflow_panel_offers_the_moves_out_of_the_state`,
+  `the_approvals_panel_offers_the_caller_their_sign_off` (a gate met in
+  approved and passed in closed, and counted in rejected, which skipped
+  it) and
+  `the_branches_panel_shows_the_refs_a_history_and_a_diff` over canned
+  and seeded documents; `the_console_moves_a_request_after_two_sign_offs`
+  (409 `approvals_missing`, then the move), and
+  `the_console_shows_a_history_and_a_diff_and_commits` (a save and a
+  tagged commit through the route, a stale version 409 `version_conflict`),
+  each finding a form or a panel for every declared operation; and
+  `the_branches_panel_pages_a_long_history` (52 commits, the 200-row cap,
+  a diff off the history refused).
+- `TestTheCommercePanels`, over describe documents built from the
+  commerce declarations and commerce.md's shop types:
+  `stock_shows_its_levels_its_forms_and_its_movements`,
+  `calendar_shows_its_week_its_closures_and_its_bookings`,
+  `holds_show_their_items_and_total_as_money`,
+  `payments_show_their_amounts_and_how_they_are_refunded` and
+  `another_behavior_has_no_commerce_panel`, with the Stock forms' seq, a
+  refund key per render and no form for an operation the engine does not
+  offer.
+- `TestTheConsolePagesConfig` and `TestTheConsoleFixturesBuild` hold the
+  config's forms and both fixtures' builds.
+- acme's `topcoat/tests/back_office.rs`, over the app's SQLite engine
+  with a seeded `Inventory`, `CollectionPoint`, `Checkout` and `Refund`:
+  `the_engine_pages_list_what_staff_may_read` (a signed-out 401 linking
+  `/sign-in`, Grace's 403, Ada's four types);
+  `stock_is_received_through_the_console` (five units received, 422 for
+  a non-integer, Grace refused);
+  `a_collection_point_shows_its_week_and_its_bookings`;
+  `a_checkout_shows_its_holds_and_payment_as_money` (`GBP 39.98`, and a
+  link to the refunds in place of a form); and
+  `a_refund_is_refused_until_two_staff_sign_it_off_then_paid` (409
+  `approvals_missing` after one sign-off, a second member of staff added
+  and granted `refunds` through the users pages, the move to approved,
+  and the refund `refunded` once acmepay's adapter reports it).
+
+A refund's runner rule that moves it to `issued` does not run in the
+app, whose engine has no runner. Left for the engine: its tool manifest
+gives a hidden tool's reason as text alone, so the console tells a
+handle's hide from the deployment's by the reason's prefix (`its MCP
+handle `) and reads `tools.hidden` from the deployed `ENGINE_DOCUMENT`; a
+structured reason (`hiddenBy`), the deployment's reason kept when a
+handle is refused too, and a policy check for a tool hidden for its
+handle would retire both. Until then a policy-refused operation whose
+handle is refused too shows a form, and the engine refuses it (403) when
+it is sent, and an engine opened with tool options other than the
+document's hides its own list with 403 rather than 404. The rule is
+reversible until the first release.
+
+### D44, amended: the console signs a caller in and out, and administers users and roles, through the identity runtime
+
+The crate establishes a page's caller through `IdentityPageAuthenticator`,
+and the 401 page links to the app's sign-in page. Every app wrote that
+page itself (acme's `/sign-in`), and no app had a page for users or
+roles, though the identity runtime's `Service` holds every call those
+pages need and checks each admin call's permission.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| When the pages are on and the API authenticates with the identity runtime (D50), `src/identity_pages.rs` serves these pages under the prefix. `sign-in` is a form whose POST calls `check_cookie_login` and `login` with a cookie session, sets the runtime's session cookie, and goes on with 303 to `next`: a path that starts with `/`, not `//`, and holds no `\` or control character, else the index. A wrong password renders the form again with 401 and the runtime's message. `sign-out` is a POST that calls `logout` and clears the cookie, then goes to the index. `account` shows `me`, the login, the name and the roles, and holds the change-password form, which posts to `account`. `pages::Settings::sign_in` names the app's own sign-in page, which every link to sign in then uses; without it they use the generated one (`identity_pages::SIGN_IN`). `outputs.topcoat.pages.identity: false`, or `pages_identity = false` in the table, turns them off. A resource whose first word below the prefix is `sign-in`, `sign-out`, `sign-up`, `account`, `users` or `roles` leaves the crate without them, and the build log says which (`topcoat: no sign-in, account, users or roles pages under /console: the pages of users are at /console/users, where the identity pages would be`). | Leaving sign-in to every app; calling the API's `@userSessions` routes, which an API such as shop-orders, authenticating through another's database, does not serve |
+| `sign-up` is served only when `pages.identity` is `{ signUp: true }` (`pages_identity = { sign_up = true }`) or the API declares `@userSessions({ register: true })`. It calls `register`, a taken login being 409 as the form's message, and signs the new user in. Without it the path is not routed, and the build log says why (`topcoat: no sign-up page under /console: neither pages.identity.signUp nor the API's @userSessions({ register: true }) opens registration`). | Always, which opens registration on an app whose API never offered it |
+| Signing in, signing up and changing a password each take a token from a rate limiter before anything else, counting the client by `client_key`, as a route does. When the API serves the route that does the same (`login`, `register`, `changePassword`), it is that route's limiter, so a client has one budget on the page and the JSON route. When it does not, as for an API whose `@userSessions` has `login: false`, the page has a limiter of its own in the app's registry, at the route's rate: 10 sign-ins, 5 sign-ups and 10 password changes a minute (`ir.IdentityLoginRateLimit`, `IdentityRegisterRateLimit`, `IdentityChangePasswordRateLimit`). Past the limit, the form renders again with 429, `Retry-After`, and "Too many attempts: try again in N seconds". | Pages without a limit, which gave unlimited password guesses, each a full argon2 verify, where D50 rests on login's rate limit in place of lockout; the pages' own limiter always, which gives a client twice the route's budget |
+| `users` lists the users and adds one (`users/new`). A user's page (`users/{id}`) shows the details, the roles with a revoke button each, a grant select of the roles not held, Disable or Enable, and Set password; each posts to `users/{id}/{revoke,grant,disable,enable,password}`. `roles` lists and adds roles; a role's page edits it for a caller who may write roles and shows it to one who may only read them, and `roles/{id}/delete` confirms a delete on a page of its own. A role's permissions are a textarea, one permission a line. Each page calls `Service` with the caller as its `IdentityPrincipal`, so `identity.users.*` and `identity.roles.*` decide, and so does D50's rule that no one grants, or administers a user holding, what they do not hold (D50, amended, below). | A permission of the console's own; admin pages only when the API declares `@userAdministration` |
+| The nav shows Users to a caller who holds `identity.users.read` and Roles to one who holds `identity.roles.read`, by `Service::permits`, the rule the calls apply, then Account and a Sign out button (`NavLink.post`). A signed-out caller's nav shows Sign in, and Sign up when it is served, as nav-only links (`NavLink.nav_only`), since the index keeps its own sign-in link. | The API's `capabilities`, which keys operation ids, not these permissions |
+| A form posts as the console's forms do: `FormErrors` at each control, 422 for what the form refuses (an empty control, a new password `check_password` refuses), and the service's status for what it refuses. A refusal that lists `details.permissions`, a role that grants what the caller does not hold or a user the caller does not cover, renders at its control, the access buttons' refusal above them. A 401, a 404, and a 403 with no such list render on a page of their own. A password is a `type="password"` input that never renders its value again, and no form derives `Debug`. Posts carry no token: Topcoat's origin policy and the runtime's cross-origin check, through `IdentityPageAuthenticator` and `check_cookie_login`, refuse another site's. | Rendering a refused password back |
+| A user's sessions are not listed, and one session cannot be revoked: the identity store has no such call (D50). The account page says that changing the password signs out every other session. | A D50 amendment in three runtimes inside a Topcoat change |
+
+Status: built in the Topcoat crate and acme. A new fixture,
+`fixture-identity-pages-api` (the core's `fixture-user-routes-api` stays
+untouched), gets pages and a golden.
+
+- `TestTheIdentityPagesAreWrittenAsDeclared`: pages by default, sign-up
+  by `signUp` and by `register: true`, none with `identity: false` or a
+  `users` resource, each build-log line, and the rate-limit constants.
+- `TestTheConsoleSignsInAndAdministers`, "without sign-up" over the API's
+  routes and "with sign-up, without the API's login" over the pages' own
+  limiters: `a_caller_signs_in_back_to_next_and_out` (401 linking with
+  `next`, a wrong password's 401, 422, 303 to `next`, four off-site
+  `next` values going to the index, the signed-out index's one Sign in,
+  sign-out); `another_sites_sign_in_is_refused`;
+  `changing_the_password_ends_the_other_sessions`;
+  `sign_up_is_served_only_with_the_flag`;
+  `an_admin_administers_users_and_roles`;
+  `a_member_is_refused_administration` (no Users or Roles in the nav,
+  403 on each); `the_eleventh_sign_in_in_a_minute_is_refused`, which
+  spends the budget across the JSON route and the page where the API
+  serves login; `the_eleventh_password_change_in_a_minute_is_refused`;
+  `the_sixth_sign_up_in_a_minute_is_refused`; and
+  `a_helpdesk_may_not_take_over_the_admin`.
+- `TestTheEngineAndIdentityPagesBuildTogether` builds a crate with both
+  the engine pages and the identity pages, over an engine database that
+  is also the authDb, as acme's is.
+- acme keeps its own `/sign-in` through `Settings::sign_in`, so every
+  link to sign in, the 401 pages', the index's, the nav's and the engine
+  pages', goes there; `/console/sign-in` is routed and linked from
+  nowhere. Ada signs out at `/console/sign-out`, and administers the
+  users and roles at `/console/users` and `/console/roles`
+  (`staff_administer_the_users_and_roles`, and the refund test above
+  adds and grants a member of staff through them). acme serves no
+  sign-up.
+
+The rule is reversible until the first release.
+
+### D50, amended: no one sets the password of, disables or enables a user who holds what they do not
+
+The identity runtimes held `setUserPassword`, `disableUser` and
+`enableUser` to `identity.users.write` alone. So a holder of it could
+set an administrator's password, sign in as them and hold every
+permission they hold, which made D50's "no one grants what they do not
+hold" moot. The JSON admin routes had the hole; the console's user page
+(D44, amended, above) put it one click away.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each of the three calls also requires the caller's permissions to cover every permission the target user holds through their roles, by the rule of granting: the uncovered permissions of the user's effective permissions (`UncoveredUser` in Go, `uncovered_user` in Rust, `uncoveredUser` in TypeScript). It is checked after `users.write` and, for a password, after the password rule, and an unknown user stays 404. A refusal is 403 `forbidden`, "No one administers a user holding a permission they do not hold", with `details.permissions` listing the uncovered ones. A user with no roles is anyone's who holds `users.write`. | Hiding the console's forms instead, which leaves the JSON route open; a separate permission for writing administrators, which every role would have to carry |
+| Enabling is held to the rule because it gives a user's permissions back to whoever holds the account's credentials. Disabling is, because it revokes every session and blocks sign-in, so a lesser administrator could otherwise lock out every greater one, and none could enable the others again. | The rule on the password alone, the take-over the review found |
+| `revokeRole` and `deleteRole` keep `roles.write` alone, as D50 has them: they take permissions away and give none. | Holding every write to a role to the rule, which would stop an administrator removing a permission they do not hold themselves |
+
+Status: built in the three runtimes. `identity_parity.json` gains a
+`userWrites` section of 8 cases, written by Go
+(`TestWriteParityVectors -update`) and run by Go, Rust (`user_writes`)
+and TypeScript (`userWrites`), and `runtime/http/testdata/README.md`
+describes it. Each runtime's HTTP tests (`TestAUserWriteNeedsTheirPermissions`
+in Go, `a_user_write_needs_their_permissions` in Rust, and the
+TypeScript twin in `hono.test.ts`) refuse a helpdesk holding
+`identity.users` when it sets the admin's password, disables or enables
+the admin (403, `details.permissions` `["identity","orders"]`), leave
+the admin's session and password as they were, answer 404 for an
+unknown user, and let the helpdesk do all three to a member. The store
+tests ran on SQLite; the rule sits above the store. The rule is
+reversible until the first release.
+
+### D58, amended: an engine type's document holds the types its behaviors' configs name
+
+The engine document's generator (`enginedoc`) wrote, for each engine
+type, a schema-file document holding the type and the value types its
+fields reach. A Branches kind's content type (D32) or a Variants value's
+type is named by the behavior's config, and no field need hold it, so
+the document left it out, and the engine refused to open: `kind
+section: Section is not a type of Document besides Document (its types:
+none)`. The console's Branches fixture (D44, amended, above) met it, and
+worked around it with a field that held the type for nothing.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An engine type's document also holds each type its behaviors' configs name: each Branches kind's `kinds.<kind>.type` and each Variants value's `types.<value>`, in the behaviors' order and by sorted key, each with the value types, enums and scalars its own fields reach. | A field on the type that holds the content type, which every schema would declare for nothing; every string in a config that equals a type's name, as a deploy orders its documents (D58, amended), which would pull in a type a label happens to name |
+| A name that is no type of the schema or of a dependency the build loaded is refused at the build: `engine type Document: behavior Branches of Document: kinds.section.type names Missing, which is not a type of desk-db or of a dependency the build loaded`. So is one that names an engine type, whose content must be a value type: `... kinds.section.type names Account, which composes a behavior: its content must be a value type`. | Leaving the refusal to the engine as it opens, after the build has passed |
+| The paths are the generator's for the two core behaviors that name types today. An extension's behavior whose config names a type still needs a field that reaches it. | Reading the paths from each behavior's declaration, which declares none |
+
+Status: built. `TestBuildHoldsTheTypesABehaviorsConfigNames`
+(`internal/generator/enginedoc`) holds a Branches kind's type and two
+Variants values' types in the document, with an enum a kind's field
+uses, as structs with no behaviors, and refuses a missing type and an
+engine type. `go test ./internal/generator/...` moves no golden, and
+fixture-engine-db's `Document` drops the field that held its kind's
+type. The rule is reversible until the first release.
+
+## D74. A stack runs the derivers its engine types need, as deployables of their own over the project's typed answers
+
+D73 left a gap: nothing in a stack ran a deriver, so a type that composed
+Derived got fields that never filled. Search's embedder had the same gap.
+The only long-running deployable for project code was the worker, which
+cannot exist without a queue, and no server runs the engine's runner
+(D58, amended).
+
+This entry adds:
+- a reference loop, `runDeriver` in `@superschematic/engine` and
+  `derive::run_deriver` in the Rust engine's `background` feature;
+- a deployable kind, `deriver`, declared with `@deriver` on an API;
+- typed answers: a generated `Derivers` type the project implements;
+- the refusal of a `Secret<T>` input;
+- narrowed types for Derived's and Provenance's fields and operations.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A deriver is a long-running deployable of its own, woken by the engine's commit notifier, with a poll as the fallback | a job on a schedule, which lands a value up to a minute late; a worker over a queue Derived feeds, which couples a core behavior to the queue runtime and duplicates Derived's stale queue |
+| The project answers each derived field through a generated method typed by the field: inputs typed by its `from` fields, the answer's value by the field's own type, and the item's `output` the field's JSON Schema | generated provider adapters configured in the stack, which put a vendor in superschematic and take prompts, retries and cost controls out of project code |
+| A model label maps to a provider's model in project code, through the API's own config | a stack construct mapping labels per environment, which can follow if projects repeat the mapping |
+| The deriver's principal is the deployable's name, holding each derived type's name and each Derived `permission`; with a `{ rules }` policy, the build refuses a stack with no rule that names its subject and allows | a generated policy rule, which would take the policy out of the project's hands; an HTTP deriver, whose service caller holds no permission (D37) |
+| TypeScript and Rust now, Go refused with a message saying it follows | all three now |
+| A `Secret<T>` field is refused as a Derived input, by the build and by the engine at define, with no override | a personal-data marker refused unless allowed, which belongs to a later Sensitive behavior that also covers the log, search and MCP output |
+| The narrowing types field names and values: `Derived.fields`, `Derived.stale` and `Provenance.fields` are keyed by the config's fields, the operations take them as enums, and `applyDerived`'s values and `reject`'s patch take the fields' own types | names only, so a wrong value fails at run time as `invalid` and not at compile time |
+| `schemas` names engine types as strings | class references, which would import engine types into an API, which the build refuses |
+
+Two answers to the design questions changed while building:
+- acme's example answers with keyword rules only. The stack has no
+  optional secret, and a required model key would stop `stack dev` and
+  CI without one. The method gets the model label and the output schema,
+  so a project puts its model call there.
+- `schemas` names types by string, as the last row says.
+
+Status: built.
+- **The reference loops:** `runtime/engine/typescript/test/deriver.test.ts`
+  and `runtime/engine/rust/testkit/tests/deriver.rs` show each fills a
+  schema's stale fields, settles a throw or a panic as a failure, wakes
+  on a commit and stops on its signal.
+- **The secret rule:** `core_derived.rs` and
+  `internal/loader/verify/behaviors_test.go` hold it.
+- **The deriver kind:**
+  - `internal/stack/derivers_test.go` holds the deployable, its settings
+    and its refusals.
+  - `internal/generator/servergen/derivers_test.go` holds the
+    entrypoints' goldens and the build's refusals: no engine database,
+    a type without Derived, a Go API, and a rules policy without the
+    deriver's rule.
+  - It also builds a generated TypeScript and Rust deriver and its
+    scaffold with `tsc`, `cargo clippy` and `rustfmt`.
+  - The local, gcp and cloudflare targets' tests hold the process, the
+    worker pool and the refusal.
+- **The narrowing:** `fixture-behavior-types` and the engine client's
+  fixture (`Request`) carry it into the goldens, and the engine's
+  TypeScript suite typechecks the typed operations.
+- **acme-shop:** shop-db's `Ticket` runs D73's recipe. shop-cart opens
+  tickets, and its deriver `TriageTickets` fills them, in
+  `TestStackDevRunsTheShop`.
+
+Left: Go derivers, a deriver over an HTTP engine, a model-label
+construct, a cost cap, and evaluating every `{ rules }` policy rule in
+order at build. The rule is reversible until the first release.

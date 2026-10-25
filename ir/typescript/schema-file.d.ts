@@ -81,6 +81,7 @@ export interface DatabaseDecl {
 
 export interface DeployableRef {
   deployable?: string;
+  deriver?: string;
   job?: string;
   runner?: boolean;
   service?: ServiceRef;
@@ -101,6 +102,22 @@ export interface DeployableSettings {
   values?: { [key: string]: unknown };
 }
 
+export interface Deriver {
+  batchSize?: number;
+  comment?: string;
+  concurrency?: number;
+  name: string;
+  schemas?: string[];
+}
+
+/**
+ * A field of the same type that holds the currency of an amount: a
+ * Finance.Currency, or text.
+ */
+export interface DisplayCurrency {
+  field: string;
+}
+
 /**
  * How a UI shows one Workflow state: its label, the present-progressive form
  * it shows while an instance is in the state, and a tone, what the state means
@@ -114,6 +131,7 @@ export interface DisplayState {
 
 export interface Document {
   comment?: string;
+  derivers?: Deriver[];
   description?: string;
   documents?: Documents;
   enums?: { [key: string]: EnumDef };
@@ -236,9 +254,10 @@ export interface FieldDef {
 }
 
 /**
- * How a UI renders a field's control (@display on a field).
+ * How a UI renders a field's control and its value (@display on a field).
  */
 export interface FieldDisplay {
+  currency?: string | DisplayCurrency;
   multiline?: boolean;
 }
 

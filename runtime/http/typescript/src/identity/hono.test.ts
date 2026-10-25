@@ -452,6 +452,37 @@ for (const kind of databaseKinds) {
       expectReply(await h.do('GET', '/auth/me', undefined, ...clerk), 401, 'unauthorized');
     });
 
+    test("a user write needs the caller to cover the user's permissions: a helpdesk writes a member, not the admin", async () => {
+      const h = await newHarness();
+      const admin = bearer(await h.login('admin@example.com', ADMIN_PASSWORD));
+      const role = await h.do('POST', '/auth/admin/roles', { name: 'helpdesk', permissions: ['identity.users'] }, ...admin);
+      expectReply(role, 200);
+      const user = await h.do('POST', '/auth/admin/users', { login: 'helpdesk@example.com', name: 'Helpdesk', password: USER_PASSWORD }, ...admin);
+      expectReply(user, 200);
+      expectReply(await h.do('PUT', `/auth/admin/users/${user.body.data.id}/roles/${role.body.data.id}`, undefined, ...admin), 200);
+      const helpdesk = bearer(await h.login('helpdesk@example.com', USER_PASSWORD));
+
+      const target = `/auth/admin/users/${h.adminId}`;
+      for (const [method, path, body] of [
+        ['PUT', `${target}/password`, { password: 'taken over' }],
+        ['POST', `${target}/disable`, undefined],
+        ['POST', `${target}/enable`, undefined],
+      ] as const) {
+        const refused = await h.do(method, path, body, ...helpdesk);
+        expectReply(refused, 403, 'forbidden');
+        expect(refused.body.details).toEqual({ permissions: ['identity', 'orders'] });
+      }
+      expectReply(await h.do('GET', '/auth/me', undefined, ...admin), 200);
+      await h.login('admin@example.com', ADMIN_PASSWORD);
+      expectReply(await h.do('PUT', `/auth/admin/users/${MISSING}/password`, { password: 'reset password' }, ...helpdesk), 404, 'not_found');
+
+      const member = `/auth/admin/users/${h.memberId}`;
+      expectDone(await h.do('PUT', `${member}/password`, { password: 'reset password' }, ...helpdesk));
+      expectReply(await h.do('POST', `${member}/disable`, undefined, ...helpdesk), 200);
+      expectReply(await h.do('POST', `${member}/enable`, undefined, ...helpdesk), 200);
+      await h.login('member@example.com', 'reset password');
+    });
+
     test('a login whose hash has another cost writes it again at the config cost', async () => {
       const h = await newHarness();
       const old = await hashPassword(USER_PASSWORD, { memoryKiB: 32, iterations: 1, parallelism: 1 });

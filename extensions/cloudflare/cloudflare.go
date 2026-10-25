@@ -147,7 +147,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:          Target,
 		Extension:     Name,
 		Platforms:     platforms,
-		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers},
+		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers, ir.DeployableDeriver: noDerivers},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNS,
 		Provisioner:   Provisioner,
@@ -173,6 +173,11 @@ func (e Extension) Register(r *registry.Registry) error {
 // which resolution says when it refuses one.
 const noWorkers = "a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), and a Worker runs only per request or per firing and reaches neither; " +
 	"run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target"
+
+// noDerivers is why the target places no deriver (D74), which resolution
+// says when it refuses one.
+const noDerivers = "a deriver fills Derived fields in a loop that lasts as long as its process, over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; " +
+	"run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target"
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension

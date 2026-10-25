@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
 	"github.com/parable-work/superschematic/stack/stacktest"
 
@@ -215,4 +216,59 @@ func TestRunnerPlatform(t *testing.T) {
 		t.Errorf("the runner's variables = %s, want its database's connection alone", got)
 	}
 	wantJSON(t, "the runner's database user", node(t, env, runner+".database-user.shop-db").Properties["name"], `"shop-db-engine-runner@acme-staging.iam"`)
+}
+
+// TestDeriverPlatform checks the Cloud Run worker pool a deriver lowers to
+// (D74): one instance under manual scaling, none when the environment
+// turns it off, its concurrency in WORKER_CONCURRENCY, no port and no
+// probe, an account of its own with a database user, and its API's edges
+// through the deriver platform's connectors.
+func TestDeriverPlatform(t *testing.T) {
+	services := stacktest.AcmeShop()
+	for i := range services {
+		switch services[i].Name {
+		case "shop-db":
+			services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+		case stacktest.ShopOrders.Name:
+			services[i].Language = registry.APILanguageTypeScript
+			services[i].Derivers = []ir.Deriver{{Name: "TriageTickets", Concurrency: 3}}
+		}
+	}
+	const deriver = "shop-orders-triage-tickets"
+	env := resolve(t, assemble(t), shop(), services, "Staging")
+	d := env.Deployable(deriver)
+	if d == nil || d.Kind != ir.DeployableDeriver || d.Platform != gcp.CloudRunDeriver || d.Deriver.Instances != 1 || d.Deriver.Concurrency != 3 {
+		t.Fatalf("the deriver is %+v", d)
+	}
+	for _, e := range env.Edges {
+		if e.From == deriver {
+			want := gcp.DeriverHTTPConnector
+			if e.Kind == ir.EdgeSQL {
+				want = gcp.DeriverSQLConnector
+			}
+			if e.Connector != want {
+				t.Errorf("edge %s is connected by %s, want %s", e.ID, e.Connector, want)
+			}
+		}
+	}
+	pool := node(t, env, deriver+".worker-pool")
+	if pool.Type != gcp.TypeWorkerPool || pool.Properties["name"] != deriver {
+		t.Errorf("the worker pool node: %s %v", pool.Type, pool.Properties)
+	}
+	wantJSON(t, "the pool's scaling", pool.Properties["scaling"], `{"manualInstanceCount":1,"scalingMode":"MANUAL"}`)
+	container := pool.Properties["template"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	for _, key := range []string{"ports", "startupProbe", "livenessProbe"} {
+		if _, ok := container[key]; ok {
+			t.Errorf("the deriver's container has %s", key)
+		}
+	}
+	envs := container["envs"].([]any)
+	wantJSON(t, "the deriver's last variable", envs[len(envs)-1], `{"name":"WORKER_CONCURRENCY","value":"3"}`)
+	wantJSON(t, "the deriver's database user", node(t, env, deriver+".database-user.shop-db").Properties["name"], `"shop-orders-triage-tickets@acme-staging.iam"`)
+
+	off := false
+	s := shop()
+	s.Environment("Staging").Settings = append(s.Environment("Staging").Settings, &ir.DeployableSettings{Of: stacktest.DeriverOf(stacktest.ShopOrders, "TriageTickets"), Enabled: &off})
+	env = resolve(t, assemble(t), s, services, "Staging")
+	wantJSON(t, "the scaling of a deriver turned off", node(t, env, deriver+".worker-pool").Properties["scaling"], `{"manualInstanceCount":0,"scalingMode":"MANUAL"}`)
 }

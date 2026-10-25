@@ -677,7 +677,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return err
 	}
 	switch spec.Kind {
-	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner:
+	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver:
 		if len(spec.Languages) == 0 {
 			return fmt.Errorf("registry: %s platform %q declares no languages", spec.Kind, spec.Name)
 		}
@@ -692,7 +692,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: database platform %q declares no SQL dialects", spec.Name)
 		}
 		if len(spec.Languages) > 0 {
-			return fmt.Errorf("registry: database platform %q declares server languages; only a server, job, worker or runner platform does", spec.Name)
+			return fmt.Errorf("registry: database platform %q declares server languages; only a server, job, worker, runner or deriver platform does", spec.Name)
 		}
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
@@ -716,7 +716,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.Artifact != "" {
 		if !spec.Kind.RunsCode() {
-			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker or runner platform builds one", spec.Kind, spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker, runner or deriver platform builds one", spec.Kind, spec.Name)
 		}
 		if !spec.Artifact.Valid() {
 			return fmt.Errorf("registry: platform %q declares artifact %q (want %s or %s)", spec.Name, spec.Artifact, ir.ArtifactImage, ir.ArtifactBundle)
@@ -1028,7 +1028,7 @@ func (r *Registry) checkStackReferences() error {
 		if spec.Edge == ir.EdgeSQL {
 			toKind = ir.DeployableDatabase
 		}
-		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker}
+		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver}
 		if spec.Edge == ir.EdgeSQL {
 			// An engine's runner reaches its engine database (D58).
 			fromKinds = append(fromKinds, ir.DeployableRunner)

@@ -3496,6 +3496,55 @@ Not built:
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
 
+#### Derivers (D74)
+
+A deriver fills the Derived fields (D73) of the engine types of an API's
+engine database. It is declared on an empty class of the API, like a
+worker, and has no queue: the stale fields are its queue.
+
+```ts
+import { deriver } from "@superschematic/api";
+
+// Fills in each Ticket's category, priority and summary.
+@deriver({ schemas: ["Ticket"], concurrency: 4, batchSize: 50 })
+export class TriageTickets {}
+```
+
+- **What it derives.** `schemas` names engine types of the API's engine
+  database that compose Derived: every such type when it is absent. An
+  API imports no engine type, so it names them. The build refuses an
+  API with no engine database, a named type that does not compose
+  Derived, and a deriver that derives nothing.
+- **The project's code.** The API generator writes a `Derivers` type with
+  one method per derived field of each schema, typed by the field: the
+  item's `inputs` are the field's `from` fields with their own types,
+  each optional, and the answer's value is the field's own type. The
+  implementation exports `createDerivers` (TypeScript) or
+  `create_derivers` (Rust) beside its `create`, and the scaffold writes
+  one with every method failing. A method calls a model, mapping the
+  item's `model` label to a provider's model through the API's own
+  config, and holding the answer to the item's `output`, the field's
+  JSON Schema.
+- **The deployable.** `<api>-<deriver>` in kebab case, as a worker's
+  name is, in its API's language: TypeScript or Rust. Go is refused
+  until it follows. Its edges, config, secrets and identity are its
+  API's. Its entrypoint opens the engine for Deps as a worker's does,
+  and runs the engine's deriver loop (`runDeriver`,
+  `derive::run_deriver`), which pulls each schema's stale fields, calls
+  the method of each, settles the answers in batches, and waits for a
+  commit when nothing is stale. A method that throws or returns an
+  error settles as a failure, which Derived counts as an attempt.
+- **Its principal.** The deployable's name as the subject, holding each
+  derived type's name and each Derived config's `permission`. The
+  engine's policy must admit it: with `{ rules }`, the build refuses a
+  stack whose rules name no `subject` of the deriver that allows.
+- **Settings.** `{ of: Api, deriver: "TriageTickets", enabled?,
+  instances?, concurrency? }`: `instances` is 0 or 1, and `concurrency`
+  how many answers run at a time.
+- **Targets.** `local` runs a process with no port. gcp runs a Cloud Run
+  worker pool of one instance. cloudflare refuses a deriver, since a
+  Worker cannot open the engine.
+
 ### 8.9 Buckets
 
 A bucket is object storage, a service of the core kind `Bucket` (D54).

@@ -1,0 +1,10 @@
+# The deriver fixture's database (D74): an engine database whose Ticket
+# composes Derived, a model filling its category and its summary, and whose
+# Note composes Comments alone. Its policy is the default, permission.
+name: triage-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    rust: { enabled: true }

@@ -1,5 +1,5 @@
 import { Finance, Generic, Identity, Temporal } from "superscalar";
-import { Validate, behavior, jsonField } from "@superschematic/schema";
+import { Validate, behavior, display, jsonField } from "@superschematic/schema";
 
 // The shop's commerce, kept by the engine (D58, D70): these types compose
 // behaviors, so they are engine types, whose instances the engine keeps in
@@ -24,6 +24,7 @@ export abstract class Inventory {
   sku: Validate<string, { maxLength: 64 }>;
   // What one unit sells for, in pence. A checkout keeps the price its line
   // was held at.
+  @display({ currency: "GBP" })
   priceCents: Finance.Money;
   // The level at which the product is low; none, never low.
   reorderAt?: Generic.Int64;
@@ -166,6 +167,8 @@ export abstract class Checkout {
 })
 @behavior("Reactions", { rules: [{ when: { changes: { field: "Payments.state", to: "refunded" } }, then: { transition: "issued" } }] })
 export abstract class Refund {
+  // How much goes back, in pence: Payments' currency, GBP.
+  @display({ currency: "GBP" })
   amountCents: Finance.Money;
   reason: Validate<string, { maxLength: 500 }>;
   // Who asked for it: the shopper's user id, or a member of staff's.

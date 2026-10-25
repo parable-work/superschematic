@@ -21,6 +21,10 @@
 //!
 //! Each worker fails every message until you implement it.
 {{- end }}
+{{- if .HasDerivers }}
+//!
+//! Each deriver fails every field until you implement it.
+{{- end }}
 {{- if .ManualEndpoints }}
 //!
 //! Each manual route answers 501 until you implement its handler.
@@ -214,4 +218,41 @@ impl Workers for {{ .WorkersStruct }} {
     }
 {{- end }}
 }
+{{- end }}
+{{- if .HasDerivers }}
+
+/// Builds the derivers of {{ .SchemaName }} from its dependencies. A deriver's
+/// entrypoint calls the method of each stale derived field, which asks a
+/// model; a value settles the field, and a failure or an error counts an
+/// attempt.
+pub async fn create_derivers(deps: Deps) -> Result<Derivers, BoxError> {
+    let deps = Arc::new(deps);
+    Ok(Derivers {
+{{- range .Derivers }}
+        {{ .Field }}: Arc::new({{ $.DeriverStruct . }} {
+            deps: Arc::clone(&deps),
+        }),
+{{- end }}
+    })
+}
+{{- range .Derivers }}
+{{- $deriver := . }}
+
+/// Implements {{ .Trait }}.
+pub struct {{ $.DeriverStruct . }} {
+    pub deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl {{ .Trait }} for {{ $.DeriverStruct . }} {
+{{- range $i, $method := .Methods }}
+{{- if $i }}
+{{ end }}
+    /// Derives {{ .Schema }}.{{ .Field }}.
+{{ $.DeriverMethodSignature . }}
+        Err("deriver {{ $deriver.Name }}: {{ .Schema }}.{{ .Field }} is not implemented".into())
+    }
+{{- end }}
+}
+{{- end }}
 {{- end }}

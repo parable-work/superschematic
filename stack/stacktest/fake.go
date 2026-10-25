@@ -62,6 +62,15 @@ const (
 	RunnerPlatform     = "fake.runner"
 	RunnerSQLConnector = "fake.runner-sql"
 
+	// DeriverPlatform runs TypeScript and Rust derivers as a pool of one
+	// instance, as gcp runs one on a Cloud Run worker pool (D74);
+	// DeriverSQLConnector, DeriverHTTPConnector and DeriverBucketConnector
+	// connect it, whose edges are its API's, as a worker's connectors do.
+	DeriverPlatform        = "fake.deriver"
+	DeriverSQLConnector    = "fake.deriver-sql"
+	DeriverHTTPConnector   = "fake.deriver-run"
+	DeriverBucketConnector = "fake.deriver-storage"
+
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
 
@@ -359,6 +368,15 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerRunner,
 		},
+		{
+			Name:      DeriverPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableDeriver,
+			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerDeriver,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
@@ -382,6 +400,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -412,6 +433,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableBucket:   BucketPlatform,
 			ir.DeployableWorker:   WorkerPlatform,
 			ir.DeployableRunner:   RunnerPlatform,
+			ir.DeployableDeriver:  DeriverPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -860,6 +882,34 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Runner.Instances,
 		"concurrency": 1,
+	}
+	if len(env) > 0 {
+		pool["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
+	return out, nil
+}
+
+// lowerDeriver lowers a deriver (D74) to an account and the secrets it
+// reads, as a server's, and a pool that runs its image with its
+// environment, one instance or none when the environment turns it off,
+// running its concurrency of answers.
+func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Deriver == nil {
+		return registry.Lowered{}, fmt.Errorf("deriver %s has no run", d.Name)
+	}
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	pool := map[string]any{
+		"name":        d.ResourceName,
+		"image":       kebab(d.Name),
+		"account":     member,
+		"language":    strings.ToLower(d.Language),
+		"instances":   d.Deriver.Instances,
+		"concurrency": d.Deriver.Concurrency,
 	}
 	if len(env) > 0 {
 		pool["env"] = env

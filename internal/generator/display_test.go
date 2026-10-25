@@ -18,15 +18,16 @@ import (
 
 // D48: no generator renders @display, as none renders a field's @docs
 // title, and none renders an enum member's title, a type's icon or a
-// field's multiline hint (D48, amended). The DB, API and General fixtures
-// build with every type language, every SDK and the Go, TypeScript and
-// Rust servers twice, as loaded and with a display, an icon, a title on
-// every enum member and a hint on every text field, and the two trees hold
-// the same files, byte for byte, but for the one output that copies the
-// IR: the Rust types crate's schemas/<Type>.json, an IR document per
-// @jsonField payload, which carries each type's display, its fields'
-// hints and its enums' titles as it carries its fields' titles, and
-// nothing else besides.
+// field's multiline hint or currency (D48, amended). The DB, API and
+// General fixtures build with every type language, every SDK and the Go,
+// TypeScript and Rust servers twice, as loaded and with a display, an
+// icon, a title on every enum member, a hint on every text field and a
+// currency on every integer field, and the two trees hold the same files,
+// byte for byte, but for the one output that copies the IR: the Rust
+// types crate's schemas/<Type>.json, an IR document per @jsonField
+// payload, which carries each type's display, its fields' hints and its
+// enums' titles as it carries its fields' titles, and nothing else
+// besides.
 func TestDisplayChangesNoGeneratedFile(t *testing.T) {
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	every := map[string]any{
@@ -169,8 +170,8 @@ func withoutDisplays(t *testing.T, rel string, data []byte) []byte {
 // addDisplays gives every type of the schema a display with every member
 // a type without behaviors takes: the nouns, a create label, an icon, its
 // first string field as the title and its first field as the summary. It
-// gives every text field that is not secret a multiline hint, and every
-// enum member a title. It returns how many types took a display.
+// gives every text field that is not secret a multiline hint, every
+// integer field a currency, and every enum member a title. It returns how many types took a display.
 func addDisplays(schema *ir.Schema) int {
 	n := 0
 	multiline := true
@@ -186,6 +187,9 @@ func addDisplays(schema *ir.Schema) int {
 				}
 				if !f.Secret && !f.TypeRef.IsMap && ir.TextValue(schema, ir.TypeRef{Name: f.TypeRef.Name}) {
 					f.Display = &ir.FieldDisplay{Multiline: &multiline}
+				}
+				if scalar := schema.Scalars[f.TypeRef.Name]; scalar != nil && !f.TypeRef.IsMap && scalar.TypeMappings["json_schema"] == "integer" {
+					f.Display = &ir.FieldDisplay{Currency: &ir.DisplayCurrency{Code: "GBP"}}
 				}
 			}
 			td.Display = display

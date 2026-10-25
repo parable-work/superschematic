@@ -1,0 +1,15 @@
+# The Topcoat extension's fixture for the identity pages (D44, amended):
+# an API whose users are the core user model's (D50), read from its authDb,
+# the loader's fixture-user-model-db, as the loader's
+# fixture-user-routes-api reads them. It serves the session routes without
+# registration, and a resource its pages list.
+name: fixture-identity-pages-api
+kind: API
+authDb: fixture-user-model-db
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  topcoat:
+    enabled: true
+    pages: { enabled: true }

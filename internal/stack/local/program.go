@@ -191,7 +191,7 @@ func (m *Migration) dialect() sqlmigrate.Dialect {
 // "worker", D53) has no port and no URL, and is ready once it starts
 // (ReadinessStarted); it is built and run as a server in its language is,
 // a Rust one's crate included (D65). So is an engine's runner's (Kind
-// "runner", D58).
+// "runner", D58), and a deriver's (Kind "deriver", D74).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
@@ -700,8 +700,8 @@ func serverOf(res *ir.Resource) (*Server, error) {
 		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s, %s and %s servers", s.Language, LanguageGo, LanguageTypeScript, LanguageRust)
 	}
 	if kind, set := res.Properties["kind"]; set {
-		if s.Kind, ok = kind.(string); !ok || (s.Kind != "worker" && s.Kind != "runner") {
-			return nil, fmt.Errorf("its kind is %v; a process is a server's, a worker's or an engine's runner's", kind)
+		if s.Kind, ok = kind.(string); !ok || (s.Kind != "worker" && s.Kind != "runner" && s.Kind != "deriver") {
+			return nil, fmt.Errorf("its kind is %v; a process is a server's, a worker's, an engine's runner's or a deriver's", kind)
 		}
 	}
 	s.Readiness, _ = res.Properties["readiness"].(string)

@@ -392,6 +392,25 @@ func TestWorkersRefusals(t *testing.T) {
 		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), "+
 			"and a Worker runs only per request or per firing and reaches neither; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
 	})
+	t.Run("a deriver", func(t *testing.T) {
+		// D74: the refusal says why and where a deriver runs.
+		s := storefrontStack()
+		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
+		s.Expose = nil
+		services := stacktest.AcmeShop()
+		for i := range services {
+			switch services[i].Name {
+			case "shop-db":
+				services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+			case stacktest.ShopOrders.Name:
+				services[i].Language = registry.APILanguageTypeScript
+				services[i].Derivers = []ir.Deriver{{Name: "TriageTickets"}}
+			}
+		}
+		_, errs := resolveOver(t, reg, s, services, "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "deriver shop-orders-triage-tickets: target cloudflare places no deriver: a deriver fills Derived fields in a loop that lasts as long as its process, "+
+			"over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target")
+	})
 	t.Run("a name over 63 characters", func(t *testing.T) {
 		s := storefrontStack()
 		long := strings.Repeat("storefront", 6) + "-edge"

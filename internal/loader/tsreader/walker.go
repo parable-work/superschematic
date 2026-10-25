@@ -770,8 +770,10 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 
 	// A @job class declares a job of the API, which @job's Apply recorded
 	// in Schema.Jobs: it is no type (D52). A @worker class is no type
-	// either: @worker's Apply recorded it in Schema.Workers (D53).
-	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil {
+	// either: @worker's Apply recorded it in Schema.Workers (D53), nor is
+	// a @deriver class: @deriver's Apply recorded it in Schema.Derivers
+	// (D74).
+	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil {
 		return
 	}
 

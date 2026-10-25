@@ -797,6 +797,54 @@ when each reaction reads on from its cursor, a schedule that came due runs
 once and every overdue deadline fires. On gcp it is a Cloud Run worker
 pool of one instance, and on `local` a process with no port.
 
+## Derivers
+
+A deriver fills the [Derived](/superschematic/guides/engine-behaviors/#derived)
+fields of an engine database's types: a model outside the engine
+computes them, and the deriver hands each stale field to your code and
+settles the answer. Declare it on an empty class of an API that connects
+to the engine database:
+
+```ts
+@deriver({ schemas: ["Ticket"] })
+export class TriageTickets {}
+```
+
+The API's generated `Derivers` type has a method per derived field,
+typed by the field. Your implementation exports `createDerivers` (or
+`create_derivers` in Rust):
+
+```ts
+export const createDerivers: DeriversConstructor = deps => ({
+  triageTickets: {
+    async ticketCategory(item) {
+      const reply = await myModel(item.model, item.instruction, item.inputs, item.output);
+      return { value: reply.category, confidence: reply.confidence };
+    },
+    // ...one method per derived field
+  },
+});
+```
+
+The deriver is a deployable of its own, `<api>-<deriver>`, on a
+TypeScript or a Rust API. It runs as the deployable's name, holding each
+derived type's name and its Derived `permission`, so a `{ rules }` policy
+needs a rule for it, which the build checks:
+
+```ts
+{ subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
+```
+
+An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
+
+```ts
+settings: [{ of: ShopCart, deriver: "TriageTickets", concurrency: 8 }]
+```
+
+On `local` it is a process with no port, and on gcp a Cloud Run worker
+pool of one instance; cloudflare refuses it. acme-shop's shop-cart runs
+one, `TriageTickets`, whose keyword rules stand in for a model.
+
 ## Static sites
 
 A Site service is a static site: its config names the APIs its browser

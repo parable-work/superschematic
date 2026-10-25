@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -94,6 +95,8 @@ var coreNarrowers = map[string]narrower{
 	"Approvals":    narrowApprovals,
 	"Numbering":    narrowNumbering,
 	"Timers":       narrowTimers,
+	"Derived":      narrowDerived,
+	"Provenance":   narrowProvenance,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -1114,4 +1117,127 @@ func cloneValue(value any) any {
 		return out
 	}
 	return value
+}
+
+// fieldNames is a schema of a list of the names given, as an operation's
+// paramsSchema lists them: at least one, each once.
+func fieldNames(names []string) map[string]any {
+	return map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": EnumOf(names)}
+}
+
+// ownField is a node that renders as the TypeScript type of one of the
+// type's own fields, without the absence an optional field allows.
+func ownField(target Target, name string) map[string]any {
+	return ref(fmt.Sprintf("NonNullable<%sFields[%s]>", target.Base, strconv.Quote(name)), "")
+}
+
+// Derived: the fields field holds, by derived field of the config, its last
+// settled value's record and its override, so none is required; stale
+// lists derived fields. The operations name derived fields, and
+// applyDerived's values are of each field's own type (D74).
+func narrowDerived(n *Narrowing, config map[string]any, target Target) error {
+	fields, _ := config["fields"].(map[string]any)
+	names := SortedKeys(fields)
+	record := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"sourceHash": map[string]any{"type": "string"},
+			"model":      map[string]any{"type": "string"},
+			"settledAt":  integer(),
+			"settledBy":  map[string]any{"type": "string"},
+			"confidence": map[string]any{"type": "number"},
+			"overridden": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []any{"by", "at"},
+				"properties": map[string]any{"by": map[string]any{"type": "string"}, "at": integer()},
+			},
+		},
+	}
+	properties := map[string]any{}
+	values := map[string]any{}
+	for _, name := range names {
+		properties[name] = record
+		values[name] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"sourceHash", "value"},
+			"properties": map[string]any{
+				"sourceHash": map[string]any{"type": "string", "minLength": 1},
+				"value":      ownField(target, name),
+				"confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"usage":      map[string]any{"type": "object"},
+			},
+		}
+	}
+	settledNames := map[string]any{"type": "array", "items": EnumOf(names)}
+	for _, step := range []error{
+		setOperationProperty(n.Params, "staleDerivations", nil, "field", EnumOf(names)),
+		setOperationProperty(n.Params, "applyDerived", nil, "fields", map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": values}),
+		setOperationProperty(n.Results, "applyDerived", nil, "settled", settledNames),
+		setOperationProperty(n.Params, "rederive", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Results, "rederive", nil, "stale", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setField(n, "fields", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true),
+	} {
+		if step != nil {
+			return step
+		}
+	}
+	return setField(n, "stale", map[string]any{"type": "array", "items": EnumOf(names)}, true)
+}
+
+// provenanceReviews are the states a recorded field's review takes.
+var provenanceReviews = []string{"proposed", "accepted", "rejected", "edited"}
+
+// Provenance: the fields field holds, by recorded field (the config's, or
+// every own field), its last write's record, so none is required; accept
+// and reject name recorded fields, and reject's patch holds their own
+// types (D74).
+func narrowProvenance(n *Narrowing, config map[string]any, target Target) error {
+	names := stringsOf(config["fields"])
+	if _, given := config["fields"]; !given && target.Instance != nil {
+		for _, field := range target.Instance.Fields {
+			if field == nil {
+				continue
+			}
+			if field.JSONTag != "" {
+				names = append(names, field.JSONTag)
+			} else {
+				names = append(names, field.Name)
+			}
+		}
+	}
+	slices.Sort(names)
+	record := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"source", "by", "at"},
+		"properties": map[string]any{
+			"source":     map[string]any{"type": "string"},
+			"by":         map[string]any{"type": "string"},
+			"at":         integer(),
+			"confidence": map[string]any{"type": "number"},
+			"review": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []any{"state"},
+				"properties": map[string]any{"state": EnumOf(provenanceReviews), "by": map[string]any{"type": "string"}, "at": integer()},
+			},
+		},
+	}
+	properties := map[string]any{}
+	quoted := make([]string, 0, len(names))
+	for _, name := range names {
+		properties[name] = record
+		quoted = append(quoted, strconv.Quote(name))
+	}
+	picked := "never"
+	if len(quoted) > 0 {
+		picked = strings.Join(quoted, " | ")
+	}
+	for _, step := range []error{
+		setOperationProperty(n.Params, "accept", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Results, "accept", nil, "accepted", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setOperationProperty(n.Params, "reject", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Params, "reject", nil, "patch", ref(fmt.Sprintf("Partial<Pick<%sFields, %s>>", target.Base, picked), "")),
+		setOperationProperty(n.Results, "reject", nil, "rejected", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setField(n, "fields", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true),
+	} {
+		if step != nil {
+			return step
+		}
+	}
+	return setField(n, "inReview", boolean(), true)
 }

@@ -98,9 +98,10 @@ type ConfigOutput struct {
 	// EnvConfig holds the identity runtime's config parsed from it (D57),
 	// and values-schema.json never lists it.
 	IdentityField string
-	// Background is true for an API that declares a job or a worker,
-	// whose entrypoint loads the API's EnvConfig too (D52, D53). A stack
-	// sets no callers field for a job or a worker, which serves no
+	// Background is true for an API that declares a job, a worker or a
+	// deriver, whose entrypoint loads the API's EnvConfig too (D52, D53,
+	// D74). A stack sets no callers field for a job, a worker or a
+	// deriver, which serves no
 	// request, so the Rust config.rs of such an API with a callers field
 	// writes load_background_env_config beside load_env_config, and the
 	// TypeScript config.ts loadBackgroundEnvConfig beside loadEnvConfig,
@@ -312,7 +313,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		return nil
 	}
 	api := schema.Kind == ir.SchemaKindAPI
-	background := api && (len(schema.Jobs) > 0 || len(schema.Workers) > 0)
+	background := api && (len(schema.Jobs) > 0 || len(schema.Workers) > 0 || len(schema.Derivers) > 0)
 	callers, cors, identity, listed := "", "", "", ""
 	if opts.Derived && api && schema.HasServiceCallers() {
 		listed = ir.CallersField(schemaName)

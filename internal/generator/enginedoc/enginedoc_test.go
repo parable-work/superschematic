@@ -161,6 +161,42 @@ func TestBuildInlinesAnImportedType(t *testing.T) {
 	}
 }
 
+// A type a behavior's config names, a Branches kind's content or a
+// Variants value's type, is in the engine type's document with what its
+// fields reach, though no field of the engine type holds it: the engine
+// refuses a config that names a type its document lacks. A name that is
+// no value type of the schema is refused at the build.
+func TestBuildHoldsTheTypesABehaviorsConfigNames(t *testing.T) {
+	s := desk()
+	s.Types["Section"] = valueType("Section", field("heading", str("string")), field("priority", str("Priority")))
+	s.Types["Memo"] = valueType("Memo", field("body", str("string")))
+	s.Types["Letter"] = valueType("Letter", field("to", str("string")))
+	s.Types["Document"] = engineType("Document", []ir.BehaviorRef{
+		{Name: "Branches", Config: json.RawMessage(`{"kinds":{"section":{"type":"Section"}}}`)},
+		{Name: "Variants", Config: json.RawMessage(`{"by":"kind","field":"content","types":{"letter":"Letter","memo":"Memo"}}`)},
+	}, field("title", str("string")), field("kind", str("string")), field("content", str("string")))
+	document := schemaFile(t, build(t, s, enginedoc.Options{}), "Document")
+	if got := keys(document["types"].(map[string]any)); !reflect.DeepEqual(got, []string{"Document", "Letter", "Memo", "Section"}) {
+		t.Errorf("types = %v, want Document, Letter, Memo, Section", got)
+	}
+	if got := keys(document["enums"].(map[string]any)); !reflect.DeepEqual(got, []string{"Priority"}) {
+		t.Errorf("enums = %v, want Priority, which Section's field uses", got)
+	}
+	if section := document["types"].(map[string]any)["Section"].(map[string]any); section["role"] != "EmbeddedStruct" || section["behaviors"] != nil {
+		t.Errorf("Section = %v, want a struct with no behaviors", section)
+	}
+
+	for _, tc := range []struct{ config, want string }{
+		{`{"kinds":{"section":{"type":"Missing"}}}`, "engine type Document: behavior Branches of Document: kinds.section.type names Missing, which is not a type of desk-db or of a dependency the build loaded"},
+		{`{"kinds":{"section":{"type":"Account"}}}`, "engine type Document: behavior Branches of Document: kinds.section.type names Account, which composes a behavior: its content must be a value type"},
+	} {
+		s.Types["Document"].Behaviors = []ir.BehaviorRef{{Name: "Branches", Config: json.RawMessage(tc.config)}}
+		if _, err := enginedoc.Build(s, enginedoc.Options{SchemaName: "desk-db", Registry: coreRegistry(t), MetaSchema: stubMetaSchema}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Build with %s: err = %v, want %q", tc.config, err, tc.want)
+		}
+	}
+}
+
 // The namespace is outputs.engine.namespace, else the service's name, and
 // either must be an engine namespace name.
 func TestNamespace(t *testing.T) {

@@ -458,6 +458,11 @@ let app = Router::builder()
     .build();
 ```
 
+With the crate's pages on, its console also pages the engine's types at
+`<prefix>/engine`, each behavior in a panel and each operation as a form,
+every call the signed-in caller's ([Engine
+pages](/superschematic/guides/topcoat/#engine-pages)).
+
 ### The project's engine crate
 
 The Rust engine (D58) runs an extension's behavior from a Rust crate
@@ -1816,6 +1821,43 @@ engine.instances.invokeSchema(deriver, "tickets", "settleDerivations", {
   Removing it leaves the values as own fields.
 - **Lease.** On a leased type, list `"Derived.applyDerived"` in Lease's
   `exempt`.
+- **Secrets stay in.** A `Secret<T>` field is refused as an input, by the
+  build and by the engine at define: a deriver sends its inputs to a
+  model outside the engine (D74).
+
+### Run a deriver
+
+`runDeriver`, from `@superschematic/engine` (and `/client`), is the loop
+a deriver runs: it pages each schema's stale fields, hands each to your
+`answer`, which calls a model, and settles each page's answers in one
+call. An answer that throws settles as a failure. When a pass finds
+nothing, it waits for a commit, or `idleMs`, and its `signal` stops it. A
+pass that meets `not_found` (a schema not yet published), `busy` or
+`unavailable` waits a second, doubling to thirty, and tries again
+(`onRetry` hears each), so a deriver may start before its document is
+deployed.
+
+```ts
+import { inProcess, runDeriver } from "@superschematic/engine";
+
+const deriver: Principal = { subject: "deriver", permissions: ["tickets.derive"] };
+await runDeriver({
+  source: inProcess(engine, deriver),            // or an EngineClient's instances
+  schemas: ["tickets"],
+  concurrency: 4,
+  signal: controller.signal,
+  answer: async (schema, item) => {
+    const reply = await myModel(item.model, item.instruction, item.inputs, item.output);
+    return { value: reply.value, confidence: reply.confidence, usage: reply.usage };
+  },
+});
+```
+
+A Rust host runs the same loop over its background engine with
+`superschematic_engine::derive::run_deriver` (the `background` feature),
+which calls the engine on the blocking pool and waits on the storage's
+notifier. A stack runs one as a deployable of its own, from a `@deriver`
+on an API ([Stacks](/superschematic/guides/stacks/)).
 
 ## Provenance
 

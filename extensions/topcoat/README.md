@@ -49,6 +49,13 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   prefix, with a layout, a nav and an index, each page under its
   operation's route controls, and, for an app that loads Topcoat's
   runtime, lists whose filter updates them in place ([Pages](#pages)).
+  Beside them it pages the engine's types, when the API's database is an
+  engine database ([Engine pages](#engine-pages)), and signs a caller in
+  and out and administers the users and roles, when its users are the
+  core user model's ([Sign-in and admin pages](#sign-in-and-admin-pages)).
+- shows an amount whose field names its currency, `@display({ currency })`,
+  as money, `GBP 4.50`, and takes it in a form as a decimal
+  ([Money](#money)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -99,7 +106,10 @@ the views, which are built on records. Pages are off by default:
 `pages: { enabled: true, prefix: "/console" }` turns them on, and they
 need the records, the forms and the views ([Pages](#pages)); `live: true`
 beside them renders each list with a filter through a shard ([Live
-lists](#live-lists)).
+lists](#live-lists)). Beside `enabled`, `engine: false` leaves out the
+[engine pages](#engine-pages), and `identity: false` the [sign-in and
+admin pages](#sign-in-and-admin-pages); `identity: { signUp: true }`
+adds a sign-up page. Both are on by default wherever they apply.
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -141,8 +151,10 @@ pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/c
 ```
 
 `pages_live = true` beside `pages_prefix` makes the lists of the pages it
-turns on live, as `pages.live` would ([Live lists](#live-lists)); without
-a `pages_prefix` the table refuses it.
+turns on live, as `pages.live` would ([Live lists](#live-lists));
+`pages_engine = false` and `pages_identity = false` turn off the engine
+pages and the identity pages, and `pages_identity = { sign_up = true }`
+adds sign-up. Without a `pages_prefix` the table refuses each of them.
 
 An app that links two crates registers each one's pages, layout and
 index at its prefix, so the table refuses one path for several services,
@@ -243,6 +255,10 @@ engine, and the build says so. `<service>_without_api` (below) takes the
 engine too and keeps it for the pages, but mounts none of its routes, as
 it mounts no JSON API.
 
+With the pages on, the console pages the engine's types too, each
+instance's behaviors in panels and its operations as forms ([Engine
+pages](#engine-pages)).
+
 ### Several services in one app
 
 `[extension.topcoat] services` lists the services one Topcoat app hosts
@@ -320,7 +336,9 @@ An API that serves no login route of its own, as `shop-orders`, whose
 users sign in through another API's, signs a user in from a page: the
 page calls the identity service's `login` with a cookie session, after
 `check_cookie_login`, and appends `config().session_cookie(..)` to the
-page's response. The acme shop's `/sign-in` does so.
+page's response. The acme shop's `/sign-in` does so. With the pages on,
+the crate writes such a page itself, with sign-out, an account page and
+the users and roles ([Sign-in and admin pages](#sign-in-and-admin-pages)).
 
 ## Records
 
@@ -572,6 +590,9 @@ attributes its rules give it:
   textarea takes `minlength` and `maxlength`, but no `pattern`, which
   `parse` checks, and a newline after its start tag, which a browser
   drops, so a value that starts with one renders as sent;
+- for an amount in a literal currency, `@display({ currency: "GBP" })`, a
+  decimal control labeled with its code, and for one whose currency is
+  another field a whole number of minor units ([Money](#money));
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
@@ -888,6 +909,7 @@ in words. A value renders by its field's type:
 | `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
 | `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
 | `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
+| An amount whose currency is known | `<data value="3998">GBP 39.98</data>` ([Money](#money)) |
 | A boolean | "Yes" or "No" |
 | An object type | its detail; in a table, its title when its type declares one |
 | A list of objects | its type's table |
@@ -954,6 +976,55 @@ header repeats. `Sorted.by` is that column and its direction, and
 `Sorted.links` each sortable column's field, link and query, which a live
 list's `Sorted.live`, its shard's query, takes in place of loading the
 page. An item's page shows a section's table with none.
+
+## Money
+
+A field that holds an amount in a currency's minor units says which
+currency with `@display({ currency })` ([D48](../../docs/DECISIONS.md)):
+a code, `"GBP"`, or another field of the same type, `{ field: "currency" }`.
+A `Finance.Money` field without it takes its type's one `Finance.Currency`
+field, when the type has exactly one.
+
+A display component shows the amount as
+`<data value="450">GBP 4.50</data>`: the code, a space, `-` for a
+negative amount, the whole part grouped by `,` in threes, and exactly
+the currency's minor units of decimals. XAU, which has none, shows the
+whole number. A field currency is read from the same record, per row in
+a table. A currency that is absent or no active ISO 4217 code shows the
+amount as a plain number, and the build log names each amount a
+component shows as a number, and why:
+
+```
+  - topcoat: OrderView.total shows as a number: it is Finance.Money, and names no currency: @display({ currency }) gives it one
+```
+
+`views::money_text(amount, currency)` writes the text, for a page's own
+markup. The minor units come from superscalar's Rust core at run time
+(`finance_currency::lookup`), through the scalar crate the types crates
+link, which the crate's `Cargo.toml` names only when it shows or reads
+money. Money takes none of the app's choices.
+
+A form's amount in a literal currency is a decimal control,
+`<input type="text" inputmode="decimal">`, labeled `Deposit (GBP)`, with
+a pattern from `forms::decimal_pattern(code, signed)`: at most the
+currency's decimals, and a `-` only when the field's bounds admit a
+negative amount. Its reader, `money_<code>` or `signed_money_<code>`,
+takes exactly what the pattern takes, and writes the minor units:
+`4.50` is 450. It refuses, at the field, "must be an amount" (surrounding
+space included), "must have at most 2 decimal places", "must be a whole
+amount" (any `.` in JPY), "must not be negative" and "is too large an
+amount". A default shows in major units (`decimal_text(2500, "GBP")` is
+`25.00`), and an edit page fills the control from the item the same way
+(`held_decimal`), so saving it unchanged keeps the amount. The app's
+choices do not make it a select: a choice's value is minor units, as the
+API sends it.
+
+An amount whose currency is another field, named or inferred, cannot
+know its decimals before that field is read, so it stays
+`type="number" step="1"`, with the hint "In minor units of Currency". Its
+reader, `minor_amount`, takes digits alone, with an optional `-`, and
+refuses `12.00` and `1.2e1` ("must be a whole number of minor units"),
+which a number input sends and an integer reader would take as 12.
 
 ## Pages, references and search
 
@@ -1567,3 +1638,171 @@ Router::builder()
 
 An app that does not load it leaves `live` off, so it registers no shard
 it cannot use.
+
+### Engine pages
+
+When the crate mounts an engine ([The engine](#the-engine)), its pages
+are on and a route of the API authenticates a caller, `engine_pages`
+serves the engine's types under `<prefix>/engine` (D44, amended):
+
+| Page | Path |
+| --- | --- |
+| The types the caller may read (the engine's `capabilities`) | `<prefix>/engine` |
+| A type's instances, a page at a time, and its schema-scope operations | `<prefix>/engine/{schema}` |
+| An instance: its own fields, a section per behavior, then the operations no section shows | `<prefix>/engine/{schema}/{id}` |
+| A read-only operation's GET, which renders its result on the page, and a write's POST, then 303 | `.../operations/{operation}`, the type's or the instance's |
+
+Every page calls the engine in-process on the blocking pool, as the
+page's caller: the principal the `PageAuthenticator` gives, mapped as
+`engine::routes` maps a request's (`Principal::new(subject,
+permissions).with_claims(claims)`), so the engine's policy decides what a
+page reads and does. No page acts as the system principal: no caller is
+401. The API's `@rateLimit` and `@timeout` do not apply. Every POST
+passes the console's own cross-origin check before the engine is
+called, trusting no other origin, not even the identity config's
+`trustedOrigins`, so a post another site sent is 403 `cross_origin`
+whatever the `PageAuthenticator` and the origin policy let through. What a page reads renders on the
+server; no procedure hands it to the browser.
+
+A page reads the type's describe document. Its `display` names the type
+and gives a list's columns: the title field, linked, else the id, then
+the summary fields, own or qualified (`Stock.available`). A list pages by
+the engine's cursor, with `back` and a size form of 10, 50 and 200 as
+the console's lists have ([A paged list](#a-paged-list)). An instance's
+own amount shows as money ([Money](#money)) in the currency its field's
+`@display` names, else its type's one `Finance.Currency` field's, which
+the page reads from the type's live schema document. The nav and
+the index gain Engine when the caller may read a type, and the trail
+names an instance by its title field, else its noun and id.
+
+An operation's form is built at run time from its `params` JSON Schema:
+a string a text input, an integer or a number a number input, each with
+its bounds, an enum or a boolean a select, and anything else a JSON
+textarea, each control named by the bare parameter. A form that writes
+an instance sends a hidden `expectedSeq`, the instance's seq when its
+page was read. An operation is offered as the engine's tool manifest
+offers it to the caller: one the type lacks, or the deployment hides
+(`outputs.engine.tools.hidden`), is 404, one the policy refuses is 403
+with the engine's reason, and one the engine hides from MCP alone, for
+a handle MCP would refuse, is offered.
+
+| The engine refuses | The page answers |
+| --- | --- |
+| A parameter (`OperationParams`) | 422, each issue at its control |
+| A behavior's veto | 409, `<code>: <reason>` as the form's message |
+| A stale `expectedSeq` | 409, the form as sent |
+| A missing instance or operation | 404, on its own page |
+| Anything else it refuses | its status and message |
+| An error that is no refusal | 500, "The engine failed to answer" |
+
+`engine_panels::panel(cx, behavior, describe, record)` renders the
+section of a behavior the crate knows: Workflow, Approvals and Branches
+(`core_shows` names the operations each shows), and Stock, Calendar,
+Holds and Payments (`commerce_shows`). A panel shows only the operations
+the page offers the caller, and its amounts through `money_text`. Any
+other behavior gets the generic panel,
+`<section class="ss-panel" data-behavior="X">`: its fields as the read
+returns them, and its operations as forms. An operation a panel does not
+show is a generic form under the panels, so each one the caller is
+offered has a form once.
+
+- **Workflow**: the state by its display label, a button for each move
+  the display labels out of it, and a "Move to" select of the others, a
+  move whose permission the caller lacks left out.
+- **Approvals**: each gate's sign-offs against its count, who signed, and
+  the caller's sign-off or withdrawal, when their permissions cover the
+  gate's and the gate does not exclude its creator. Entering the gated
+  state consumes its sign-offs, so a gate the instance entered or passed
+  says so: "Met: it entered Approved with its 2 sign-offs."
+- **Branches**: the refs, primary first (`?ref=`), a ref's commits 50 at
+  a time (`?skip=`), a diff of two of them (`?from=&to=`, at most 200
+  rows), the release log, and the writes as `engine_pages::operation_form`
+  with the refs and versions filled in: branch, save, commit, seal,
+  rebase, revert, merge and discard. A tagged commit's release is a
+  button in its row.
+- **Stock**: on hand, held, available and low, the receive, adjust and
+  count forms, each with the page's `expectedSeq`,
+  and the movements 20 at a time (`?movements=`).
+- **Calendar**: the time zone, the capacity, the hours as a week, the
+  closures, and the bookings between `bookingsFrom` and `bookingsTo` (UTC,
+  both days, a week from today by default), 20 at a time.
+- **Holds**: the state, the items with their unit prices, and the total,
+  "Mixed currencies" when it is null and "Nothing priced" when no item
+  has a price.
+- **Payments**: due, authorized, captured, refunded, outstanding and
+  overpaid, in its currency, the state and the attempts. A refund
+  instance links to what it refunds; an instance another type refunds
+  through Approvals links to that type; any other holds `refundPayment`'s
+  form, in minor units, whose idempotency key is made as the form
+  renders.
+
+`pages.engine: false` (`pages_engine = false`) turns the engine pages
+off. The build log says why a crate whose pages and engine are on has
+none:
+
+```
+  - topcoat: no engine pages at /console/engine: no route of the API authenticates a caller, and a page calls the engine only as its caller, whom the engine's policy admits
+  - topcoat: no engine pages at /engine/engine: the path is under /engine, where the crate mounts the engine's own routes
+  - topcoat: no engine pages at /console/engine: the API's own collection engine is served there
+```
+
+The acme shop's console pages `shop-db`'s `Inventory`, `CollectionPoint`,
+`Checkout` and `Refund` at `/console/engine`; its
+`topcoat/tests/back_office.rs` receives stock, reads a pickup point's
+week, shows a checkout's holds and payment as money, and signs a refund
+off twice before it moves to approved.
+
+### Sign-in and admin pages
+
+When the API authenticates with the identity runtime (D50) and its
+pages are on, `identity_pages` serves, under the prefix:
+
+| Page | Path |
+| --- | --- |
+| Sign in (GET, POST), then 303 to `next` | `<prefix>/sign-in` |
+| Sign out (POST), clearing the cookie | `<prefix>/sign-out` |
+| Sign up (GET, POST), with `pages.identity.signUp` or `@userSessions({ register: true })` | `<prefix>/sign-up` |
+| The caller's login, name and roles, and the change-password form | `<prefix>/account` |
+| The users, a new user, and a user's page | `<prefix>/users`, `<prefix>/users/new`, `<prefix>/users/{id}` |
+| A user's posts | `<prefix>/users/{id}/{grant,revoke,disable,enable,password}` |
+| The roles, a new role, a role's edit page and its delete | `<prefix>/roles`, `<prefix>/roles/new`, `<prefix>/roles/{id}`, `<prefix>/roles/{id}/delete` |
+
+Each calls the identity runtime's `Service` in-process with the caller as
+its `IdentityPrincipal`, so `identity.users.*` and `identity.roles.*`
+decide, and no one grants a permission, or administers a user holding
+one, they do not hold. Sign-in runs `check_cookie_login`, then `login`
+with a cookie session, and sets the runtime's session cookie. `next` is
+kept only when it is a path of the app: it starts with `/`, not `//`,
+and holds no `\` or control character. A form renders again with each
+error at its control, 422 for what the page refuses and the service's
+status for what it refuses; a 401, a 404 and a 403 without a list of
+permissions render on their own page. A password control never renders
+what was sent.
+
+Signing in, signing up and changing a password take a token from a rate
+limiter first, counting the client by `client_key`: the API's route's
+limiter when the API serves `login`, `register` or `changePassword`, so
+the page and the route share one budget, else the page's own at the
+route's rate, 10, 5 and 10 a minute. Past it the form answers 429 with
+`Retry-After` and "Too many attempts: try again in N seconds".
+
+The nav shows Users to a caller who holds `identity.users.read` and Roles
+to one who holds `identity.roles.read` (`Service::permits`), then
+Account and a Sign out button (`NavLink.post`), and a signed-out caller
+Sign in, and Sign up when it is served, as nav-only links
+(`NavLink.nav_only`), since the index has its own sign-in link.
+
+`pages::Settings::sign_in` names the app's own sign-in page, which every
+link to sign in then uses; without it they use `identity_pages::SIGN_IN`.
+The acme shop names its `/sign-in`, so `/console/sign-in` is routed but
+linked from nowhere, and its staff sign out at `/console/sign-out`.
+`pages.identity: false` (`pages_identity = false`) turns the pages off.
+The build log says why a crate has no sign-up, or none of the pages:
+
+```
+  - topcoat: no sign-up page under /console: neither pages.identity.signUp nor the API's @userSessions({ register: true }) opens registration
+  - topcoat: no sign-in, account, users or roles pages under /console: the pages of users are at /console/users, where the identity pages would be
+```
+
+The identity store lists no user's sessions and ends no one session, so
+no page does; changing a password ends every other session.

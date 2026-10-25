@@ -45,6 +45,11 @@ export function identityForbidden(message: string, details?: unknown): HttpProbl
   return new HttpProblem(403, message, { code: IdentityErrorCode.FORBIDDEN, ...(details !== undefined ? { details } : {}) });
 }
 
+/** A write to a user who holds permissions the caller does not, listing them. */
+export function notCovered(permissions: string[]): HttpProblem {
+  return identityForbidden('No one administers a user holding a permission they do not hold', { permissions });
+}
+
 export function crossOrigin(): HttpProblem {
   return new HttpProblem(403, 'Cross-origin request refused', { code: IdentityErrorCode.CROSS_ORIGIN });
 }

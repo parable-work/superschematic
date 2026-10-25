@@ -14,8 +14,9 @@ import { normalizeIdentityUUIDStrict } from 'superscalar';
 import { HttpProblem, OperationResult, notFound, type RequestContext } from '@superschematic/http-runtime';
 import { BehaviorVetoError, EngineError, type Principal } from '@superschematic/engine';
 import type { AsyncEngine } from '@superschematic/engine/server';
-import type { CartsImplementation, Constructor, Deps, PickupSlotsImplementation } from '@acme/shop-cart-api';
-import type { CartLine, CartView, IdentityUUID, PickupSlot } from '@acme/shop-cart-types/types';
+import type { CartsImplementation, Constructor, Deps, DerivedAnswer, DeriversConstructor, PickupSlotsImplementation, TicketsImplementation } from '@acme/shop-cart-api';
+import type { CartLine, CartView, IdentityUUID, PickupSlot, TicketView } from '@acme/shop-cart-types/types';
+import { TicketCategory, TicketPriority } from '@acme/shop-db-types';
 
 // The engine namespace shop-db's engine types live in, and the deployable
 // shop-cart's calls name to its policy (D37).
@@ -36,6 +37,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const create: Constructor = deps => ({
   carts: carts(deps),
   pickupSlots: pickupSlots(deps),
+  tickets: tickets(deps),
 });
 
 /** The shopper's call through shop-cart: the shopper is the actor, shop-cart the service. */
@@ -194,4 +196,95 @@ function pickupSlots(deps: Deps): PickupSlotsImplementation {
       );
     },
   };
+}
+
+/** A Ticket as the engine reads it. */
+interface TicketRecord {
+  id: IdentityUUID;
+  data: { customerId: string; subject: string; body?: string; orderId?: string; category?: string; priority?: string; summary?: string };
+  behaviors: { Workflow?: { status: string }; Provenance?: { inReview?: boolean } };
+}
+
+function ticketView(found: unknown): TicketView {
+  const record = found as unknown as TicketRecord;
+  return {
+    id: record.id,
+    status: record.behaviors.Workflow?.status ?? 'new',
+    subject: record.data.subject,
+    body: record.data.body,
+    orderId: record.data.orderId,
+    category: record.data.category,
+    priority: record.data.priority,
+    summary: record.data.summary,
+    inReview: record.behaviors.Provenance?.inReview ?? false,
+  };
+}
+
+function tickets(deps: Deps): TicketsImplementation {
+  return {
+    // A new ticket of the caller's in new: shop-cart's deriver fills in its
+    // category, priority and summary once it commits (D74).
+    openTicket: async ({ input }, ctx) => {
+      const principal = shopper(ctx);
+      const data: Record<string, unknown> = { customerId: principal.subject, subject: input.subject };
+      if (input.body != null) data.body = input.body;
+      if (input.orderId != null) data.orderId = input.orderId;
+      const record = await engineCall(deps, engine =>
+        engine.instances.create(principal, 'Ticket', data, { ...inNamespace, id: engineId(randomUUID()) })
+      );
+      deps.logger.info('ticket opened', { ticket: (record as unknown as TicketRecord).id, shopper: principal.subject });
+      return new OperationResult(ticketView(record), 201);
+    },
+    getTicket: async ({ id }, ctx) => {
+      const principal = shopper(ctx);
+      const found = await engineCall(deps, engine => engine.instances.get(principal, 'Ticket', engineId(id), inNamespace));
+      if (!found || (found as unknown as TicketRecord).data.customerId !== principal.subject) throw notFound(`Ticket ${id} does not exist`);
+      return ticketView(found);
+    },
+  };
+}
+
+/**
+ * The deriver TriageTickets' answers (D74): keyword rules over the
+ * ticket's subject and body, which stand in for a model so stack dev and
+ * CI need no provider. A rule that matches is sure (0.9); a ticket no rule
+ * matches is "other" at 0.5, which Provenance holds in review for support
+ * staff. A project calls its model here, mapping item.model ("standard",
+ * "simple") to a provider's model and holding the answer to item.output.
+ */
+export const createDerivers: DeriversConstructor = () => ({
+  triageTickets: {
+    async ticketCategory(item) {
+      const text = words(item.inputs.subject, item.inputs.body);
+      const rules: Array<[RegExp, TicketCategory]> = [
+        [/\b(refund|charge[d]?|card|payment|paid|invoice)\b/, TicketCategory.Payments],
+        [/\b(deliver(y|ed)?|courier|pickup|collect(ion)?|late|arrive[d]?)\b/, TicketCategory.Delivery],
+        [/\b(order|cancel|cart|checkout)\b/, TicketCategory.Orders],
+        [/\b(broken|faulty|size|colour|color|product|item)\b/, TicketCategory.Product],
+      ];
+      const hit = rules.find(([pattern]) => pattern.test(text));
+      return hit ? sure(hit[1]) : { value: TicketCategory.Other, confidence: 0.5 };
+    },
+    async ticketPriority(item) {
+      const text = words(item.inputs.subject, item.inputs.body);
+      if (/\b(urgent|asap|today|immediately|wrong (card|amount)|charged twice)\b/.test(text)) return sure(TicketPriority.Urgent);
+      if (/\b(when you can|no rush|question|wondering)\b/.test(text)) return sure(TicketPriority.Low);
+      return sure(TicketPriority.Normal);
+    },
+    async ticketSummary(item) {
+      const body = (item.inputs.body ?? '').trim();
+      const first = body.split(/(?<=[.!?])\s/)[0] ?? body;
+      return { value: first.length > 200 ? `${first.slice(0, 197)}...` : first, confidence: 0.9 };
+    },
+  },
+});
+
+/** An answer the rules are sure of. */
+function sure<T>(value: T): DerivedAnswer<T> {
+  return { value, confidence: 0.9 };
+}
+
+/** The ticket's text, lowercased, for the rules. */
+function words(...parts: Array<string | null | undefined>): string {
+  return parts.filter(part => part != null).join(' ').toLowerCase();
 }
