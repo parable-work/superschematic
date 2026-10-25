@@ -564,11 +564,62 @@ and `calendar.manage`.
 
 `placeOrder` still takes an order in one step, holding no stock and
 taking no payment, for the shop's Rust server, which answers the
-checkout routes and the webhook 501, and its Topcoat app, which mounts
-the engine at `/engine` but sells nothing through it yet. The
+checkout routes and the webhook 501, and its Topcoat app, which keeps
+the back office below but sells nothing through its engine. The
 [README](https://github.com/parable-work/superschematic/blob/main/examples/acme-shop/README.md#commerce)
 walks through a sale, and D70's amendment, "acme-shop sells, books and
 refunds through the engine", records why each piece runs where it does.
+
+## The back office
+
+A [Topcoat app](/superschematic/guides/topcoat/#engine-pages) over an API
+of the engine database pages its engine's types, so staff work the
+shop's stock, pickup points, checkouts and refunds from a browser, each
+call made as the signed-in member of staff, whom the database's policy
+admits by their permissions:
+
+- an `Inventory`'s page shows on hand, held, available and low, the
+  receive, adjust and count forms, and the movements, newest first. A
+  form sends the page's `expectedSeq`, so a second click is 409, not a
+  second delivery; <!-- verify: fix-eng -->
+- a `CollectionPoint`'s shows its time zone, its opening hours as a week,
+  its closures and the bookings of a range of dates;
+- a `Checkout`'s shows its holds, each item's unit price and the total as
+  money, `GBP 39.98`, or "Mixed currencies" when the total is null, and its
+  payment: what is due, captured and refunded, its state and its
+  attempts. Since `Refund` refunds it through `Approvals`, the payment
+  links to the refunds rather than holding a refund form;
+- a `Refund`'s shows its sign-offs against the two its `approved` gate
+  needs, a sign-off form for a member of staff who holds
+  `refunds.approve`, and the moves. Moving it to `approved` with one
+  sign-off is 409 `approvals_missing`, with the engine's message on the
+  form.
+
+A type that refunds itself directly gets `refundPayment`'s form, whose
+idempotency key is made as the form renders, so a form sent twice
+refunds once. <!-- verify: fix-eng -->
+
+acme's Topcoat app has this back office at `/console/engine`, and the
+shop's users and roles at `/console/users` and `/console/roles`. Its
+engine is a SQLite file of its own and has no payment adapter, so it
+sells nothing: its checkouts are those its tests write, as the stack's
+`shop-orders` and acmepay's adapter would. `topcoat/tests/back_office.rs`
+seeds an anvil, the front counter, Grace's checkout of two anvils, held
+and paid, and a refund of GBP 10.00. Ada receives five anvils through
+the Stock panel, and Grace is refused (403). Ada signs the refund off,
+moving it is refused, Ada adds Katherine through the users pages and
+grants her the `refunds` role, Katherine signs it off, and Ada moves it
+to `approved`. Once the adapter reports the refund paid, its payment and
+the checkout's show it refunded. The app runs no runner, so the refund
+stays `approved` rather than moving on to `issued`.
+
+The app's demo staff, `ada@example.com`, holds the roles the policy
+names: `staff` (`orders.any`), `refunds` (`refunds.approve`), `stock`
+(`stock.write`), `collection-points` (`calendar.manage`) and `admin`
+(`identity.users.*`, `identity.roles.*`). She signs in at the app's own
+`/sign-in`, which the console links to, and signs out at
+`/console/sign-out`; the console's own `/console/sign-in` is served but
+linked from nowhere.
 
 ## The proof
 
