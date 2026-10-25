@@ -977,9 +977,13 @@ Build the stack like any service. A single build loads the services it
 reaches from its siblings:
 
 ```sh
-superschematic build schemas/services/shop-stack
-superschematic build-all schemas/services
+superschematic-topcoat build schemas/services/shop-stack
+superschematic-topcoat build-all schemas/services
 ```
+
+acme's `shop-stack` has an app that needs Topcoat, so its build runs with
+`superschematic-topcoat` ([Apps](#apps)); a stack without one builds
+with `superschematic`.
 
 Under the output root, `schemas/dist` by default, the build writes:
 
@@ -1097,8 +1101,13 @@ runs `ShipOrders` and `SettlePayments` every minute, and turns
 `shop-stock`'s crate at `apps/backoffice`, with its pages under `/stock`
 and the engine console over `shop-db` under `/stock/engine`, which the
 stack exposes ([Apps](#apps)). Its build needs the Topcoat extension, so
-the example runs its stack commands with `superschematic-topcoat`.
-{/* verify: b4 */}
+the example builds its tree and runs `stack dev` with
+`superschematic-topcoat`; the installed `superschematic` still inits and
+plans the stack. `stack dev`'s summary prints where the app is,
+`app shop-stock-backoffice http://127.0.0.1:<port>, Backoffice of
+shop-stock`. Sign in at `/stock/sign-in` as a `shop-db` user who holds
+`stock.write`, then receive stock on a product's Inventory page,
+`/stock/engine/Inventory/{id}`, through its Stock panel.
 
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
@@ -1126,7 +1135,7 @@ in a container with `shop-db` migrated, fake-gcs-server in another with
 on its generated crate, which cargo builds, the storefront's on Bun, each
 worker as a process, `ShipOrders` on its schedule, the site, built
 once and served with its config, and `Backoffice` after `shop-stock`'s
-server. {/* verify: b4 */}
+server.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
 running, calls each Go and Rust server through its Go SDK, uploads a
 product's image to `shop-media` through the URL `shop-api` signs, counts
@@ -1139,8 +1148,10 @@ signed webhook `shop-orders` records, sees the checkout placed, its order
 written and the sale reported to `shop-stock` in one trace, a sale
 reported with a shopper's session alone refused 401, the worker fulfil
 the order and `ReorderStock` file the product's restock request, a member
-of staff sign in to `Backoffice` and receive stock through
-`/stock/engine/Inventory/{id}` {/* verify: b4 */}, and a
+of staff who holds `stock.write` sign in to `Backoffice` at
+`/stock/sign-in` and receive five units through the Stock panel's form on
+`/stock/engine/Inventory/{id}`, which `shop-stock`'s `GetStock` then
+counts, and a
 refund two members of staff sign off made by `SettlePayments`, run with
 `stack run`; reads a cart from the storefront and the site and its
 config, checks that `shop-api` answers CORS for the site's origin and no
@@ -1186,12 +1197,13 @@ refuses a secret that has none and names the file it reads:
 
 ```sh
 superschematic stack secrets set Dev --stack schemas/services/shop-stack
-superschematic stack dev schemas/services/shop-stack
+superschematic-topcoat stack dev schemas/services/shop-stack
 ```
 
 A stack with an [app](#apps) that names an extension runs with the binary
-that links it: acme's `shop-stack` runs with `superschematic-topcoat` in
-place of `superschematic`. {/* verify: b4 */}
+that links it: acme's `shop-stack`, whose `Backoffice` needs Topcoat,
+runs with `superschematic-topcoat`, and a stack without one with
+`superschematic`.
 
 It needs Docker, Go, [Bun](https://bun.sh) for a stack with a TypeScript
 server, cargo for a stack with a Rust server, and the migration runner, `superschematic-migrate`, on `PATH` or
@@ -2348,11 +2360,14 @@ from the project's release page, and checks it against the release's
 `SHA256SUMS`, so a repository's CI changes only when you build with
 another release. A stack whose [app](#apps) names the `topcoat` extension,
 which the release's binary does not link, runs `superschematic-topcoat` in
-every job instead: each job builds it from the commit the release's
-`BUILD_COMMIT` names, fetched by its hash, against the release's static
-archives. Apps that name two extensions between them, or one whose binary
-superschematic's repository does not hold, fail the build of the
-workflow, since its every run would refuse the stack. {/* verify: b4 */} It checks the static archives against the digest the
+every job instead. Each job downloads the release's tarball, checks it
+against `SHA256SUMS`, reads the commit its `BUILD_COMMIT` names, fetches
+that commit by its hash, and builds `superschematic-topcoat` there
+against the release's static archives, their digests stamped in, as the
+release builds `superschematic`; it runs no project code. Apps that name
+two extensions between them, or one whose binary superschematic's
+repository does not hold, fail the build of the workflow, since its
+every run would refuse the stack. It checks the static archives against the digest the
 binary that generated it names. A binary built from a checkout names no release: its
 workflow's install step fails and says to generate the workflow again
 with a released superschematic. Every action is pinned by commit, and

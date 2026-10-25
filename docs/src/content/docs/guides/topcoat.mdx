@@ -41,8 +41,8 @@ customer's. They show the shop's amounts as money, `GBP 39.98`
 The extension is a Go module of its own, `extensions/topcoat`. The
 installed `superschematic` binary does not link it, since Topcoat is
 before 1.0; `superschematic-topcoat` is the installed binary with it
-linked beside the official extensions, so it builds and deploys
-everything `superschematic` does: {/* verify: b4 */}
+linked beside the official extensions (gcp, cloudflare and pulumi), so
+it builds and deploys everything `superschematic` does:
 
 ```bash
 cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
@@ -1073,9 +1073,9 @@ export abstract class Backoffice {}
 ```
 
 The API must be Rust, and its build must link the extension: run the
-stack's commands with `superschematic-topcoat`. The core binary still
-plans and inits the stack, and refuses to build it, saying to run
-`superschematic-topcoat`.
+stack's commands with `superschematic-topcoat`. The installed
+`superschematic` still plans and inits the stack, and refuses to build
+it, saying to run `superschematic-topcoat`.
 
 The app's program is a library crate at the naming file's
 [`[implementation_paths] rust_app`](/superschematic/reference/naming/#implementation_pathsrust_app),
@@ -1104,8 +1104,10 @@ the entrypoint opened, in place of `engine::open` on a SQLite file, and,
 for an API on the identity runtime, `IdentityPageAuthenticator::of` over
 the implementations. An API whose users are its own passes its
 `PageAuthenticator` after the parts. It mounts the JSON API at `/api` and
-the engine at `/engine`, as `<service>` does.
-{/* verify: b4 */}
+the engine's routes at `/engine`, as `<service>` does. It takes the parts
+through `AppParts`, which each app's parts convert into. An app that
+wants neither the JSON API nor the engine's routes calls
+`<service>_without_api` with the parts' implementations and engine.
 
 `serve` binds `parts.addr` itself and hands the listener to
 `topcoat::serve`. Never call `topcoat::start` there: it binds `HOST` and
@@ -1114,8 +1116,6 @@ on the container's loopback and never pass its startup probe. acme's
 `Backoffice`, an app of `shop-stock`, is three lines:
 
 <Snippet file="apps/backoffice/src/lib.rs" symbol="serve" />
-
-{/* verify: b4 */}
 
 Its crate depends on the API crate and the Topcoat crate by path, under
 the output root (`../../schemas/dist/topcoat/shop-stock`), and on
@@ -1127,15 +1127,27 @@ of its own:
 
 <Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_live" />
 
-{/* verify: b4 */}
-
 The image carries no Topcoat asset bundle yet, so the lists are GET forms
 that load the page again rather than live lists. On gcp the app's Cloud
 Run service is internal-only unless the stack exposes it, which `stack
 init` does for every app; on `local` it is a process at its port.
-`go/stack_dev_test.go` runs acme's stack with `superschematic-topcoat`,
-signs a member of staff in to `Backoffice` and receives stock through the
-engine console, `/stock/engine/Inventory/{id}`. {/* verify: b4 */}
+Run it from `examples/acme-shop` with `superschematic-topcoat stack dev
+schemas/services/shop-stack`, whose summary prints the app's address.
+Under it, `Backoffice` serves:
+
+| Path | What it is |
+| --- | --- |
+| `/stock`, `/stock/stock`, `/stock/stock/{productId}` | the index, the stock's list and a product's page, with the forms that set and receive its stock |
+| `/stock/engine` and below | the engine console over `shop-db`: each engine type the caller may read, an instance's behaviors in panels, and its operations as forms ([Engine pages](#engine-pages)) |
+| `/stock/sign-in`, `/stock/sign-out`, `/stock/account`, `/stock/users`, `/stock/roles` | the identity pages ([Sign-in and admin pages](#sign-in-and-admin-pages)) |
+| `/api`, `/engine` | `shop-stock`'s JSON API and `shop-db`'s engine routes |
+
+The stack holds no seeded user, so sign in as a `shop-db` user who holds
+`stock.write`. `go/stack_dev_test.go` runs acme's stack with
+`superschematic-topcoat`, creates such a member of staff, signs them in
+at `/stock/sign-in`, and receives five units through the Stock panel's
+`receiveStock` form on `/stock/engine/Inventory/{id}`, which
+`shop-stock`'s `GetStock` then counts.
 
 ## Test the app
 

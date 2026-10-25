@@ -5384,9 +5384,9 @@ the stack targets replaced them.
    TypeScript storefront's tests.
    Later, D78 made an app a deployable of the stack (section 8.6), and
    acme-shop's `Backoffice`, a Topcoat app over `shop-stock`, runs inside
-   it under `stack dev`, its port from the environment; the Topcoat app
-   over `shop-orders`, whose server is Go in the stack, still runs under
-   `cargo run`. <!-- verify: b4 -->
+   it under `superschematic-topcoat stack dev`, its port from the
+   environment; the Topcoat app over `shop-orders`, whose server is Go in
+   the stack, still runs under `cargo run`.
 2. **Model, resolver and seams.** The Stack kind, environments,
    `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no

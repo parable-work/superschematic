@@ -58,35 +58,33 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   ([Money](#money)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
-are. Neither the core nor the installed `superschematic`, which links gcp
-and pulumi, links it (D44). `cmd/superschematic-topcoat` is the installed
-binary with it linked beside the official extensions
-(`cmd/superschematic/official`), so it builds and deploys what
-`superschematic` does, and a stack whose app names `topcoat` (D78) too:
-<!-- verify: b4 -->
+are. Neither the core nor the installed `superschematic`, which links the
+official extensions (gcp, cloudflare and pulumi), links it (D44).
+`cmd/superschematic-topcoat` is the installed binary with it linked
+beside those (D44, amended): it takes the same list from
+`cmd/superschematic/official`, so it builds and deploys everything
+`superschematic` does, and builds a stack whose app names `topcoat`
+(D78), which `superschematic` refuses:
 
 ```bash
 go build -o superschematic-topcoat ./cmd/superschematic-topcoat
 ```
 
-A project's own binary links it beside its other extensions the same way,
-passing it to `cli.New`:
+A project's own binary links it beside the official extensions, or its
+own, the same way, passing them to `cli.New`:
 
 ```go
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/parable-work/superschematic/cli"
+	"github.com/parable-work/superschematic/cmd/superschematic/official"
 	"github.com/parable-work/superschematic/extensions/topcoat"
 )
 
 func main() {
-	if err := cli.New(cli.Config{Name: "superschematic-topcoat"}, topcoat.Extension{}).Execute(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := cli.New(cli.Config{Name: "superschematic-topcoat"}, append(official.Extensions(), topcoat.Extension{})...).Execute(); err != nil {
+		cli.Exit(err)
 	}
 }
 ```
@@ -354,8 +352,9 @@ into the output root's `impl/` with its paths re-based, and its image
 takes in every crate it reaches by path, this one among them. The image
 carries no asset bundle yet, so a live list is a GET form there.
 acme's `examples/acme-shop/apps/backoffice` is such an app over
-`shop-stock`, with its pages under `/stock`.
-<!-- verify: b4 -->
+`shop-stock`, with its pages under `/stock` and the engine console over
+`shop-db` at `/stock/engine`; `superschematic-topcoat stack dev
+schemas/services/shop-stack` runs it beside `shop-stock`'s server.
 
 ## Users and sessions
 
