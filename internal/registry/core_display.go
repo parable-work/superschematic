@@ -77,28 +77,43 @@ func displayDecorator() DecoratorSpec {
 
 // fieldDisplayArgs is the JSON Schema of @display's argument on a field
 // (D48, amended), which is also what the data forms write under a field's
-// `display` key: the schema-file JSON Schema takes $defs/FieldDisplay from
-// it, as it takes a type's display from displayArgs.
+// `display` key: the schema-file JSON Schema takes $defs/FieldDisplay and
+// $defs/DisplayCurrency from it, as it takes a type's display from
+// displayArgs. A currency is a code, three capital letters, or a field.
 var fieldDisplayArgs = json.RawMessage(`{
 	"$ref": "#/$defs/FieldDisplay",
 	"$defs": {
 		"FieldDisplay": {
-			"description": "How a UI renders a field's control (@display on a field).",
+			"description": "How a UI renders a field's control and its value (@display on a field).",
 			"type": "object",
 			"additionalProperties": false,
 			"minProperties": 1,
 			"properties": {
-				"multiline": {"description": "A control that holds several lines (true) or one line (false), whatever the field's maxLength; absent leaves it to the UI.", "type": "boolean"}
+				"multiline": {"description": "A control that holds several lines (true) or one line (false), whatever the field's maxLength; absent leaves it to the UI.", "type": "boolean"},
+				"currency": {"description": "The currency of the amount in minor units the field holds: an ISO 4217 code (GBP), or a field of the same type that holds one.", "oneOf": [
+					{"type": "string", "pattern": "^[A-Z]{3}$"},
+					{"$ref": "#/$defs/DisplayCurrency"}
+				]}
+			}
+		},
+		"DisplayCurrency": {
+			"description": "A field of the same type that holds the currency of an amount: a Finance.Currency, or text.",
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["field"],
+			"properties": {
+				"field": {"description": "The field's name, or its JSON key.", "type": "string", "pattern": "\\S"}
 			}
 		}
 	}
 }`)
 
-// fieldDisplayDecorator is @display({ multiline }) from
+// fieldDisplayDecorator is @display({ multiline, currency }) from
 // @superschematic/schema on a field: it writes FieldDef.Display, once per
 // field. It is a spec of its own beside the type's, since the registry keys
 // a decorator by name and target. The frontend has held the argument to
-// fieldDisplayArgs; the loader holds the field to text that is not secret
+// fieldDisplayArgs; the loader holds multiline to text that is not secret,
+// and currency to an amount and an active code or a sibling that holds one
 // (verify.checkDisplays).
 func fieldDisplayDecorator() DecoratorSpec {
 	return DecoratorSpec{

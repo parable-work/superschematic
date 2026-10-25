@@ -110,6 +110,10 @@ type formField struct {
 	enum    *ir.EnumDef
 	// Choosable marks a control the app's choices turn into a select.
 	Choosable bool
+	// Currency is the literal currency of an amount a decimal control
+	// holds (D44, amended): its control is text, read as the currency's
+	// minor units by money_<code>; empty for any other control.
+	Currency string
 	// Default is the Rust expression of the field's value in a new form.
 	Default string
 
@@ -374,6 +378,7 @@ func (b *formBuilder) kindOf(f *formField, owner *ir.TypeDef, field *ir.FieldDef
 		b.jsonText(f, field)
 		return nil
 	}
+	b.money(f, owner, field)
 	if multiline := multilineOf(field); multiline != nil && *multiline && f.Control != "longtext" && b.log != nil {
 		b.log("  - topcoat: %s.%s: @display multiline is ignored: its control is %s\n", owner.Name, field.Name, controlNoun(f.Control))
 	}
@@ -388,6 +393,74 @@ func (b *formBuilder) kindOf(f *formField, owner *ir.TypeDef, field *ir.FieldDef
 		f.Default = defaultOf(field, f)
 	}
 	return nil
+}
+
+// HoldsForms reports whether the crate has a form of either kind, an
+// input form or an argument form. forms.rs is written without one when
+// the crate has pages, which read Refusal and FormErrors from it; it then
+// holds neither a post's reader nor a component's helpers, which nothing
+// would call.
+func (c *crate) HoldsForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+
+// FormCurrencies are the literal currencies of the amounts the forms take
+// as decimals (D44, amended), sorted: forms.rs writes money_<code> for
+// each, and the decimal helpers once.
+func (c *crate) FormCurrencies() []formCurrency {
+	seen := map[string]bool{}
+	var out []formCurrency
+	for _, st := range c.FormStructs {
+		for _, f := range st.Fields {
+			if f.Currency != "" && !seen[f.Currency] {
+				seen[f.Currency] = true
+				out = append(out, formCurrency{Code: f.Currency, Read: f.Read})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+	return out
+}
+
+// formCurrency is a currency a form reads an amount in: its code and its
+// reader, money_<code>.
+type formCurrency struct {
+	Code string
+	Read string
+}
+
+// money makes the control of an amount in a literal currency a decimal
+// one (D44, amended): text with inputmode="decimal", labeled with its code
+// and patterned by its decimals, which money_<code> reads as minor units.
+// An amount whose currency is a field keeps its whole-number input, since
+// the field may be unset or changed in the same form, and its hint names
+// that field.
+func (b *formBuilder) money(f *formField, owner *ir.TypeDef, field *ir.FieldDef) {
+	if f.Read != "integer" {
+		return
+	}
+	currency := currencyOf(b.schemaSet, owner, field)
+	switch {
+	case currency.code != "":
+		minimum := field.ValidateMin
+		if scalar := b.scalar(field.TypeRef.Name); scalar != nil {
+			minimum = orFloat(minimum, scalar.Minimum)
+		}
+		signed := minimum == nil || *minimum < 0
+		f.Currency = currency.code
+		f.Control, f.Read = "text", "money_"+strings.ToLower(currency.code)
+		f.Label += " (" + currency.code + ")"
+		attrs := []string{`inputmode="decimal"`, fmt.Sprintf("pattern=(decimal_pattern(%s, %t))", rustString(currency.code), signed)}
+		if field.Placeholder != "" {
+			attrs = append(attrs, "placeholder="+rustString(field.Placeholder))
+		}
+		f.Attrs = joinAttrs(attrs)
+	case currency.sibling != nil:
+		hint := "In minor units of " + labelOf(currency.sibling)
+		if f.Hint == "" {
+			f.Hint = hint
+		} else {
+			f.Hint = strings.TrimSuffix(f.Hint, ".") + ". " + hint
+		}
+	}
 }
 
 // jsonText makes f a textarea holding its value's JSON text.
@@ -597,6 +670,13 @@ func defaultOf(field *ir.FieldDef, f *formField) string {
 		return ""
 	}
 	text := *field.Default
+	if f.Currency != "" {
+		// An amount's default is minor units, which its decimal control
+		// holds as a decimal.
+		if amount, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64); err == nil {
+			return fmt.Sprintf("Some(decimal_text(%d, %s))", amount, rustString(f.Currency))
+		}
+	}
 	if f.Read != "boolean" {
 		return "Some(" + rustString(text) + ".to_owned())"
 	}

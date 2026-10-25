@@ -5,6 +5,9 @@
 # Its @display names its title, its summary fields, its noun and plural; an
 # address's names its title, and a line's price has none. A comment's
 # replies are comments. A status on hold is labeled by its member's title.
+# An invoice's amounts name their currency (D48, amended): a code, a field
+# of the invoice, or a line's one Finance.Currency field; its refund names
+# none, between two currency fields.
 name: fixture-views-api
 kind: API
 scalars:
@@ -23,6 +26,15 @@ scalars:
   Generic.JSON:
     name: Generic.JSON
     languagePrimitive: object
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+  Finance.Money:
+    name: Finance.Money
+    languagePrimitive: number
+  Finance.Currency:
+    name: Finance.Currency
+    languagePrimitive: string
 enums:
   # Where an order is.
   OrderStatus:
@@ -131,6 +143,58 @@ types:
       - name: replies
         typeRef: { name: Comment, isArray: true }
         required: true
+  Invoice:
+    name: Invoice
+    role: APIView
+    display:
+      noun: Invoice
+      titleField: number
+      summaryFields: [number, total, adjustments, refund]
+    fields:
+      - name: number
+        typeRef: { name: string }
+        required: true
+      - name: total
+        typeRef: { name: Finance.Money }
+        required: true
+        display: { currency: GBP }
+      - name: deposit
+        typeRef: { name: Finance.Money }
+        display: { currency: JPY }
+      - name: fee
+        typeRef: { name: Generic.Int64 }
+        required: true
+        display: { currency: BHD }
+      - name: gold
+        typeRef: { name: Generic.Int64 }
+        display: { currency: XAU }
+      - name: adjustments
+        typeRef: { name: Generic.Int64, isArray: true }
+        required: true
+        display: { currency: { field: billedIn } }
+      - name: billedIn
+        typeRef: { name: Finance.Currency }
+      - name: settledIn
+        typeRef: { name: Finance.Currency }
+        required: true
+      - name: refund
+        typeRef: { name: Finance.Money }
+      - name: lines
+        typeRef: { name: InvoiceLine, isArray: true }
+        required: true
+  InvoiceLine:
+    name: InvoiceLine
+    role: APIView
+    fields:
+      - name: item
+        typeRef: { name: string }
+        required: true
+      - name: amount
+        typeRef: { name: Finance.Money }
+        required: true
+      - name: currency
+        typeRef: { name: Finance.Currency }
+        required: true
 operationSets:
   - name: OrderQueries
     operations:
@@ -153,4 +217,14 @@ operationSets:
         arguments:
           - name: id
             typeRef: { name: Identity.UUID }
+            required: true
+      # One invoice.
+      - name: getInvoice
+        typeRef: { name: Invoice }
+        required: true
+        httpMethod: GET
+        restPath: "invoices/{number}"
+        arguments:
+          - name: number
+            typeRef: { name: string }
             required: true
