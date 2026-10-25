@@ -72,22 +72,15 @@ func servicePublicAddress(ctx registry.PlatformContext) any {
 //     certificate for its host, and the DNS records they need
 //     (exposureNodes).
 func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
-	d := ctx.Deployable
-	env := ctx.Environment
-	v := valuesOf(env)
-	out, w, err := lowerWorkload(ctx)
-	if err != nil {
-		return registry.Lowered{}, err
-	}
-	add := func(res ...*ir.Resource) { out.Resources = append(out.Resources, res...) }
+	return lowerRunService(ctx, entrypointProbes)
+}
 
-	container, template := w.container, w.template
-	container["ports"] = map[string]any{"containerPort": containerPort}
-	// The entrypoint's health checks (section 8.1): an instance takes
-	// traffic once /readyz answers, so a revision whose databases do not
-	// answer never serves, and one whose process stops answering /healthz
-	// is restarted. /healthz answers while the instance drains, so a
-	// drain is never cut short.
+// entrypointProbes are the entrypoint's health checks (section 8.1): an
+// instance takes traffic once /readyz answers, so a revision whose
+// databases do not answer never serves, and one whose process stops
+// answering /healthz is restarted. /healthz answers while the instance
+// drains, so a drain is never cut short.
+func entrypointProbes(container map[string]any) {
 	container["startupProbe"] = map[string]any{
 		"httpGet":          map[string]any{"path": readinessPath, "port": containerPort},
 		"periodSeconds":    startupPeriod,
@@ -100,6 +93,24 @@ func lowerService(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"timeoutSeconds":   livenessTimeout,
 		"failureThreshold": livenessFailures,
 	}
+}
+
+// lowerRunService lowers a server or an app (D78) to its Cloud Run
+// service, as lowerService says, with the health checks probes sets on
+// its container.
+func lowerRunService(ctx registry.PlatformContext, probes func(container map[string]any)) (registry.Lowered, error) {
+	d := ctx.Deployable
+	env := ctx.Environment
+	v := valuesOf(env)
+	out, w, err := lowerWorkload(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	add := func(res ...*ir.Resource) { out.Resources = append(out.Resources, res...) }
+
+	container, template := w.container, w.template
+	container["ports"] = map[string]any{"containerPort": containerPort}
+	probes(container)
 	// Cloud Run allocates a service's CPU only while it handles a request,
 	// and bills its instances for that time and their starts and stops,
 	// unless the service sets its resources, as every one here does

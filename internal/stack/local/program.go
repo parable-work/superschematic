@@ -191,7 +191,9 @@ func (m *Migration) dialect() sqlmigrate.Dialect {
 // "worker", D53) has no port and no URL, and is ready once it starts
 // (ReadinessStarted); it is built and run as a server in its language is,
 // a Rust one's crate included (D65). So is an engine's runner's (Kind
-// "runner", D58), and a deriver's (Kind "deriver", D74).
+// "runner", D58), and a deriver's (Kind "deriver", D74). An app's process
+// (Kind "app", D78) is a Rust server's, with a port and a URL, but is
+// ready once it listens on its port (ReadinessListening).
 type Server struct {
 	ID         string   `json:"id"`
 	Deployable string   `json:"deployable"`
@@ -700,8 +702,8 @@ func serverOf(res *ir.Resource) (*Server, error) {
 		return nil, fmt.Errorf("its language is %q; the local provisioner runs %s, %s and %s servers", s.Language, LanguageGo, LanguageTypeScript, LanguageRust)
 	}
 	if kind, set := res.Properties["kind"]; set {
-		if s.Kind, ok = kind.(string); !ok || (s.Kind != "worker" && s.Kind != "runner" && s.Kind != "deriver") {
-			return nil, fmt.Errorf("its kind is %v; a process is a server's, a worker's, an engine's runner's or a deriver's", kind)
+		if s.Kind, ok = kind.(string); !ok || (s.Kind != "worker" && s.Kind != "runner" && s.Kind != "deriver" && s.Kind != "app") {
+			return nil, fmt.Errorf("its kind is %v; a process is a server's, a worker's, an engine's runner's, a deriver's or an app's", kind)
 		}
 	}
 	s.Readiness, _ = res.Properties["readiness"].(string)
@@ -715,8 +717,8 @@ func serverOf(res *ir.Resource) (*Server, error) {
 		if s.Port, ok = intValue(port); !ok {
 			return nil, fmt.Errorf("its port is not a number")
 		}
-		if !strings.HasPrefix(s.Readiness, "/") {
-			return nil, fmt.Errorf("its readiness path is not a path")
+		if !strings.HasPrefix(s.Readiness, "/") && s.Readiness != ReadinessListening {
+			return nil, fmt.Errorf("its readiness path is not a path, nor %s", ReadinessListening)
 		}
 		s.URL = ServerURL(s.Port)
 	}
