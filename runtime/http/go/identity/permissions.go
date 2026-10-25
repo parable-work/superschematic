@@ -73,6 +73,15 @@ func Uncovered(held, given []string) []string {
 	return out
 }
 
+// UncoveredUser lists the permissions a user holds through roles that no
+// permission of held covers: Uncovered of their EffectivePermissions. A
+// caller may set the user's password, disable them or enable them only
+// when it is empty: no one takes over, or locks out, a user who holds what
+// they do not.
+func UncoveredUser(held []string, roles []session.Role) []string {
+	return Uncovered(held, EffectivePermissions(roles))
+}
+
 // Route is what capabilities needs to know of one operation of the API,
 // the route requirements the generated server passes.
 type Route struct {

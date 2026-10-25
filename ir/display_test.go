@@ -204,6 +204,91 @@ func TestValidateFieldDisplay(t *testing.T) {
 	}
 }
 
+// A field display's currency (D48, amended) is a literal code or a field:
+// ValidateFieldDisplay holds a code to three capital letters and a field
+// to a non-blank name, and refuses both or neither; JSON and YAML write
+// the code as a string and the field as {field}, and read each back.
+func TestFieldDisplayCurrency(t *testing.T) {
+	for _, d := range []*FieldDisplay{
+		{Currency: &DisplayCurrency{Code: "GBP"}},
+		{Currency: &DisplayCurrency{Field: "currency"}},
+	} {
+		if err := ValidateFieldDisplay(d); err != nil {
+			t.Fatalf("currency %+v: %v", *d.Currency, err)
+		}
+	}
+	for _, test := range []struct {
+		currency DisplayCurrency
+		want     string
+	}{
+		{DisplayCurrency{Code: "usd"}, `display currency "usd" is not an ISO 4217 code: three capital letters`},
+		{DisplayCurrency{Code: "GBPS"}, `display currency "GBPS" is not an ISO 4217 code: three capital letters`},
+		{DisplayCurrency{Field: " "}, "display currency must be a code or a non-blank field"},
+		{DisplayCurrency{}, "display currency must be a code or a non-blank field"},
+		{DisplayCurrency{Code: "GBP", Field: "currency"}, "display currency is both a code and a field"},
+	} {
+		currency := test.currency
+		if err := ValidateFieldDisplay(&FieldDisplay{Currency: &currency}); err == nil || err.Error() != test.want {
+			t.Errorf("currency %+v: %v, want %s", test.currency, err, test.want)
+		}
+	}
+
+	for _, test := range []struct {
+		currency DisplayCurrency
+		json     string
+		yaml     string
+	}{
+		{DisplayCurrency{Code: "GBP"}, `{"currency":"GBP"}`, "currency: GBP\n"},
+		{DisplayCurrency{Field: "currency"}, `{"currency":{"field":"currency"}}`, "currency:\n    field: currency\n"},
+	} {
+		currency := test.currency
+		display := &FieldDisplay{Currency: &currency}
+		data, err := json.Marshal(display)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != test.json {
+			t.Errorf("JSON = %s, want %s", data, test.json)
+		}
+		var back FieldDisplay
+		if err := json.Unmarshal(data, &back); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(&back, display) {
+			t.Errorf("JSON round trip = %+v, want %+v", back.Currency, display.Currency)
+		}
+		text, err := yaml.Marshal(display)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(text) != test.yaml {
+			t.Errorf("YAML = %q, want %q", text, test.yaml)
+		}
+		var fromYAML FieldDisplay
+		if err := yaml.Unmarshal(text, &fromYAML); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(&fromYAML, display) {
+			t.Errorf("YAML round trip = %+v, want %+v", fromYAML.Currency, display.Currency)
+		}
+	}
+	for _, data := range []string{`{"currency":{"field":"currency","code":"GBP"}}`, `{"currency":4}`} {
+		var display FieldDisplay
+		if err := json.Unmarshal([]byte(data), &display); err == nil {
+			t.Errorf("%s read as %+v", data, display.Currency)
+		}
+	}
+	for _, text := range []string{"currency:\n    code: GBP\n", "currency: [GBP]\n"} {
+		var display FieldDisplay
+		if err := yaml.Unmarshal([]byte(text), &display); err == nil {
+			t.Errorf("%q read as %+v", text, display.Currency)
+		}
+	}
+	if _, err := json.Marshal(&FieldDisplay{Currency: &DisplayCurrency{Code: "GBP", Field: "currency"}}); err == nil {
+		t.Error("a currency that is both a code and a field marshaled")
+	}
+}
+
 // The tones are the closed set D48 records, in order.
 func TestDisplayTones(t *testing.T) {
 	got := make([]string, 0, len(DisplayTones()))

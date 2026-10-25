@@ -1,6 +1,8 @@
 package ir
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -170,27 +172,134 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 	return nil
 }
 
-// FieldDisplay is how a UI renders a field's control, declared with
-// @display on the field (D48, amended). The data forms write it under the
-// field's display. It adds no storage or validation, and no generator
-// renders it.
+// FieldDisplay is how a UI renders a field's control and value, declared
+// with @display on the field (D48, amended). The data forms write it under
+// the field's display. It adds no storage or validation, and no type, SDK
+// or server generator renders it.
 type FieldDisplay struct {
 	// Multiline asks for a control that holds several lines when true, and
 	// one line when false, whatever the field's maxLength; nil leaves it to
 	// the UI.
 	Multiline *bool `json:"multiline,omitempty" yaml:"multiline,omitempty"`
+
+	// Currency names the currency of the amount in minor units the field
+	// holds: a literal ISO 4217 code, or a field of the same type that
+	// holds one. nil names none.
+	Currency *DisplayCurrency `json:"currency,omitempty" yaml:"currency,omitempty"`
+}
+
+// DisplayCurrency is the currency of a field's amount (D48, amended), in
+// D70's two forms: a literal ISO 4217 alphabetic code, which the data forms
+// write as the string itself ("GBP"), or a field of the same type that
+// holds the code, written as an object ({ field: "currency" }). One of the
+// two is set.
+type DisplayCurrency struct {
+	// Code is a literal currency, three capital letters: "GBP". The loader
+	// holds it to an active ISO 4217 code.
+	Code string `json:"-" yaml:"-"`
+
+	// Field names a field of the same type, by its name or its JSON key,
+	// that holds the currency: a Finance.Currency, or text.
+	Field string `json:"field" yaml:"field"`
+}
+
+// displayCurrencyCode is the shape of a literal display currency: three
+// capital ASCII letters, as Finance.Currency's pattern states it.
+var displayCurrencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+
+// displayCurrencyField is the object form of a display currency.
+type displayCurrencyField struct {
+	Field string `json:"field" yaml:"field"`
+}
+
+// MarshalJSON writes a literal currency as its code and a field's as
+// {"field": name}.
+func (c DisplayCurrency) MarshalJSON() ([]byte, error) {
+	switch {
+	case c.Code != "" && c.Field != "":
+		return nil, errors.New("display currency is both a code and a field")
+	case c.Code != "":
+		return json.Marshal(c.Code)
+	}
+	return json.Marshal(displayCurrencyField{Field: c.Field})
+}
+
+// UnmarshalJSON reads a code, a string, or a field, an object with field
+// alone.
+func (c *DisplayCurrency) UnmarshalJSON(data []byte) error {
+	var code string
+	if err := json.Unmarshal(data, &code); err == nil {
+		*c = DisplayCurrency{Code: code}
+		return nil
+	}
+	var field displayCurrencyField
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&field); err != nil {
+		return fmt.Errorf("display currency is a code or {field}: %w", err)
+	}
+	*c = DisplayCurrency{Field: field.Field}
+	return nil
+}
+
+// MarshalYAML writes the currency as MarshalJSON does.
+func (c DisplayCurrency) MarshalYAML() (any, error) {
+	switch {
+	case c.Code != "" && c.Field != "":
+		return nil, errors.New("display currency is both a code and a field")
+	case c.Code != "":
+		return c.Code, nil
+	}
+	return displayCurrencyField{Field: c.Field}, nil
+}
+
+// UnmarshalYAML reads the currency as UnmarshalJSON does.
+func (c *DisplayCurrency) UnmarshalYAML(unmarshal func(any) error) error {
+	var code string
+	if err := unmarshal(&code); err == nil {
+		*c = DisplayCurrency{Code: code}
+		return nil
+	}
+	var field map[string]any
+	if err := unmarshal(&field); err != nil {
+		return fmt.Errorf("display currency is a code or {field}: %w", err)
+	}
+	*c = DisplayCurrency{}
+	for key, value := range field {
+		name, ok := value.(string)
+		if key != "field" || !ok {
+			return fmt.Errorf("display currency is a code or {field}, got the key %q", key)
+		}
+		c.Field = name
+	}
+	return nil
 }
 
 // ValidateFieldDisplay checks a field display's shape, as the JSON Schema
 // of a field's @display argument does, for IR built without a frontend: it
-// must declare something. Whether the field holds text is the loader's
-// check, which reads the field's type.
+// must declare something, and a currency is three capital letters or a
+// non-blank field's name. Whether the field holds text for multiline, or
+// an amount for currency, whether a code is an active ISO 4217 one, and
+// whether the field a currency names exists, are the loader's checks,
+// which read the field's type and its siblings.
 func ValidateFieldDisplay(d *FieldDisplay) error {
 	if d == nil {
 		return nil
 	}
-	if d.Multiline == nil {
+	if d.Multiline == nil && d.Currency == nil {
 		return errors.New("display declares nothing")
+	}
+	if c := d.Currency; c != nil {
+		switch {
+		case c.Code != "" && c.Field != "":
+			return errors.New("display currency is both a code and a field")
+		case c.Code != "":
+			if !displayCurrencyCode.MatchString(c.Code) {
+				return fmt.Errorf("display currency %q is not an ISO 4217 code: three capital letters", c.Code)
+			}
+		case strings.TrimSpace(c.Field) == "":
+			return errors.New("display currency must be a code or a non-blank field")
+		}
 	}
 	return nil
 }

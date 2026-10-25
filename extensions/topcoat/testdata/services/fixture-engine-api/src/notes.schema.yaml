@@ -8,6 +8,18 @@ types:
       - name: count
         typeRef: { name: number }
         required: true
+  # A note as the API lists it, a resource the pages list beside the
+  # engine's.
+  NoteTitle:
+    name: NoteTitle
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
 operationSets:
   - name: Notes
     operations:
@@ -17,3 +29,14 @@ operationSets:
         auth: true
         httpMethod: GET
         restPath: notes/count
+      - name: listNotes
+        typeRef: { name: NoteTitle, isArray: true }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes
+        arguments:
+          # The notes whose title holds it, the list's filter.
+          - name: title
+            typeRef: { name: string }
+            isQuery: true

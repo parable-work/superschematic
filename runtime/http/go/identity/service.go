@@ -583,17 +583,22 @@ func (s *Service) getUser(ctx context.Context, id string) (IdentityUser, error) 
 }
 
 // DisableUser disables a user and revokes their sessions (users.write).
+// The caller's permissions must cover each of the user's.
 func (s *Service) DisableUser(ctx context.Context, p Principal, id string) (IdentityUser, error) {
 	return s.setDisabled(ctx, p, id, true)
 }
 
-// EnableUser enables a disabled user (users.write).
+// EnableUser enables a disabled user (users.write). The caller's
+// permissions must cover each of the user's.
 func (s *Service) EnableUser(ctx context.Context, p Principal, id string) (IdentityUser, error) {
 	return s.setDisabled(ctx, p, id, false)
 }
 
 func (s *Service) setDisabled(ctx context.Context, p Principal, id string, disabled bool) (IdentityUser, error) {
 	if err := s.require(p, PermissionUsersWrite); err != nil {
+		return IdentityUser{}, err
+	}
+	if err := s.covers(ctx, p, id); err != nil {
 		return IdentityUser{}, err
 	}
 	if err := s.store.SetDisabled(ctx, id, disabled, s.now()); err != nil {
@@ -603,7 +608,7 @@ func (s *Service) setDisabled(ctx context.Context, p Principal, id string, disab
 }
 
 // SetUserPassword sets a user's password and revokes their sessions
-// (users.write).
+// (users.write). The caller's permissions must cover each of the user's.
 func (s *Service) SetUserPassword(ctx context.Context, p Principal, id string, in SetPasswordInput) error {
 	if err := s.require(p, PermissionUsersWrite); err != nil {
 		return err
@@ -613,11 +618,31 @@ func (s *Service) SetUserPassword(ctx context.Context, p Principal, id string, i
 	if err := f.err(); err != nil {
 		return err
 	}
+	if err := s.covers(ctx, p, id); err != nil {
+		return err
+	}
 	hash, err := HashPassword(in.Password, s.params)
 	if err != nil {
 		return err
 	}
 	return storeError(s.store.SetPassword(ctx, id, hash, s.now(), ""), "User")
+}
+
+// covers refuses a write to the user with id unless the caller's
+// permissions cover every permission the user holds through their roles
+// (UncoveredUser): 404 for no such user, 403 listing the ones not
+// covered. Whoever sets a user's password signs in as them, and whoever
+// enables or disables them gives or takes their permissions, so no one
+// does either to a user who holds what they do not.
+func (s *Service) covers(ctx context.Context, p Principal, id string) error {
+	user, err := s.store.GetUser(ctx, id)
+	if err != nil {
+		return storeError(err, "User")
+	}
+	if uncovered := UncoveredUser(p.Permissions, toSessionRoles(user.Roles)); len(uncovered) > 0 {
+		return forbidden(notCoveredMessage, map[string]any{"permissions": uncovered})
+	}
+	return nil
 }
 
 // ListRoles lists every role, by name (roles.read).

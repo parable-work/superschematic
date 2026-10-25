@@ -74,6 +74,23 @@ type crate struct {
 	// opens in-process on SQLite and mounts at /engine (D58), nil when its
 	// database is none (engine.go).
 	Engine *engineModel
+	// EnginePages are the pages of the engine's types under
+	// <prefix>/engine, nil unless the pages are on and the crate mounts an
+	// engine (engine_pages.go); EnginePanels the panels its instance pages
+	// show per behavior, set whenever EnginePages is (engine_panels.go).
+	EnginePages  *enginePagesModel
+	EnginePanels *enginePanelsModel
+	// IdentityPages are sign-in, sign-out, the account, users and roles
+	// pages, nil unless the pages are on and the API authenticates with the
+	// identity runtime (identity_pages.go).
+	IdentityPages *identityPagesModel
+	// Money reports that a display component shows an amount by its
+	// currency, or a form reads one as a decimal (money.go). ScalarCrate is the scalar crate, which gives each
+	// currency's minor units, and ScalarPath its directory from the
+	// crate's, empty when [paths] names none, as for the types crates.
+	Money       bool
+	ScalarCrate string
+	ScalarPath  string
 	// hosting gives the crates of the API dependencies one app hosts
 	// beside the service (D61, amended), each read the first time a
 	// reference's options operation is the dependency's.
@@ -527,8 +544,51 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 			return nil, err
 		}
 	}
+	if err := out.consoleModules(c, api, cfg, schemas); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
+
+// consoleModules sets the models of the console's own pages, the engine's
+// and the identity runtime's, the engine's behavior panels, and money,
+// each from what newCrate built before, then what the pages share with
+// them (hookPages).
+func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustAPI, cfg Config, schemas schemaSet) error {
+	var err error
+	if c.EnginePages, err = enginePagesOf(ctx, cfg, c); err != nil {
+		return err
+	}
+	if c.EnginePanels, err = enginePanelsOf(ctx, c); err != nil {
+		return err
+	}
+	if c.EnginePages != nil && c.EnginePanels == nil {
+		return fmt.Errorf("topcoat: %s has engine pages without their panels, which an instance's page calls", c.SchemaName)
+	}
+	if c.IdentityPages, err = identityPagesOf(ctx, api, cfg, c); err != nil {
+		return err
+	}
+	if c.Money, err = moneyOf(ctx, schemas, c); err != nil {
+		return err
+	}
+	c.ScalarCrate = ctx.Options.Naming.ScalarRustCrate
+	if scalar := ctx.Options.Paths.ScalarRust; scalar != "" {
+		rel, err := filepath.Rel(Dir(ctx.Options.OutputRoot, c.SchemaName), scalar)
+		if err != nil {
+			return fmt.Errorf("topcoat: path to the scalar crate: %w", err)
+		}
+		c.ScalarPath = filepath.ToSlash(rel)
+	}
+	c.hookPages()
+	return nil
+}
+
+// WritesMoney reports whether views.rs writes money_text: a display
+// component shows money, a form reads an amount as a decimal, or the
+// engine's panels may show money (a Holds' or a Payments' amounts).
+// Cargo.toml then depends on the scalar crate, which views.rs and forms.rs
+// read each currency's minor units from.
+func (c *crate) WritesMoney() bool { return c.Money || c.EnginePanels != nil }
 
 // schemasOf is the service's schema and its dependencies', in which a
 // result type and the types it nests are declared.
@@ -615,9 +675,11 @@ func (c *crate) RecordsUseWire() bool {
 	return false
 }
 
-// HasForms reports whether the crate has a form of either kind, an input
-// form or an argument form, so it writes forms.rs.
-func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+// HasForms reports whether the crate writes forms.rs: it has a form of
+// either kind, an input form or an argument form, or pages, which read a
+// refusal's errors from it (Refusal, FormErrors) whether or not a page
+// submits a form.
+func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 || c.Pages != nil }
 
 // HasChoices reports whether a form or a display component takes the app's
 // choices, so the crate writes choices.rs, which forms.rs re-exports.
@@ -626,7 +688,8 @@ func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
 // FormsUse reports whether a form uses item, so forms.rs declares what it
 // needs: a kind of an input form's field ("value", "object", "objectRows",
 // "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
-// "yes_no", "date_time", "json_text"), "read" for any; "put", "list" and
+// "yes_no", "date_time", "json_text", an amount's "minor_amount",
+// "money_<code>" or "signed_money_<code>"), "read" for any; "put", "list" and
 // "rows" for writing an input form; "first", "values", "postedText" and
 // "postedRows" for reading a post, and "maxRows" when a list's limit is
 // MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
@@ -882,7 +945,7 @@ func (c *crate) write(dir string) error {
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
-	if len(c.Views) > 0 {
+	if c.HasViews() {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
 	if c.References != nil {
@@ -894,13 +957,22 @@ func (c *crate) write(dir string) error {
 	if c.Engine != nil {
 		files = append(files, struct{ template, path string }{"engine.tmpl", filepath.Join("src", "engine.rs")})
 	}
+	if c.EnginePages != nil {
+		files = append(files, struct{ template, path string }{"engine_pages.tmpl", filepath.Join("src", "engine_pages.rs")})
+	}
+	if c.EnginePanels != nil {
+		files = append(files, struct{ template, path string }{"engine_panels.tmpl", filepath.Join("src", "engine_panels.rs")})
+	}
+	if c.IdentityPages != nil {
+		files = append(files, struct{ template, path string }{"identity_pages.tmpl", filepath.Join("src", "identity_pages.rs")})
+	}
 	tmpl, err := parseTemplates()
 	if err != nil {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs", "engine_pages.rs", "engine_panels.rs", "identity_pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
