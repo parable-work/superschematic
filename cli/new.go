@@ -44,12 +44,12 @@ type newServiceFlags struct {
 
 // newServiceKinds are the kinds new service writes, as --kind names them.
 // A Stack service comes from stack init, which reads the tree it deploys.
-var newServiceKinds = []ir.SchemaKind{ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindSite}
+var newServiceKinds = []ir.SchemaKind{ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindSite, ir.SchemaKindMemoryStore}
 
 func newNewServiceCmd(a *app) *cobra.Command {
 	flags := &newServiceFlags{}
 	cmd := &cobra.Command{
-		Use:   "service <name> --kind DB|API|General|Bucket|Site",
+		Use:   "service <name> --kind DB|API|General|Bucket|Site|MemoryStore",
 		Short: "Write a service: its config, package files and a starter schema, then build it once",
 		Long: `service writes services/<name>/ under a schemas root (docs/DECISIONS.md, D71):
 
@@ -62,7 +62,7 @@ func newNewServiceCmd(a *app) *cobra.Command {
                        service's handle
   src/<name>.schema.ts a starter declaration to rename and grow: a table
                        for a DB, an object type for General, a GET route
-                       for an API
+                       for an API, a channel and a key for a MemoryStore
 
 A DB gets Go and TypeScript types, the Go types every DB needs. An API
 gets Go and TypeScript types, a Go server and Go and TypeScript SDKs,
@@ -70,7 +70,8 @@ since a server or an SDK in a language needs the types in it. A General
 schema gets Go and TypeScript types. A Bucket and a Site declare nothing
 in schema files, so they get the config, the package files and
 src/index.ts alone: an API lists a bucket in its buckets, and a site's
-config lists the APIs its browser code calls.
+config lists the APIs its browser code calls. A MemoryStore declares a
+channel and a key, and an API lists it in its memoryStores.
 
 Last, it builds the service once, as superschematic build does, into the
 schemas root's dist/, which writes src/service.generated.ts, the handle
@@ -89,7 +90,7 @@ Examples:
 			return runNewService(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.kind, "kind", "", "the service's kind: DB, API, General, Bucket or Site")
+	cmd.Flags().StringVar(&flags.kind, "kind", "", "the service's kind: DB, API, General, Bucket, Site or MemoryStore")
 	cmd.Flags().StringVar(&flags.root, "root", "", "the schemas root (default: the working directory when it holds superschematic.toml, else ./schemas)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <schemas-root>/superschematic.toml)")
 	_ = cmd.MarkFlagRequired("kind")
@@ -244,6 +245,9 @@ func newServiceNext(name string, kind ir.SchemaKind, names naming.Naming, dir st
 		fmt.Fprintf(&b, "  An API stores objects in it by listing it in its config's buckets: [%s], imported from %q.\n", handle, names.NpmServicePackage(name))
 	case ir.SchemaKindSite:
 		b.WriteString("  List the APIs its browser code calls in its config's calls, and its build in site.\n")
+	case ir.SchemaKindMemoryStore:
+		fmt.Fprintf(&b, "  Declare its channels and keys in %s.\n", schema)
+		fmt.Fprintf(&b, "  An API uses it by listing it in its config's memoryStores: [%s], imported from %q.\n", handle, names.NpmServicePackage(name))
 	}
 	fmt.Fprintf(&b, "  superschematic build-all %s\n", displayPath(filepath.Dir(dir)))
 	return b.String()
@@ -315,6 +319,9 @@ func newServiceConfig(name string, kind ir.SchemaKind, names naming.Naming) []by
 		body = "  outputs: {}"
 	case ir.SchemaKindSite:
 		comment = "// A static site: its config is all it has. calls lists the APIs its\n// browser code calls, and site its build."
+	case ir.SchemaKindMemoryStore:
+		comment = "// A memory store that the replicas of a stack share: its schema declares\n// each channel and key it carries, and it never holds a fact. outputs.types\n// names the languages its definitions are written in. An API that uses it\n// lists it in its memoryStores."
+		body = "  outputs: {}"
 	}
 	imports := "defineConfig, SchemaKind"
 	if language {
@@ -368,6 +375,25 @@ export class ItemQueries {
   }
 }
 `, spec("@superschematic/api")), []string{"ItemQueries", "ItemView"}
+	case ir.SchemaKindMemoryStore:
+		return fmt.Appendf(nil, `import { Identity } from %s;
+import { channel, key } from %s;
+
+// A channel: a wake-up that a replica can lose. The class's fields are the
+// parts of its name, so a waiter on one item hears that item's changes
+// alone; it rereads the item from the database when it hears one.
+@channel()
+export abstract class ItemChanged {
+  itemId: Identity.UUID;
+}
+
+// A key, which expires: a claim lets one replica do a piece of work once,
+// here a notice per item, for ten minutes.
+@key({ use: "claim", ttlSeconds: 600 })
+export abstract class ItemNoticeSent {
+  itemId: Identity.UUID;
+}
+`, spec(names.ScalarNpmPackage), spec("@superschematic/memory-store")), []string{"ItemChanged", "ItemNoticeSent"}
 	case ir.SchemaKindGeneral:
 		return []byte(`// An object type: an abstract class declares one, and an enum an enum.
 // Fields take superscalar scalars, enums and other types. Rename it and

@@ -108,6 +108,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
 	specs = append(specs, deriverDecorator())
+	// A MemoryStore service's channels and keys, a class each
+	// (core_memorystore.go, D75).
+	specs = append(specs, memoryStoreDecorators()...)
 
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {

@@ -33,7 +33,7 @@ name: release
 # for the same four os/arch pairs on one runner, since it needs no cgo, and
 # records the commit too. assemble refuses a set whose binaries and archives
 # disagree on that commit, writes SHA256SUMS, packs the npm tarballs beside
-# the four addon packages, sixteen in all, @superschematic/engine naming the
+# the four addon packages, seventeen in all, @superschematic/engine naming the
 # addon packages as optional dependencies at the release's version, and
 # builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
@@ -600,7 +600,7 @@ jobs:
           for target in "${addons[@]}"; do
             optional+=("optionalDependencies.@superschematic/engine-${target}=$VERSION")
           done
-          for pkg in schema db api schema-config stack; do
+          for pkg in schema db api schema-config stack memory-store; do
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
           (cd ir/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
@@ -613,7 +613,7 @@ jobs:
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 16
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 17
           python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
@@ -719,12 +719,13 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the sixteen exact names are
+    # per package; the seventeen exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
     #   @superschematic/schema-config
     #   @superschematic/stack
+    #   @superschematic/memory-store
     #   @superschematic/schema-ir
     #   @superschematic/schema-runtime
     #   @superschematic/http-runtime
@@ -771,7 +772,7 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the sixteen packages
+      - name: Publish the seventeen packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, @superschematic/stack after it and
@@ -781,7 +782,7 @@ jobs:
         # four addon packages, its optional dependencies at the release's
         # version, which an install that finds none skips, and the engine's
         # work-queue and commerce packages last, after the engine, their
-        # peer; no other package of the sixteen depends on another at
+        # peer; no other package of the seventeen depends on another at
         # install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
@@ -792,7 +793,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config stack schema-ir schema-runtime http-runtime versiongraph \
+          for name in schema db api schema-config stack memory-store schema-ir schema-runtime http-runtime versiongraph \
             engine-darwin-arm64 engine-darwin-x64 engine-linux-x64-gnu engine-linux-arm64-gnu engine engine-workqueue engine-commerce; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"

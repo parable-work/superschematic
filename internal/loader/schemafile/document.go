@@ -73,6 +73,11 @@ type Document struct {
 	// ir.Schema.Derivers, which the TypeScript form declares with @deriver
 	// on a class (D74).
 	Derivers []*ir.Deriver `json:"derivers,omitempty" yaml:"derivers,omitempty"`
+	// MemoryStoreDeclarations lists a MemoryStore service's channels and
+	// keys: ir.Schema.MemoryStoreDeclarations, which the TypeScript form
+	// declares with @channel or @key on a class (D75). The core's reserved
+	// declarations are left out; the load adds them.
+	MemoryStoreDeclarations []*ir.MemoryStoreDeclaration `json:"memoryStoreDeclarations,omitempty" yaml:"memoryStoreDeclarations,omitempty"`
 
 	// Documents holds sidecar documents keyed by document name, copied into
 	// [ir.Schema.Documents] in canonical JSON (see [ir.CanonicalJSON]).
@@ -101,7 +106,7 @@ var singleDefKinds = map[string]bool{
 // TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
 	"imports", "references", "scalars", "types", "enums", "unions",
-	"operationSets", "jobs", "workers", "derivers", "documents", "extensions",
+	"operationSets", "jobs", "workers", "derivers", "memoryStoreDeclarations", "documents", "extensions",
 }
 
 // form identifies which on-disk shape a payload uses.

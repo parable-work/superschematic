@@ -228,6 +228,9 @@ func (e *emitter) emitDocument() {
 	for _, deriver := range e.doc.Derivers {
 		e.emitDeriver(deriver)
 	}
+	for _, decl := range e.doc.MemoryStoreDeclarations {
+		e.emitMemoryStoreDeclaration(decl)
+	}
 }
 
 // emitDeriver renders a deriver as the class the reader reads it from

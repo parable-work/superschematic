@@ -412,7 +412,7 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 // read for this load's chain of references is refused, so a cycle of them
 // is an error, not an endless read.
 func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, dependencies map[string]ir.SchemaKind, reg *registry.Registry) (map[string]*ir.Schema, error) {
-	if schema.Kind != ir.SchemaKindAPI {
+	if schema.Kind != ir.SchemaKindAPI && schema.Kind != ir.SchemaKindMemoryStore {
 		return nil, nil
 	}
 	kind, _ := reg.Kind(string(schema.Kind))
@@ -441,6 +441,18 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 	}
 	for _, held := range ir.ReferencesOf(schema) {
 		need(held.Ref.Type, "whose type a RefersTo names")
+	}
+	// A memory store's payloads and the enums of its parts (D75).
+	for _, decl := range schema.MemoryStoreDeclarations {
+		if decl == nil {
+			continue
+		}
+		if decl.Payload != nil {
+			need(decl.Payload.Name, "whose type a channel carries")
+		}
+		for _, part := range decl.Parts {
+			need(part.Type.Name, "whose type a part of a memory store's declaration names")
+		}
 	}
 	for _, set := range schema.OperationSets {
 		if set == nil {
@@ -515,6 +527,9 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			return nil, err
 		}
 	}
+	// Every MemoryStore schema holds the core's reserved declarations, the
+	// shared rate limit's (D75).
+	schema.AddReservedMemoryStoreDeclarations()
 	// The data forms write a stack's declarations as typed fields, which
 	// the TypeScript form's handle recording never sees.
 	for _, ref := range ir.StackReferences(schema) {

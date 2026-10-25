@@ -6,7 +6,11 @@
  * site: its config names the APIs it calls and how it builds, and its code
  * sits at its implementation path (D55). A Bucket service is private object
  * storage that APIs list in their `buckets` (D54): its config is all it
- * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore
+ * service is a Redis or Valkey server the replicas of a stack share, which
+ * holds no fact (D75): its schema declares each channel and key it carries
+ * (`@superschematic/memory-store`), and APIs list it in their
+ * `memoryStores`.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -14,7 +18,8 @@ export enum SchemaKind {
   General = "General",
   Stack = "Stack",
   Site = "Site",
-  Bucket = "Bucket"
+  Bucket = "Bucket",
+  MemoryStore = "MemoryStore"
 }
 
 /**
@@ -303,6 +308,14 @@ export type SchemaConfig = {
    */
   readonly buckets?: readonly ServiceHandle<"Bucket">[];
   /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry is a MemoryStore service's handle.
+   */
+  readonly memoryStores?: readonly ServiceHandle<"MemoryStore">[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceHandle<"MemoryStore">;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -314,7 +327,7 @@ export type SchemaConfig = {
 
 /**
  * A service reference in the JSON/YAML config forms, in dependencies,
- * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
+ * calls, buckets, memoryStores and rateLimitStore. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -347,6 +360,14 @@ export type SchemaConfigDocument = {
    * The Bucket services this API's implementation uses: each is a Bucket in its Deps, and a bucket edge from its server and jobs. Only an API service sets it, and each entry names a Bucket service.
    */
   readonly buckets?: readonly ServiceDependencyRef[];
+  /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.
+   */
+  readonly memoryStores?: readonly ServiceDependencyRef[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceDependencyRef;
   /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */

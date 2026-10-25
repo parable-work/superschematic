@@ -124,12 +124,14 @@ http_runtime_typescript = "runtime/http/typescript"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, the endpoint of each API it `calls`, and the
-# connection of each bucket it lists in `buckets`. {SERVICE} is the DB,
-# called API or Bucket service's name in upper snake case.
+# connection of each bucket it lists in `buckets`, and of each memory store
+# it lists in `memoryStores`. {SERVICE} is the DB, called API, Bucket or
+# MemoryStore service's name in upper snake case.
 [derived_fields]
 database = "{SERVICE}_DATABASE"
 service = "{SERVICE}_SERVICE"
 bucket = "{SERVICE}_BUCKET"
+memory_store = "{SERVICE}_MEMORY_STORE"
 
 # Where a stack's build and `build --scaffold` write a missing API
 # implementation, per language, relative to the repository root, and where a
