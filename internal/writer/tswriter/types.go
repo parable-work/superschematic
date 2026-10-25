@@ -541,8 +541,8 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Icon != "" {
 		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
 	}
-	if fd.Display != nil && fd.Display.Multiline != nil {
-		out = append(out, e.use("display")+fmt.Sprintf("({ multiline: %t })", *fd.Display.Multiline))
+	if members := fieldDisplayMembers(fd.Display); members != "" {
+		out = append(out, e.use("display")+"({ "+members+" })")
 	}
 	if fd.Key {
 		out = append(out, e.use("key"))
@@ -574,6 +574,27 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	return out
 }
 
+// fieldDisplayMembers is a field's @display argument's members (D48,
+// amended), in the IR's order: multiline, then currency, a code or
+// { field }; empty for a display that declares neither.
+func fieldDisplayMembers(display *ir.FieldDisplay) string {
+	if display == nil {
+		return ""
+	}
+	var members []string
+	if display.Multiline != nil {
+		members = append(members, fmt.Sprintf("multiline: %t", *display.Multiline))
+	}
+	if c := display.Currency; c != nil {
+		if c.Code != "" {
+			members = append(members, "currency: "+quote(c.Code))
+		} else {
+			members = append(members, "currency: { field: "+quote(c.Field)+" }")
+		}
+	}
+	return strings.Join(members, ", ")
+}
+
 // checkStructField rejects FieldDef metadata that has no authoring form on a
 // data-class property.
 func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
@@ -583,7 +604,7 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Title, rest.Purpose, rest.Icon = "", "", ""
-	if rest.Display != nil && rest.Display.Multiline != nil {
+	if fieldDisplayMembers(rest.Display) != "" {
 		rest.Display = nil
 	}
 	rest.Default = nil

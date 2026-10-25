@@ -11,20 +11,10 @@ import "github.com/parable-work/superschematic/registry"
 // crate's engine and its pages' prefix.
 type enginePanelsModel struct{}
 
-// panelsBeforeTheConsole, which only the panels' tests set (through
-// engine_panels_export_test.go), gives a crate whose pages are on, that
-// mounts an engine and authenticates its callers, the engine pages' model
-// while engine_pages.go builds none, so that engine_panels.rs is written
-// and compiled. It goes once the engine console is built.
-var panelsBeforeTheConsole bool
-
 // enginePanelsOf is the engine panels of the crate: one whenever it has
 // engine pages, whose instance page calls engine_panels::panel, and nil
 // otherwise.
 func enginePanelsOf(c registry.GenerateContext, out *crate) (*enginePanelsModel, error) {
-	if out.EnginePages == nil && panelsBeforeTheConsole && out.Pages != nil && out.Engine != nil && out.HasAuth {
-		out.EnginePages = &enginePagesModel{}
-	}
 	if out.EnginePages == nil {
 		return nil, nil
 	}

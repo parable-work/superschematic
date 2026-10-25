@@ -29,6 +29,8 @@
 //! `/console`, with a layout and a nav; the app's `.discover()`
 //! registers them, and `pages::Settings` in its app context names its
 //! sign-in page and its choices.
+//! `identity_pages` signs a caller in and out under `/console`, and
+//! administers users and roles, through the identity runtime's `Service`.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
@@ -41,6 +43,7 @@ pub mod procedures;
 pub mod records;
 mod wire;
 pub mod views;
+pub mod identity_pages;
 
 /// The service's API crate: its `Implementations`, `Args` structs and
 /// `types`.

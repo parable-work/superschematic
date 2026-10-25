@@ -43,6 +43,42 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
     }
 }
 
+/// An amount of `currency`'s minor units as a reader reads it (D44,
+/// amended): the code, a space, then the amount over `10^minor_units` with
+/// exactly that many decimals, its whole part grouped by `,` in threes, and
+/// `-` before a negative amount. `money_text(123456, "GBP")` is
+/// "GBP 1,234.56", `money_text(450, "JPY")` "JPY 450" and
+/// `money_text(-5, "BHD")` "BHD -0.005". A code ISO 4217 gives no minor
+/// units (XAU) shows the whole number after it. A currency that is no
+/// active ISO 4217 code, an absent currency field's empty one among them,
+/// shows the amount as a number. Each currency's minor units are
+/// superscalar's `Finance.Currency` table's.
+pub fn money_text(amount: i64, currency: &str) -> String {
+    let Some(found) = superscalar::scalars::finance_currency::lookup(currency) else {
+        return amount.to_string();
+    };
+    let places = usize::from(found.minor_units.unwrap_or(0));
+    let digits = format!("{:0>width$}", amount.unsigned_abs(), width = places + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - places);
+    let mut text = String::with_capacity(currency.len() + digits.len() + digits.len() / 3 + 3);
+    text.push_str(currency);
+    text.push(' ');
+    if amount < 0 {
+        text.push('-');
+    }
+    for (index, digit) in whole.char_indices() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    if !fraction.is_empty() {
+        text.push('.');
+        text.push_str(fraction);
+    }
+    text
+}
+
 /// `NoteCountRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]

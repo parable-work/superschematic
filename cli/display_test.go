@@ -17,8 +17,8 @@ import (
 // TypeScript and from the JSON format wrote to the same IR; json-schema
 // admits the decorators' arguments and nothing else under display; and
 // the loader refuses a display whose states its Workflow does not list, a
-// multiline hint on a field that holds no text, and a title two members
-// share.
+// multiline hint on a field that holds no text, a currency on a field that
+// holds no amount, and a title two members share.
 func TestDisplayThroughTheCommands(t *testing.T) {
 	emit := func(service string) (map[string]json.RawMessage, map[string]json.RawMessage) {
 		t.Helper()
@@ -83,12 +83,18 @@ func TestDisplayThroughTheCommands(t *testing.T) {
 	assert.Contains(t, def.Defs.TypeDisplay.Properties, "icon")
 	assert.Equal(t, []string{"muted", "active", "success", "warning", "danger"}, def.Defs.DisplayState.Properties.Tone.Enum)
 	assert.Equal(t, 1, def.Defs.FieldDisplay.MinProperties)
-	assert.Len(t, def.Defs.FieldDisplay.Properties, 1)
+	assert.Len(t, def.Defs.FieldDisplay.Properties, 2)
 	var multiline struct {
 		Type string `json:"type"`
 	}
 	require.NoError(t, json.Unmarshal(def.Defs.FieldDisplay.Properties["multiline"], &multiline))
 	assert.Equal(t, "boolean", multiline.Type)
+	// A currency is a code or a field (D48, amended).
+	var currency struct {
+		OneOf []map[string]string `json:"oneOf"`
+	}
+	require.NoError(t, json.Unmarshal(def.Defs.FieldDisplay.Properties["currency"], &currency))
+	assert.Equal(t, []map[string]string{{"type": "string", "pattern": "^[A-Z]{3}$"}, {"$ref": "#/$defs/DisplayCurrency"}}, currency.OneOf)
 	assert.Contains(t, def.Defs.EnumValueDef.Properties, "title")
 
 	// A state the type's Workflow does not list fails the load.
@@ -126,6 +132,17 @@ func TestDisplayThroughTheCommands(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(service, "src", "ticket.schema.json"), []byte(numeric), 0o644))
 	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
 	require.ErrorContains(t, err, `src/ticket.schema.json: type Ticket: field body takes @display multiline, which is for text, but it is Priority`)
+
+	// So does a currency on a field that holds no amount.
+	priced := strings.Replace(string(data), `"display": {
+            "multiline": true
+          },`, `"display": {
+            "currency": "GBP"
+          },`, 1)
+	require.NotEqual(t, string(data), priced)
+	require.NoError(t, os.WriteFile(filepath.Join(service, "src", "ticket.schema.json"), []byte(priced), 0o644))
+	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
+	require.ErrorContains(t, err, `src/ticket.schema.json: type Ticket: field body takes @display currency, which is for an amount in minor units, but it is string`)
 
 	shared := strings.Replace(string(data), `"title": "Drop everything"`, `"title": "needs attention"`, 1)
 	require.NotEqual(t, string(data), shared)

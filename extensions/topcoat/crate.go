@@ -85,7 +85,7 @@ type crate struct {
 	// identity runtime (identity_pages.go).
 	IdentityPages *identityPagesModel
 	// Money reports that a display component shows an amount by its
-	// currency (money.go). ScalarCrate is the scalar crate, which gives each
+	// currency, or a form reads one as a decimal (money.go). ScalarCrate is the scalar crate, which gives each
 	// currency's minor units, and ScalarPath its directory from the
 	// crate's, empty when [paths] names none, as for the types crates.
 	Money       bool
@@ -584,8 +584,10 @@ func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustA
 }
 
 // WritesMoney reports whether views.rs writes money_text: a display
-// component shows money, or the engine's panels may (a Holds' or a
-// Payments' amounts). Cargo.toml then depends on the scalar crate.
+// component shows money, a form reads an amount as a decimal, or the
+// engine's panels may show money (a Holds' or a Payments' amounts).
+// Cargo.toml then depends on the scalar crate, which views.rs and forms.rs
+// read each currency's minor units from.
 func (c *crate) WritesMoney() bool { return c.Money || c.EnginePanels != nil }
 
 // schemasOf is the service's schema and its dependencies', in which a
@@ -673,9 +675,11 @@ func (c *crate) RecordsUseWire() bool {
 	return false
 }
 
-// HasForms reports whether the crate has a form of either kind, an input
-// form or an argument form, so it writes forms.rs.
-func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 }
+// HasForms reports whether the crate writes forms.rs: it has a form of
+// either kind, an input form or an argument form, or pages, which read a
+// refusal's errors from it (Refusal, FormErrors) whether or not a page
+// submits a form.
+func (c *crate) HasForms() bool { return len(c.Forms) > 0 || len(c.ArgForms) > 0 || c.Pages != nil }
 
 // HasChoices reports whether a form or a display component takes the app's
 // choices, so the crate writes choices.rs, which forms.rs re-exports.
@@ -940,7 +944,7 @@ func (c *crate) write(dir string) error {
 	if len(c.Procedures) > 0 {
 		files = append(files, struct{ template, path string }{"procedures.tmpl", filepath.Join("src", "procedures.rs")})
 	}
-	if len(c.Views) > 0 {
+	if c.HasViews() {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
 	}
 	if c.References != nil {

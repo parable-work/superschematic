@@ -133,18 +133,20 @@ impl Settings {
     }
 
     /// The settings the app put in its context, or the defaults.
-    fn of(cx: &Cx) -> Self {
+    pub fn of(cx: &Cx) -> Self {
         try_app_context::<Settings>(cx).cloned().unwrap_or_default()
     }
 
-    fn site_title(&self) -> String {
+    /// The site's title: the app's, else the service's name in words.
+    pub fn site_title(&self) -> String {
         self.title.clone().unwrap_or_else(|| TITLE.to_owned())
     }
 
-    /// The sign-in page with `next`, the page to come back to; none when the
-    /// app gave no sign-in page.
-    fn sign_in_href(&self, next: &str) -> Option<String> {
-        let url = self.sign_in.as_deref()?;
+    /// The sign-in page with `next`, the page to come back to: the app's,
+    /// else the identity pages' own (`identity_pages::SIGN_IN`); none when
+    /// neither gives one.
+    pub fn sign_in_href(&self, next: &str) -> Option<String> {
+        let url = self.sign_in.as_deref().or(crate::identity_pages::SIGN_IN)?;
         let join = if url.contains('?') { '&' } else { '?' };
         Some(format!("{url}{join}next={}", encode(next)))
     }
@@ -157,7 +159,7 @@ fn choices_of(cx: &Cx, resource: &str) -> Choices {
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
-fn current(cx: &Cx) -> String {
+pub fn current(cx: &Cx) -> String {
     let uri = uri(cx);
     uri.path_and_query().map_or_else(|| uri.path().to_owned(), |path| path.as_str().to_owned())
 }
@@ -170,7 +172,7 @@ fn seg(value: &str) -> Option<String> {
 
 /// Percent-encodes each byte of `value` but a letter, a digit and `-._~`,
 /// for a path's segment or a query's value.
-fn encode(value: &str) -> String {
+pub fn encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
@@ -184,7 +186,7 @@ fn encode(value: &str) -> String {
 
 /// A path's percent-encoded segment as text, for a label and a route's
 /// value.
-fn decode(segment: &str) -> String {
+pub fn decode(segment: &str) -> String {
     let bytes = segment.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
@@ -253,7 +255,7 @@ fn as_text(raw: &str) -> Option<Value> {
 
 /// What a refusal says: its form's messages, then each control's after its
 /// name.
-fn messages(refusal: &Refusal) -> Vec<String> {
+pub fn messages(refusal: &Refusal) -> Vec<String> {
     let mut out = refusal.errors.form.clone();
     for (name, list) in &refusal.errors.fields {
         out.extend(list.iter().map(|message| format!("{name}: {message}")));
@@ -265,7 +267,7 @@ fn messages(refusal: &Refusal) -> Vec<String> {
 /// caller who is not signed in (401) a link to the app's sign-in page that
 /// comes back to `next`.
 #[component]
-async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
+pub async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
     let status = refusal.status;
     let sign_in = if status == StatusCode::UNAUTHORIZED { Settings::of(cx).sign_in_href(&next) } else { None };
     let messages = messages(&refusal);
@@ -284,7 +286,7 @@ async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Re
 }
 
 /// The heading of a refusal by its status.
-fn heading(status: StatusCode) -> &'static str {
+pub fn heading(status: StatusCode) -> &'static str {
     match status.as_u16() {
         401 => "Sign in to see this page",
         403 => "Not allowed",
@@ -322,6 +324,37 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
         Ok(_) => links.push(link),
         Err(status) => *signed_out |= status == StatusCode::UNAUTHORIZED,
     }
+}
+
+/// A link the console's own pages add to the nav and the index, after the
+/// resources' lists: the engine's types (`engine_pages::nav_link`), the
+/// account, users and roles (`identity_pages::nav_links`). A `post` link is
+/// a button that posts to `href`, as signing out does. A `nav_only` link,
+/// such as signing in, is the nav's alone, and the index leaves it out, as
+/// it does a `post` link: the index has its own link to sign in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavLink {
+    pub href: String,
+    pub label: String,
+    pub post: bool,
+    pub nav_only: bool,
+}
+
+/// The console's own pages' links, in the nav and the index after the
+/// resources'. The request keeps them (`#[memoize]`), so the nav and the
+/// index ask once.
+#[memoize]
+async fn console_links(cx: &Cx) -> Vec<NavLink> {
+    let mut links = Vec::new();
+    links.extend(crate::identity_pages::nav_links(cx).await);
+    links
+}
+
+/// The trail of a page of the console's own at `path`, after the index:
+/// each step's label and link, the last the page itself. None for a page
+/// that is not theirs, whose trail the resources' tree gives.
+async fn console_trail(cx: &Cx, path: &str) -> Option<Vec<(String, Option<String>)>> {
+    crate::identity_pages::trail(cx, path).await
 }
 
 /// A collection in the trail: its key, its words in a path, its labels,
@@ -482,6 +515,24 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
+    // The console's own pages' links, the current one marked as a
+    // resource's is; a post's button is never current.
+    let console: Vec<(String, String, bool, Option<&'static str>)> = console_links(cx)
+        .await
+        .iter()
+        .map(|link| {
+            let current = if link.post {
+                None
+            } else if path == link.href {
+                Some("page")
+            } else if at(&link.href) {
+                Some("true")
+            } else {
+                None
+            };
+            (link.href.clone(), link.label.clone(), link.post, current)
+        })
+        .collect();
     let mut crumbs = trail(&path, &title);
     for crumb in &mut crumbs {
         if let Some((key, ids)) = &crumb.item
@@ -492,14 +543,36 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     }
     let crumbs: Vec<(String, Option<String>, bool)> =
         crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
+    // A page of the console's own names its steps after the index.
+    let crumbs = match console_trail(cx, &path).await {
+        Some(steps) => {
+            let mut all = vec![(title.clone(), Some(PREFIX.to_owned()), false)];
+            all.extend(steps.into_iter().map(|(label, href)| (label, href, false)));
+            if let Some(last) = all.last_mut() {
+                last.1 = None;
+                last.2 = true;
+            }
+            all
+        }
+        None => crumbs,
+    };
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
-            if !nav.is_empty() {
+            if !nav.is_empty() || !console.is_empty() {
                 <nav class="ss-nav" aria-label="Resources">
                     <ul>
                         for (href, label, current) in nav {
                             <li><a href=(href) aria-current=(current)>(label)</a></li>
+                        }
+                        for (href, label, post, current) in console {
+                            <li>
+                                if post {
+                                    <form method="post" action=(href)><button type="submit">(label)</button></form>
+                                } else {
+                                    <a href=(href) aria-current=(current)>(label)</a>
+                                }
+                            </li>
                         }
                     </ul>
                 </nav>
@@ -529,14 +602,25 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     let settings = Settings::of(cx);
     let (links, signed_out) = listed(cx).await;
     let sign_in = if *signed_out { settings.sign_in_href(&current(cx)) } else { None };
+    // The console's own pages' links, after the resources': a post's button
+    // and a nav-only link are the nav's alone.
+    let console: Vec<(String, String)> = console_links(cx)
+        .await
+        .iter()
+        .filter(|link| !link.post && !link.nav_only)
+        .map(|link| (link.href.clone(), link.label.clone()))
+        .collect();
     Ok(view! {
         <h1>(settings.site_title())</h1>
-        if links.is_empty() {
+        if links.is_empty() && console.is_empty() {
             <p class="ss-empty">"There is nothing here you may list."</p>
         } else {
             <ul class="ss-index">
                 for link in links {
                     <li><a href=(link.href)>(link.label)</a></li>
+                }
+                for (href, label) in console {
+                    <li><a href=(href)>(label)</a></li>
                 }
             </ul>
         }

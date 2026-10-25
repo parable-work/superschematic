@@ -480,6 +480,91 @@ fn integer(value: Option<&str>) -> Read {
     }
 }
 
+/// The minor-unit exponent of `currency` (D44, amended), from superscalar's
+/// `Finance.Currency` table: 2 for GBP, 0 for JPY, 3 for BHD, and 0 for a
+/// code ISO 4217 gives none (XAU), whose amounts are whole numbers.
+fn minor_units(currency: &str) -> usize {
+    usize::from(superscalar::scalars::finance_currency::minor_units(currency).unwrap_or(0))
+}
+
+/// An amount typed as a decimal of `currency` (D44, amended), read as the
+/// whole number of its minor units the input holds: `4.5` and `4.50` of
+/// GBP are 450, and `4` is 400. Text that is no decimal, more decimals
+/// than the currency has, or an amount past an i64 is refused; a sign the
+/// field's bounds refuse, the input's rules refuse.
+fn money(value: Option<&str>, currency: &str) -> Read {
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    let places = minor_units(currency);
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if whole.is_empty() && fraction.is_empty() || !whole.bytes().chain(fraction.bytes()).all(|byte| byte.is_ascii_digit()) {
+        return Err("must be an amount");
+    }
+    if fraction.len() > places {
+        return Err(match places {
+            0 => "must be a whole amount",
+            1 => "must have at most 1 decimal place",
+            2 => "must have at most 2 decimal places",
+            3 => "must have at most 3 decimal places",
+            _ => "must have at most 4 decimal places",
+        });
+    }
+    let Ok(magnitude) = format!("{whole}{fraction:0<places$}").parse::<i128>() else {
+        return Err("is too large an amount");
+    };
+    let amount = if negative { -magnitude } else { magnitude };
+    i64::try_from(amount).map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
+}
+
+/// An amount typed as a decimal of GBP, read as its minor units.
+fn money_gbp(value: Option<&str>) -> Read {
+    money(value, "GBP")
+}
+
+/// An amount typed as a decimal of JPY, read as its minor units.
+fn money_jpy(value: Option<&str>) -> Read {
+    money(value, "JPY")
+}
+
+/// The pattern of a decimal control of `currency` (D44, amended): digits,
+/// then a point and at most the currency's decimals, or digits alone for a
+/// currency of whole amounts; and a leading `-` when the field's bounds
+/// take a negative amount.
+pub fn decimal_pattern(currency: &str, signed: bool) -> String {
+    let sign = if signed { "-?" } else { "" };
+    match minor_units(currency) {
+        0 => format!(r"{sign}\d+"),
+        places => format!(r"{sign}(\d+(\.\d{{0,{places}}})?|\.\d{{1,{places}}})"),
+    }
+}
+
+/// An amount in `currency`'s minor units as its decimal control holds it:
+/// `decimal_text(450, "GBP")` is "4.50", ungrouped and without its code,
+/// as a new form's default and a page's form filled from an item hold it.
+pub fn decimal_text(amount: i64, currency: &str) -> String {
+    let places = minor_units(currency);
+    let digits = format!("{:0>width$}", amount.unsigned_abs(), width = places + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - places);
+    let sign = if amount < 0 { "-" } else { "" };
+    if fraction.is_empty() {
+        format!("{sign}{whole}")
+    } else {
+        format!("{sign}{whole}.{fraction}")
+    }
+}
+
+/// An item's amount, as the API sends it, as its decimal control of
+/// `currency` holds it (`decimal_text`); none for a value that is no whole
+/// number.
+pub fn held_decimal(value: &Value, currency: &str) -> Option<String> {
+    value.as_i64().map(|amount| decimal_text(amount, currency))
+}
+
 /// A number, refused when it is not one.
 fn number(value: Option<&str>) -> Read {
     match value.map(|text| text.trim().parse::<f64>()) {
@@ -813,6 +898,9 @@ pub struct BookingInputForm {
     pub requests: Option<String>,
     pub preferences: Option<String>,
     pub labels: Option<String>,
+    pub deposit: Option<String>,
+    pub tip: Option<String>,
+    pub extra_charge: Option<String>,
     /// The row button that submitted the form (`_action`), which
     /// `apply_action` applies.
     pub row_action: Option<String>,
@@ -840,6 +928,9 @@ impl BookingInputForm {
             requests: None,
             preferences: None,
             labels: None,
+            deposit: Some(decimal_text(2500, "GBP")),
+            tip: None,
+            extra_charge: None,
             row_action: None,
             overflow: false,
         }
@@ -915,6 +1006,9 @@ impl BookingInputForm {
             requests: posted.get("requests").text(),
             preferences: posted.get("preferences").text(),
             labels: posted.get("labels").text(),
+            deposit: posted.get("deposit").text(),
+            tip: posted.get("tip").text(),
+            extra_charge: posted.get("extraCharge").text(),
             row_action: None,
             overflow: false,
         }
@@ -953,6 +1047,9 @@ impl BookingInputForm {
         put(&mut json, errors, "requests", &format!("{at}requests"), text(self.requests.as_deref()));
         put(&mut json, errors, "preferences", &format!("{at}preferences"), json_text(self.preferences.as_deref()));
         put(&mut json, errors, "labels", &format!("{at}labels"), json_text(self.labels.as_deref()));
+        put(&mut json, errors, "deposit", &format!("{at}deposit"), money_gbp(self.deposit.as_deref()));
+        put(&mut json, errors, "tip", &format!("{at}tip"), money_jpy(self.tip.as_deref()));
+        put(&mut json, errors, "extraCharge", &format!("{at}extraCharge"), integer(self.extra_charge.as_deref()));
         json
     }
 
@@ -975,6 +1072,9 @@ impl BookingInputForm {
                 "requests" => rest.is_empty(),
                 "preferences" => shows_all(rest),
                 "labels" => shows_all(rest),
+                "deposit" => rest.is_empty(),
+                "tip" => rest.is_empty(),
+                "extraCharge" => rest.is_empty(),
                 _ => false,
             },
             _ => false,
@@ -1686,6 +1786,37 @@ pub async fn booking_input_fields(
             <label for="booking-input-labels">"Labels (JSON)"</label>
             <textarea id="booking-input-labels" name="labels" rows="4" spellcheck="false" aria-invalid=(errors.invalid("labels"))>(form.labels.clone())</textarea>
             for message in errors.under("labels") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="booking-input-deposit">"Deposit (GBP)"</label>
+            match choices.of("deposit", "deposit") {
+                Some(options) => choice_select(id: "booking-input-deposit", name: "deposit", required: false, invalid: errors.invalid("deposit"), options: choice_options(options, form.deposit.as_deref())),
+                None => <input id="booking-input-deposit" name="deposit" type="text" inputmode="decimal" pattern=(decimal_pattern("GBP", false)) value=(form.deposit.clone()) aria-invalid=(errors.invalid("deposit"))>,
+            }
+            for message in errors.of("deposit") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="booking-input-tip">"Tip (JPY)"</label>
+            match choices.of("tip", "tip") {
+                Some(options) => choice_select(id: "booking-input-tip", name: "tip", required: false, invalid: errors.invalid("tip"), options: choice_options(options, form.tip.as_deref())),
+                None => <input id="booking-input-tip" name="tip" type="text" inputmode="decimal" pattern=(decimal_pattern("JPY", true)) value=(form.tip.clone()) aria-invalid=(errors.invalid("tip"))>,
+            }
+            for message in errors.of("tip") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+        <div class="field">
+            <label for="booking-input-extra-charge">"Extra charge"</label>
+            <p class="field-hint" id="booking-input-extra-charge-hint">"In minor units of Currency"</p>
+            match choices.of("extraCharge", "extraCharge") {
+                Some(options) => choice_select(id: "booking-input-extra-charge", name: "extraCharge", required: false, invalid: errors.invalid("extraCharge"), options: choice_options(options, form.extra_charge.as_deref())),
+                None => <input id="booking-input-extra-charge" name="extraCharge" type="number" step="1" min="0" max="9007199254740991" aria-describedby="booking-input-extra-charge-hint" value=(form.extra_charge.clone()) aria-invalid=(errors.invalid("extraCharge"))>,
+            }
+            for message in errors.of("extraCharge") {
                 <p class="field-error">(message)</p>
             }
         </div>

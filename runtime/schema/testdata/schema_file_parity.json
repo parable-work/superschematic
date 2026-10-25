@@ -1203,6 +1203,55 @@
       "error": "a field display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display': additional properties 'rows' not allowed"
     },
     {
+      "name": "a field display currency",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [\n\t\t{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"GBP\"}},\n\t\t{\"name\": \"fee\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \"currency\"}}},\n\t\t{\"name\": \"currency\", \"typeRef\": {\"name\": \"Finance.Currency\"}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Price\":{\"fields\":[{\"display\":{\"currency\":\"GBP\"},\"name\":\"amount\",\"typeRef\":{\"name\":\"Finance.Money\"}},{\"display\":{\"currency\":{\"field\":\"currency\"}},\"name\":\"fee\",\"typeRef\":{\"name\":\"Finance.Money\"}},{\"name\":\"currency\",\"typeRef\":{\"name\":\"Finance.Currency\"}}],\"name\":\"Price\",\"role\":\"APIInput\"}}}"
+    },
+    {
+      "name": "a field display currency in lower case",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"gbp\"}}]}",
+      "accept": false,
+      "error": "a field display currency in lower case: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': 'gbp' does not match pattern '^[A-Z]{3}$'\n  - at '/fields/0/display/currency': got string, want object"
+    },
+    {
+      "name": "a field display currency of four letters",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"GBPX\"}}]}",
+      "accept": false,
+      "error": "a field display currency of four letters: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': 'GBPX' does not match pattern '^[A-Z]{3}$'\n  - at '/fields/0/display/currency': got string, want object"
+    },
+    {
+      "name": "a field display currency that is a number",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": 826}}]}",
+      "accept": false,
+      "error": "a field display currency that is a number: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got number, want string\n  - at '/fields/0/display/currency': got number, want object"
+    },
+    {
+      "name": "a field display currency field that is blank",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \" \"}}}]}",
+      "accept": false,
+      "error": "a field display currency field that is blank: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency/field': ' ' does not match pattern '\\\\S'"
+    },
+    {
+      "name": "a field display currency without its field",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {}}}]}",
+      "accept": false,
+      "error": "a field display currency without its field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency': missing property 'field'"
+    },
+    {
+      "name": "a field display currency with a code and a field",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \"currency\", \"code\": \"GBP\"}}}]}",
+      "accept": false,
+      "error": "a field display currency with a code and a field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency': additional properties 'code' not allowed"
+    },
+    {
       "name": "enum member titles in an enum file",
       "registry": "core",
       "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [\n\t\t{\"name\": \"Placed\", \"serializedAs\": \"placed\"}, {\"name\": \"OnHold\", \"title\": \"Held for a stock check\", \"serializedAs\": \"on_hold\"}]}",

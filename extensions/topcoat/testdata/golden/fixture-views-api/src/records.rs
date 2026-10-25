@@ -88,6 +88,117 @@ impl From<types::Comment> for CommentRecord {
     }
 }
 
+/// The record of `types::Invoice`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvoiceRecord {
+    pub number: String,
+    pub total: i64,
+    pub deposit: Option<i64>,
+    pub fee: i64,
+    pub gold: Option<i64>,
+    pub adjustments: Vec<i64>,
+    pub billed_in: Option<String>,
+    pub settled_in: String,
+    pub refund: Option<i64>,
+    pub lines: Vec<InvoiceLineRecord>,
+}
+
+impl InvoiceRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            number: wire::string(&json["number"]),
+            total: wire::integer(&json["total"]),
+            deposit: wire::optional(&json["deposit"], wire::integer),
+            fee: wire::integer(&json["fee"]),
+            gold: wire::optional(&json["gold"], wire::integer),
+            adjustments: wire::list(&json["adjustments"], wire::integer),
+            billed_in: wire::optional(&json["billedIn"], wire::string),
+            settled_in: wire::string(&json["settledIn"]),
+            refund: wire::optional(&json["refund"], wire::integer),
+            lines: wire::list(&json["lines"], InvoiceLineRecord::from_wire),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("number".to_owned(), wire::put_string(&self.number));
+        json.insert("total".to_owned(), wire::put_integer(&self.total));
+        if let Some(value) = &self.deposit {
+            json.insert("deposit".to_owned(), wire::put_integer(value));
+        }
+        json.insert("fee".to_owned(), wire::put_integer(&self.fee));
+        if let Some(value) = &self.gold {
+            json.insert("gold".to_owned(), wire::put_integer(value));
+        }
+        json.insert("adjustments".to_owned(), wire::put_list(&self.adjustments, wire::put_integer));
+        if let Some(value) = &self.billed_in {
+            json.insert("billedIn".to_owned(), wire::put_string(value));
+        }
+        json.insert("settledIn".to_owned(), wire::put_string(&self.settled_in));
+        if let Some(value) = &self.refund {
+            json.insert("refund".to_owned(), wire::put_integer(value));
+        }
+        json.insert("lines".to_owned(), wire::put_list(&self.lines, InvoiceLineRecord::to_wire));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Invoice> for InvoiceRecord {
+    fn from(value: &types::Invoice) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Invoice> for InvoiceRecord {
+    fn from(value: types::Invoice) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::InvoiceLine`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvoiceLineRecord {
+    pub item: String,
+    pub amount: i64,
+    pub currency: String,
+}
+
+impl InvoiceLineRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            item: wire::string(&json["item"]),
+            amount: wire::integer(&json["amount"]),
+            currency: wire::string(&json["currency"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("item".to_owned(), wire::put_string(&self.item));
+        json.insert("amount".to_owned(), wire::put_integer(&self.amount));
+        json.insert("currency".to_owned(), wire::put_string(&self.currency));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::InvoiceLine> for InvoiceLineRecord {
+    fn from(value: &types::InvoiceLine) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::InvoiceLine> for InvoiceLineRecord {
+    fn from(value: types::InvoiceLine) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::Money`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
