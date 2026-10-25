@@ -7,9 +7,11 @@
 //!
 //! The `auth: iam` test runs over TLS when
 //! `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS` names a `rediss://` Valkey whose
-//! default user's password is `token-1`, with the PEM of its CA at the
-//! path `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CA` names, against a fake
-//! metadata server; it skips otherwise.
+//! default user's password is `SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD`,
+//! with the PEM of its CA at the path `SUPERSCHEMATIC_TEST_MEMORY_STORE_CA`
+//! names, the server and the variables the TypeScript runtime's TLS tests
+//! read, against a fake metadata server that gives the password as the
+//! token; it skips otherwise.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -31,7 +33,8 @@ use tokio::task::JoinHandle;
 
 const STORE_ENV: &str = "SUPERSCHEMATIC_TEST_MEMORY_STORE";
 const TLS_ENV: &str = "SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS";
-const TLS_CA_ENV: &str = "SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CA";
+const TLS_CA_ENV: &str = "SUPERSCHEMATIC_TEST_MEMORY_STORE_CA";
+const TLS_PASSWORD_ENV: &str = "SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD";
 
 /// The test server's URL, refused unless its host is loopback and its
 /// database is not 0; `None` when the variable is unset.
@@ -413,25 +416,25 @@ async fn a_lost_server_is_unavailable_until_it_returns_and_subscriptions_come_ba
     publisher.close().await;
 }
 
-/// A fake metadata server, which gives `token-1` to a request that carries
+/// A fake metadata server, which gives `token` to a request that carries
 /// `Metadata-Flavor: Google`, and counts the requests.
-async fn metadata_server() -> (String, Arc<AtomicUsize>) {
+async fn metadata_server(token: &str) -> (String, Arc<AtomicUsize>) {
     let asked = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&asked);
+    let body =
+        serde_json::json!({"access_token": token, "expires_in": 3599, "token_type": "Bearer"})
+            .to_string();
     let app = Router::new().route(
         "/computeMetadata/v1/instance/service-accounts/default/token",
         get(move |headers: HeaderMap| {
             let counted = Arc::clone(&counted);
+            let body = body.clone();
             async move {
                 if headers.get("metadata-flavor").and_then(|v| v.to_str().ok()) != Some("Google") {
                     return (StatusCode::FORBIDDEN, String::new());
                 }
                 counted.fetch_add(1, Ordering::SeqCst);
-                (
-                    StatusCode::OK,
-                    r#"{"access_token":"token-1","expires_in":3599,"token_type":"Bearer"}"#
-                        .to_string(),
-                )
+                (StatusCode::OK, body)
             }
         }),
     );
@@ -448,7 +451,8 @@ async fn iam_sends_the_metadata_servers_token_over_tls() {
         return;
     };
     let ca = std::fs::read_to_string(std::env::var(TLS_CA_ENV).expect("the CA's path")).unwrap();
-    let (metadata, asked) = metadata_server().await;
+    let password = std::env::var(TLS_PASSWORD_ENV).expect("the server's password");
+    let (metadata, asked) = metadata_server(&password).await;
     let mut tls = connection(&unique("iam"), &url);
     tls.auth = MemoryStoreAuth::Iam;
     tls.ca = Some(ca);
