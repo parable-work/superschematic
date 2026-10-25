@@ -1,6 +1,7 @@
 package topcoat_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -658,3 +659,86 @@ async fn a_member_is_refused_administration() {
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
 }
 `
+
+// TestTheEngineAndIdentityPagesBuildTogether builds copies of
+// fixture-engine-api and fixture-engine-db in which the database holds the
+// core user model's tables too (fixture-user-model-db's) and is the API's
+// authDb, and the API has an @userSessions set, as acme's shop-db and
+// shop-orders are, so the crate has both the engine pages and the
+// identity pages. It runs cargo clippy with warnings denied, then cargo
+// test: the nav and the trail that join them compile.
+func TestTheEngineAndIdentityPagesBuildTogether(t *testing.T) {
+	parent := testpaths.TempDir(t)
+	copyService := func(from, name string, edit func(file, text string) string) {
+		t.Helper()
+		err := filepath.WalkDir(from, func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(from, path)
+			if err != nil {
+				return err
+			}
+			writeFile(t, filepath.Join(parent, name, rel), edit(filepath.ToSlash(rel), string(data)))
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	copyService(serviceDir(engineDatabase), engineDatabase, func(_, text string) string { return text })
+	users, err := os.ReadFile(filepath.Join(serviceDir("fixture-user-model-db"), "src", "users.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The user model's tables, in the database's name, without the scalar
+	// its own schema declares.
+	var model map[string]any
+	if err := json.Unmarshal(users, &model); err != nil {
+		t.Fatal(err)
+	}
+	model["name"] = engineDatabase
+	delete(model["scalars"].(map[string]any), "Identity.UUID")
+	users, err = json.Marshal(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(parent, engineDatabase, "src", "users.schema.json"), string(users))
+	copyService(serviceDir(engineService), engineService, func(file, text string) string {
+		edited := text
+		switch file {
+		case "schema.config.yaml":
+			edited = strings.Replace(text, "kind: API\n", "kind: API\nauthDb: "+engineDatabase+"\n", 1)
+		case "src/notes.schema.yaml":
+			edited = strings.Replace(text, "operationSets:\n", "operationSets:\n  - name: Account\n    userSessions: {}\n    operations: []\n", 1)
+		}
+		if edited == text {
+			t.Fatalf("the edit of %s changed nothing", file)
+		}
+		return edited
+	})
+	dir := filepath.Join(parent, engineService)
+	root := testpaths.TempDir(t)
+	if _, err := buildIn(t, buildSpec{names: registry.DefaultNaming(), dir: filepath.Join(parent, engineDatabase), root: root, outputs: engineDatabaseOutputs()}); err != nil {
+		t.Fatalf("build %s: %v", engineDatabase, err)
+	}
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, pagesOutputs(), &log); err != nil {
+		t.Fatalf("build %s: %v", dir, err)
+	}
+	for _, file := range []string{"engine_pages.rs", "identity_pages.rs"} {
+		if _, err := os.Stat(filepath.Join(topcoat.Dir(root, engineService), "src", file)); err != nil {
+			t.Fatalf("the crate has no %s: %v\n%s", file, err, log.String())
+		}
+	}
+	cargoTestCrateWith(t, engineService, "#[test]\nfn builds() {}\n", crateOptions{
+		dir:          dir,
+		dependencies: []string{engineDatabase},
+		depOutputs:   map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
+		features:     []string{"identity-sqlite"},
+	})
+}
