@@ -584,6 +584,49 @@ func TestAdministration(t *testing.T) {
 	})
 }
 
+// TestAUserWriteNeedsTheirPermissions: setting a user's password,
+// disabling them and enabling them need the caller's permissions to cover
+// every permission the user holds through their roles, as a grant does. A
+// helpdesk holding identity.users may write a member, who holds nothing,
+// and not the admin, whose role carries identity and orders: 403 listing
+// them, the admin's password and session untouched.
+func TestAUserWriteNeedsTheirPermissions(t *testing.T) {
+	eachHarness(t, testConfig, func(t *testing.T, h *harness) {
+		admin := bearer(h.login("admin@example.com", adminPassword))
+		helpdeskRole := h.do("POST", "/auth/admin/roles", map[string]any{"name": "helpdesk", "permissions": []string{"identity.users"}}, admin...)
+		h.expect(helpdeskRole, 200, "")
+		created := h.do("POST", "/auth/admin/users", map[string]any{"login": "helpdesk@example.com", "name": "Helpdesk", "password": userPassword}, admin...)
+		h.expect(created, 200, "")
+		h.expect(h.do("PUT", "/auth/admin/users/"+created.data()["id"].(string)+"/roles/"+helpdeskRole.data()["id"].(string), nil, admin...), 200, "")
+		helpdesk := bearer(h.login("helpdesk@example.com", userPassword))
+
+		user := "/auth/admin/users/" + h.adminID
+		for _, write := range []struct {
+			method, path string
+			body         any
+		}{
+			{"PUT", user + "/password", map[string]any{"password": "taken over"}},
+			{"POST", user + "/disable", nil},
+			{"POST", user + "/enable", nil},
+		} {
+			refused := h.do(write.method, write.path, write.body, helpdesk...)
+			h.expect(refused, 403, identity.CodeForbidden)
+			if !equalJSON(refused.body["details"], map[string]any{"permissions": []any{"identity", "orders"}}) {
+				t.Errorf("%s %s: the refusal's details = %v", write.method, write.path, refused.body["details"])
+			}
+		}
+		h.expect(h.do("GET", "/auth/me", nil, admin...), 200, "")
+		h.login("admin@example.com", adminPassword)
+		h.expect(h.do("PUT", "/auth/admin/users/00000000-0000-4000-8000-000000000000/password", map[string]any{"password": "reset password"}, helpdesk...), 404, identity.CodeNotFound)
+
+		member := "/auth/admin/users/" + h.memberID
+		h.expectTrue(h.do("PUT", member+"/password", map[string]any{"password": "reset password"}, helpdesk...))
+		h.expect(h.do("POST", member+"/disable", nil, helpdesk...), 200, "")
+		h.expect(h.do("POST", member+"/enable", nil, helpdesk...), 200, "")
+		h.login("member@example.com", "reset password")
+	})
+}
+
 // TestLoginRehashes: a login whose hash has another cost writes it again at
 // the config's.
 func TestLoginRehashes(t *testing.T) {

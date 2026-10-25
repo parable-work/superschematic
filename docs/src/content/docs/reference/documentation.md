@@ -228,6 +228,54 @@ src/login.schema.ts: type LoginInput: field password takes @display multiline, b
 It is presentation only: no generated type, validator or wire format
 changes, and the OpenAPI document and the tool manifests leave it out.
 
+### `@display({ currency })` on a field
+
+An amount is a whole number of a currency's minor units: 450 for GBP 4.50.
+`@display({ currency })` says which currency a field's amount is in, so
+a UI can show it as money and take it as a decimal. It is a code, or
+another field of the same type that holds one:
+
+```ts
+import { Nullable, display } from "@superschematic/schema";
+import { Finance, Generic } from "superscalar";
+
+export abstract class InvoiceView {
+  @display({ currency: "GBP" })
+  totalCents: Generic.Int64;
+
+  @display({ currency: { field: "currency" } })
+  dueCents: Generic.Int64;
+  currency: Nullable<Finance.Currency>;
+}
+```
+
+| Decorator | Writes | Rule |
+| --- | --- | --- |
+| `@display({ currency })` | `FieldDef.display.currency` (`ir.DisplayCurrency`) | the field holds an integer scalar (`Finance.Money`, `Generic.Int64`) or a list of them, not a map; a code is an active ISO 4217 code in capitals; a `{ field }` names another field of the type, by its name or its JSON key, that holds one `Finance.Currency` or text value |
+
+The JSON and YAML forms write a code as a string and a field as
+`{ field: currency }` under the field's `display`, beside `multiline`. A
+code must be on ISO 4217's active list, as `Finance.Currency` checks it,
+so `usd` and a withdrawn code are refused. The loader refuses the hint in
+every form:
+
+```
+src/price.schema.ts: type Price: field note takes @display currency, which is for an amount in minor units, but it is string
+src/price.schema.ts: type Price: field amount takes @display currency "HRK", which is not an active ISO 4217 currency code
+src/price.schema.ts: type Price: field amount takes @display currency { field: "money" }, which is not a field of the type (fields: cents, currency)
+src/price.schema.ts: type Price: field amount takes @display currency { field: "cents" }, which is Generic.Int64; a currency field holds a single Finance.Currency or text value
+```
+
+A `Finance.Money` field without the hint, in a type with exactly one
+`Finance.Currency` field, is read as in that field's currency; the hint
+wins, and with two currency fields and no hint the amount names none.
+Like `multiline` it is presentation only: no generated type, validator
+or wire format changes. The Topcoat crate shows such an amount as
+`GBP 4.50` and takes it in a decimal control
+([Money](/superschematic/guides/topcoat/#money)). The engine's own
+amounts name their currency in their behavior's config, as
+[commerce](/superschematic/guides/commerce/#totals-and-currency) does.
+
 ## A title on an enum member
 
 A member's title is its reader-facing label: what a select's option or a

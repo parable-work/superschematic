@@ -120,3 +120,75 @@ func TestEnumTitlesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestFieldDisplayCurrencyRoundTrips: a field's @display currency (D48,
+// amended), a code or a field, beside multiline in one argument, goes
+// from YAML to IR to TypeScript, JSON and YAML and back to equal IR; the
+// TypeScript writer writes the code as a string and the field as
+// { field }.
+func TestFieldDisplayCurrencyRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"schema.config.yaml": "name: prices\nkind: General\noutputs: {}\n",
+		"src/price.schema.yaml": `name: prices
+kind: General
+scalars:
+  Finance.Money: { name: Finance.Money, languagePrimitive: number }
+  Finance.Currency: { name: Finance.Currency, languagePrimitive: string }
+  Generic.Int64: { name: Generic.Int64, languagePrimitive: number }
+types:
+  Price:
+    name: Price
+    role: EmbeddedStruct
+    fields:
+      - name: amount
+        typeRef: { name: Finance.Money }
+        required: true
+        display: { currency: GBP }
+      - name: tiers
+        typeRef: { name: Generic.Int64, isArray: true }
+        required: true
+        display: { currency: { field: currency } }
+      - name: currency
+        typeRef: { name: Finance.Currency }
+        required: true
+      - name: note
+        typeRef: { name: string }
+        required: true
+        display: { multiline: true }
+`,
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	schema, err := loader.LoadService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := writtenSource(t, schema, FormatTS)
+	for _, want := range []string{
+		"  @display({ currency: \"GBP\" })\n  amount: Finance.Money;\n",
+		"  @display({ currency: { field: \"currency\" } })\n  tiers: Generic.Int64[];\n",
+		"  @display({ multiline: true })\n  note: string;\n",
+	} {
+		if !strings.Contains(ts, want) {
+			t.Errorf("TS output missing\n%s\ngot:\n%s", want, ts)
+		}
+	}
+	for _, format := range []Format{FormatTS, FormatJSON, FormatYAML} {
+		if got, want := normalizeIR(t, writeAndReload(t, schema, format)), normalizeIR(t, schema); got != want {
+			t.Errorf("IR changed after a YAML -> %s round trip\nwant:\n%s\ngot:\n%s", format, want, got)
+		}
+	}
+	both := cloneSchema(t, schema)
+	yes := true
+	both.Types["Price"].Fields[0].Display.Multiline = &yes
+	if got := writtenSource(t, both, FormatTS); !strings.Contains(got, "@display({ multiline: true, currency: \"GBP\" })") {
+		t.Errorf("TS output of two members:\n%s", got)
+	}
+}

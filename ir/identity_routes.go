@@ -151,13 +151,17 @@ const (
 	// (users.read).
 	IdentityOpGetUser = "getUser"
 	// IdentityOpDisableUser is POST <path>/users/{id}/disable, to
-	// IdentityUser (users.write); revokes the user's sessions.
+	// IdentityUser (users.write, and the caller's permissions cover every
+	// one the user holds: D50, amended); revokes the user's sessions.
 	IdentityOpDisableUser = "disableUser"
 	// IdentityOpEnableUser is POST <path>/users/{id}/enable, to
-	// IdentityUser (users.write).
+	// IdentityUser (users.write, and the caller's permissions cover every
+	// one the user holds: D50, amended).
 	IdentityOpEnableUser = "enableUser"
 	// IdentityOpSetUserPassword is PUT <path>/users/{id}/password,
-	// SetPasswordInput to true (users.write); revokes the user's sessions.
+	// SetPasswordInput to true (users.write, and the caller's permissions
+	// cover every one the user holds: D50, amended); revokes the user's
+	// sessions.
 	IdentityOpSetUserPassword = "setUserPassword"
 	// IdentityOpListRoles is GET <path>/roles, to IdentityRole[]
 	// (roles.read).

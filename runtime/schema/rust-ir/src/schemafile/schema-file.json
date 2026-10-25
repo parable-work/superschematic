@@ -3353,6 +3353,21 @@
       ],
       "type": "object"
     },
+    "DisplayCurrency": {
+      "additionalProperties": false,
+      "description": "A field of the same type that holds the currency of an amount: a Finance.Currency, or text.",
+      "properties": {
+        "field": {
+          "description": "The field's name, or its JSON key.",
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
     "DisplayState": {
       "additionalProperties": false,
       "description": "How a UI shows one Workflow state: its label, the present-progressive form it shows while an instance is in the state, and a tone, what the state means to a reader.",
@@ -3910,9 +3925,21 @@
     },
     "FieldDisplay": {
       "additionalProperties": false,
-      "description": "How a UI renders a field's control (@display on a field).",
+      "description": "How a UI renders a field's control and its value (@display on a field).",
       "minProperties": 1,
       "properties": {
+        "currency": {
+          "description": "The currency of the amount in minor units the field holds: an ISO 4217 code (GBP), or a field of the same type that holds one.",
+          "oneOf": [
+            {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/DisplayCurrency"
+            }
+          ]
+        },
         "multiline": {
           "description": "A control that holds several lines (true) or one line (false), whatever the field's maxLength; absent leaves it to the UI.",
           "type": "boolean"

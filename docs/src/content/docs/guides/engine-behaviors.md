@@ -451,6 +451,11 @@ let app = Router::builder()
     .build();
 ```
 
+With the crate's pages on, its console also pages the engine's types at
+`<prefix>/engine`, each behavior in a panel and each operation as a form,
+every call the signed-in caller's ([Engine
+pages](/superschematic/guides/topcoat/#engine-pages)).
+
 ### The project's engine crate
 
 The Rust engine (D58) runs an extension's behavior from a Rust crate

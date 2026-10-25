@@ -163,7 +163,12 @@ user holds any number of them. A user's permissions are their roles',
 with the same dotted rule `@requirePermission` uses. No one grants what
 they do not hold: writing a role's permissions, or granting a role, needs
 the caller's own permissions to cover each one given, or it is 403 with
-the uncovered permissions in `details.permissions`.
+the uncovered permissions in `details.permissions`. Nor does anyone take
+over a user who holds more than they do: setting a user's password,
+disabling them and enabling them need the caller's permissions to cover
+every permission the user holds through their roles, or it is 403
+`forbidden` with the uncovered ones. A user with no roles is anyone's
+who holds `identity.users.write`.
 
 `capabilities` answers, for each operation of the API, keyed by its OpenAPI
 operation id, whether the route admits the caller, by the router's own
@@ -198,6 +203,22 @@ the session routes under `/auth`. A behavior's permission, such as a
 Workflow transition's, is then a role's like any other, and the opt-in
 `permissionPolicy()` allows an action to a caller holding
 `<schema>.<action>`. See the engine README's Users section.
+
+## Pages with Topcoat
+
+A [Topcoat app](/superschematic/guides/topcoat/#sign-in-and-admin-pages)
+over an API whose users are the core model's gets pages for them with its
+console: sign-in, which comes back to the page that sent the caller
+there, sign-out, an account page that changes the password, and, for a
+caller who holds `identity.users.read` or `identity.roles.read`, the
+users and the roles, where an administrator adds users, grants and
+revokes roles, disables and enables users, and sets a password. Each
+page calls the identity service in-process as the signed-in caller, so
+the same permissions and the same coverage rule decide as on the
+routes. Signing in, signing up and changing a password share the routes'
+rate limits, and a sign-up page is served only when the API registers
+users or the app's config asks for one. acme's console is at
+`/console/users` and `/console/roles`, for Ada.
 
 ## What it does not do
 

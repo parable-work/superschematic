@@ -53,6 +53,13 @@ pub(crate) fn not_held(permissions: Vec<String>) -> ApiError {
         .with_details(json!({ "permissions": permissions }))
 }
 
+/// A write to a user who holds permissions the caller does not, listing
+/// them.
+pub(crate) fn not_covered(permissions: Vec<String>) -> ApiError {
+    ApiError::forbidden("No one administers a user holding a permission they do not hold")
+        .with_details(json!({ "permissions": permissions }))
+}
+
 pub(crate) fn cross_origin() -> ApiError {
     ApiError::new(
         StatusCode::FORBIDDEN,

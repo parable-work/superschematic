@@ -42,6 +42,8 @@
 {{- end }}
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
+{{- else if .HasViews }}
+//! `views` writes an amount in its currency (`money_text`).
 {{- end }}
 {{- if .References }}
 //! `references` names what a value that refers to an item holds (D61): a
@@ -58,6 +60,15 @@
 //! `{{ .Pages.Prefix }}`, with a layout and a nav; the app's `.discover()`
 //! registers them, and `pages::Settings` in its app context names its
 //! sign-in page and its choices.
+{{- end }}
+{{- if .EnginePages }}
+//! `engine_pages` serves the engine's types under `{{ .Pages.Prefix }}{{ engineMount }}`, an
+//! instance's behaviors in `engine_panels`' panels, each page calling the
+//! engine in-process as its caller.
+{{- end }}
+{{- if .IdentityPages }}
+//! `identity_pages` signs a caller in and out under `{{ .Pages.Prefix }}`, and
+//! administers users and roles, through the identity runtime's `Service`.
 {{- end }}
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
@@ -85,11 +96,20 @@ pub mod references;
 {{- if .HasRecords }}
 mod wire;
 {{- end }}
-{{- if .Views }}
+{{- if .HasViews }}
 pub mod views;
 {{- end }}
 {{- if .Engine }}
 pub mod engine;
+{{- end }}
+{{- if .EnginePages }}
+pub mod engine_pages;
+{{- end }}
+{{- if .EnginePanels }}
+pub mod engine_panels;
+{{- end }}
+{{- if .IdentityPages }}
+pub mod identity_pages;
 {{- end }}
 
 /// The service's API crate: its `Implementations`, `Args` structs and

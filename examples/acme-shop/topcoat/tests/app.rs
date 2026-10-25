@@ -539,7 +539,10 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     let page = send(&router, "GET", &order, Some(&cookie), None).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains(r#"<div data-field="status"><dt>Status</dt><dd><data value="placed">Placed</data></dd></div>"#), "{}", page.body);
-    assert!(page.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd>3998</dd></div>"#), "{}", page.body);
+    // The total and each line's price are money, in pounds, as
+    // `@display({ currency: "GBP" })` says.
+    assert!(page.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd><data value="3998">GBP 39.98</data></dd></div>"#), "{}", page.body);
+    assert!(page.body.contains(r#"<td data-field="unitPriceCents"><data value="1999">GBP 19.99</data></td>"#), "{}", page.body);
     // Each line's product by its name, which the catalog's lookup gives.
     assert!(page.body.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", page.body);
     assert!(!page.body.contains(&format!(">{anvil}<")), "{}", page.body);
@@ -807,7 +810,7 @@ async fn a_sqlite_shop_outlives_the_app() {
     let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
     assert_eq!(orders.status, StatusCode::OK);
     assert!(orders.body.contains(r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption>"#), "{}", orders.body);
-    assert!(orders.body.contains(r#"<td data-field="status"><data value="placed">Placed</data></td><td data-field="totalCents">3998</td>"#), "{}", orders.body);
+    assert!(orders.body.contains(r#"<td data-field="status"><data value="placed">Placed</data></td><td data-field="totalCents"><data value="3998">GBP 39.98</data></td>"#), "{}", orders.body);
     let page = send(&router, "GET", &order, Some(&cookie), None).await;
     assert!(page.body.contains(r#"<data value="cancelled">Cancelled</data>"#), "{}", page.body);
     assert!(page.body.contains(r#"<dd>Found a bigger anvil</dd>"#), "{}", page.body);
@@ -853,7 +856,10 @@ async fn the_console_shows_what_the_shopper_may_list() {
     // Each link starts with its type's icon, which the app's stylesheet
     // draws.
     let products = r#"<li><a href="/console/products"><span class="ss-icon" data-icon="package" aria-hidden="true"></span>Products</a></li>"#;
-    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{products}</ul></nav>"#)), "{}", index.body);
+    // The nav's sign-in link is the app's own page, which its settings
+    // name, not the identity pages' /console/sign-in.
+    let sign_in = r#"<li><a href="/sign-in?next=%2Fconsole">Sign in</a></li>"#;
+    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{products}{sign_in}</ul></nav>"#)), "{}", index.body);
     assert!(index.body.contains(&format!(r#"<ul class="ss-index">{products}</ul>"#)), "{}", index.body);
     assert!(index.body.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole">Sign in</a>"#), "{}", index.body);
     let orders = send(&router, "GET", "/console/orders", None, None).await;
@@ -865,9 +871,14 @@ async fn the_console_shows_what_the_shopper_may_list() {
     // Signed in, the nav and the index list the orders too.
     let cookie = signed_in.cookie.expect("the session cookie");
     let index = send(&router, "GET", "/console", Some(&cookie), None).await;
+    // After the resources, the shopper's account and the button that signs
+    // them out; neither the engine's types nor the users and roles, which a
+    // shopper may not read.
     let links = format!(r#"<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>{products}"#);
-    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{links}</ul></nav>"#)), "{}", index.body);
-    assert!(index.body.contains(&format!(r#"<ul class="ss-index">{links}</ul>"#)), "{}", index.body);
+    let account = r#"<li><a href="/console/account">Account</a></li>"#;
+    let sign_out = r#"<li><form method="post" action="/console/sign-out"><button type="submit">Sign out</button></form></li>"#;
+    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{links}{account}{sign_out}</ul></nav>"#)), "{}", index.body);
+    assert!(index.body.contains(&format!(r#"<ul class="ss-index">{links}{account}</ul>"#)), "{}", index.body);
     assert!(!index.body.contains("ss-sign-in"), "{}", index.body);
 }
 
@@ -1259,14 +1270,16 @@ async fn a_products_page_shows_the_first_page_of_its_reviews() {
     }
 }
 
-/// The totals of the orders a table lists, in its order.
+/// The totals of the orders a table lists, in its order, in pence: each
+/// cell is money, its amount in minor units the `data` element's value.
 fn totals(body: &str) -> Vec<&str> {
-    each_between(body, r#"<td data-field="totalCents">"#, "</td>")
+    each_between(body, r#"<td data-field="totalCents"><data value=""#, "\"")
 }
 
-/// The prices of the products a console table lists, in its order.
+/// The prices of the products a console table lists, in its order, in
+/// pence, as `totals` reads them.
 fn prices(body: &str) -> Vec<&str> {
-    each_between(body, r#"<td data-field="priceCents">"#, "</td>")
+    each_between(body, r#"<td data-field="priceCents"><data value=""#, "\"")
 }
 
 /// The column header of `field` in a table, from its attributes on.
@@ -1344,6 +1357,7 @@ async fn the_consoles_lists_sort_by_their_headers() {
         let dearest = send(&router, "GET", "/console/products?sort=-priceCents", None, None).await;
         assert_eq!(product_names(&dearest.body), ["Bellows", "Anvil", "Chisel"], "{shop}");
         assert_eq!(prices(&dearest.body), ["2500", "1999", "450"], "{shop}");
+        assert!(dearest.body.contains(r#"<td data-field="priceCents"><data value="2500">GBP 25.00</data></td>"#), "{shop}: {}", dearest.body);
         assert!(header(&dearest.body, "priceCents").starts_with(r#" aria-sort="descending">"#), "{shop}: {}", dearest.body);
         let cheapest = send(&router, "GET", &sort_link(&dearest.body, "priceCents"), None, None).await;
         assert_eq!(product_names(&cheapest.body), ["Chisel", "Anvil", "Bellows"], "{shop}");
@@ -1424,7 +1438,7 @@ async fn the_new_order_page_finds_a_product_by_its_name() {
         let placed = send(&router, "POST", "/orders/new", Some(&cookie), Some(&format!("lines[0].productId={chisel}&lines[0].quantity=2&{ADDRESS}"))).await;
         assert_eq!(placed.status, StatusCode::SEE_OTHER, "{shop}: {}", placed.body);
         let order = send(&router, "GET", &placed.location.expect("the order's page"), Some(&cookie), None).await;
-        assert!(order.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd>900</dd></div>"#), "{shop}: {}", order.body);
+        assert!(order.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd><data value="900">GBP 9.00</data></dd></div>"#), "{shop}: {}", order.body);
         assert!(order.body.contains(r#"<td data-field="productId">Chisel</td>"#), "{shop}: {}", order.body);
 
         // Live, the picker is a shard the box's input renders again in

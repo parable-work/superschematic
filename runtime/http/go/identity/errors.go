@@ -49,6 +49,10 @@ func unauthenticated(cause error) *apperror.AppError {
 	return problem(apperror.ErrCodeUnauthorized, CodeUnauthorized, "Authentication required", cause)
 }
 
+// notCoveredMessage is the 403 of a write to a user who holds a permission
+// the caller does not (Service.covers).
+const notCoveredMessage = "No one administers a user holding a permission they do not hold"
+
 func forbidden(message string, details any) *apperror.AppError {
 	e := problem(apperror.ErrCodeForbidden, CodeForbidden, message, nil)
 	e.Details = details

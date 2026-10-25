@@ -453,8 +453,10 @@ type resolver struct {
 }
 
 // document builds the schema-file document of root, an engine type: a
-// General document named after it, holding it, the value types it
-// reaches, and the enums and scalars their fields use, with no imports.
+// General document named after it, holding it, the value types its fields
+// reach and those its behaviors' configs name (configTypes), each with what
+// its own fields reach, and the enums and scalars their fields use, with no
+// imports.
 func (r resolver) document(root *ir.TypeDef) (*schemafile.Document, error) {
 	file := &schemafile.Document{Name: root.Name, Kind: ir.SchemaKindGeneral, Types: map[string]*ir.TypeDef{}}
 	type item struct {
@@ -463,6 +465,25 @@ func (r resolver) document(root *ir.TypeDef) (*schemafile.Document, error) {
 	}
 	queue := []item{{root, r.schema}}
 	file.Types[root.Name] = engineType(root, true)
+	named, err := configTypes(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range named {
+		if file.Types[ref.name] != nil {
+			continue
+		}
+		owner, kind, def := r.lookup(r.schema, ref.name)
+		if kind != kindType {
+			return nil, fmt.Errorf("behavior %s of %s: %s names %s, which is not a type of %s or of a dependency the build loaded", ref.behavior, root.Name, ref.at, ref.name, r.schema.Name)
+		}
+		td := def.(*ir.TypeDef)
+		if td == root || codegen.IsEngineType(td) {
+			return nil, fmt.Errorf("behavior %s of %s: %s names %s, which composes a behavior: its content must be a value type", ref.behavior, root.Name, ref.at, ref.name)
+		}
+		file.Types[ref.name] = engineType(td, false)
+		queue = append(queue, item{td, owner})
+	}
 	for len(queue) > 0 {
 		it := queue[0]
 		queue = queue[1:]
@@ -500,6 +521,55 @@ func (r resolver) document(root *ir.TypeDef) (*schemafile.Document, error) {
 		}
 	}
 	return file, nil
+}
+
+// configRef is a type a behavior's config names: the behavior, where in
+// its config, and the type's name.
+type configRef struct {
+	behavior, at, name string
+}
+
+// configTypes are the types td's behaviors' configs name, which the
+// engine reads as types of td's document besides it, though no field
+// need reach them: each Branches kind's content type (kinds.<kind>.type)
+// and each Variants value's type (types.<value>), in the behaviors' order
+// and by sorted key.
+func configTypes(td *ir.TypeDef) ([]configRef, error) {
+	var refs []configRef
+	for _, behavior := range td.Behaviors {
+		var path string
+		switch behavior.Name {
+		case "Branches":
+			path = "kinds"
+		case "Variants":
+			path = "types"
+		default:
+			continue
+		}
+		if len(behavior.Config) == 0 {
+			continue
+		}
+		var config map[string]any
+		if err := json.Unmarshal(behavior.Config, &config); err != nil {
+			return nil, fmt.Errorf("behavior %s of %s: config: %w", behavior.Name, td.Name, err)
+		}
+		members, _ := config[path].(map[string]any)
+		for _, key := range slices.Sorted(maps.Keys(members)) {
+			var name string
+			at := path + "." + key
+			if behavior.Name == "Branches" {
+				kind, _ := members[key].(map[string]any)
+				name, _ = kind["type"].(string)
+				at += ".type"
+			} else {
+				name, _ = members[key].(string)
+			}
+			if name != "" {
+				refs = append(refs, configRef{behavior: behavior.Name, at: at, name: name})
+			}
+		}
+	}
+	return refs, nil
 }
 
 type defKind int
