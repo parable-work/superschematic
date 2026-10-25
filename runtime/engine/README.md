@@ -2637,7 +2637,7 @@ A field its declaration marks `"volatile": true` can move without an
 event of its own instance: the engine computes it at the read, from
 other instances, the clock or the config. The core's are
 `Dependencies.blocked`, `Links.targets` (whose `latest` and `stale` read
-the target), `Rollups.values`, Comments' three (which its operations
+the target), `Rollups.values`, Comments' four (which its operations
 beside the instance move), and the work queue's `Lease.active` and
 `Budget.meters` (a daily meter starts again at a read). The log holds
 such a field as the instance's last event found it, the describe
@@ -2959,24 +2959,31 @@ back.
 A conversation on the instance (D77): messages, each top-level or a reply
 in the thread of a top-level one, one level deep, which their authors
 edit and delete, others react to and pin, and whose threads are resolved
-and reopened. `rust/behaviors/src/comments-contract.md` is the contract
-the behavior, the generators and the corpora implement: every record,
-parameter, check and refusal in its order.
+and reopened. A message may be streamed as it is written: `begin` holds
+its place, `appendDraft` adds to its draft and sends the `draft` signal,
+and `finish` posts it. `rust/behaviors/src/comments-contract.md` is the
+contract the behavior, the generators and the corpora implement: every
+record, parameter, check and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent), `editWindowMs` (at least 1000; an author's edit after it is refused), `blocks` (the kinds a post or an edit may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit and delete another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent) |
-| Fields | all volatile: `messages`, the posted messages, top-level and replies; `lastMessageAt`, when the latest posted one was posted, absent while there is none; `threads`, `{ open, resolved }`, the posted top-level messages |
-| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
-| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `not_author`, `edit_window_passed`, `too_many_edits`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
-| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post appends none, and the reads none |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once) |
+| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
+| Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
+| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft` none, and the reads none |
 | `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
 A message's record is `{ id, thread?, quotes?, author, via?, state, body,
-blocks, mentions, reactions, createdAt, editedAt?, edits, pinned }`, and
-a top-level message's adds `replies`, `lastReplyAt?`, `participants` (the
-latest ten authors of its thread's posted messages) and `resolved?: { by,
-at }`. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
+blocks, mentions, reactions, createdAt, postedAt?, editedAt?, edits,
+pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
+`participants` (the latest ten authors of its thread's standing
+messages) and `resolved?: { by, at }`. `state` is `composing`, `posted`,
+`interrupted` or `deleted`; a message *stands* while it is posted or
+interrupted, and `postedAt` is when it came to stand: a post's time, or
+its finish's or interrupt's. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
 caller's subject and `via` the calling service's deployable (D37); the
 times are the engine clock's. `reactions` holds each emoji's `count` and
 whether the caller is one of them (`mine`); in an event it is the
@@ -2993,6 +3000,27 @@ author, its thread and its replies stay. `purge`, which needs
 `moderatePermission`, removes a message for good, a top-level one with
 its whole thread. A post into a resolved thread leaves it resolved.
 
+A streamed message is the way an agent's reply shows as it is written.
+`begin` takes the message's id and its place, `composing`, with an empty
+body and nothing counted; each `appendDraft` adds a chunk to its draft and
+returns the draft's length before and after it, in code points (a
+JavaScript client counts them with `Array.from(text).length`), at most
+4000 bytes of JSON string a chunk. Once its call commits it sends the
+`draft` signal, `{ message, offset, text }`, to the event streams opened
+with signals on the instance; a read of a composing message holds its
+draft so far as its body. A reader opens the stream before it reads,
+appends a `draft` whose `offset` is the length it holds, ignores one
+below it, and reads the message again past it, since a signal is
+delivered at most once. `finish` posts the draft, or a `body` in its
+place, and counts it as a post. An empty append changes nothing but keeps
+the message from going idle, for an author at work with nothing to show;
+one idle for `composeTimeoutMs` is interrupted by the schedule, as the
+runner, or by anyone the policy lets write: it keeps its draft as its
+body, `interrupted`, or is deleted when the draft has no text. Its author
+may interrupt it, or drop it with `deleteMessage`, at any time. A
+composing message takes no edit, reaction, pin, resolve, reply or quote
+(`composing`); an author's edit of an interrupted message posts it.
+
 `listMessages` pages the top-level messages, or with `thread` that
 thread's replies and its top-level message as `root`, always in
 ascending id order: with no anchor the latest page, `before` an older
@@ -3006,7 +3034,10 @@ last holding each instance's counters and the counts the fields read
 beside the instance column `count`. The migration moves version 1's
 comments, a chain of replies, into threads one level deep: a comment's
 thread is the root of its chain, and it quotes the comment it replied to
-when that was a reply.
+when that was a reply. Migration 3 (`drafts`) adds `comment_drafts`, one
+row per non-empty append, and a composing message's columns,
+`draft_length` and `last_append_at`, with `posted_at`, which it sets to
+each existing message's `created_at`.
 
 #### Revisions
 
@@ -5134,7 +5165,7 @@ module of its own (in `rust/behaviors` and
 | Behavior | What it says |
 | --- | --- |
 | `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; that `transition` sets `enteredAt`, create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
-| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
+| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; streaming a message with begin, appendDraft and finish, how long its author may pause (`composeTimeoutMs`) and how many drafts a caller holds (`maxDrafts`); that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
 | `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
 | `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |

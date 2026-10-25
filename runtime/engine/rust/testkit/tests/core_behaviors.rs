@@ -232,7 +232,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(created.behaviors.clone()),
             json!({
                 "Workflow": {"status": "draft", "enteredAt": created.created_at},
-                "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}},
+                "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []},
                 "Revisions": {"revision": 1, "pendingProposals": 0}
             })
         );
@@ -309,7 +309,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(record.behaviors.clone()),
             json!({
                 "Workflow": {"status": "published", "enteredAt": log[6].at},
-                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": []},
                 "Revisions": {"revision": 2, "pendingProposals": 0}
             })
         );
@@ -335,7 +335,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             [
                 json!(["create", "wes", {
                     "data": {"title": "Launch plan"},
-                    "behaviors": {"Workflow": {"status": "draft", "enteredAt": log[0].at}, "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}}, "Revisions": {"revision": 1, "pendingProposals": 0}}
+                    "behaviors": {"Workflow": {"status": "draft", "enteredAt": log[0].at}, "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []}, "Revisions": {"revision": 1, "pendingProposals": 0}}
                 }]),
                 json!(["operation", "wes", {"beside": "post", "seq": null}]),
                 json!(["operation", "wes", {"behaviors": {"Workflow": {"status": "review", "enteredAt": log[2].at}}}]),
@@ -440,7 +440,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(retracted.behaviors),
             json!({
                 "Workflow": {"status": "retracted", "enteredAt": events("doc-1")[7].at},
-                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": []},
                 "Revisions": {"revision": 3, "pendingProposals": 0}
             })
         );
