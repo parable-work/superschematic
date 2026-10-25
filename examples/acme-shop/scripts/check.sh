@@ -180,7 +180,7 @@ if [[ -f "$DIST/Cargo.lock" ]]; then
 fi
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 14 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 15 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -190,6 +190,7 @@ built_before() {
 }
 built_before shop-common shop-storefront
 built_before shop-db shop-api
+built_before shop-cache shop-api
 built_before shop-db shop-orders
 built_before shop-db shop-stock
 built_before shop-stock shop-orders
@@ -260,7 +261,7 @@ capture price-ir.json sh -c "\"$OUT/superschematic\" build schemas/services/shop
 
 echo "==> generated Go modules compile"
 for module in \
-  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders types/go/shop-stock \
+  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders types/go/shop-stock types/go/shop-cache \
   orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders sdk/go/shop-stock; do
   echo "    $module"
   go_module_compiles "$DIST/$module"
@@ -544,14 +545,14 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 14
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 15
 # A schema's references to other services in its decorators' arguments
 # are recorded under dist (D41): each stack's to the APIs it deploys, and
 # shop-stock's to shop-orders, the one caller its sales admit. So
 # once dist is gone, they build again, and so does shop-orders, whose key
 # covers shop-stock's, the API it calls; each is cached under its new key,
 # and every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 9
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 10
 for service in shop-stock shop-orders shop-stack storefront-stack wishlist-stack; do
   grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
 done

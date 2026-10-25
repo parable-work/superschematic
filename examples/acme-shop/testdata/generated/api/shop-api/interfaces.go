@@ -19,7 +19,18 @@ type ProductImplementation interface {
 	// CreateProduct handles POST /api/products
 	CreateProduct(ctx context.Context, input *types.CreateProductInput) (*types.ProductView, error)
 	// GetProduct handles GET /api/products/{id}
+	//
+	// At most 120 a minute from one address, which every replica counts in
+	// shop-cache, shop-api's rateLimitStore (D75).
 	GetProduct(ctx context.Context, id types.IdentityUUID) (*types.ProductView, error)
+	// WaitForProductImage handles GET /api/products/{id}/image
+	//
+	// Waits up to waitSeconds, at most 30, for the product to have an image,
+	// and returns it as it is then. The replica that records an image wakes
+	// the waiter, on whichever replica it is, through shop-cache (D75); the
+	// waiter still reads the product now and then, since a wake-up can be
+	// lost.
+	WaitForProductImage(ctx context.Context, id types.IdentityUUID, waitSeconds int64) (*types.ProductView, error)
 	// CreateProductImageUpload handles POST /api/products/{id}/image-upload
 	//
 	// Signs an upload of the product's image to shop-media and records the

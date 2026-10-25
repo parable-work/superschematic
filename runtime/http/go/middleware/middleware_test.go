@@ -11,6 +11,7 @@ import (
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	"github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -199,6 +200,54 @@ func TestRateLimit(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, last.Code)
 		assert.Contains(t, last.Body.String(), `"requestId":"req-7"`)
 	})
+}
+
+// TestRateLimitWithStore: two replicas of a route, each its own
+// middleware, spend one budget in the store WithStore names, and the
+// refusal is the route's problem with httprate's Retry-After; a Disabled
+// or nil store leaves each replica its own budget (D75).
+func TestRateLimitWithStore(t *testing.T) {
+	store := memorystore.NewInProcess("shop-cache")
+	defer store.Close()
+	replica := func(s memorystore.Store) http.Handler {
+		return middleware.RateLimit(2, time.Minute, nopLoggerGetter, middleware.WithStore(s, "shop-api", "ProductQueries.getProduct"))(okHandler())
+	}
+	serve := func(h http.Handler) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.97:12345"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+	for attempt := 0; ; attempt++ {
+		a, b := replica(store), replica(store)
+		start := time.Now().Truncate(time.Minute)
+		codes := []int{serve(a).Code, serve(b).Code}
+		last := serve(a)
+		if time.Now().Truncate(time.Minute) != start && attempt == 0 {
+			// The window turned between the requests: count again in the
+			// new one, whose keys are new.
+			continue
+		}
+		assert.Equal(t, []int{http.StatusOK, http.StatusOK}, codes)
+		assert.Equal(t, http.StatusTooManyRequests, last.Code)
+		assert.Equal(t, "60", last.Header().Get("Retry-After"))
+		assert.Contains(t, last.Body.String(), `"code":"too_many_requests"`)
+		// The store counts the client's address, hashed, as every
+		// language's limiter keys it.
+		ref, err := memorystore.RateLimitRef("shop-api", "ProductQueries.getProduct", start.Unix(), "10.0.0.97")
+		require.NoError(t, err)
+		n, err := store.Count(context.Background(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), n)
+		break
+	}
+
+	for _, s := range []memorystore.Store{memorystore.Disabled("shop-cache"), nil} {
+		a, b := replica(s), replica(s)
+		codes := []int{serve(a).Code, serve(a).Code, serve(b).Code, serve(b).Code}
+		assert.Equal(t, []int{http.StatusOK, http.StatusOK, http.StatusOK, http.StatusOK}, codes, "each replica has its own budget")
+	}
 }
 
 func TestBodyLimit_MaxBytesReaderEnforcement(t *testing.T) {

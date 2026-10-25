@@ -52,7 +52,7 @@ func buildDeps(t *testing.T, outputRoot, implementationRoot string, paths naming
 	t.Helper()
 	configs := map[string]*schemaconfig.SchemaConfig{}
 	schemas := map[string]*ir.Schema{}
-	for _, name := range []string{"deps-db", "deps-catalog", "deps-orders"} {
+	for _, name := range []string{"deps-db", "deps-catalog", "deps-orders", "deps-cache"} {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(depsFixtures, name))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)

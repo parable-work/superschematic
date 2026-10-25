@@ -21,6 +21,7 @@ import (
 	depscatalogsdk "example.com/schemas/sdk/go/deps-catalog"
 	depsdb "example.com/schemas/types/go/deps-db"
 	"github.com/parable-work/superschematic/runtime/http/go/bucket"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	"go.uber.org/zap"
 )
 
@@ -44,6 +45,13 @@ type Deps struct {
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	DepsMedia bucket.Bucket
+
+	// DepsCache is deps-cache, a memory store the API lists, which every
+	// replica shares and can lose (D75).
+	// While the store is disabled or unreachable every call returns
+	// memorystore.ErrUnavailable at once, and the implementation takes the
+	// path it had without it.
+	DepsCache memorystore.Store
 
 	// Logger is the API's logger.
 	Logger *zap.Logger
