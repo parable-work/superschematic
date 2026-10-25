@@ -379,6 +379,8 @@ async fn stock_is_received_through_the_console() {
     let ada = sign_in(&router, ADA).await;
     let page = send(&router, "GET", &instance("Inventory", anvil), Some(&ada), None).await;
     assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    // Its own price is money, in the currency its @display names.
+    assert_eq!(field(&page.body, "priceCents"), r#"<data value="1999">GBP 19.99</data>"#, "{}", page.body);
     // 10 received, 2 sold to Grace's checkout, which committed them.
     let stock = panel(&page.body, "Stock");
     assert_eq!(field(stock, "Stock.onHand"), "8", "{stock}");
@@ -455,6 +457,8 @@ async fn a_refund_is_refused_until_two_staff_sign_it_off_then_paid() {
     assert!(panel(&page.body, "Workflow").contains(r#"data-state="requested""#), "{}", page.body);
     let approvals = panel(&page.body, "Approvals");
     assert!(approvals.contains("0 of 2 sign-offs"), "{approvals}");
+    // Its own amount is money, in the currency its @display names.
+    assert_eq!(field(&page.body, "amountCents"), r#"<data value="1000">GBP 10.00</data>"#, "{}", page.body);
     // The refund's Payments links the checkout it refunds, and its amount
     // is money.
     let payments = panel(&page.body, "Payments");
