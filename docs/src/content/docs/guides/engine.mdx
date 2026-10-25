@@ -13,10 +13,10 @@ JSON while it runs; the engine versions the schema, keeps its instances
 and an event log in one SQLite file, and serves them over HTTP, a
 server-sent event stream and MCP. A type in the schema composes
 behaviors: code that adds fields, operations, checks and storage to it,
-such as a state machine, comments or reviewed revisions.
+such as a state machine, a conversation or reviewed revisions.
 
 This guide builds `examples/engine-notes`, a notes server. A note moves
-from draft through review to published, collects comments and keeps its
+from draft through review to published, holds a conversation and keeps its
 revisions, and a reader can propose a change for an editor to approve.
 CI runs the example's end-to-end test on Node.js and on Bun in the
 release candidate run on `main` twice a day. The
@@ -112,7 +112,8 @@ from a TypeScript or YAML schema file. The notes schema:
   `Workflow` keeps a `status`, and when it last moved in `enteredAt`,
   and moves it only along the listed transitions; moving a note from review to published, or from published
   to archived, needs the permission `notes.publish`. `Comments` keeps
-  comments on the note. `Revisions` records a revision at every change,
+  a conversation on the note: messages, each top-level or a reply in a
+  thread. `Revisions` records a revision at every change,
   and its `review` config lets a caller propose a change that someone
   holding `notes.review` approves or rejects.
 
@@ -214,8 +215,9 @@ either engine.
   `unarchive` or `list`). This example makes no namespace while it runs,
   so its policy refuses `manage`.
 - A behavior operation asks `write` when it writes and `read` when it only
-  reads. This policy lets a reader call `comment` and `propose`, and
-  nothing else that writes.
+  reads. This policy lets a reader post in a note's conversation, edit
+  and delete her messages, react, and `propose`, and nothing else that
+  writes.
 - Where a behavior limits who may do something, its config names a
   permission and the behavior asks the engine's permission matcher. That
   is the HTTP runtime's `hasAnyPermission` unless you pass another, so
@@ -314,7 +316,11 @@ curl -s $API/schemas/notes/instances \
         "enteredAt": 1790790700324
       },
       "Comments": {
-        "commentCount": 0
+        "messages": 0,
+        "threads": {
+          "open": 0,
+          "resolved": 0
+        }
       },
       "Revisions": {
         "revision": 1,
@@ -334,7 +340,7 @@ curl -s $API/schemas/notes/instances \
 
 The response is 201. The note's `data` holds its own fields, and
 `behaviors` the fields its behaviors add, under each behavior's name:
-Workflow's `status` and `enteredAt`, Comments' `commentCount` and
+Workflow's `status` and `enteredAt`, Comments' `messages` and `threads` and
 Revisions' `revision` and `pendingProposals`. They never collide with the note's own fields,
 which could hold a `status` of their own. Only a behavior's operations
 change its fields: a create or an update writes `data`, and a name it
@@ -382,7 +388,7 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft","enteredAt":1790790700324},"Comments":{"commentCount":0},"Revisions":{"revision":2,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft","enteredAt":1790790700324},"Comments":{"messages":0,"threads":{"open":0,"resolved":0}},"Revisions":{"revision":2,"pendingProposals":0}}}
 ```
 
 `GET $API/schemas/notes/instances` lists notes in creation order, a page
@@ -536,7 +542,7 @@ for a client to branch on, and a state it does not name is 400
 ### Comments
 
 ```sh
-curl -s $API/schemas/notes/instances/launch/operations/comment \
+curl -s $API/schemas/notes/instances/launch/operations/post \
   -H 'authorization: Bearer carol-token' -H 'content-type: application/json' \
   -d '{"body": "Which fall?"}' | jq .data
 ```
@@ -544,14 +550,44 @@ curl -s $API/schemas/notes/instances/launch/operations/comment \
 ```json
 {
   "id": 1,
+  "author": "carol",
+  "state": "posted",
   "body": "Which fall?",
-  "createdBy": "carol",
-  "createdAt": 1790790700450
+  "blocks": [],
+  "mentions": [],
+  "reactions": {},
+  "createdAt": 1790790700450,
+  "edits": 0,
+  "pinned": false,
+  "replies": 0,
+  "participants": [
+    "carol"
+  ]
 }
 ```
 
-A comment can reply to another (`replyTo`), and `listComments` pages
-through them.
+A post is beside the note: it writes the conversation's own tables, so
+the note's `seq`, ETag and `updatedAt` stay where they were, and a lease
+on the note does not stop a reply. Every message is top-level, a thread
+of its own, or a reply in one: `thread` names the top-level message, and
+threads are one level deep. A message may carry `mentions` and
+`blocks` beside its Markdown `body`: a `ref` to another instance the
+poster may read, or an `action` card with a title and a status. Its
+author edits it (`edit`, whose earlier text `listEdits` keeps) and
+deletes it (`deleteMessage`, which keeps its place in the thread);
+anyone who may write reacts to it with an emoji (`react`, `unreact`),
+pins it (`pin`, `unpin`), and the thread's author resolves the thread
+(`resolve`, `reopen`). `listMessages` reads a page of the top-level
+messages, or with `thread` of a thread's replies, with `before`,
+`after` or `around` a message id, and `getMessage` reads one. The config
+narrows who may do what: `editWindowMs`, `maxBodyLength` and `blocks`,
+and `moderatePermission`, `pinPermission` and `resolvePermission` for a
+caller who acts on another's message.
+
+The note's Comments fields count the conversation: `messages`, the
+posted messages; `lastMessageAt`, when the latest was posted; and
+`threads`, `{open, resolved}`. A post moves them without moving the
+note, so the event it appends carries the message rather than a patch.
 
 ### Revisions
 
@@ -611,7 +647,7 @@ curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-toke
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published","enteredAt":1790790702190},"Comments":{"commentCount":1},"Revisions":{"revision":3,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published","enteredAt":1790790702190},"Comments":{"messages":1,"lastMessageAt":1790790700450,"threads":{"open":1,"resolved":0}},"Revisions":{"revision":3,"pendingProposals":0}}}
 ```
 
 `reject` settles a proposal without applying it, `listProposals` and
@@ -704,7 +740,7 @@ curl -s "$API/events?after=0" -H 'authorization: Bearer carol-token' \
 [4,"update","alice",null]
 [5,"operation","alice","transition"]
 [6,"operation","bob","transition"]
-[7,"operation","carol","comment"]
+[7,"operation","carol","post"]
 [8,"operation","carol","propose"]
 [9,"operation","bob","approve"]
 ```
@@ -715,6 +751,9 @@ not read are left out. An event's `change` is the instance for a create,
 `{data, behaviors}`, a merge patch of that for an update, and `{behavior,
 operation, params, patch}` for an operation, its `patch` the same, so
 applying the changes in order gives the note as a read returns it. An
+operation beside the note, such as carol's post, appends an event with
+`seq` null and `beside: true`, whose change is `{behavior, operation,
+params, result}`; applying the others skips it. An
 operation whose behavior said where the values it wrote came from adds
 `attribution`, by field: the behavior and the confidence and source it
 gave. A define's is `{hash}`, the draft's hash: a reviewer
@@ -726,7 +765,8 @@ copies a large field; read the value from `GET $API/values/<hash>`.
 Three filters narrow a page further, each a list, repeated or
 comma-separated: `kind` keeps those kinds, `behavior` keeps the
 operations of those behaviors, and `exclude` drops operations by name.
-`?kind=operation&exclude=comment` is every operation but comments. A page
+`?kind=operation&exclude=post` is every operation but posts, and
+`beside=false` drops the events of operations beside their instance. A page
 still scans its limit of events, so one whose events were all dropped is
 empty, and its `next` is past them. `after=head` starts at the last
 event: no events, and `next` to read on from.
@@ -751,13 +791,13 @@ curl -sN "$API/events?after=6" -H 'accept: text/event-stream' -H 'authorization:
 : open
 
 id: 7
-data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"behaviors":{"Comments":{"commentCount":1}}}}}
+data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":null,"beside":true,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"post","params":{"body":"Which fall?"},"result":{"id":1,"author":"carol","state":"posted","body":"Which fall?","blocks":[],"mentions":[],"reactions":{},"createdAt":1790790700450,"edits":0,"pinned":false,"replies":0,"participants":["carol"]}}}
 
 id: 8
-data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{"behaviors":{"Revisions":{"pendingProposals":1}}}}}
+data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{"behaviors":{"Revisions":{"pendingProposals":1}}}}}
 
 id: 9
-data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"data":{"body":"Ships on October 1."},"behaviors":{"Revisions":{"revision":3,"pendingProposals":0}}}}}
+data: {"cursor":9,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"data":{"body":"Ships on October 1."},"behaviors":{"Revisions":{"revision":3,"pendingProposals":0}}}}}
 
 event: ready
 id: 9
@@ -774,7 +814,7 @@ drop the last events the stream read, a message with only an `id:` keeps
 the client's place, which `EventSource` records without an event. While
 it waits it sends a `: keepalive` comment every five seconds. Stop it
 with Ctrl-C. The end-to-end test reads the stream from a cursor, then
-adds a comment and receives its event.
+posts a reply and receives its event.
 
 This server keeps every event. One that passes `retention` to
 `openEngine`, `{ maxAgeMs }`, `{ maxEvents }` or both, has its runner
@@ -867,7 +907,7 @@ const notes = notesClient(new EngineClient({ baseUrl: 'http://127.0.0.1:8787/api
 const note = await notes.create({ title: 'Launch' }, { id: 'launch' });   // data: NoteFields
 note.behaviors.Workflow.status;                                           // 'draft' | 'review' | 'published' | 'archived'
 await notes.transition('launch', { to: 'review' });                       // { to: 'publshed' } fails to compile
-await notes.comment('launch', { body: 'Ships in the fall.' });
+await notes.post('launch', { body: 'Ships in the fall.' });               // returns a NoteCommentMessage
 await notes.propose('launch', { patch: { body: 'Ships on the first.' } }); // patch: NotePatch
 try {
   await notes.transition('launch', { to: 'review' });
@@ -878,8 +918,9 @@ try {
 
 The behaviors' configs narrow the types: a `Workflow`'s states, the names
 of a `Links` config with each required link required at create, the
-schemas a `Dependencies` blocker may come from, and with `Variants` the
-type of the field for each value of the one that picks it. An operation's
+schemas a `Dependencies` blocker may come from, the kinds of block a
+`Comments` config lets a post give, and with `Variants` the type of the
+field for each value of the one that picks it. An operation's
 method takes its declaration's parameters and returns its result, and a
 write's `preconditions` take only the behaviors that declare one (Lease's
 `token`). The module imports the client and nothing else, so it runs in
@@ -897,7 +938,7 @@ list the behaviors the engine runs and return one's declaration, its
 config's JSON Schema included, `get_value`, which reads a value of
 the value store by its hash, and `list_namespaces`, `create_namespace`,
 `archive_namespace` and `unarchive_namespace`. A tool's name is the schema's and the operation's,
-in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
+in snake case: `notes_create`, `notes_transition`, `notes_list_messages`.
 `notes_list` takes `where`, as the route does, as a JSON object.
 A tool the policy refuses the caller is left out of the caller's list, so
 carol, a reader, sees these:
@@ -917,8 +958,15 @@ describe_behavior
 get_value
 notes_get
 notes_list
-notes_comment
-notes_list_comments
+notes_post
+notes_edit
+notes_delete_message
+notes_react
+notes_unreact
+notes_list_messages
+notes_get_message
+notes_list_edits
+notes_list_reactions
 notes_list_revisions
 notes_get_revision
 notes_propose

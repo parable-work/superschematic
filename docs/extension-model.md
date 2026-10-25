@@ -1151,7 +1151,7 @@ engine; without them the engine refuses a schema that composes one.
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
 | `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
-| `Comments` | none | `commentCount` | `comment`, `listComments` |
+| `Comments` | `maxBodyLength`, `editWindowMs`, `blocks` (`ref`, `action`), `moderatePermission`, `pinPermission`, `resolvePermission`, optional | `messages`, `lastMessageAt`, `threads` (all volatile) | `post`, `edit`, `deleteMessage`, `purge`, `react`, `unreact`, `pin`, `unpin`, `resolve`, `reopen`, each beside the instance (D77), and `listMessages`, `getMessage`, `listEdits`, `listReactions` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
