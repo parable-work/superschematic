@@ -1349,6 +1349,12 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
 	}
+	for _, m := range r.Schema.MemoryStores {
+		deps.MemoryStores = append(deps.MemoryStores, rustrestgen.DepsMemoryStore{Service: m.Name, Field: rustrestgen.DepsField(m.Name)})
+	}
+	if r.Schema.RateLimitStore != nil {
+		deps.RateLimitStore = r.Schema.RateLimitStore.Name
+	}
 	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db

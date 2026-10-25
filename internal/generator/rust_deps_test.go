@@ -88,7 +88,8 @@ func rustGoldenPaths(repoRoot string) naming.LocalPaths {
 
 // TestRustDepsAndScaffoldGolden: deps-rust-shop's crate declares Deps with
 // its config, a Postgres pool, a client of deps-rust-pricing's Rust SDK,
-// the runtime's Bucket for deps-media and its span, Handlers with a field
+// the runtime's Bucket for deps-media, its MemoryStore for deps-cache
+// (D75) and its span, Handlers with a field
 // per namespace, and Implementations::new, which takes the identity
 // authenticator and the service authenticator; its config.rs reads its
 // setting, its database, service, bucket, callers, CORS and identity
@@ -228,6 +229,7 @@ use schemas_deps_rust_pricing_sdk::{ClientConfig, DepsRustPricingSdk, ServiceCre
 use schemas_deps_rust_shop_api::config::{load_env_config, EnvConfig};
 use schemas_deps_rust_shop_api::runtime::identity::{IdentityAuthenticator, PostgresPool};
 use schemas_deps_rust_shop_api::runtime::bucket::Bucket;
+use schemas_deps_rust_shop_api::runtime::memorystore::DisabledMemoryStore;
 use schemas_deps_rust_shop_api::runtime::stackconfig::{self, Database};
 use schemas_deps_rust_shop_api::runtime::{gcs, postgres, JwtServiceAuthenticator};
 use schemas_deps_rust_shop_api::{build_router, identity, Deps, Handlers, Implementations};
@@ -257,6 +259,9 @@ async fn implementations(config: EnvConfig) -> Implementations {
         db: pool.clone(),
         deps_rust_pricing: pricing,
         deps_media: Arc::new(media),
+        // Its field unset, deps-cache runs disabled, as the entrypoint
+        // opens it (D75).
+        deps_cache: Arc::new(DisabledMemoryStore::new("deps-cache")),
         span: tracing::info_span!("api", name = "deps-rust-shop"),
     };
     let handlers: Handlers = create(deps).await.expect("create builds the handlers");
