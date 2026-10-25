@@ -7,8 +7,9 @@
 // The fake platforms lower to resource types of a provider named `fake`,
 // shaped like the gcp target's (section 7.2): a server is a service with
 // its own account, a database an instance with a database per hosted
-// schema, a bucket a private bucket, a sql edge a client grant, an http
-// edge an invoker grant and a bucket edge an object user grant.
+// schema, a bucket a private bucket, a memory store an instance with TLS,
+// a sql edge a client grant, an http edge an invoker grant, a bucket edge
+// an object user grant and a memoryStore edge a connection user grant.
 package stacktest
 
 import (
@@ -92,6 +93,15 @@ const (
 	BucketConnector    = "fake.run-storage"
 	JobBucketConnector = "fake.job-storage"
 
+	// MemoryStorePlatform keeps a memory store, as gcp keeps one in
+	// Memorystore for Valkey; MemoryStoreConnector, JobMemoryStoreConnector
+	// and WorkerMemoryStoreConnector grant a server's, a job's or a
+	// worker's account a connection to it (D75).
+	MemoryStorePlatform        = "fake.memorystore"
+	MemoryStoreConnector       = "fake.run-memorystore"
+	JobMemoryStoreConnector    = "fake.job-memorystore"
+	WorkerMemoryStoreConnector = "fake.worker-memorystore"
+
 	// BundlePlatform runs TypeScript servers whose artifact is a bundle,
 	// as a Workers platform runs a Worker's files (D64): a script that reads
 	// each file of the bundle from the program's artifacts, with its hash.
@@ -161,6 +171,7 @@ const (
 	TypeSchedule      = "fake:scheduler/job:Job"
 	TypeSite          = "fake:storage/site:Site"
 	TypeBucket        = "fake:storage/bucket:Bucket"
+	TypeMemoryStore   = "fake:cache/instance:Instance"
 	TypePool          = "fake:run/pool:Pool"
 	TypeScript        = "fake:edge/script:Script"
 )
@@ -350,6 +361,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower: lowerBucket,
 		},
 		{
+			Name:      MemoryStorePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableMemoryStore,
+			Settings:  json.RawMessage(memoryStoreSettings),
+			NameOf:    memoryStoreName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".instance", Name: "url"}
+			},
+			Lower: lowerMemoryStore,
+		},
+		{
 			Name:      WorkerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableWorker,
@@ -394,6 +416,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: MemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: RunPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: JobMemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: JobPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: WorkerMemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: WorkerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
 		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: WorkerLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: LitePlatform, Connect: connectLite},
@@ -426,14 +451,15 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Name:      Target,
 		Extension: Name,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   RunPlatform,
-			ir.DeployableDatabase: SQLPlatform,
-			ir.DeployableJob:      JobPlatform,
-			ir.DeployableSite:     SitePlatform,
-			ir.DeployableBucket:   BucketPlatform,
-			ir.DeployableWorker:   WorkerPlatform,
-			ir.DeployableRunner:   RunnerPlatform,
-			ir.DeployableDeriver:  DeriverPlatform,
+			ir.DeployableServer:      RunPlatform,
+			ir.DeployableDatabase:    SQLPlatform,
+			ir.DeployableJob:         JobPlatform,
+			ir.DeployableSite:        SitePlatform,
+			ir.DeployableBucket:      BucketPlatform,
+			ir.DeployableWorker:      WorkerPlatform,
+			ir.DeployableRunner:      RunnerPlatform,
+			ir.DeployableDeriver:     DeriverPlatform,
+			ir.DeployableMemoryStore: MemoryStorePlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -511,6 +537,14 @@ const bucketSettings = `{
   "additionalProperties": false
 }`
 
+const memoryStoreSettings = `{
+  "type": "object",
+  "properties": {
+    "nodeType": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}`
+
 const dnsValues = `{
   "type": "object",
   "properties": {"zone": {"type": "string", "minLength": 1}},
@@ -571,6 +605,9 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string"}, "location": {"type": "string"}, "public": {"type": "boolean"},
 	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
 	  },
+	  "additionalProperties": false}`,
+	TypeMemoryStore: `{"type": "object", "required": ["name", "location", "tls"],
+	  "properties": {"name": {"type": "string"}, "location": {"type": "string"}, "tls": {"type": "boolean"}, "nodeType": {"type": "string"}},
 	  "additionalProperties": false}`,
 	TypeScript: `{"type": "object", "required": ["name", "account", "mainModule", "modules"],
 	  "properties": {
@@ -1093,6 +1130,66 @@ func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 			},
 		}},
 		Value: ir.BucketConnection{Name: ctx.To.Address},
+	}, nil
+}
+
+// memoryStoreName names a memory store after the project, the stack and
+// the store. A member of a parameterized environment shares its parent's
+// store, so the name holds no parameter (D75).
+func memoryStoreName(ctx registry.PlatformContext) any {
+	project, _ := ctx.Environment.Values["project"].(string)
+	return Join(project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name))
+}
+
+// lowerMemoryStore lowers a memory store to an instance with TLS in the
+// environment's region, of the node type its settings name.
+func lowerMemoryStore(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	region, _ := ctx.Environment.Values["region"].(string)
+	props := map[string]any{"name": d.ResourceName, "location": region, "tls": true}
+	if nodeType, ok := d.Settings["nodeType"].(string); ok {
+		props["nodeType"] = nodeType
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{ID: d.Name + ".instance", Type: TypeMemoryStore, Properties: props}}}, nil
+}
+
+// connectMemoryStore grants the server's, the job's or the worker's
+// account a connection to the store and derives how to reach it: its
+// rediss URL, its CA, IAM authentication, and in a member of a
+// parameterized environment the member's name, each parameter's value
+// joined (D75).
+func connectMemoryStore(ctx registry.ConnectorContext) (registry.Connected, error) {
+	value := ir.MemoryStoreConnection{
+		Store: ctx.Edge.Service.Name,
+		URL:   ctx.To.Address,
+		CA:    ir.Output{Resource: ctx.To.Name + ".instance", Name: "ca"},
+		Auth:  ir.MemoryStoreAuthIAM,
+	}
+	switch params := ctx.Environment.Parameters; len(params) {
+	case 0:
+	case 1:
+		value.Member = ir.Parameter(params[0])
+	default:
+		parts := []any{}
+		for i, param := range params {
+			if i > 0 {
+				parts = append(parts, "-")
+			}
+			parts = append(parts, ir.Parameter(param))
+		}
+		value.Member = Join(parts...)
+	}
+	return registry.Connected{
+		Resources: []*ir.Resource{{
+			ID:   ctx.From.Name + ".memorystore." + ctx.Edge.Service.Name,
+			Type: TypeGrant,
+			Properties: map[string]any{
+				"role":     "memorystore.dbConnectionUser",
+				"member":   ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+				"resource": ir.Output{Resource: ctx.To.Name + ".instance", Name: "id"},
+			},
+		}},
+		Value: value,
 	}, nil
 }
 

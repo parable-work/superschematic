@@ -16,6 +16,7 @@ declare module "../src/index" {
       bucket: { versioning?: boolean };
       worker: { memory?: string };
       runner: { memory?: string };
+      memoryStore: { nodeType?: string };
     };
   }
 }
@@ -44,6 +45,8 @@ const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
 // A Bucket service's handle (D54).
 const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
+// A MemoryStore service's handle (D75).
+const ShopCache = service({ name: "shop-cache", kind: SchemaKind.MemoryStore });
 // An API with @job classes, whose names the sentinel writes as the third
 // type argument.
 const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
@@ -79,6 +82,8 @@ export abstract class Data {}
     { of: Data, tier: "small" },
     // A bucket takes the target's bucket settings.
     { of: ShopMedia, versioning: true },
+    // A memory store takes the target's memoryStore settings.
+    { of: ShopCache, nodeType: "SHARED_CORE_NANO" },
     // A platform outside the target takes its own settings, which the
     // loader checks.
     { of: ShopDb, platform: "other.sql", storageGb: 10 },
@@ -173,6 +178,31 @@ export abstract class ServerSettingOnBucket {}
 })
 export abstract class EnvOnBucket {}
 
+// A memory store an environment turns off (D75).
+@environment({ target: "fake", settings: [{ of: ShopCache, enabled: false }] })
+export abstract class NoCache {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket's settings on a memory store
+  settings: [{ of: ShopCache, versioning: true }],
+})
+export abstract class BucketSettingOnMemoryStore {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket is not turned off
+  settings: [{ of: ShopMedia, enabled: false }],
+})
+export abstract class BucketOff {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a memory store has no env
+  settings: [{ of: ShopCache, env: { LOG_LEVEL: "warn" } }],
+})
+export abstract class EnvOnMemoryStore {}
+
 @environment({
   target: "fake",
   // @ts-expect-error a General service is no deployable
@@ -224,6 +254,17 @@ export abstract class LocalDatabaseSetting {}
   settings: [{ of: ShopMedia, versioning: true }],
 })
 export abstract class LocalBucketSetting {}
+
+// The local target's memory store takes no settings, and is turned off.
+@environment({ target: "local", settings: [{ of: ShopCache, enabled: false }] })
+export abstract class LocalNoCache {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local memory store takes no settings
+  settings: [{ of: ShopCache, nodeType: "x" }],
+})
+export abstract class LocalMemoryStoreSetting {}
 
 @environment({
   target: "local",

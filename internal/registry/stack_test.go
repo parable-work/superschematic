@@ -281,6 +281,40 @@ func TestRegisterConnectorRejects(t *testing.T) {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
+	// A memoryStore edge runs from a server, a job or a worker to a
+	// memoryStore platform, which declares no languages and no dialects
+	// (D75). This is the seam a target registers its store's platform and
+	// connectors through.
+	storePlatform := runPlatform("fake.memorystore")
+	storePlatform.Kind, storePlatform.Languages = ir.DeployableMemoryStore, nil
+	workerPlatform := runPlatform("fake.worker")
+	workerPlatform.Kind = ir.DeployableWorker
+	toStore := ConnectorSpec{Name: "run-memorystore", Edge: ir.EdgeMemoryStore, From: "fake.run", To: "fake.memorystore", Connect: connect}
+	t.Run("a memoryStore edge", func(t *testing.T) {
+		if err := finalize(t, []PlatformSpec{runPlatform("fake.run"), storePlatform}, toStore); err != nil {
+			t.Fatal(err)
+		}
+		fromWorker := toStore
+		fromWorker.Name, fromWorker.From = "worker-memorystore", "fake.worker"
+		if err := finalize(t, []PlatformSpec{workerPlatform, storePlatform}, fromWorker); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a memoryStore edge to a bucket platform", func(t *testing.T) {
+		spec := toStore
+		spec.To = "fake.storage"
+		err := finalize(t, []PlatformSpec{runPlatform("fake.run"), bucketPlatform}, spec)
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.storage", a bucket platform; a memoryStore edge's to is a memoryStore`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("a memoryStore platform with languages", func(t *testing.T) {
+		spec := storePlatform
+		spec.Languages = []string{APILanguageGo}
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `memoryStore platform "fake.memorystore" declares server languages or SQL dialects`) {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
 }
 
 // TestGenericConnector: a generic connector names no platform, serves an
@@ -298,6 +332,7 @@ func TestGenericConnector(t *testing.T) {
 		{"a platform", func(s *ConnectorSpec) { s.From = "fake.run" }, `generic connector "generic.http" names a platform`},
 		{"a sql edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeSQL }, "serves a sql edge; a generic connector serves an http or a site edge"},
 		{"a bucket edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeBucket }, "serves a bucket edge"},
+		{"a memoryStore edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeMemoryStore }, "serves a memoryStore edge"},
 		{"a bad resource type", func(s *ConnectorSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"tls:index/privateKey:PrivateKey": json.RawMessage(`{"type": []}`)}
 		}, `connector "generic.http" resource type tls:index/privateKey:PrivateKey`},

@@ -224,6 +224,15 @@ func TestVerifyStack(t *testing.T) {
 	if len(f.errs) > 0 {
 		t.Fatalf("a valid stack: %v", f.errs)
 	}
+	// A memory store's element turns it off (D75).
+	off := false
+	withStoreOff := valid()
+	withStoreOff.Types["Staging"].Environment.Settings = append(withStoreOff.Types["Staging"].Environment.Settings,
+		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}, Enabled: &off})
+	spec.Verify(withStoreOff, &f)
+	if len(f.errs) > 0 {
+		t.Fatalf("a stack that turns a memory store off: %v", f.errs)
+	}
 
 	for _, tc := range []struct {
 		name   string
@@ -307,6 +316,10 @@ func TestVerifyStack(t *testing.T) {
 		{"an exposed deriver", func(s *ir.Schema) {
 			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Deriver: "TriageTickets"}}
 		}, "@stack class Shop expose[0] names deriver TriageTickets; only a server is exposed"},
+		{"enabled on a bucket", func(s *ir.Schema) {
+			off := false
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}}, Enabled: &off}
+		}, "sets enabled, which only a job takes"},
 		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
 		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},
 	} {

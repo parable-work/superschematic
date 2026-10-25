@@ -16,6 +16,7 @@ declare module "@superschematic/stack" {
       worker: { memory?: string };
       runner: {};
       deriver: {};
+      memoryStore: { nodeType?: string };
     };
   }
 }

@@ -30,9 +30,9 @@ export interface Targets {
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container and of its storage emulator
  * (D54), a server's and a site's settings its port, and a database, a job,
- * a worker, a bucket, an engine's runner (D58) and a deriver (D74) take no
- * settings. A port
- * left out is derived from the stack, the environment and the deployable.
+ * a worker, a bucket, an engine's runner (D58), a deriver (D74) and a
+ * memory store (D75) take no settings. A port left out is derived from
+ * the stack, the environment and the deployable.
  */
 export interface LocalTarget {
   values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
@@ -50,13 +50,14 @@ export interface LocalTarget {
   runner: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   deriver: {};
+  memoryStore: {};
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "memoryStore";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -123,9 +124,22 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
       ? SettingsOf<T, "site">
       : Of extends ServiceHandle<"Bucket">
         ? SettingsOf<T, "bucket">
-        : Of extends DeployableClass
-          ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
-          : never);
+        : Of extends ServiceHandle<"MemoryStore">
+          ? MemoryStoreRun & SettingsOf<T, "memoryStore">
+          : Of extends DeployableClass
+            ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
+            : never);
+
+/**
+ * Whether a memory store runs in an environment (D75). A store that is
+ * off is placed nowhere: no target needs a platform for it, no workload's
+ * field is set, and each opens the store disabled and takes the paths it
+ * had before the store existed.
+ */
+export type MemoryStoreRun = {
+  /** Turns the store on or off; on unless set. */
+  readonly enabled?: boolean;
+};
 
 /**
  * When a job runs in an environment (D52): its schedule, a five-field cron
@@ -274,7 +288,7 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
-  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket"> | DeployableClass };
+  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket" | "MemoryStore"> | DeployableClass };
 
 /** The argument of `@environment`. */
 export type EnvironmentOptions<T extends TargetName | undefined, S extends readonly unknown[]> = {
@@ -284,7 +298,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker`, `deriver` or `runner: true` beside a handle for a job, a worker, a deriver or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver` or `runner: true` beside a handle for a job, a worker, a deriver or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
