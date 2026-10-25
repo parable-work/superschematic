@@ -688,7 +688,8 @@ func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
 // FormsUse reports whether a form uses item, so forms.rs declares what it
 // needs: a kind of an input form's field ("value", "object", "objectRows",
 // "valueRows", "group"); a reader ("text", "integer", "number", "boolean",
-// "yes_no", "date_time", "json_text"), "read" for any; "put", "list" and
+// "yes_no", "date_time", "json_text", an amount's "minor_amount",
+// "money_<code>" or "signed_money_<code>"), "read" for any; "put", "list" and
 // "rows" for writing an input form; "first", "values", "postedText" and
 // "postedRows" for reading a post, and "maxRows" when a list's limit is
 // MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
