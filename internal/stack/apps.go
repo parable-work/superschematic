@@ -65,10 +65,13 @@ func Apps(in Input) ([]*ir.ResolvedDeployable, error) {
 // running binary does not link (D78). linked are the names of the linked
 // extensions (registry.Registry.Extensions) and apps are what Apps
 // returns. Resolution, plans and `stack init` read an app without it, so
-// that a binary that never builds the app still runs them; a build of
-// the stack, which writes the app's entrypoint, and so `stack dev`,
-// `stack deploy` and the CI's prepare job, calls it first. The error
-// names each missing extension of each app, and the binary that links it.
+// that a binary that never builds the app still runs them. Each command
+// that builds the stack calls it first and refuses the whole stack: the
+// stack's build, which writes the app's entrypoint (build-all and `stack
+// dev`), and the commands that build its deployables' images from what a
+// build wrote (`stack build`, and `stack deploy` and `stack prepare`
+// unless --no-build). The error names each missing extension of each app,
+// and the binary that links it.
 func CheckAppExtensions(apps []*ir.ResolvedDeployable, linked []string) error {
 	var msgs []string
 	for _, d := range apps {
