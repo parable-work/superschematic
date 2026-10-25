@@ -8,7 +8,10 @@ token on each new connection, which IAM authentication needs.
 openRedisMemoryStore never fails for a server that is down: it pings once
 within a second and returns, and the store reconnects in the background
 with jittered backoff from 100 ms to 5 s, while a health ping every 2 s
-keeps available() true to the connection. While the store is unavailable,
+keeps available() true to the connection. A connection that stays open
+but answers no ping, as a flow a network drops without closing, is
+destroyed and a new one opened, rather than held until the kernel gives
+up on it. While the store is unavailable,
 every call throws MemoryStoreUnavailableError at once (the client queues
 nothing while offline). A call takes at most 500 ms, and one retry covers a
 stale connection. The client sends no CLIENT command (no name, no
@@ -20,7 +23,11 @@ authenticates as user default with an OAuth access token of the
 workload's service account, which the metadata server gives
 ($GCE_METADATA_HOST overrides its host) and which is fetched again before
 it expires. The store holds one subscriber connection, opened with the
-first subscription. No log line holds the URL, a token or a name's parts.
+first subscription, which pings after 15 s with nothing heard; one that
+does not answer is replaced, and the new one subscribes to every channel
+the store holds. close() gives the commands in flight 500 ms, then
+destroys the connections. No log line holds the URL, a token or a name's
+parts.
 */
 
 import { createClient, ErrorReply } from '@redis/client';
@@ -52,9 +59,11 @@ export interface RedisMemoryStoreTimings {
   /** The first delay after a failure, and the cap the doubling delays reach. */
   readonly minBackoffMs: number;
   readonly maxBackoffMs: number;
+  /** How long the subscriber connection hears nothing before it pings. */
+  readonly receiveIdleMs: number;
 }
 
-/** The contract's timings: a 1 s connect and ping, 500 ms calls, a 2 s health ping, and backoff from 100 ms to 5 s. */
+/** The contract's timings: a 1 s connect and ping, 500 ms calls, a 2 s health ping, backoff from 100 ms to 5 s, and a subscriber ping after 15 s idle. */
 export const DEFAULT_REDIS_TIMINGS: RedisMemoryStoreTimings = {
   connectMs: 1_000,
   opMs: 500,
@@ -62,6 +71,7 @@ export const DEFAULT_REDIS_TIMINGS: RedisMemoryStoreTimings = {
   healthIntervalMs: 2_000,
   minBackoffMs: 100,
   maxBackoffMs: 5_000,
+  receiveIdleMs: 15_000,
 };
 
 /** An OAuth access token and when it expires, in Unix milliseconds. */
@@ -135,7 +145,11 @@ function jitter(d: number): number {
   return Math.max(1, Math.round(d - spread + Math.random() * 2 * spread));
 }
 
-/** Rejects with a timeout after ms, or settles as p does. */
+/**
+ * Rejects with a timeout after ms, or settles as p does. node-redis keeps a
+ * command it gave up on pending until its connection answers or is
+ * destroyed: the health and subscriber pings destroy one that does not.
+ */
 function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -155,6 +169,15 @@ const noLogger: Logger = {
 /** What the store uses of node-redis's client. */
 type Client = ReturnType<typeof createClient>;
 
+/** Destroys a client the store no longer uses, which may already be closed. */
+function discard(client: Client): void {
+  try {
+    client.destroy();
+  } catch {
+    // Already closed.
+  }
+}
+
 /**
  * Opens the memory store connection names. It refuses only a connection it
  * cannot use (MemoryStoreConfigError): a server that is down gives a store
@@ -170,15 +193,24 @@ class RedisMemoryStore implements MemoryStore {
   readonly name: string;
   private readonly timings: RedisMemoryStoreTimings;
   private readonly logger: Logger;
-  private readonly client: Client;
+  /** The command connection, which the health ping replaces when it is half-open. */
+  private client: Client;
   private readonly clientOptions: Parameters<typeof createClient>[0];
   private readonly secrets: string[] = [];
   private up = false;
   private closed = false;
   private healthTimer: ReturnType<typeof setTimeout> | undefined;
   private backoff: number;
+  /** When each client's socket connected, until its handshake ends: a handshake no reply ends is stuck. */
+  private readonly handshakes = new WeakMap<Client, number>();
   private subscriber: Client | undefined;
-  private readonly channels = new Map<string, { declaration: string; handlers: Set<MessageHandler>; listener: (message: Buffer) => void }>();
+  private subscriberTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the subscriber connection last heard a message or a ping's reply. */
+  private heardAt = 0;
+  /** What to subscribe to: each channel's handlers, by full name. The subscriber connection follows it. */
+  private readonly channels = new Map<string, { declaration: string; handlers: Set<MessageHandler> }>();
+  /** The one listener node-redis holds for every channel, so it holds at most one per channel. */
+  private readonly listener = (message: Buffer, channel: Buffer): void => this.dispatch(channel.toString(), message);
 
   constructor(
     private readonly connection: MemoryStoreConnection,
@@ -194,8 +226,7 @@ class RedisMemoryStore implements MemoryStore {
     this.secrets.push(connection.url);
     this.logger = (options.logger ?? noLogger).child({ memoryStore: this.name });
     this.clientOptions = this.options(options);
-    this.client = createClient(this.clientOptions);
-    this.watchClient(this.client, 'store');
+    this.client = this.newClient('store');
   }
 
   /** The node-redis options of the connection, which every connection of the store shares. */
@@ -274,17 +305,43 @@ class RedisMemoryStore implements MemoryStore {
     };
   }
 
-  /** Logs a client's errors, which node-redis emits on every failed reconnect, by the store's state alone. */
-  private watchClient(client: Client, role: 'store' | 'subscriber'): void {
+  /**
+   * A client of the connection, not yet connected, whose events change the
+   * store's state while it is the store's command or subscriber client. Its
+   * errors, which node-redis emits on every failed reconnect, are logged by
+   * the store's state alone.
+   */
+  private newClient(role: 'store' | 'subscriber'): Client {
+    const client = createClient(this.clientOptions);
+    const current = () => !this.closed && client === (role === 'store' ? this.client : this.subscriber);
+    client.on('connect', () => this.handshakes.set(client, Date.now()));
     client.on('error', (error: unknown) => {
+      this.handshakes.delete(client);
+      if (!current()) return;
       if (role === 'store') this.markDown(error);
       else this.logger.debug('memory store subscriber connection failed; reconnecting', { error: this.scrub(error) });
     });
-    if (role === 'store') {
-      client.on('ready', () => {
-        if (!this.closed) this.setUp(true);
-      });
-    }
+    client.on('ready', () => {
+      this.handshakes.delete(client);
+      if (!current()) return;
+      if (role === 'store') this.setUp(true);
+      else this.resubscribe(client);
+    });
+    return client;
+  }
+
+  /** Whether client's socket connected and its handshake has had no reply for longer than a connect and a ping. */
+  private stuck(client: Client): boolean {
+    const since = this.handshakes.get(client);
+    return since !== undefined && Date.now() - since > this.timings.connectMs + this.timings.pingMs;
+  }
+
+  /** Replaces the command connection with a new one, which connects in the background. */
+  private replaceClient(): void {
+    const old = this.client;
+    this.client = this.newClient('store');
+    discard(old);
+    this.client.connect().catch(() => undefined);
   }
 
   /** Connects, pings once within pingMs, and starts the health ping. */
@@ -318,26 +375,21 @@ class RedisMemoryStore implements MemoryStore {
     if (this.closed) throw new MemoryStoreUnavailableError(this.name, 'closed');
     const name = this.full(ref);
     let channel = this.channels.get(name);
+    const first = channel === undefined;
     if (!channel) {
-      const handlers = new Set<MessageHandler>();
-      channel = {
-        declaration: ref.declaration,
-        handlers,
-        listener: (message: Buffer) => this.dispatch(ref.declaration, handlers, message),
-      };
+      channel = { declaration: ref.declaration, handlers: new Set() };
       this.channels.set(name, channel);
-      await this.subscribeChannel(name, channel.listener);
     }
+    // The handler is held before the SUBSCRIBE goes out, so an unsubscribe
+    // of another handler meanwhile leaves the channel to it.
     channel.handlers.add(handler);
     const held = channel;
+    if (first) await this.subscribeChannel(name);
     return {
       unsubscribe: async () => {
         if (!held.handlers.delete(handler) || held.handlers.size > 0 || this.channels.get(name) !== held) return;
         this.channels.delete(name);
-        const subscriber = this.subscriber;
-        if (subscriber?.isReady) {
-          await within(subscriber.unsubscribe(name, held.listener, true), this.timings.opMs, 'UNSUBSCRIBE').catch(() => undefined);
-        }
+        await this.unsubscribeChannel(name);
       },
     };
   }
@@ -374,15 +426,15 @@ class RedisMemoryStore implements MemoryStore {
     this.closed = true;
     this.up = false;
     clearTimeout(this.healthTimer);
+    clearTimeout(this.subscriberTimer);
     this.channels.clear();
-    await Promise.allSettled([this.client, this.subscriber].filter((c): c is Client => c !== undefined).map(c => (c.isOpen ? c.close() : Promise.resolve())));
-    for (const c of [this.client, this.subscriber]) {
-      try {
-        c?.destroy();
-      } catch {
-        // Already closed.
-      }
-    }
+    const clients = [this.client, this.subscriber].filter((c): c is Client => c !== undefined);
+    // A client's close waits for every command in flight, which a
+    // half-open connection never answers: they have opMs, then the
+    // connections are destroyed.
+    const closing = Promise.allSettled(clients.map(c => (c.isOpen ? c.close() : Promise.resolve())));
+    await within(closing, this.timings.opMs, 'closing the memory store').catch(() => undefined);
+    for (const c of clients) discard(c);
   }
 
   private full(ref: Ref): string {
@@ -409,31 +461,132 @@ class RedisMemoryStore implements MemoryStore {
     throw new MemoryStoreUnavailableError(this.name, 'not connected', { cause: new Error(this.scrub(last)) });
   }
 
-  /** Opens the subscriber connection on first use, and subscribes name on it. */
-  private async subscribeChannel(name: string, listener: (message: Buffer) => void): Promise<void> {
+  /**
+   * Subscribes to name on the subscriber connection, which opens on first
+   * use. A connection that is not ready subscribes to every channel once it
+   * is (resubscribe). The channel stays in the map whatever SUBSCRIBE
+   * answers: a SUBSCRIBE with no reply in time replaces the connection,
+   * whose successor subscribes to it.
+   */
+  private async subscribeChannel(name: string): Promise<void> {
     if (!this.subscriber) {
-      const subscriber = this.client.duplicate();
-      this.subscriber = subscriber;
-      this.watchClient(subscriber, 'subscriber');
-      subscriber.on('ready', () => {
-        // node-redis subscribes again to what it holds; a channel it was
-        // offline for is subscribed here.
-        for (const [channel, held] of this.channels) {
-          subscriber.subscribe(channel, held.listener, true).catch(() => undefined);
-        }
-      });
-      subscriber.connect().catch(() => undefined);
+      this.openSubscriber();
+      return;
     }
     const subscriber = this.subscriber;
     if (!subscriber.isReady) return;
     try {
-      await within(subscriber.subscribe(name, listener, true), this.timings.opMs, 'SUBSCRIBE');
+      await within(subscriber.subscribe(name, this.listener, true), this.timings.opMs, 'SUBSCRIBE');
     } catch (error) {
-      this.logger.debug('memory store subscribe deferred until the subscriber connection returns', { error: this.scrub(error) });
+      if (error instanceof ErrorReply) {
+        this.logger.warn('memory store server refused SUBSCRIBE', { error: this.scrub(error) });
+        return;
+      }
+      this.logger.debug('memory store subscribe failed; replacing the subscriber connection', { error: this.scrub(error) });
+      if (!this.closed && subscriber === this.subscriber && subscriber.isReady && this.channels.has(name)) this.replaceSubscriber();
     }
   }
 
-  private dispatch(declaration: string, handlers: Set<MessageHandler>, message: Buffer): void {
+  /**
+   * Unsubscribes from name. The command goes to node-redis whether or not
+   * the connection is up: node-redis drops its listener only once the
+   * server confirms, and resubscribes to what it holds on a reconnect. A
+   * failed reconnect drops the command it queued, so resubscribe leaves
+   * every channel the map no longer holds.
+   */
+  private async unsubscribeChannel(name: string): Promise<void> {
+    const subscriber = this.subscriber;
+    if (!subscriber) return;
+    const done = subscriber.unsubscribe(name, this.listener, true).catch(() => undefined);
+    if (subscriber.isReady) await within(done, this.timings.opMs, 'UNSUBSCRIBE').catch(() => undefined);
+  }
+
+  /** Opens a subscriber connection, which subscribes to every channel once it is ready, and starts its idle ping. */
+  private openSubscriber(): void {
+    const subscriber = this.newClient('subscriber');
+    this.subscriber = subscriber;
+    this.heardAt = Date.now();
+    subscriber.connect().catch(() => undefined);
+    this.scheduleSubscriberPing();
+  }
+
+  /** Replaces the subscriber connection with a new one. */
+  private replaceSubscriber(): void {
+    const old = this.subscriber;
+    this.openSubscriber();
+    if (old) discard(old);
+  }
+
+  /**
+   * Makes what a ready subscriber connection holds the map's channels:
+   * node-redis has subscribed again to what it held, which may lack a
+   * channel subscribed while it was down, or hold one whose UNSUBSCRIBE a
+   * failed reconnect dropped.
+   */
+  private resubscribe(subscriber: Client): void {
+    const held = subscriber.getPubSubListeners('CHANNELS');
+    for (const name of [...held.keys()]) {
+      if (!this.channels.has(name)) subscriber.unsubscribe(name, this.listener, true).catch(() => undefined);
+    }
+    for (const name of this.channels.keys()) {
+      // A channel node-redis marks as unsubscribing, whose UNSUBSCRIBE is
+      // queued or was dropped, is subscribed again after it.
+      if (held.get(name)?.unsubscribing !== false) {
+        subscriber.subscribe(name, this.listener, true).catch(error => this.logger.debug('memory store resubscribe failed', { error: this.scrub(error) }));
+      }
+    }
+  }
+
+  /** The subscriber connection's next idle check: by default, receiveIdleMs after it last heard. */
+  private scheduleSubscriberPing(wait = Math.max(1, this.heardAt + this.timings.receiveIdleMs - Date.now())): void {
+    clearTimeout(this.subscriberTimer);
+    if (this.closed || !this.subscriber) return;
+    this.subscriberTimer = setTimeout(() => void this.pingSubscriber(), wait);
+    (this.subscriberTimer as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * Pings a subscriber connection that has heard nothing for receiveIdleMs,
+   * and replaces one that claims to be ready and does not answer, or whose
+   * handshake is stuck. node-redis would hold it until the kernel gives up
+   * on the socket, and every message published meanwhile would be lost.
+   */
+  private async pingSubscriber(): Promise<void> {
+    const subscriber = this.subscriber;
+    if (this.closed || !subscriber) return;
+    if (Date.now() - this.heardAt >= this.timings.receiveIdleMs) {
+      let dead = false;
+      if (subscriber.isReady) {
+        try {
+          await within(subscriber.ping(), this.timings.pingMs, 'the subscriber ping');
+          this.heardAt = Date.now();
+        } catch (error) {
+          // A connection that failed is reconnecting already.
+          dead = subscriber.isReady;
+          this.logger.debug('memory store subscriber ping failed', { error: this.scrub(error) });
+        }
+      } else {
+        dead = this.stuck(subscriber);
+      }
+      if (this.closed || subscriber !== this.subscriber) return;
+      if (dead) {
+        this.replaceSubscriber();
+        return;
+      }
+      // One that is reconnecting is checked again at the health interval.
+      if (!subscriber.isReady) {
+        this.scheduleSubscriberPing(this.timings.healthIntervalMs);
+        return;
+      }
+    }
+    this.scheduleSubscriberPing();
+  }
+
+  private dispatch(name: string, message: Buffer): void {
+    this.heardAt = Date.now();
+    const channel = this.channels.get(name);
+    if (!channel) return;
+    const { declaration, handlers } = channel;
     const data = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
     for (const handler of [...handlers]) {
       try {
@@ -455,11 +608,19 @@ class RedisMemoryStore implements MemoryStore {
   private async health(): Promise<void> {
     if (this.closed) return;
     let error: unknown;
+    const client = this.client;
     try {
-      if (!this.client.isReady) throw new Error('the connection is not ready');
-      await within(this.client.ping(), this.timings.pingMs, 'the health ping');
+      if (!client.isReady) {
+        if (this.stuck(client)) this.replaceClient();
+        throw new Error('the connection is not ready');
+      }
+      await within(client.ping(), this.timings.pingMs, 'the health ping');
     } catch (e) {
       error = e ?? new Error('the health ping failed');
+      // A connection that still claims to be ready and gave no reply is
+      // half-open: node-redis would hold it, and the ping pending on it,
+      // until the kernel gives up on the socket. A new one replaces it.
+      if (!this.closed && client === this.client && client.isReady) this.replaceClient();
     }
     if (this.closed) return;
     if (error === undefined) {

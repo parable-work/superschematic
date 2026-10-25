@@ -55,7 +55,7 @@ const CHAIN = testStore('SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN');
 const CHAIN_CA = process.env.SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA;
 
 /** Short timings, so a test of an outage takes a second or two. */
-const FAST: Partial<RedisMemoryStoreTimings> = { healthIntervalMs: 100, minBackoffMs: 20, maxBackoffMs: 200 };
+const FAST: Partial<RedisMemoryStoreTimings> = { healthIntervalMs: 100, minBackoffMs: 20, maxBackoffMs: 200, receiveIdleMs: 200 };
 
 /** A logger that keeps every line, to check what a line holds. */
 function recording(): Logger & { lines: { level: string; msg: string; fields: LogFields }[] } {
@@ -70,9 +70,9 @@ function recording(): Logger & { lines: { level: string; msg: string; fields: Lo
   return Object.assign(make({}), { lines });
 }
 
-async function until(check: () => boolean, ms = 5_000): Promise<void> {
+async function until(check: () => boolean | Promise<boolean>, ms = 5_000): Promise<void> {
   const deadline = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > deadline) throw new Error('timed out');
     await Bun.sleep(20);
   }
@@ -151,11 +151,19 @@ describe('metadataTokenSource', () => {
   });
 });
 
-/** A TCP proxy to target that a test stops and starts, to stand for an outage. */
-function proxy(target: URL): { port: () => number; start: () => Promise<void>; stop: () => Promise<void> } {
+/**
+ * A TCP proxy to target that a test stops and starts, to stand for an
+ * outage, or black-holes, to stand for a flow a network drops without
+ * closing: every connection open then, and every connection accepted
+ * while black-holed, drops what it carries from then on and never closes,
+ * as a peer whose state is gone; resume forwards new connections again.
+ */
+function proxy(target: URL): { port: () => number; start: () => Promise<void>; stop: () => Promise<void>; blackhole: () => void; resume: () => void } {
   let server: Server | undefined;
   let port = 0;
+  let holing = false;
   const sockets = new Set<Socket>();
+  const pairs = new Set<{ dead: boolean }>();
   return {
     port: () => port,
     start: () =>
@@ -163,8 +171,12 @@ function proxy(target: URL): { port: () => number; start: () => Promise<void>; s
         server = createServer(client => {
           const upstream = createConnection({ host: target.hostname, port: Number(target.port || 6379) });
           sockets.add(client).add(upstream);
-          client.pipe(upstream).pipe(client);
+          const pair = { dead: holing };
+          pairs.add(pair);
+          client.on('data', chunk => void (pair.dead || upstream.write(chunk)));
+          upstream.on('data', chunk => void (pair.dead || client.write(chunk)));
           const drop = () => {
+            pairs.delete(pair);
             client.destroy();
             upstream.destroy();
           };
@@ -182,6 +194,13 @@ function proxy(target: URL): { port: () => number; start: () => Promise<void>; s
         sockets.clear();
         server?.close(() => resolve());
       }),
+    blackhole: () => {
+      holing = true;
+      for (const pair of pairs) pair.dead = true;
+    },
+    resume: () => {
+      holing = false;
+    },
   };
 }
 
@@ -189,7 +208,7 @@ describe.skipIf(!PLAIN)('on a server (SUPERSCHEMATIC_TEST_MEMORY_STORE)', () => 
   const url = PLAIN!;
   const stores: MemoryStore[] = [];
   const open = async (store = 'shop-cache', member?: string, logger?: Logger) => {
-    const s = await openRedisMemoryStore({ store, url, auth: 'none', ...(member ? { member } : {}) }, { timings: FAST, ...(logger ? { logger } : {}) });
+    const s = await openRedisMemoryStore({ store, url, auth: 'none', ...(member ? { member } : {}) }, { timings: FAST });
     stores.push(s);
     return s;
   };
@@ -296,6 +315,124 @@ describe.skipIf(!PLAIN)('on a server (SUPERSCHEMATIC_TEST_MEMORY_STORE)', () => 
     expect(logger.lines.map(l => l.msg)).toContain('memory store connected');
     await p.stop();
   });
+
+  /** A store through p, with short pings, that the suite closes. */
+  const through = async (p: ReturnType<typeof proxy>) => {
+    const s = await openRedisMemoryStore(
+      { store: 'shop-cache', url: `redis://127.0.0.1:${p.port()}${new URL(url).pathname}`, auth: 'none' },
+      { timings: { ...FAST, pingMs: 300 } }
+    );
+    stores.push(s);
+    return s;
+  };
+  const numsub = async (name: string) => {
+    if (!admin.isOpen) await admin.connect();
+    const reply = (await admin.sendCommand(['PUBSUB', 'NUMSUB', name])) as unknown[];
+    return Number(reply[1]);
+  };
+
+  /** Rejects when p has not settled after ms. */
+  const bounded = <T>(p: Promise<T>, ms: number) =>
+    Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms))]);
+
+  test('replaces a half-open connection: available and heard again once the server is reachable', async () => {
+    const p = proxy(new URL(url));
+    await p.start();
+    const store = await through(p);
+    const publisher = await open();
+    const ch = signalChannel({ declaration: 'stock-changed', name: `stock-changed:${unique()}` });
+    let heard = 0;
+    await ch.subscribe(store, () => void heard++);
+    await until(() => {
+      void ch.publish(publisher, signal);
+      return heard >= 1;
+    });
+
+    p.blackhole();
+    await until(() => !store.available());
+    // The connections opened meanwhile die in their handshake.
+    await Bun.sleep(500);
+    // The flows are dead for good, but the server is reachable again on a
+    // new connection.
+    p.resume();
+    await until(() => store.available());
+    const ref = { declaration: 'views', name: `views:${unique()}` };
+    expect(await store.increment(ref, 60_000)).toBe(1);
+    // The subscriber's ping finds its connection dead, and the new one
+    // subscribes again.
+    const before = heard;
+    await until(() => {
+      void ch.publish(publisher, signal);
+      return heard > before;
+    });
+    await p.stop();
+  }, 30_000);
+
+  test('close resolves within a bound on a half-open connection', async () => {
+    const p = proxy(new URL(url));
+    await p.start();
+    const store = await through(p);
+    await signalChannel({ declaration: 'x', name: `x:${unique()}` }).subscribe(store, () => undefined);
+    await Bun.sleep(100);
+    p.blackhole();
+    // A health ping and a subscriber ping are left pending on the dead flow.
+    await Bun.sleep(400);
+    const t = Date.now();
+    await bounded(store.close(), 2_000);
+    expect(Date.now() - t).toBeLessThan(1_500);
+    await p.stop();
+  }, 30_000);
+
+  test('a subscribe whose channel another subscription leaves while its SUBSCRIBE is in flight still hears', async () => {
+    const store = await open();
+    const publisher = await open();
+    // The subscriber connection is up, so the next SUBSCRIBE goes out.
+    const up = signalChannel({ declaration: 'x', name: `x:${unique()}` });
+    let ready = false;
+    await up.subscribe(store, () => void (ready = true));
+    await until(() => {
+      void up.publish(publisher, signal);
+      return ready;
+    });
+    const ch = signalChannel({ declaration: 'stock-changed', name: `stock-changed:${unique()}` });
+    let first = 0;
+    const pending = ch.subscribe(store, () => void first++);
+    const second = await ch.subscribe(store, () => undefined);
+    await second.unsubscribe();
+    await pending;
+    await until(() => {
+      void ch.publish(publisher, signal);
+      return first >= 1;
+    });
+  }, 15_000);
+
+  test('an unsubscribe while the subscriber connection is down leaves the channel once it returns', async () => {
+    const p = proxy(new URL(url));
+    await p.start();
+    const store = await through(p);
+    const publisher = await open();
+    const kept = signalChannel({ declaration: 'kept', name: `kept:${unique()}` });
+    let heard = 0;
+    await kept.subscribe(store, () => void heard++);
+    const ch = signalChannel({ declaration: 'stock-changed', name: `stock-changed:${unique()}` });
+    const full = `shop-cache:${ch.ref.name}`;
+    for (let round = 0; round < 3; round++) {
+      const sub = await ch.subscribe(store, () => undefined);
+      await until(async () => (await numsub(full)) === 1);
+      await p.stop();
+      await sub.unsubscribe();
+      // A reconnect fails meanwhile, which drops what the client queued.
+      await Bun.sleep(150);
+      await p.start();
+      const before = heard;
+      await until(() => {
+        void kept.publish(publisher, signal);
+        return heard > before;
+      });
+      await until(async () => (await numsub(full)) === 0);
+    }
+    await p.stop();
+  }, 30_000);
 });
 
 describe.skipIf(!(TLS && TLS_CA && TLS_PASSWORD))('over TLS with IAM tokens (SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS)', () => {
