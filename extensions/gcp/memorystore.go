@@ -74,9 +74,13 @@ func memoryStoreName(ctx registry.PlatformContext) any {
 }
 
 // The instance's outputs a connection reads: the first Private Service
-// Connect endpoint the instance created, which with cluster mode disabled
-// is the primary's, and the first certificate of its managed server CA's
-// chain, the CA nearest the server's own certificate.
+// Connect connection the instance created, taken as the primary's (with
+// replicas it also creates a reader's; the first live run checks the
+// order, by its connectionType), and the first certificate of its managed
+// server CA's first chain, the CA that issues the server's own
+// certificate. The field holds one PEM: the resource graph has no value
+// that joins a list, so a client trusts that CA as an anchor of a partial
+// chain, as Go's and rustls's do by default.
 const (
 	memoryStoreIPOutput   = "endpoints[0].connections[0].pscAutoConnection.ipAddress"
 	memoryStorePortOutput = "endpoints[0].connections[0].pscAutoConnection.port"
