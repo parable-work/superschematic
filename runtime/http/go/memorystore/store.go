@@ -23,8 +23,7 @@
 // no client for: Watch (availability, the health ping and its backoff),
 // Fanout (one subscription per channel, which wakes every local handler),
 // the metrics, MetadataTokens (an access token per connection for `auth:
-// iam`) and Redact, and the shared rate limit's httprate counter
-// (RateLimitCounter).
+// iam`) and Redact, and the shared rate limit (RateLimiter).
 package memorystore
 
 import (

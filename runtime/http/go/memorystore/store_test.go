@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/httprate"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -496,42 +495,90 @@ func TestRedactingLog(t *testing.T) {
 }
 
 // TestSharedRateLimit: two limiters, two replicas of one route, over one
-// store spend one budget; while the store is down each counts in process
-// and none answers httprate's 428; a Disabled store counts in process.
+// store spend one budget; a refusal is not counted; while the store is
+// down, closed or Disabled, Take returns ErrUnavailable at once, for the
+// route's in-process limiter to decide.
 func TestSharedRateLimit(t *testing.T) {
 	store := NewInProcess("shop-cache")
 	defer store.Close()
-	replica := func() http.Handler {
-		return httprate.LimitBy(3, time.Minute, func(*http.Request) (string, error) { return "203.0.113.7", nil },
-			httprate.WithLimitCounter(NewRateLimitCounter(store, "shop-api", "ProductQueries.getProduct")))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
-	}
-	a, b := replica(), replica()
-	status := func(h http.Handler) int {
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-		return w.Code
-	}
-	// A window may turn between two requests; retry once in a fresh one.
-	for attempt := 0; ; attempt++ {
-		start := time.Now().Truncate(time.Minute)
-		got := []int{status(a), status(b), status(a), status(b)}
-		if time.Now().Truncate(time.Minute) != start && attempt == 0 {
-			continue
+	ctx := context.Background()
+	a := NewRateLimiter(store, "shop-api", "product.getProduct", 3, time.Minute)
+	b := NewRateLimiter(store, "shop-api", "product.getProduct", 3, time.Minute)
+	now := time.Date(2026, 10, 25, 12, 0, 30, 0, time.UTC)
+	var got []string
+	for _, l := range []*RateLimiter{a, b, a, b, a} {
+		d, err := l.Take(ctx, "203.0.113.7", now)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if fmt.Sprint(got) != "[200 200 200 429]" {
-			t.Fatalf("four requests over two replicas = %v, want the fourth refused", got)
-		}
-		break
+		got = append(got, fmt.Sprintf("%v/%d/%d", d.Allowed, d.Remaining, d.RetryAfterSeconds))
+	}
+	if want := "[true/2/0 true/1/0 true/0/0 false/0/60 false/0/60]"; fmt.Sprint(got) != want {
+		t.Fatalf("five requests over two replicas = %v, want %s", got, want)
+	}
+	ref, _ := RateLimitRef("shop-api", "product.getProduct", now.Truncate(time.Minute).Unix(), "203.0.113.7")
+	if n, _ := store.Count(ctx, ref); n != 3 {
+		t.Errorf("the window's count = %d, want the 3 allowed", n)
+	}
+	// Another client has its own budget.
+	if d, err := a.Take(ctx, "203.0.113.8", now); err != nil || !d.Allowed {
+		t.Errorf("another client = %+v, %v", d, err)
 	}
 	store.SetAvailable(false)
-	for i := range 4 {
-		if code := status(a); code != http.StatusOK && code != http.StatusTooManyRequests {
-			t.Fatalf("request %d while the store is down = %d", i, code)
+	if _, err := a.Take(ctx, "203.0.113.7", now); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("Take while the store is down = %v", err)
+	}
+	for _, s := range []Store{Disabled("shop-cache"), nil} {
+		if _, err := NewRateLimiter(s, "shop-api", "product.getProduct", 3, time.Minute).Take(ctx, "203.0.113.7", now); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("Take over %v = %v", s, err)
 		}
 	}
-	if code := status(b); code == http.StatusPreconditionRequired {
-		t.Fatal("httprate answered 428: the counter returned an error")
+}
+
+// TestCounts: Counts reads a MultiCounter's counters in one call, and any
+// other store's by a Count each, all at once.
+func TestCounts(t *testing.T) {
+	store := NewInProcess("shop-cache")
+	defer store.Close()
+	ctx := context.Background()
+	a, b := Ref{Declaration: "views", Name: "views:a"}, Ref{Declaration: "views", Name: "views:b"}
+	for range 2 {
+		if _, err := store.Increment(ctx, b, time.Minute); err != nil {
+			t.Fatal(err)
+		}
 	}
+	slow := &slowStore{Store: store, delay: 50 * time.Millisecond}
+	for name, s := range map[string]Store{"multi": store, "count each": slow} {
+		start := time.Now()
+		counts, err := Counts(ctx, s, a, b)
+		if err != nil || fmt.Sprint(counts) != "[0 2]" {
+			t.Errorf("%s: Counts = %v, %v", name, counts, err)
+		}
+		if name == "count each" && time.Since(start) > 90*time.Millisecond {
+			t.Errorf("two slow Counts took %s, not one round trip", time.Since(start))
+		}
+	}
+	store.SetAvailable(false)
+	if _, err := Counts(ctx, slow, a, b); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("Counts while down = %v", err)
+	}
+}
+
+// slowStore is a store whose every key call takes delay, as a round trip
+// to a server does. It is no MultiCounter.
+type slowStore struct {
+	Store
+	delay time.Duration
+}
+
+func (s *slowStore) Count(ctx context.Context, ref Ref) (int64, error) {
+	time.Sleep(s.delay)
+	return s.Store.Count(ctx, ref)
+}
+
+func (s *slowStore) Increment(ctx context.Context, ref Ref, ttl time.Duration) (int64, error) {
+	time.Sleep(s.delay)
+	return s.Store.Increment(ctx, ref, ttl)
 }
 
 func recv(t *testing.T, ch <-chan string) string {

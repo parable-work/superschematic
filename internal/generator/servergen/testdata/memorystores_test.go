@@ -82,9 +82,10 @@ func ref(t *testing.T, declaration string, parts ...string) memorystore.Ref {
 }
 
 // TestMemoryStoreOnRedis: on a real server, keys count with their TTL,
-// claim once and delete; a message reaches every local handler over one
-// subscription; a member's names carry its prefix; over 64 KiB is
-// refused; and a closed store refuses at once.
+// read together, claim once and delete; the shared rate limit counts; a
+// message reaches every local handler over one subscription; a member's
+// names carry its prefix; over 64 KiB is refused; and a closed store
+// refuses at once.
 func TestMemoryStoreOnRedis(t *testing.T) {
 	raw := testServerURL(t)
 	ctx := context.Background()
@@ -118,6 +119,28 @@ func TestMemoryStoreOnRedis(t *testing.T) {
 	if n, err := s.Count(ctx, ref(t, "views", "absent")); err != nil || n != 0 {
 		t.Errorf("Count of an absent key = %d, %v", n, err)
 	}
+	if counts, err := s.Counts(ctx, views, ref(t, "views", "absent")); err != nil || fmt.Sprint(counts) != "[2 0]" {
+		t.Errorf("Counts = %v, %v", counts, err)
+	}
+	// The shared rate limit reads both windows in one MGET.
+	limiter := memorystore.NewRateLimiter(s, "shop-api", "product.getProduct", 2, time.Minute)
+	now := time.Now()
+	var decisions []bool
+	for range 3 {
+		d, err := limiter.Take(ctx, "203.0.113.7", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decisions = append(decisions, d.Allowed)
+	}
+	if fmt.Sprint(decisions) != "[true true false]" {
+		t.Errorf("three requests under a limit of two = %v", decisions)
+	}
+	limitRef, _ := memorystore.RateLimitRef("shop-api", "product.getProduct", now.Truncate(time.Minute).Unix(), "203.0.113.7")
+	if ttl := raw2.PTTL(ctx, memorystore.FullName(s.Name(), limitRef)).Val(); ttl <= 2*time.Minute || ttl > 2*time.Minute+5*time.Second {
+		t.Errorf("the rate-limit key's PTTL = %s, want two windows and five seconds", ttl)
+	}
+	_ = raw2.Del(ctx, memorystore.FullName(s.Name(), limitRef))
 	claim := ref(t, "receipt-sent", "o1")
 	first, err1 := s.Claim(ctx, claim, time.Minute)
 	second, err2 := s.Claim(ctx, claim, time.Minute)

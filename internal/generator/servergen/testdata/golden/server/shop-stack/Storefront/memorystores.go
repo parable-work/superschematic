@@ -109,7 +109,10 @@ type redisStore struct {
 	closeOnce sync.Once
 }
 
-var _ memorystore.Store = (*redisStore)(nil)
+var (
+	_ memorystore.Store        = (*redisStore)(nil)
+	_ memorystore.MultiCounter = (*redisStore)(nil)
+)
 
 // openRedisStore opens conn with the timings tm, the defaults where zero,
 // asking metadataHost for an access token with auth iam, or
@@ -290,6 +293,38 @@ func (s *redisStore) Count(ctx context.Context, ref memorystore.Ref) (int64, err
 		return 0, fmt.Errorf("memory store %s: count %s: the key holds no count", s.prefix, ref.Declaration)
 	}
 	return n, nil
+}
+
+// Counts reads the counters refs name in one MGET: the shared rate limit's
+// two windows in one round trip.
+func (s *redisStore) Counts(ctx context.Context, refs ...memorystore.Ref) ([]int64, error) {
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		if err := s.ready(ctx, ref, memorystore.OpCount, 0); err != nil {
+			return nil, err
+		}
+		names[i] = memorystore.FullName(s.prefix, ref)
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	values, err := s.client.MGet(ctx, names...).Result()
+	if err := s.results(ctx, refs, memorystore.OpCount, err); err != nil {
+		return nil, err
+	}
+	counts := make([]int64, len(refs))
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+		text, ok := value.(string)
+		n, err := strconv.ParseInt(text, 10, 64)
+		if !ok || err != nil {
+			return nil, fmt.Errorf("memory store %s: count %s: the key holds no count", s.prefix, refs[i].Declaration)
+		}
+		counts[i] = n
+	}
+	return counts, nil
 }
 
 func (s *redisStore) Claim(ctx context.Context, ref memorystore.Ref, ttl time.Duration) (bool, error) {
@@ -627,13 +662,22 @@ func (s *redisStore) ready(ctx context.Context, ref memorystore.Ref, op string, 
 // for the call's wait, which wraps ErrUnavailable so the caller falls
 // back for that call alone.
 func (s *redisStore) result(ctx context.Context, ref memorystore.Ref, op string, err error) error {
+	return s.results(ctx, []memorystore.Ref{ref}, op, err)
+}
+
+// results is result for a call on each of refs, whose error names the
+// first.
+func (s *redisStore) results(ctx context.Context, refs []memorystore.Ref, op string, err error) error {
 	record := func(outcome string) {
-		if op == "publish" {
-			s.metrics.Publish(ctx, ref.Declaration, outcome)
-			return
+		for _, ref := range refs {
+			if op == "publish" {
+				s.metrics.Publish(ctx, ref.Declaration, outcome)
+			} else {
+				s.metrics.Key(ctx, ref.Declaration, op, outcome)
+			}
 		}
-		s.metrics.Key(ctx, ref.Declaration, op, outcome)
 	}
+	ref := refs[0]
 	switch {
 	case err == nil:
 		record(memorystore.OutcomeOK)

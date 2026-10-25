@@ -79,7 +79,10 @@ func NewInProcess(name string, opts ...InProcessOption) *InProcess {
 	return s
 }
 
-var _ Store = (*InProcess)(nil)
+var (
+	_ Store        = (*InProcess)(nil)
+	_ MultiCounter = (*InProcess)(nil)
+)
 
 // Name is the store's prefix.
 func (s *InProcess) Name() string { return s.name }
@@ -186,6 +189,25 @@ func (s *InProcess) Count(ctx context.Context, ref Ref) (int64, error) {
 	k, _ := s.live(FullName(s.name, ref))
 	s.metrics.Key(ctx, ref.Declaration, OpCount, OutcomeOK)
 	return k.value, nil
+}
+
+// Counts returns the counters refs name, 0 for each that is absent, under
+// one hold of the store's lock.
+func (s *InProcess) Counts(ctx context.Context, refs ...Ref) ([]int64, error) {
+	for _, ref := range refs {
+		if err := s.ready(ctx, ref, OpCount); err != nil {
+			return nil, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := make([]int64, len(refs))
+	for i, ref := range refs {
+		k, _ := s.live(FullName(s.name, ref))
+		counts[i] = k.value
+		s.metrics.Key(ctx, ref.Declaration, OpCount, OutcomeOK)
+	}
+	return counts, nil
 }
 
 // Claim sets the claim ref names when it is absent.

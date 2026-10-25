@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -106,50 +107,85 @@ func keyByClientIP(r *http.Request) (string, error) {
 
 // RateLimit returns a rate limiting middleware using httprate: at most
 // requestLimit requests per client address in a sliding window of
-// windowLength. Each replica counts in process unless an option gives the
-// limiter a shared counter (WithStore, D75).
+// windowLength. Each replica counts in process unless an option names a
+// store every replica shares (WithStore, D75).
 func RateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGetter, opts ...RateLimitOption) func(http.Handler) http.Handler {
-	options := []httprate.Option{
-		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			logger := loggerFromContext(r.Context(), getLogger)
-			logger.Warn("rate limit exceeded", zap.String("path", r.URL.Path))
-			// httprate has set Retry-After and the X-RateLimit headers.
-			response.RequestError(w, r, http.StatusTooManyRequests, "Too Many Requests", "too_many_requests")
-		}),
-	}
+	var cfg rateLimitConfig
 	for _, opt := range opts {
 		if opt != nil {
-			options = append(options, opt()...)
+			opt(&cfg)
 		}
 	}
-	return httprate.LimitBy(requestLimit, windowLength, keyByClientIP, options...)
+	refuse := func(w http.ResponseWriter, r *http.Request) {
+		logger := loggerFromContext(r.Context(), getLogger)
+		logger.Warn("rate limit exceeded", zap.String("path", r.URL.Path))
+		// The limiter has set Retry-After and the X-RateLimit headers.
+		response.RequestError(w, r, http.StatusTooManyRequests, "Too Many Requests", "too_many_requests")
+	}
+	options := []httprate.Option{httprate.WithLimitHandler(refuse)}
+	if cfg.counter != nil {
+		options = append(options, httprate.WithLimitCounter(cfg.counter))
+	}
+	local := httprate.LimitBy(requestLimit, windowLength, keyByClientIP, options...)
+	if cfg.store == nil {
+		return local
+	}
+	shared := memorystore.NewRateLimiter(cfg.store, cfg.service, cfg.operation, requestLimit, windowLength)
+	return func(next http.Handler) http.Handler {
+		inProcess := local(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key, _ := keyByClientIP(r)
+			d, err := shared.Take(r.Context(), key, time.Now())
+			if err != nil {
+				if !errors.Is(err, memorystore.ErrUnavailable) {
+					loggerFromContext(r.Context(), getLogger).Debug("the shared rate limit failed; the request is limited in process", zap.String("error", memorystore.RedactError(err)))
+				}
+				inProcess.ServeHTTP(w, r)
+				return
+			}
+			// httprate's headers, as its limiter sets them.
+			h := w.Header()
+			h.Set("X-RateLimit-Limit", strconv.Itoa(d.Limit))
+			h.Set("X-RateLimit-Reset", strconv.FormatInt(d.Reset.Unix(), 10))
+			h.Set("X-RateLimit-Remaining", strconv.Itoa(d.Remaining))
+			if !d.Allowed {
+				h.Set("Retry-After", strconv.FormatInt(d.RetryAfterSeconds, 10))
+				refuse(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // RateLimitOption configures RateLimit.
-type RateLimitOption func() []httprate.Option
+type RateLimitOption func(*rateLimitConfig)
+
+type rateLimitConfig struct {
+	counter            httprate.LimitCounter
+	store              memorystore.Store
+	service, operation string
+}
 
 // WithLimitCounter counts in counter in place of the process's own
 // memory.
 func WithLimitCounter(counter httprate.LimitCounter) RateLimitOption {
-	return func() []httprate.Option {
-		if counter == nil {
-			return nil
-		}
-		return []httprate.Option{httprate.WithLimitCounter(counter)}
-	}
+	return func(c *rateLimitConfig) { c.counter = counter }
 }
 
 // WithStore counts the route, service's operation, in store, which every
 // replica of the API shares: the shared rate limit of an API whose config
-// names a rateLimitStore (D75). While the store is unavailable the
-// counter counts in process, each replica on its own budget. A nil or
-// Disabled store counts in process alone, as without the option.
+// names a rateLimitStore (D75). The store-backed limiter holds no lock
+// across its round trips, which httprate's holds around a LimitCounter.
+// While the store is unavailable, or a call to it fails, the request is
+// limited in process, each replica on its own budget. A nil or Disabled
+// store counts in process alone, as without the option.
 func WithStore(store memorystore.Store, service, operation string) RateLimitOption {
-	return func() []httprate.Option {
+	return func(c *rateLimitConfig) {
 		if store == nil || memorystore.IsDisabled(store) {
-			return nil
+			return
 		}
-		return []httprate.Option{httprate.WithLimitCounter(memorystore.NewRateLimitCounter(store, service, operation))}
+		c.store, c.service, c.operation = store, service, operation
 	}
 }
 
