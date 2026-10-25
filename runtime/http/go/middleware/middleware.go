@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/http/go/response"
 	"go.opentelemetry.io/otel/attribute"
@@ -103,19 +104,53 @@ func keyByClientIP(r *http.Request) (string, error) {
 	return ip, nil
 }
 
-// RateLimit returns a rate limiting middleware using httprate.
-func RateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGetter) func(http.Handler) http.Handler {
-	return httprate.LimitBy(
-		requestLimit,
-		windowLength,
-		keyByClientIP,
+// RateLimit returns a rate limiting middleware using httprate: at most
+// requestLimit requests per client address in a sliding window of
+// windowLength. Each replica counts in process unless an option gives the
+// limiter a shared counter (WithStore, D75).
+func RateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGetter, opts ...RateLimitOption) func(http.Handler) http.Handler {
+	options := []httprate.Option{
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			logger := loggerFromContext(r.Context(), getLogger)
 			logger.Warn("rate limit exceeded", zap.String("path", r.URL.Path))
 			// httprate has set Retry-After and the X-RateLimit headers.
 			response.RequestError(w, r, http.StatusTooManyRequests, "Too Many Requests", "too_many_requests")
 		}),
-	)
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			options = append(options, opt()...)
+		}
+	}
+	return httprate.LimitBy(requestLimit, windowLength, keyByClientIP, options...)
+}
+
+// RateLimitOption configures RateLimit.
+type RateLimitOption func() []httprate.Option
+
+// WithLimitCounter counts in counter in place of the process's own
+// memory.
+func WithLimitCounter(counter httprate.LimitCounter) RateLimitOption {
+	return func() []httprate.Option {
+		if counter == nil {
+			return nil
+		}
+		return []httprate.Option{httprate.WithLimitCounter(counter)}
+	}
+}
+
+// WithStore counts the route, service's operation, in store, which every
+// replica of the API shares: the shared rate limit of an API whose config
+// names a rateLimitStore (D75). While the store is unavailable the
+// counter counts in process, each replica on its own budget. A nil or
+// Disabled store counts in process alone, as without the option.
+func WithStore(store memorystore.Store, service, operation string) RateLimitOption {
+	return func() []httprate.Option {
+		if store == nil || memorystore.IsDisabled(store) {
+			return nil
+		}
+		return []httprate.Option{httprate.WithLimitCounter(memorystore.NewRateLimitCounter(store, service, operation))}
+	}
 }
 
 // BodyLimit limits the maximum request body size for a route.
