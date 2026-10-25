@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1162,7 +1163,58 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
 	}
+	stores, err := r.goMemoryStores()
+	if err != nil {
+		return deps, nil, err
+	}
+	deps.MemoryStores = stores
+	if ref := r.Schema.RateLimitStore; ref != nil {
+		deps.RateLimitStore = ref.Name
+	}
 	return deps, roots, nil
+}
+
+// goMemoryStores are the memory stores the API lists, its rateLimitStore
+// among them, each a memorystore.Store in Deps (D75), with the module of
+// the store's Go definitions when its outputs write them, and the Go types
+// modules those reach.
+func (r run) goMemoryStores() ([]apigen.DepsMemoryStore, error) {
+	var stores []apigen.DepsMemoryStore
+	seen := map[string]bool{}
+	refs := slices.Clone(r.Schema.MemoryStores)
+	if ref := r.Schema.RateLimitStore; ref != nil {
+		refs = append(refs, *ref)
+	}
+	for _, ref := range refs {
+		if seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		m := apigen.DepsMemoryStore{Service: ref.Name, Field: goutil.GoPublicIdentifier(ref.Name)}
+		definitions := true
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(ref.Name); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return nil, fmt.Errorf("generator: schema config for %s: %w", ref.Name, err)
+				}
+				definitions = outputs.TypesEnabled(LangGo)
+			}
+		}
+		if definitions && r.Options.LoadDependency != nil {
+			schema, err := r.LoadDependency(ref.Name)
+			if err != nil {
+				return nil, fmt.Errorf("generator: load %s, a memory store %s lists: %w", ref.Name, r.Config.Name, err)
+			}
+			if m.Modules, err = r.goTypesClosure(schema); err != nil {
+				return nil, err
+			}
+			m.Definitions = r.Options.Naming.GoTypesModule(ref.Name)
+		}
+		stores = append(stores, m)
+	}
+	slices.SortFunc(stores, func(a, b apigen.DepsMemoryStore) int { return strings.Compare(a.Service, b.Service) })
+	return stores, nil
 }
 
 // checkWorkerQueues refuses a worker of api whose queue is no @queue class

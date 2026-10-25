@@ -54,6 +54,9 @@ import (
 {{- if .RoutesNeedScalars }}
 	scalars "{{ $.Naming.ScalarGoModule }}"
 {{- end }}
+{{- if .Deps.RateLimitStore }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
+{{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
 {{- if .HasServiceCallers }}
@@ -133,6 +136,15 @@ type Config struct {
 
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
 	PayloadDecryptor runtimemiddleware.PayloadDecryptor
+{{- end }}
+{{- if .Deps.RateLimitStore }}
+
+	// RateLimitStore is {{ .Deps.RateLimitStore }}, the memory store the API's config names
+	// its rateLimitStore (D75): each @rateLimit route counts in it, so every
+	// replica spends one budget. Optional: nil, or a disabled store, counts
+	// each replica's requests in its own process, and while the store is
+	// unavailable each replica counts in process.
+	RateLimitStore memorystore.Store
 {{- end }}
 {{- if .HasManualRoutes }}
 
@@ -336,7 +348,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}
 				{{- if .RateLimit }}
-				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext{{ if .Output.Deps.RateLimitStore }}, runtimemiddleware.WithStore(cfg.RateLimitStore, {{ printf "%q" .Output.SchemaName }}, {{ printf "%q" .RateLimitOperation }}){{ end }}),
 				{{- end }}
 				{{- if .BodyLimit }}
 				runtimemiddleware.BodyLimit({{ .BodyLimit }}, RespondError),
