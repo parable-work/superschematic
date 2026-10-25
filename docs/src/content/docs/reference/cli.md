@@ -24,9 +24,14 @@ program's status.
 The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
 `new`, `stack` and `identity` groups, beside cobra's own `help` and
-`completion`. The
+`completion`. `--version` prints the binary's name and release,
+`superschematic version 1.2.3`, or `0.0.0` for a binary built from a
+checkout; a generated workflow checks the binary it installs with it. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner), which add none. The migration runner,
+target, and the Pulumi provisioner), which add none. Each release also
+ships `superschematic-topcoat`, the same binary with the
+[Topcoat](/superschematic/guides/topcoat/) extension linked too, which
+builds a stack whose app needs it. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the

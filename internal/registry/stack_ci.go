@@ -218,6 +218,19 @@ type CIRequest struct {
 	// (D47, amended). Empty for a binary the release workflow did not
 	// build, which names no digests.
 	Archives map[string]CIArchive
+
+	// RootApps are the apps of the services root's other stacks that need
+	// an extension (D78). Every job builds the whole services root
+	// (build-all), which builds them, so the workflow's binary must link
+	// what they need as well as what the stack's own apps need.
+	RootApps []CIApp
+}
+
+// CIApp is an app (D78) of a stack of the services root: the stack, and
+// the app as the stack resolves it, with the extensions its build needs.
+type CIApp struct {
+	Stack string
+	App   ir.ResolvedApp
 }
 
 // CIArchive is one platform's static archives in a release: a tarball at

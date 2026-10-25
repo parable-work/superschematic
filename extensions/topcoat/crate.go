@@ -40,7 +40,8 @@ type crate struct {
 	// the API crate's store features.
 	Identity bool
 	// Apps are the parts structs of the API's apps (D78), api::apps::<App>Parts,
-	// each of which <service>_with_parts sets the crate up from; none when
+	// each of which <service>_with_parts (pages only) and
+	// <service>_with_parts_and_api set the crate up from; none when
 	// the API declares no app, or its crate no apps module (no Deps).
 	Apps []string
 	// Operations are the operations with an in-process call an end user's

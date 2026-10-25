@@ -42,11 +42,18 @@ The extension is a Go module of its own, `extensions/topcoat`. The
 installed `superschematic` binary does not link it, since Topcoat is
 before 1.0; `superschematic-topcoat` is the installed binary with it
 linked beside the official extensions (gcp, cloudflare and pulumi), so
-it builds and deploys everything `superschematic` does:
+it builds and deploys everything `superschematic` does. Each release
+ships it beside `superschematic`, as
+`superschematic-topcoat_<version>_<platform>.tar.gz`, listed in the same
+`SHA256SUMS`; download it, or build it from a checkout:
 
 ```bash
 cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
 ```
+
+A binary built from a checkout names no release, so a stack's workflow it
+writes cannot install one; write the workflow with the released binary
+([Generated CI](/superschematic/guides/stacks/#generated-ci)).
 
 The crate needs the Rust server. A service turns it on with
 `outputs.topcoat: { enabled: true }` in its config, or by being listed in
@@ -1097,17 +1104,24 @@ build that finds no crate there writes one, whose `serve` listens on
 stack runs it, ready, until you write yours. The crate is yours from then
 on, and the build never writes it again.
 
-The Topcoat crate of an API that declares an app has one more setup
-method, `<service>_with_parts(parts)`. It sets the crate up from the
-parts as `<service>` would from them: the implementations, the engine
-the entrypoint opened, in place of `engine::open` on a SQLite file, and,
-for an API on the identity runtime, `IdentityPageAuthenticator::of` over
-the implementations. An API whose users are its own passes its
-`PageAuthenticator` after the parts. It mounts the JSON API at `/api` and
-the engine's routes at `/engine`, as `<service>` does. It takes the parts
-through `AppParts`, which each app's parts convert into. An app that
-wants neither the JSON API nor the engine's routes calls
-`<service>_without_api` with the parts' implementations and engine.
+The Topcoat crate of an API that declares an app has two more setup
+methods, `<service>_with_parts(parts)` and
+`<service>_with_parts_and_api(parts)`. Each sets the crate up from the
+parts: the implementations, the engine the entrypoint opened, in place
+of `engine::open` on a SQLite file, and, for an API on the identity
+runtime, `IdentityPageAuthenticator::of` over the implementations. An API
+whose users are its own passes its `PageAuthenticator` after the parts.
+Each takes the parts through `AppParts`, which each app's parts convert
+into.
+
+`<service>_with_parts` serves the pages alone, as `<service>_without_api`
+does: they call the API and the engine in-process, and neither the JSON
+API nor the engine's routes are on the app's address. A stack exposes an
+app apart from its API, so an app that mounted them would serve an API
+the stack keeps internal, its operations that need no caller among them.
+`<service>_with_parts_and_api` mounts the JSON API at `/api` and the
+engine's routes at `/engine` too, as `<service>` does: use it when the
+stack exposes the API as well, or keeps the app internal.
 
 `serve` binds `parts.addr` itself and hands the listener to
 `topcoat::serve`. Never call `topcoat::start` there: it binds `HOST` and
@@ -1140,14 +1154,16 @@ Under it, `Backoffice` serves:
 | `/stock`, `/stock/stock`, `/stock/stock/{productId}` | the index, the stock's list and a product's page, with the forms that set and receive its stock |
 | `/stock/engine` and below | the engine console over `shop-db`: each engine type the caller may read, an instance's behaviors in panels, and its operations as forms ([Engine pages](#engine-pages)) |
 | `/stock/sign-in`, `/stock/sign-out`, `/stock/account`, `/stock/users`, `/stock/roles` | the identity pages ([Sign-in and admin pages](#sign-in-and-admin-pages)) |
-| `/api`, `/engine` | `shop-stock`'s JSON API and `shop-db`'s engine routes |
 
 The stack holds no seeded user, so sign in as a `shop-db` user who holds
 `stock.write`. `go/stack_dev_test.go` runs acme's stack with
 `superschematic-topcoat`, creates such a member of staff, signs them in
 at `/stock/sign-in`, and receives five units through the Stock panel's
 `receiveStock` form on `/stock/engine/Inventory/{id}`, which
-`shop-stock`'s `GetStock` then counts.
+`shop-stock`'s `GetStock` then counts. `Backoffice` calls
+`shop_stock_with_parts`, so `shop-stock`'s JSON API and `shop-db`'s engine
+routes are not on its address, and the test sees `/api/stock` answer 404
+there.
 
 ## Test the app
 

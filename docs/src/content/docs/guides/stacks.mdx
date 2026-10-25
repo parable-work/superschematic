@@ -915,6 +915,13 @@ every app of the APIs it deploys:
 export abstract class Shop {}
 ```
 
+Exposing an app exposes its address apart from its API's. A Topcoat
+app's `<service>_with_parts` serves the pages alone, which call the API
+in-process, so an API the stack keeps internal stays internal;
+`<service>_with_parts_and_api` mounts the JSON API and the engine's
+routes on the app's address too
+([Run the app in a stack](/superschematic/guides/topcoat/#run-the-app-in-a-stack)).
+
 An element names it the same way and takes `enabled`, `env`, a
 `platform` and the platform's settings: a local `port`, or a Cloud Run
 service's `minInstances` or `memory`. It takes no `schedule`, `instances`
@@ -939,9 +946,11 @@ inits the stack, but refuses every command that builds it, `build-all`,
 app Backoffice of shop-stock needs the topcoat extension, which this superschematic binary does not link; run superschematic-topcoat
 ```
 
-Run those commands with `superschematic-topcoat`
+Run those commands with `superschematic-topcoat`, which the release
+ships beside `superschematic`
 ([Build the crate](/superschematic/guides/topcoat/#build-the-crate)). The
-generated CI builds that binary itself ([Generated CI](#generated-ci)).
+generated CI installs it for a services root with such an app
+([Generated CI](#generated-ci)).
 
 On `local` the app is a process with a port, built with cargo, and ready
 once it accepts a TCP connection: it serves no `/readyz`, since its
@@ -2356,21 +2365,21 @@ The cloud jobs also install the tools the environment's provisioner runs:
 the `pulumi` CLI at the release of the Pulumi SDK the binary links.
 
 The workflow installs the release of superschematic that generated it,
-from the project's release page, and checks it against the release's
-`SHA256SUMS`, so a repository's CI changes only when you build with
-another release. A stack whose [app](#apps) names the `topcoat` extension,
-which the release's binary does not link, runs `superschematic-topcoat` in
-every job instead. Each job downloads the release's tarball, checks it
-against `SHA256SUMS`, reads the commit its `BUILD_COMMIT` names, fetches
-that commit by its hash, and builds `superschematic-topcoat` there
-against the release's static archives, their digests stamped in, as the
-release builds `superschematic`; it runs no project code. Apps that name
-two extensions between them, or one whose binary superschematic's
-repository does not hold, fail the build of the workflow, since its
-every run would refuse the stack. It checks the static archives against the digest the
+from the project's release page, checks it against the release's
+`SHA256SUMS`, and checks that it reports that release (`superschematic
+--version`), so a repository's CI changes only when you build with
+another release. Every job builds the whole services root, so when an
+[app](#apps) of any stack of the root names the `topcoat` extension,
+which `superschematic` does not link, every job installs and runs the
+release's `superschematic-topcoat` instead, the same way, and the
+workflow's header says which app needs it: acme's `storefront-stack`,
+with no app of its own, runs it because `shop-stack`'s Backoffice needs
+Topcoat. Apps that name two extensions between them, or one the release
+ships no binary of, fail the build of the workflow, since its every run
+would refuse the services root. It checks the static archives against the digest the
 binary that generated it names. A binary built from a checkout names no release: its
 workflow's install step fails and says to generate the workflow again
-with a released superschematic. Every action is pinned by commit, and
+with a released binary. Every action is pinned by commit, and
 nothing in the file depends on when it was generated.
 
 ## DNS

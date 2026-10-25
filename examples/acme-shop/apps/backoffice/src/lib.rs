@@ -12,8 +12,10 @@
 //! `/stock/engine`, whose Inventory pages receive stock through the Stock
 //! panel's forms; and sign-in, the account, users and roles. Each page calls
 //! shop-stock or the engine in-process as its caller: staff who hold
-//! `stock.write` receive stock. shop-stock's JSON API is mounted at `/api`,
-//! and the engine's routes at `/engine`.
+//! `stock.write` receive stock. The app serves its pages alone: neither
+//! shop-stock's JSON API nor the engine's routes are on its address, so
+//! exposing the app exposes no more of shop-stock than the pages do.
+//! `shop_stock_with_parts_and_api` would mount them at `/api` and `/engine`.
 //!
 //! The image carries no Topcoat asset bundle, so the lists are GET forms
 //! that load the page.

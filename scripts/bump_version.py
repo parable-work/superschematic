@@ -116,8 +116,10 @@ The `replace` lines stay in a release, and `go install <package>@vX.Y.Z`
 refuses a command whose module carries any, as cmd/superschematic does.
 runtime/migrate/go carries none, so superschematic-migrate installs that
 way; runtime/http/go carries them, so superschematic-identity does not.
-The installed binary is downloaded from the release or built from a
-checkout.
+The installed binary, and superschematic-topcoat beside it (D78), whose
+extensions/topcoat module carries replaces too, are downloaded from the
+release (release.yml builds both against the release's archives) or built
+from a checkout.
 
 Pre-releases: SemVer `-alpha.N`, `-beta.N` and `-rc.N` map to PEP 440 `aN`,
 `bN` and `rcN`. Other pre-release identifiers and build metadata are rejected

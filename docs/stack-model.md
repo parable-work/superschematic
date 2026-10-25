@@ -5155,12 +5155,16 @@ rather than whichever release is the current LTS.
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from
 its repository's release page, checked against the release's
-`SHA256SUMS`. A binary built from a checkout is no release, so its
+`SHA256SUMS` and by the version the binary reports (`--version`). When
+an app of any stack of the services root needs the `topcoat` extension
+(D78), every job installs and runs the release's `superschematic-topcoat`
+the same way, since every job builds the whole root (D47, amended). A
+binary built from a checkout is no release, so its
 workflow's install step fails and says to generate again with a released
 binary. Every action is pinned by commit, and the file holds no
 timestamp. The build cache keys the workflow on the stack's inputs, which
-hold its config, and on the binary, which names the release, so it needs
-no key of its own. Only servers whose build context changed
+hold its config, on the binary, which names the release, and on the
+root's other stacks, whose apps choose the binary. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
 
