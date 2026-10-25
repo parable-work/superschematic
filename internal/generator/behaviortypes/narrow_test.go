@@ -34,8 +34,10 @@ func TestCoreNarrowingsTypeDeclaredFields(t *testing.T) {
 }
 
 // Comments' blocks config narrows what post and edit give: every declared
-// kind when absent (the block alias), the kinds it names, and no blocks
-// at all when it names none. A record's blocks keep every kind.
+// kind when absent (the block alias), the kinds it names, and when it
+// names none, no blocks for post and an empty array for edit, which
+// clears the blocks a message was posted with before. A record's blocks
+// keep every kind.
 func TestCommentsNarrowsTheBlocksPostAndEditGive(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Comments")
@@ -73,9 +75,18 @@ func TestCommentsNarrowsTheBlocksPostAndEditGive(t *testing.T) {
 				if node, _ := items.(map[string]any); node[RefKey] != "NoteCommentBlock" {
 					t.Errorf("%s: %s gives %v, want every kind", test.config, op, items)
 				}
-			case len(test.want) == 0:
+			case len(test.want) == 0 && op == "post":
 				if items != nil {
 					t.Errorf("%s: %s gives %v, want no blocks", test.config, op, items)
+				}
+			case len(test.want) == 0:
+				blocks, err := at(n.Params[op], "properties", "blocks")
+				if err != nil || blocks["items"] != false || blocks["maxItems"] != json.Number("0") {
+					t.Errorf("%s: %s gives blocks %v (%v), want only the empty array", test.config, op, blocks, err)
+				}
+				var r TSRenderer
+				if got := r.Render(blocks, ""); got != "never[]" {
+					t.Errorf("%s: %s's blocks render as %s, want never[]", test.config, op, got)
 				}
 			default:
 				node, _ := items.(map[string]any)

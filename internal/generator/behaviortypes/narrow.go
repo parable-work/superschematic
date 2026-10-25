@@ -347,8 +347,17 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 		}
 	}
 	for _, op := range []string{"post", "edit"} {
-		if len(allowed) == 0 {
+		if len(allowed) == 0 && op == "post" {
 			if err := deleteProperty(n.Params[op], "blocks"); err != nil {
+				return fmt.Errorf("operation %s: %w", op, err)
+			}
+			continue
+		}
+		if len(allowed) == 0 {
+			// An edit giving no blocks is the only way to clear the
+			// blocks a message was posted with before the config named
+			// none, so edit keeps blocks, as an empty array.
+			if err := emptyArray(n.Params[op], "properties", "blocks"); err != nil {
 				return fmt.Errorf("operation %s: %w", op, err)
 			}
 			continue
@@ -378,6 +387,21 @@ func blockKind(schema any) string {
 	kind, _ := at(schema, "properties", "kind")
 	text, _ := kind["const"].(string)
 	return text
+}
+
+// emptyArray narrows the array schema at a path of object keys to the
+// empty array: no items (never[] in TypeScript), and at most none.
+func emptyArray(schema any, path ...string) error {
+	array, err := at(schema, path...)
+	if err != nil {
+		return err
+	}
+	if _, ok := array["items"]; !ok {
+		return fmt.Errorf("the declaration's schema at %v holds no items", path)
+	}
+	array["items"] = false
+	array["maxItems"] = json.Number("0")
+	return nil
 }
 
 // setItems replaces the items of the array schema at a path of object
