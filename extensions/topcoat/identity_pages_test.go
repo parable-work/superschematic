@@ -283,6 +283,13 @@ async fn a_caller_signs_in_back_to_next_and_out() {
     let reply = send(&router, "GET", "/console/notes", None, &[]).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
     assert!(reply.body.contains(r#"href="/console/sign-in?next=%2Fconsole%2Fnotes""#), "{}", reply.body);
+
+    // The signed-out index links to signing in once, besides the nav's.
+    let index = send(&router, "GET", "/console", None, &[]).await;
+    let main = &index.body[index.body.find("</nav>").expect("the nav")..];
+    assert_eq!(main.matches(">Sign in</a>").count(), 1, "{}", index.body);
+    assert!(main.contains(r#"class="ss-sign-in""#), "{}", index.body);
+    assert!(nav(&index.body).contains(">Sign in</a>"), "{}", index.body);
     let reply = send(&router, "GET", "/console/sign-in?next=%2Fconsole%2Fnotes", None, &[]).await;
     assert_eq!(reply.status, StatusCode::OK);
     assert!(reply.body.contains(r#"<input type="hidden" name="next" value="/console/notes">"#), "{}", reply.body);

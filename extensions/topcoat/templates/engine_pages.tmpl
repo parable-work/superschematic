@@ -204,7 +204,7 @@ async fn offered(cx: &Cx) -> Result<HashSet<String>, Refusal> {
 /// resources': none when the caller may read none of them.
 pub async fn nav_link(cx: &Cx) -> Option<NavLink> {
     let readable = readable(cx).await.ok()?;
-    (!readable.is_empty()).then(|| NavLink { href: ENGINE.to_owned(), label: "Engine".to_owned(), post: false })
+    (!readable.is_empty()).then(|| NavLink { href: ENGINE.to_owned(), label: "Engine".to_owned(), post: false, nav_only: false })
 }
 
 /// The trail of the engine's page at `path` after the index, each step's
