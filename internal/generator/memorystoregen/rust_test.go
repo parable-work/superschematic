@@ -66,7 +66,9 @@ fn product() -> superscalar::Uuid {
 fn each_definition_names_its_parts_in_order() {
     let id = product();
     let changed = STOCK_CHANGED.for_(&id).unwrap();
-    assert_eq!(changed.name(), format!("stock-changed:{id}"));
+    // A UUID part is its wire form, the compact base62 string, which the
+    // Go and TypeScript definitions' tests build the same name from.
+    assert_eq!(changed.name(), "stock-changed:1vBzL4ARBgq9iQp4yVfPll");
     assert_eq!(changed.declaration(), "stock-changed");
     let views = PRODUCT_VIEWS
         .for_ttl(Duration::from_secs(3600), &id, 20261025, Region::North, true, "a label")

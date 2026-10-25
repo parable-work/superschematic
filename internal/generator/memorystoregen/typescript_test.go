@@ -27,13 +27,15 @@ import { Region } from '@schemas/shop-cache-common-types/types';
 import type { StockLevel } from '@schemas/shop-cache-common-types/types';
 import { STORE, productViews, receiptSent, stockChanged, stockSamples } from './index';
 
-const productId = '1dTTvbXa8LxwSmeC8pRVJx';
+// The wire form of 3f2a9c1e-7b4d-4e8a-9c2f-1d5e6a7b8c9d, whose name the Go
+// and Rust definitions' tests build too.
+const productId = '1vBzL4ARBgq9iQp4yVfPll';
 
 test('the definitions name each channel and key by its typed parts', () => {
   expect(STORE).toBe('shop-cache');
-  expect(stockChanged.for(productId).ref).toEqual({ declaration: 'stock-changed', name: 'stock-changed:1dTTvbXa8LxwSmeC8pRVJx' });
+  expect(stockChanged.for(productId).ref).toEqual({ declaration: 'stock-changed', name: 'stock-changed:1vBzL4ARBgq9iQp4yVfPll' });
   const views = productViews.forTTL(86_400_000, productId, 20261025, Region.North, true, 'a label');
-  expect(views.ref.name).toBe('views:1dTTvbXa8LxwSmeC8pRVJx:20261025:north:true:a label');
+  expect(views.ref.name).toBe('views:1vBzL4ARBgq9iQp4yVfPll:20261025:north:true:a label');
   expect(views.ttlMs).toBe(86_400_000);
   expect(() => productViews.forTTL(86_400_001, productId, 1, Region.South, false, 'x')).toThrow(RangeError);
   expect(() => productViews.forTTL(1000, productId, 1.5, Region.South, false, 'x')).toThrow(MemoryStoreNameError);

@@ -42,9 +42,10 @@ func TestDefinitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A UUID part is its wire form, the compact base62 string its JSON
-	// holds.
+	// holds, which the TypeScript and Rust definitions' tests build the
+	// same name from.
 	wire := id.String()
-	if len(wire) == 36 {
+	if wire != "1vBzL4ARBgq9iQp4yVfPll" {
 		t.Fatalf("the UUID's wire form is %q, not its compact one", wire)
 	}
 	if changed.Name() != "stock-changed:"+wire || changed.Declaration() != shopcache.StockChanged.Name() {
