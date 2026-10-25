@@ -29,6 +29,7 @@ const (
 	CodeVetoed            ErrorCode = "vetoed"
 	CodeValueTooLarge     ErrorCode = "value_too_large"
 	CodeUnavailable       ErrorCode = "unavailable"
+	CodeRateLimited       ErrorCode = "rate_limited"
 	CodeBusy              ErrorCode = "busy"
 	CodeInternal          ErrorCode = "internal"
 )
@@ -53,6 +54,8 @@ func (c ErrorCode) Status() int {
 		return http.StatusRequestEntityTooLarge
 	case CodeInvalidSchema, CodeInvalidInstance:
 		return http.StatusUnprocessableEntity
+	case CodeRateLimited:
+		return http.StatusTooManyRequests
 	case CodeUnavailable, CodeBusy:
 		return http.StatusServiceUnavailable
 	default:

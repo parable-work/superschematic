@@ -1,6 +1,7 @@
 package agentcatalog
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -80,6 +81,31 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 	}
 	if !strings.Contains(catalog, "\n```ts\ninterface WorkflowConfig {") {
 		t.Error("the config types do not include WorkflowConfig")
+	}
+}
+
+// A behavior's signals (D77) are listed with who may send each.
+func TestSignalsAreListed(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	signals := json.RawMessage(`{"name": "Chatter", "signals": [
+		{"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": {"type": "object"}},
+		{"name": "draft", "access": "operation", "paramsSchema": true}
+	]}`)
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: signals}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	catalog := render(t, Behaviors, reg)
+	want := "\nSignals (delivered to event streams opened with `signals=1`, never stored):\n\n" +
+		"- `typing` (sent by callers who may read): Who is typing.\n" +
+		"- `draft` (sent by its operations alone)\n"
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Chatter's entry lacks its signals:\n%s", catalog[strings.Index(catalog, "## `Chatter`"):])
 	}
 }
 

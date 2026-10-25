@@ -9,7 +9,7 @@ Preconditions header, and turns a refusal into an EngineProblem
 */
 
 import { EngineTransportError } from './errors.js';
-import { EventSubscription, eventQuery, type EventFilters, type SubscribeOptions } from './stream.js';
+import { EventSubscription, eventQuery, type EventFilters, type SignalMessage, type StreamMessage, type SubscribeOptions } from './stream.js';
 import { Transport, seqOf, type CallOptions, type EndUserAuth, type FetchLike, type RequestSpec, type ServiceCredential } from './transport.js';
 import type {
   BehaviorFieldsJSON,
@@ -105,6 +105,8 @@ export class EngineClient {
   readonly instances: InstanceCalls;
   readonly events: EventCalls;
   readonly behaviors: BehaviorCalls;
+  /** The signals of instances (D77). */
+  readonly signals: SignalCalls;
   /** The namespace calls use unless they name another. */
   readonly namespace: string;
   private readonly transport: Transport;
@@ -119,6 +121,7 @@ export class EngineClient {
     this.instances = new InstanceCalls(this.scope);
     this.events = new EventCalls(this.scope);
     this.behaviors = new BehaviorCalls(this.scope);
+    this.signals = new SignalCalls(this.scope);
   }
 
   /** setToken replaces the end user's token the client holds. */
@@ -163,6 +166,40 @@ class Scope {
 
   async data<T>(spec: RequestSpec): Promise<T> {
     return (await this.transport.json<T>(spec)).data;
+  }
+}
+
+/** What a signal's send names, beside its data (D77). */
+export interface SendSignalInput {
+  readonly schema: string;
+  readonly instanceId: string;
+  /** The behavior that declares the signal. */
+  readonly behavior: string;
+  readonly name: string;
+  /** At most 4096 bytes of JSON its paramsSchema accepts; `{}` when absent. */
+  readonly data?: unknown;
+}
+
+/**
+ * The signals of instances (D77): a message about an instance that the
+ * engine delivers to the event streams opened with signals
+ * (`events.subscribe({ signals: true })`) and keeps nowhere.
+ */
+export class SignalCalls {
+  constructor(private readonly scope: Scope) {}
+
+  /**
+   * send sends a signal its behavior declares with access read or write,
+   * as the policy allows: 204, nothing stored. Past the engine's rate per
+   * caller and instance it is 429 `rate_limited`, which is not retried.
+   */
+  async send(input: SendSignalInput, options: CallOptions = {}): Promise<void> {
+    await this.scope.transport.empty({
+      method: 'POST',
+      path: `${this.scope.instance(options, input.schema, input.instanceId)}/signals/${segment(input.behavior)}/${segment(input.name)}`,
+      body: input.data ?? {},
+      options,
+    });
   }
 }
 
@@ -343,10 +380,13 @@ export class EventCalls {
 
   /**
    * subscribe opens the event stream: iterate the subscription for each
-   * event and a `ready` per connection; it resumes by Last-Event-ID when
+   * event and a `ready` per connection, and with `signals: true` each
+   * signal (D77) as a `signal` message; it resumes by Last-Event-ID when
    * the connection drops.
    */
-  subscribe(options: SubscribeOptions = {}): EventSubscription {
+  subscribe(options: SubscribeOptions & { readonly signals: true }): EventSubscription<StreamMessage | SignalMessage>;
+  subscribe(options?: SubscribeOptions): EventSubscription;
+  subscribe(options: SubscribeOptions = {}): EventSubscription<StreamMessage | SignalMessage> {
     return new EventSubscription(this.scope.transport, `${this.scope.ns(options)}/events`, options);
   }
 }

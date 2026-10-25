@@ -649,8 +649,9 @@ pub unsafe fn wait(engine: u64, after: u64, timeout_ms: u32, epoch: *mut u64) ->
         if handle.engine.is_closed() {
             return None;
         }
+        // The wakes: a commit's and a signal's (D77), which a stream sends.
         let notifier = Arc::clone(handle.engine.db().notifier());
-        let moved = notifier.wait(after, Duration::from_millis(u64::from(timeout_ms)));
+        let moved = notifier.wait_wakes(after, Duration::from_millis(u64::from(timeout_ms)));
         // A shutdown moves the epoch to wake every waiter.
         (!handle.engine.is_closed()).then_some(moved)
     }));

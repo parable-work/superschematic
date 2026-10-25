@@ -122,6 +122,8 @@ export class AsyncEngine {
     maxBytes(): Promise<number>;
   };
   readonly behaviors: Promised<Pick<Engine['behaviors'], 'has' | 'names' | 'declaration'>>;
+  /** The signals of instances (D77): what a caller sends to the event streams open on one. */
+  readonly signals: Promised<Engine['signals']>;
   private readonly watchers = new Set<EventWatcher>();
   private head = 0;
   private started: Promise<void> | undefined;
@@ -221,6 +223,9 @@ export class AsyncEngine {
       names: plainCall(call, 'behaviors.names') as () => Promise<string[]>,
       declaration: plainCall(call, 'behaviors.declaration'),
     } as unknown as AsyncEngine['behaviors'];
+    this.signals = {
+      send: principalCall(call, 'signals.send'),
+    } as unknown as AsyncEngine['signals'];
   }
 
   /**

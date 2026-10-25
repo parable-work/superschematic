@@ -796,7 +796,7 @@ func (r *run) open(step *object, args []any) error {
 	default:
 		return fmt.Errorf("a policy the replayer cannot pass: %s", show(policy))
 	}
-	for _, key := range []string{"namespaces", "runner", "retention", "tools", "values"} {
+	for _, key := range []string{"namespaces", "runner", "retention", "tools", "values", "signals"} {
 		if value, ok := given.get(key); ok {
 			config.set(key, value)
 		}

@@ -27,6 +27,7 @@ import type { AnyBehaviorImplementation } from '../testing/behavior.js';
 import type { RetentionOptions } from '../types/events.js';
 import type { NamespaceOptions } from '../types/namespaces.js';
 import type { RunnerOptions } from '../types/runner.js';
+import type { SignalOptions } from '../types/signals.js';
 import type { ValueOptions } from '../types/values.js';
 import { UnsupportedError } from './errors.js';
 import type { ToolOptions } from './tool-options.js';
@@ -151,6 +152,12 @@ export interface EngineOptions {
    * keeps every event.
    */
   retention?: RetentionOptions;
+  /**
+   * The signals of instances (D77): how many a principal may send on one
+   * instance each second, 20 by default (runtime/engine/README.md, "The
+   * event stream").
+   */
+  signals?: SignalOptions;
 }
 
 /** What the engine's TypeScript side answers for the Rust engine, on this thread. */

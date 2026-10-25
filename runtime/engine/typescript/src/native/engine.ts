@@ -37,6 +37,7 @@ import { DEFAULT_NAMESPACE, type NamespaceRecord } from '../types/namespaces.js'
 import type { Page } from '../types/paging.js';
 import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../types/runner.js';
 import type { ComposedBehavior, DefineOptions, PublishResult, SchemaCapabilities, SchemaRecord, SchemaSummary, SchemaTarget, ValidateOptions } from '../types/schemas.js';
+import type { SendSignalInput } from '../types/signals.js';
 import type { Row, RunResult, SqlValue } from '../types/storage.js';
 import type { BehaviorDocument, BehaviorSummary, DescribeDocument, ToolFilter, ToolManifest, ToolSummary, ToolTarget } from '../types/tools.js';
 import type { StoredValue, ValueTarget } from '../types/values.js';
@@ -472,13 +473,47 @@ class Watchers {
       this.head = this.calls?.sync('events.head', undefined) as number;
     }
     this.watchers.add(watcher);
-    if (!this.watching) {
-      this.watching = true;
-      this.addon.watch(() => this.poll());
-    }
+    this.start();
     return () => {
       this.watchers.delete(watcher);
     };
+  }
+
+  /**
+   * onWake calls wake each time the addon's watch hears the notifier: a
+   * commit, or a signal one of the engine's event streams kept (D77),
+   * which tells no watcher of a commit but wakes a stream's body.
+   */
+  onWake(wake: () => void): () => void {
+    if (this.closed) {
+      throw new Error('the engine is closed');
+    }
+    this.wakes.add(wake);
+    this.start();
+    return () => {
+      this.wakes.delete(wake);
+    };
+  }
+
+  private readonly wakes = new Set<() => void>();
+
+  private start(): void {
+    if (!this.watching) {
+      this.watching = true;
+      this.addon.watch(() => this.heard());
+    }
+  }
+
+  // heard tells the watchers of the commits, then wakes every stream body.
+  private heard(): void {
+    this.poll();
+    for (const wake of [...this.wakes]) {
+      try {
+        wake();
+      } catch {
+        // One stream's failure is not another's.
+      }
+    }
   }
 
   /** poll tells the watchers of the commits since it last looked. */
@@ -530,6 +565,7 @@ class Watchers {
     }
     const watchers = [...this.watchers];
     this.watchers.clear();
+    this.wakes.clear();
     for (const watcher of watchers) {
       try {
         watcher.closed?.();
@@ -774,6 +810,22 @@ class EngineRunner {
   }
 }
 
+class EngineSignals {
+  constructor(private readonly calls: Calls) {}
+
+  /**
+   * send sends a signal on an instance (D77) to the event streams opened
+   * with signals: its behavior declares it with access read or write, the
+   * policy allows that access with the operation `signal:<name>`, its data
+   * is at most 4096 bytes of JSON its paramsSchema accepts, and the
+   * principal is within signals.perSecond on the instance (rate_limited).
+   * Nothing is stored and no event appended.
+   */
+  send(principal: Principal, input: SendSignalInput): void {
+    this.calls.sync('signals.send', principal, [input]);
+  }
+}
+
 class EngineValues {
   constructor(private readonly calls: Calls) {}
 
@@ -966,6 +1018,8 @@ export class Engine {
   readonly tools: EngineTools;
   readonly runner: EngineRunner;
   readonly values: EngineValues;
+  /** The signals of instances (D77): what a caller sends to the event streams open on one. */
+  readonly signals: EngineSignals;
   /** Decides whether a principal holds a permission, as the options gave it; hasAnyPermission by default. */
   readonly permissionMatcher: PermissionMatcher;
   /** `sqlite`, or `postgres`, whose engine is called through callAsync. */
@@ -1003,6 +1057,7 @@ export class Engine {
     this.tools = new EngineTools(this.calls, tools);
     this.runner = new EngineRunner(this.calls, addon, this.events, runner, clock ?? Date.now, () => watchers.closed, () => hosts.bridge.depth > 0);
     this.values = new EngineValues(this.calls);
+    this.signals = new EngineSignals(this.calls);
     this.nativeStorage = path === undefined || addon.dialect !== 'sqlite' ? undefined : new EngineStorage(addon, path, () => watchers.poll());
   }
 
@@ -1074,6 +1129,15 @@ export class Engine {
     } catch (error) {
       throw restoreError(error);
     }
+  }
+
+  /**
+   * onWake calls wake each time a commit, or a signal an event stream
+   * keeps (D77), moves the engine's notifier, on this thread: what an event
+   * stream's body waits on (src/native/http.ts).
+   */
+  onWake(wake: () => void): () => void {
+    return this.watchers.onWake(wake);
   }
 
   /** streamClose ends an event stream handleHttp holds open. */

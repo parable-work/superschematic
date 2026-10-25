@@ -1802,6 +1802,50 @@ impl Behavior for Dispatch {
     }
 }
 
+/// test.Chatter (D77): signals of each access, `typing` (`read`, an
+/// object), `nudge` (`write`, any JSON) and `draft` (`operation`,
+/// `{ text }`), and `draft`, a beside operation that sends its signal of
+/// the same name with the text it is given, after its call commits.
+pub struct Chatter;
+
+static CHATTER_DECLARATION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let text = json!({"type": "object", "additionalProperties": false, "required": ["text"], "properties": {"text": {"type": "string"}}});
+    json!({
+        "name": "test.Chatter",
+        "operations": [
+            {"name": "draft", "paramsSchema": text, "resultSchema": true, "writes": true, "beside": true}
+        ],
+        "signals": [
+            {"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": {"type": "object"}},
+            {"name": "nudge", "access": "write", "paramsSchema": true},
+            {"name": "draft", "access": "operation", "paramsSchema": text}
+        ]
+    })
+    .to_string()
+});
+
+impl Behavior for Chatter {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        &CHATTER_DECLARATION
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            operations: vec![("draft", |_, cx, params| {
+                cx.signal("draft", &json!({ "text": params.get("text") }))?;
+                Ok(Value::Null)
+            })],
+            ..Hooks::default()
+        }
+    }
+}
+
 /// A core behavior by name, alone, for a step that registers one again or
 /// an open that names one: the engine refuses it, as the TypeScript engine
 /// refuses a name already registered. A work-queue behavior's name finds
@@ -1887,6 +1931,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Holder") => set.with(Holder),
         (_, "test.Reader") => set.with(Reader),
         (_, "test.Broken") => set.with(Broken),
+        (_, "test.Chatter") => set.with(Chatter),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
         (_, "test.Signal") => set.with(crate::workqueue_fixtures::Signal),
         (_, "test.Gate") => set.with(crate::workqueue_fixtures::Gate),

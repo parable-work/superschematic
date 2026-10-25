@@ -60,6 +60,7 @@ var bodyRoutes = map[string]bool{
 	"invokeOperation":       true,
 	"invokeSchemaOperation": true,
 	"searchSchemas":         true,
+	"sendSignal":            true,
 }
 
 // Serve is which of the engine's routes a handler serves.
