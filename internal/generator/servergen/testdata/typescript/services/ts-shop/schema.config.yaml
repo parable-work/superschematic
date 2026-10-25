@@ -1,6 +1,7 @@
 # A TypeScript API with a database, a callee, a bucket and a setting: it
 # takes ts-db from its one DB-kind dependency, calls ts-pricing, lists the
-# bucket ts-media (D54), holds one setting in its @envVars type, checks
+# bucket ts-media (D54), lists the memory store ts-cache and counts its
+# rate limits there (D75), holds one setting in its @envVars type, checks
 # the end user on one operation and leaves one to a handler of its own
 # (@manualRouteRegistration, D51).
 name: ts-shop
@@ -11,6 +12,9 @@ calls:
   - { name: ts-pricing, kind: API }
 buckets:
   - { name: ts-media, kind: Bucket }
+memoryStores:
+  - { name: ts-cache, kind: MemoryStore }
+rateLimitStore: { name: ts-cache, kind: MemoryStore }
 outputs:
   types:
     typescript: { enabled: true }

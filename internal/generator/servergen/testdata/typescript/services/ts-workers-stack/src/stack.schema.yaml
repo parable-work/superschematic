@@ -22,8 +22,13 @@ types:
       settings:
         - of: { service: { name: ts-pricing, kind: API } }
           platform: fake.bundle
+        - of: { service: { name: ts-cache, kind: MemoryStore } }
+          enabled: false
   Local:
     name: Local
     role: EmbeddedStruct
     environment:
       target: local
+      settings:
+        - of: { service: { name: ts-cache, kind: MemoryStore } }
+          enabled: false

@@ -1,0 +1,8 @@
+# The memory store ts-shop lists and counts its rate limits in, and
+# ts-pricing lists (D75). Each server opens it once from its config field,
+# on Redis, or disabled where an environment turns it off: Local, whose
+# target has no memory store platform here, and Edge, on a platform whose
+# artifact is a bundle, which reaches no store.
+name: ts-cache
+kind: MemoryStore
+outputs: {}

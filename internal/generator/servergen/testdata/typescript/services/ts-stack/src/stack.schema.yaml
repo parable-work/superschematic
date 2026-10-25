@@ -20,3 +20,6 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
+      settings:
+        - of: { service: { name: ts-cache, kind: MemoryStore } }
+          enabled: false

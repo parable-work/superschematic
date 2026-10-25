@@ -16,7 +16,7 @@
 // createManualRoutes (D51; section 8.6).
 
 import type { Pool } from 'pg';
-import type { Authenticator, Bucket, Logger } from '@superschematic/http-runtime';
+import type { Authenticator, Bucket, Logger, MemoryStore } from '@superschematic/http-runtime';
 import type { ManualRouteHandler } from '@superschematic/http-runtime/hono';
 import type { TsPricingSDK } from '@schemas/ts-pricing-sdk';
 import type { CartAbandoned } from '@schemas/ts-db-types';
@@ -33,6 +33,12 @@ export interface Deps {
   readonly tsPricing: TsPricingSDK;
   /** ts-media, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly tsMedia: Bucket;
+  /**
+   * ts-cache, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path.
+   */
+  readonly tsCache: MemoryStore;
   /** The API's logger. */
   readonly logger: Logger;
 }
