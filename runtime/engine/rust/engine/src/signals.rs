@@ -374,6 +374,20 @@ struct Queues {
 }
 
 impl Queues {
+    // open holds a stream's queue, letting go of those whose streams
+    // closed: a stream that opens and closes with no signal sent between
+    // leaves nothing behind, since deliver alone would never prune it.
+    fn open(&self, filter: SignalFilter) -> Arc<SignalQueue> {
+        let queue = Arc::new(SignalQueue {
+            filter,
+            held: Mutex::new(VecDeque::new()),
+        });
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        open.retain(|queue| queue.strong_count() > 0);
+        open.push(Arc::downgrade(&queue));
+        queue
+    }
+
     fn deliver(&self, payload: &str) {
         let Ok(signal) = serde_json::from_str::<EngineSignal>(payload) else {
             return;
@@ -418,16 +432,7 @@ impl SignalHub {
     /// A stream's queue, which holds every signal its filter keeps from
     /// now until it is dropped.
     pub fn open(&self, filter: SignalFilter) -> Arc<SignalQueue> {
-        let queue = Arc::new(SignalQueue {
-            filter,
-            held: Mutex::new(VecDeque::new()),
-        });
-        self.queues
-            .open
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(Arc::downgrade(&queue));
-        queue
+        self.queues.open(filter)
     }
 }
 
@@ -437,7 +442,16 @@ const LIMITER_ENTRIES: usize = 4096;
 /// A token bucket per principal's subject and instance.
 pub(crate) struct RateLimiter {
     per_second: u32,
-    buckets: Mutex<HashMap<BucketKey, Bucket>>,
+    buckets: Mutex<Buckets>,
+}
+
+// The buckets, and how many there may be before the next sweep forgets
+// the full ones: LIMITER_ENTRIES, or twice what the last sweep kept when
+// that is more, so a map of many buckets still being spent is swept once
+// each time it doubles rather than at every take.
+struct Buckets {
+    map: HashMap<BucketKey, Bucket>,
+    sweep_at: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -458,7 +472,10 @@ impl RateLimiter {
     fn new(per_second: u32) -> RateLimiter {
         RateLimiter {
             per_second,
-            buckets: Mutex::new(HashMap::new()),
+            buckets: Mutex::new(Buckets {
+                map: HashMap::new(),
+                sweep_at: LIMITER_ENTRIES,
+            }),
         }
     }
 
@@ -472,9 +489,14 @@ impl RateLimiter {
             let elapsed = (now - bucket.at).max(0) as f64;
             (bucket.tokens + elapsed * rate / 1000.0).min(rate)
         };
-        let mut buckets = self.buckets.lock().unwrap_or_else(PoisonError::into_inner);
-        if buckets.len() >= LIMITER_ENTRIES {
+        let mut guard = self.buckets.lock().unwrap_or_else(PoisonError::into_inner);
+        let Buckets {
+            map: buckets,
+            sweep_at,
+        } = &mut *guard;
+        if buckets.len() >= *sweep_at {
             buckets.retain(|_, bucket| refill(bucket) < rate);
+            *sweep_at = LIMITER_ENTRIES.max(buckets.len() * 2);
         }
         let key = BucketKey {
             subject: signal.from.clone(),
@@ -536,6 +558,61 @@ mod tests {
         // Half a second is one token at two a second.
         assert!(limiter.take(&signal("alice", "t1", 500)).is_ok());
         assert!(limiter.take(&signal("alice", "t1", 500)).is_err());
+    }
+
+    #[test]
+    fn the_limiter_forgets_full_buckets_past_its_entries_and_sweeps_once_a_doubling() {
+        let limiter = RateLimiter::new(2);
+        let entries = |limiter: &RateLimiter| {
+            let buckets = limiter.buckets.lock().unwrap();
+            (buckets.map.len(), buckets.sweep_at)
+        };
+        // Each bucket spent at 0 and full again a second on.
+        for n in 0..LIMITER_ENTRIES {
+            limiter.take(&signal("alice", &format!("t{n}"), 0)).unwrap();
+        }
+        assert_eq!(entries(&limiter), (LIMITER_ENTRIES, LIMITER_ENTRIES));
+        // Past the entries, a take forgets the full buckets.
+        limiter.take(&signal("alice", "fresh", 1000)).unwrap();
+        assert_eq!(entries(&limiter), (1, LIMITER_ENTRIES));
+        // Buckets still being spent are kept: the sweep as the map is
+        // full again forgets only "fresh", full by now.
+        for n in 0..LIMITER_ENTRIES {
+            limiter
+                .take(&signal("bob", &format!("t{n}"), 2000))
+                .unwrap();
+        }
+        let kept = LIMITER_ENTRIES - 1;
+        assert_eq!(entries(&limiter), (LIMITER_ENTRIES, kept * 2));
+        limiter.take(&signal("bob", "t0", 2000)).unwrap();
+        assert!(limiter.take(&signal("bob", "t0", 2000)).is_err());
+        // Past the entries, with every bucket spent, a take sweeps no more
+        // until the map has doubled what the sweep kept.
+        for n in 0..(kept * 2 - LIMITER_ENTRIES) {
+            limiter
+                .take(&signal("carol", &format!("t{n}"), 2000))
+                .unwrap();
+        }
+        assert_eq!(entries(&limiter), (kept * 2, kept * 2));
+        // Then it sweeps, and a second on every bucket is full again.
+        limiter.take(&signal("dave", "t0", 3000)).unwrap();
+        assert_eq!(entries(&limiter), (1, LIMITER_ENTRIES));
+    }
+
+    #[test]
+    fn opening_a_queue_lets_go_of_those_whose_streams_closed() {
+        let queues = Queues {
+            open: Mutex::new(Vec::new()),
+            notifier: Arc::new(superschematic_engine_storage::Notifier::new()),
+        };
+        for _ in 0..100 {
+            drop(queues.open(SignalFilter::default()));
+        }
+        let held = queues.open(SignalFilter::default());
+        assert_eq!(queues.open.lock().unwrap().len(), 1);
+        let _also = queues.open(SignalFilter::default());
+        assert_eq!(queues.open.lock().unwrap().len(), 2);
+        drop(held);
     }
 
     #[test]
