@@ -21,12 +21,22 @@
 //! conversation. Migration 2 moves version 1's comments, a chain of
 //! replies, into threads one level deep.
 //!
+//! A message may be streamed as it is written (batch 2): `begin` holds its
+//! place as composing, `appendDraft` adds to its draft, a chunk at a time,
+//! and sends the `draft` signal once its call commits, and `finish` posts
+//! it; `interrupt` stops one, keeping what was written, and the schedule
+//! `interrupt` calls it, as the runner, on each message whose author has
+//! appended nothing for `composeTimeoutMs`. A message *stands* while it is
+//! posted or interrupted, and the fields count the standing ones; the
+//! `composing` field names who is writing one. Migration 3 adds the drafts.
+//!
 //! configChange: Comments can be added to a schema that has instances,
 //! which start with an empty conversation, and cannot be removed from one:
 //! their messages would stay behind with nothing to delete them. A config
 //! change applies to the next call.
 
 mod checks;
+mod drafts;
 mod reads;
 mod record;
 mod storage;
@@ -34,7 +44,7 @@ mod writes;
 
 use serde_json::Value;
 
-use superschematic_engine::behaviors::InstanceView;
+use superschematic_engine::behaviors::{Every, InstanceView, Schedule};
 use superschematic_engine::{Behavior, ConfigTarget, Error, Hooks, InstanceChange, Result};
 
 use checks::integer;
@@ -44,6 +54,14 @@ const NAME: &str = "Comments";
 
 /// The longest body when the config gives no `maxBodyLength`.
 pub const DEFAULT_MAX_BODY_LENGTH: i64 = 40_000;
+/// How long a composing message's author may append nothing when the
+/// config gives no `composeTimeoutMs`.
+pub const DEFAULT_COMPOSE_TIMEOUT_MS: i64 = 60_000;
+/// The most composing messages a subject has on an instance when the
+/// config gives no `maxDrafts`.
+pub const DEFAULT_MAX_DRAFTS: i64 = 5;
+/// The longest interval of the schedule `interrupt`.
+const MAX_INTERRUPT_EVERY_MS: i64 = 15_000;
 
 /// Comments' config. Every member is optional; `{}` and no config are the
 /// same.
@@ -62,6 +80,11 @@ pub struct CommentsConfig {
     pub pin_permission: Option<String>,
     /// Resolve and reopen another's thread; only its author when `None`.
     pub resolve_permission: Option<String>,
+    /// How long a composing message's author may append nothing before
+    /// the runner interrupts it.
+    pub compose_timeout_ms: i64,
+    /// The most composing messages one subject has on an instance at once.
+    pub max_drafts: i64,
 }
 
 impl Default for CommentsConfig {
@@ -73,6 +96,8 @@ impl Default for CommentsConfig {
             moderate_permission: None,
             pin_permission: None,
             resolve_permission: None,
+            compose_timeout_ms: DEFAULT_COMPOSE_TIMEOUT_MS,
+            max_drafts: DEFAULT_MAX_DRAFTS,
         }
     }
 }
@@ -102,7 +127,16 @@ impl CommentsConfig {
             moderate_permission: text("moderatePermission"),
             pin_permission: text("pinPermission"),
             resolve_permission: text("resolvePermission"),
+            compose_timeout_ms: integer(raw.get("composeTimeoutMs"))
+                .unwrap_or(DEFAULT_COMPOSE_TIMEOUT_MS),
+            max_drafts: integer(raw.get("maxDrafts")).unwrap_or(DEFAULT_MAX_DRAFTS),
         })
+    }
+
+    /// The schedule `interrupt`'s interval: a quarter of
+    /// `composeTimeoutMs`, at most 15 seconds.
+    pub fn interrupt_every_ms(&self) -> i64 {
+        (self.compose_timeout_ms / 4).min(MAX_INTERRUPT_EVERY_MS)
     }
 }
 
@@ -110,7 +144,7 @@ impl CommentsConfig {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Comments;
 
-// The `threads` field: the posted top-level messages, open and resolved.
+// The `threads` field: the standing top-level messages, open and resolved.
 fn threads(view: &InstanceView<'_, CommentsConfig>) -> Result<Option<Value>> {
     let found = conversation(view)?.unwrap_or_default();
     Ok(Some(checks::object(vec![
@@ -153,6 +187,12 @@ impl Behavior for Comments {
                 ("unpin", |_, cx, params| writes::unpin(cx, params)),
                 ("resolve", |_, cx, params| writes::resolve(cx, params)),
                 ("reopen", |_, cx, params| writes::reopen(cx, params)),
+                ("begin", |_, cx, params| drafts::begin(cx, params)),
+                ("appendDraft", |_, cx, params| {
+                    drafts::append_draft(cx, params)
+                }),
+                ("finish", |_, cx, params| drafts::finish(cx, params)),
+                ("interrupt", |_, cx, params| drafts::interrupt(cx, params)),
                 ("listMessages", |_, cx, params| {
                     reads::list_messages(cx, params)
                 }),
@@ -172,6 +212,14 @@ impl Behavior for Comments {
                         .map(Value::from))
                 }),
                 ("threads", |_, view| threads(view)),
+                ("composing", |_, view| {
+                    Ok(Some(Value::Array(
+                        storage::composing(view)?
+                            .into_iter()
+                            .map(Value::from)
+                            .collect(),
+                    )))
+                }),
             ],
             after_change: Some(|_, cx, change| {
                 if matches!(change, InstanceChange::Delete) {
@@ -179,6 +227,15 @@ impl Behavior for Comments {
                 }
                 Ok(())
             }),
+            schedules: vec![(
+                "interrupt",
+                Schedule {
+                    every: Every::Config(|_, config: &CommentsConfig| {
+                        Ok(Some(config.interrupt_every_ms()))
+                    }),
+                    run: |_, cx| drafts::interrupt_idle(cx),
+                },
+            )],
             ..Hooks::default()
         }
     }

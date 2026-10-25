@@ -4,7 +4,10 @@
 //! details; and the checks the operations share, in the order their tables
 //! list them.
 
+use std::sync::LazyLock;
+
 use serde_json::{json, Map, Value};
+use superschematic_schema_ir::ajv::AjvSchema;
 
 use superschematic_engine::behaviors::InstanceView;
 use superschematic_engine::errors::{SchemaIssue, Veto};
@@ -19,6 +22,21 @@ pub(super) const MAX_ACTION_DATA: usize = 8192;
 pub(super) const MAX_EDITS: i64 = 500;
 /// The most distinct emoji a message holds reactions with.
 pub(super) const MAX_EMOJI: i64 = 20;
+/// The most bytes an appendDraft's `text` takes written as a JSON string,
+/// its quotes included, so its draft signal fits a signal's 4096 bytes.
+pub(super) const MAX_APPEND_BYTES: usize = 4000;
+
+// The pattern post's body declares: a text has text when it matches.
+static HAS_TEXT: LazyLock<AjvSchema> = LazyLock::new(|| {
+    AjvSchema::compile(&json!({"type": "string", "pattern": "\\S"}))
+        .expect("the pattern \\S compiles")
+});
+
+/// Whether a text has text: it holds a code point that is not white space,
+/// decided as the engine decides post's body pattern `\S`.
+pub(super) fn has_text(text: &str) -> bool {
+    HAS_TEXT.is_valid(&Value::from(text))
+}
 
 /// A veto of one of Comments' operations, with its code and details.
 pub(super) fn veto<C>(
@@ -106,6 +124,44 @@ pub(super) fn deleted<C>(view: &InstanceView<'_, C>, operation: &str, id: i64) -
         "deleted",
         format!("message {id} of {} {} is deleted", view.schema(), view.id()),
         json!({ "message": id }),
+    )
+}
+
+/// `composing` for a composing message an operation names, or a post's or
+/// a begin's thread or quotes.
+pub(super) fn composing<C>(view: &InstanceView<'_, C>, operation: &str, id: i64) -> Error {
+    veto(
+        view,
+        operation,
+        "composing",
+        format!(
+            "message {id} of {} {} is composing: it is being written, and stands once finished",
+            view.schema(),
+            view.id()
+        ),
+        json!({ "message": id }),
+    )
+}
+
+/// `not_composing` for an appendDraft, finish or interrupt of a message
+/// that is posted, interrupted or deleted.
+pub(super) fn not_composing<C>(
+    view: &InstanceView<'_, C>,
+    operation: &str,
+    message: &Message,
+) -> Error {
+    veto(
+        view,
+        operation,
+        "not_composing",
+        format!(
+            "message {} of {} {} is {}, not composing",
+            message.id,
+            view.schema(),
+            view.id(),
+            message.state
+        ),
+        json!({ "message": message.id, "state": message.state }),
     )
 }
 
