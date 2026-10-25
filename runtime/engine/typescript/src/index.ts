@@ -17,6 +17,8 @@ export { AsyncEngine, openEngineAsync } from './native/async.js';
 export type { DeployedSchema, DeployOptions, EngineHealth } from './native/async.js';
 export type { EngineOptions, PostgresOptions } from './native/options.js';
 export { UnsupportedError } from './native/errors.js';
+export { inProcess, runDeriver } from './client/deriver.js';
+export type { DerivationAnswer, DerivationItem, DerivationSource, DeriverOptions, SettleResult } from './client/deriver.js';
 export type { UnsupportedGap } from './native/errors.js';
 export type { SqliteConnection } from './native/sqlite.js';
 
@@ -171,7 +173,6 @@ export type {
   ConstantsConfig,
   DependenciesConfig,
   DependentRecord,
-  DerivationItem,
   DerivedConfig,
   DerivedField,
   EvidenceRecord,

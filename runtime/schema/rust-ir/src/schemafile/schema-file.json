@@ -3285,6 +3285,10 @@
           "default": "",
           "type": "string"
         },
+        "deriver": {
+          "default": "",
+          "type": "string"
+        },
         "job": {
           "default": "",
           "type": "string"
@@ -3353,6 +3357,37 @@
       ],
       "type": "object"
     },
+    "Deriver": {
+      "additionalProperties": false,
+      "properties": {
+        "batchSize": {
+          "default": 0,
+          "type": "integer"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "concurrency": {
+          "default": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schemas": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "DisplayCurrency": {
       "additionalProperties": false,
       "description": "A field of the same type that holds the currency of an amount: a Finance.Currency, or text.",
@@ -3403,6 +3438,13 @@
         "comment": {
           "default": "",
           "type": "string"
+        },
+        "derivers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Deriver"
+          },
+          "type": "array"
         },
         "description": {
           "default": "",

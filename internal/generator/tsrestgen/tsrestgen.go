@@ -294,6 +294,10 @@ type APIOutput struct {
 	// scaffold createJobs and createWorkers.
 	Jobs    []JobInfo
 	Workers []WorkerInfo
+	// Derivers are the API's derivers (D74), sorted by name: deps.ts
+	// declares the Derivers interface, and the scaffold createDerivers.
+	// The dispatch layer sets them with SetDerivers.
+	Derivers []DeriverInfo
 	// HasEnvConfig reports whether the package's config.ts declares
 	// EnvConfig and loadEnvConfig, which Deps.config holds. The dispatch
 	// layer writes config.ts (envgen) and sets it.

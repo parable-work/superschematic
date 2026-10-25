@@ -1,0 +1,12 @@
+# A Rust API over triage-db that declares two derivers (D74): TriageTickets,
+# which fills Ticket's derived fields eight at a time, and FillAll, which
+# names no schema and so fills every type of triage-db that composes
+# Derived.
+name: triage-rs-api
+kind: API
+dependencies:
+  - { name: triage-db, kind: DB }
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

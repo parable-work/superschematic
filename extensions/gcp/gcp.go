@@ -43,13 +43,15 @@ const (
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
 	// CloudRunWorker runs workers as Cloud Run worker pools (D53);
 	// CloudRunRunner runs an engine's runner as a Cloud Run worker pool of
-	// one instance (D58); CloudSQL runs Postgres databases on Cloud SQL
-	// instances.
-	CloudRun       = "gcp.cloudrun"
-	CloudRunJob    = "gcp.cloudrunjob"
-	CloudRunWorker = "gcp.cloudrunworker"
-	CloudRunRunner = "gcp.cloudrunrunner"
-	CloudSQL       = "gcp.cloudsql"
+	// one instance (D58); CloudRunDeriver runs a deriver as a Cloud Run
+	// worker pool of one instance (D74); CloudSQL runs Postgres databases
+	// on Cloud SQL instances.
+	CloudRun        = "gcp.cloudrun"
+	CloudRunJob     = "gcp.cloudrunjob"
+	CloudRunWorker  = "gcp.cloudrunworker"
+	CloudRunRunner  = "gcp.cloudrunrunner"
+	CloudRunDeriver = "gcp.cloudrunderiver"
+	CloudSQL        = "gcp.cloudsql"
 
 	// Site serves a static site's files from a Cloud Storage bucket,
 	// through a load balancer with Cloud CDN (D55).
@@ -92,6 +94,13 @@ const (
 	// RunnerSQLConnector connects an engine's runner's worker pool to its
 	// engine database on Cloud SQL, its one edge (D58).
 	RunnerSQLConnector = "gcp.cloudrunrunner-cloudsql"
+
+	// DeriverSQLConnector, DeriverHTTPConnector and DeriverBucketConnector
+	// connect a deriver's worker pool, whose edges are its API's, as a
+	// worker's connectors do (D74).
+	DeriverSQLConnector    = "gcp.cloudrunderiver-cloudsql"
+	DeriverHTTPConnector   = "gcp.cloudrunderiver-cloudrun"
+	DeriverBucketConnector = "gcp.cloudrunderiver-storage"
 
 	// Provisioner is the provisioner the target names. The pulumi
 	// extension registers it.
@@ -198,6 +207,17 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerRunner,
 		},
 		{
+			Name:      CloudRunDeriver,
+			Extension: Name,
+			Kind:      ir.DeployableDeriver,
+			// In its API's language, TypeScript or Rust (D74).
+			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			Settings:  json.RawMessage(cloudRunWorkerSettings),
+			NameOf:    serviceName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerDeriver,
+		},
+		{
 			Name:      CloudSQL,
 			Extension: Name,
 			Kind:      ir.DeployableDatabase,
@@ -244,6 +264,9 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunWorker, To: CloudRun, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunWorker, To: Storage, Connect: connectBucket},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunRunner, To: CloudSQL, Connect: connectSQL},
+		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunDeriver, To: CloudSQL, Connect: connectSQL},
+		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunDeriver, To: CloudRun, Connect: connectHTTP},
+		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunDeriver, To: Storage, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -269,6 +292,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableBucket:   Storage,
 			ir.DeployableWorker:   CloudRunWorker,
 			ir.DeployableRunner:   CloudRunRunner,
+			ir.DeployableDeriver:  CloudRunDeriver,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           CloudDNS,

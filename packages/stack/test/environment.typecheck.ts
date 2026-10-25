@@ -50,6 +50,9 @@ const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ n
 // An API with @worker classes and no @job class, whose workers the
 // sentinel writes as the fourth type argument, with the jobs never.
 const ShopFulfilment = service<"API", ShopApiConfig, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
+// An API with @deriver classes and no @job or @worker class, whose
+// derivers the sentinel writes as the fifth type argument (D74).
+const ShopSupport = service<"API", ShopApiConfig, never, never, "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });
 
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
@@ -350,6 +353,40 @@ export abstract class WorkerSettings {}
   settings: [{ of: ShopFulfilment, worker: "FulfilOrders", concurrency: 2 }],
 })
 export abstract class LocalWorker {}
+
+// A deriver's element names its API's handle and the deriver's class; it
+// turns the deriver on or off, runs one instance or none, sets how many
+// answers it runs at a time, and takes an env of its API's config (D74).
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [
+    { of: ShopSupport, deriver: "TriageTickets", instances: 1, concurrency: 8, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, deriver: "Anything", enabled: false },
+  ],
+})
+export abstract class DeriverSettings {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a deriver the API does not declare
+  settings: [{ of: ShopSupport, deriver: "TriageTicket" }],
+})
+export abstract class UnknownDeriver {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a deriver runs one instance or none
+  settings: [{ of: ShopSupport, deriver: "TriageTickets", instances: 2 }],
+})
+export abstract class TwoDerivers {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a schedule is a job's setting, not a deriver's
+  settings: [{ of: ShopSupport, deriver: "TriageTickets", schedule: "0 * * * *" }],
+})
+export abstract class ScheduleOnDeriver {}
 
 @environment({
   target: "fake",

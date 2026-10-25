@@ -143,10 +143,12 @@ type resolver struct {
 	deployables map[string]*deployable
 	// byService maps a member service to the deployable that hosts or
 	// serves it; byJob maps a job, `<api>/<job>`, to its deployable, and
-	// byWorker a worker, `<api>/<worker>` (D53).
+	// byWorker a worker, `<api>/<worker>` (D53), and byDeriver a deriver,
+	// `<api>/<deriver>` (D74).
 	byService map[string]string
 	byJob     map[string]string
 	byWorker  map[string]string
+	byDeriver map[string]string
 	edges     map[string]*edge
 
 	// produced are the resources producers returned, in order.
@@ -172,6 +174,8 @@ type deployable struct {
 	job *ir.Job
 	// worker is a worker's declaration, nil for every other kind (D53).
 	worker *ir.Worker
+	// deriver is a deriver's declaration, nil for every other kind (D74).
+	deriver *ir.Deriver
 }
 
 // settings are a deployable's settings merged over the environment chain.
@@ -195,7 +199,8 @@ type settings struct {
 	// instances, maxInstances and concurrency are a worker's, with
 	// enabled: what the environment chain sets, the later over the
 	// earlier. workerFrom names the environment that set each (D53). An
-	// engine's runner takes enabled alone (D58).
+	// engine's runner takes enabled alone (D58). A deriver takes enabled,
+	// instances and concurrency (D74).
 	instances, maxInstances, concurrency *int
 	workerFrom                           map[string]string
 }
@@ -230,6 +235,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.declareDeployables()
 	r.defaultDeployables()
 	r.defaultWorkers()
+	r.defaultDerivers()
 	r.defaultRunners()
 	r.applySettings()
 	r.place()
@@ -239,6 +245,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
+	r.runDerivers()
 	r.runRunners()
 	if r.failed() {
 		return nil
@@ -654,6 +661,8 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 		return nil, false
 	case ref.Runner:
 		return r.resolveRunnerRef(where, ref)
+	case ref.Deriver != "":
+		return r.resolveDeriverRef(where, ref)
 	case ref.Worker != "":
 		return r.resolveWorkerRef(where, ref)
 	case ref.Job != "" && ref.Service == nil:
@@ -741,7 +750,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
+			if r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
@@ -784,7 +793,7 @@ func (r *resolver) applySettings() {
 // sets on the server reaches the job too. A key the server takes for
 // another API it serves is left out of the job's fields when they are
 // bound, not refused. A worker takes its API's server's env as a job does
-// (D53).
+// (D53), and so does a deriver (D74).
 func (r *resolver) inheritServerEnv() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -794,6 +803,8 @@ func (r *resolver) inheritServerEnv() {
 			api = d.res.Job.API
 		case d.res.Kind == ir.DeployableWorker && d.res.Worker != nil:
 			api = d.res.Worker.API
+		case d.res.Kind == ir.DeployableDeriver && d.res.Deriver != nil:
+			api = d.res.Deriver.API
 		default:
 			continue
 		}
@@ -908,7 +919,7 @@ func (r *resolver) place() {
 		res.Platform = platformName
 		d.platform = platform
 		switch res.Kind {
-		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver:
 			r.placeServer(d)
 		case ir.DeployableRunner:
 			r.placeRunner(d)
@@ -941,6 +952,9 @@ func (r *resolver) placeServer(d *deployable) {
 		return
 	}
 	d.res.Language = lang
+	if d.res.Kind == ir.DeployableDeriver && lang == registry.APILanguageGo {
+		return // runDerivers refuses a Go API's deriver, whatever its platform runs
+	}
 	if !slices.Contains(d.platform.Languages, d.res.Language) {
 		msg := fmt.Sprintf("%s %s is a %s %s, and platform %s runs only %s", d.res.Kind, d.res.Name, d.res.Language, d.res.Kind, d.platform.Name, strings.Join(d.platform.Languages, ", "))
 		if scope := unbuiltDeployable(d.res.Kind, d.res.Language); scope != "" {
@@ -1287,6 +1301,11 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	if d.Runner != nil {
 		runner := *d.Runner
 		c.Runner = &runner
+	}
+	if d.Deriver != nil {
+		deriver := *d.Deriver
+		deriver.Schemas = slices.Clone(d.Deriver.Schemas)
+		c.Deriver = &deriver
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))

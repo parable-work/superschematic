@@ -247,6 +247,11 @@ func (o *APIOutput) HasWorkers() bool { return o.Deps != nil && len(o.Workers) >
 // BoxError, the error their methods return.
 func (o *APIOutput) HasBackgroundWork() bool { return o.HasJobs() || o.HasWorkers() }
 
+// HasTraits reports whether deps.rs declares a trait an implementation
+// implements beside a namespace's, whose methods fail with BoxError: Jobs,
+// Workers or a deriver's (D74).
+func (o *APIOutput) HasTraits() bool { return o.HasBackgroundWork() || o.HasDerivers() }
+
 // The functions an implementation of an API with jobs or workers declares
 // in its src/lib.rs, which a job's and a worker's entrypoint call with the
 // API's Deps (D65).
@@ -283,7 +288,7 @@ func (o *APIOutput) ManualSignature(endpoint EndpointInfo) string {
 // Handlers, and Jobs, Workers and BoxError for an API with either.
 func (o *APIOutput) DepsExports() string {
 	names := []string{"Deps", "Handlers"}
-	if o.HasBackgroundWork() {
+	if o.HasTraits() {
 		names = append(names, "BoxError")
 	}
 	if o.HasJobs() {
@@ -292,6 +297,7 @@ func (o *APIOutput) DepsExports() string {
 	if o.HasWorkers() {
 		names = append(names, "Workers")
 	}
+	names = append(names, o.DeriverExports()...)
 	return strings.TrimPrefix(rustutil.UseLine("deps", names), "use ")
 }
 
@@ -299,7 +305,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types for an API with workers, nil without one or when the crate
 // depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if !o.HasWorkers() || o.Deps.DatabaseTypesCrate == "" {
+	if (!o.HasWorkers() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -332,6 +338,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	}
 	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
+	}
+	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {
+		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
 	}
 	o.Deps = &deps
 	return nil
@@ -386,11 +395,18 @@ func (o *APIOutput) DepsUses() []string {
 	if len(o.WebhookProviders) > 0 {
 		interfaces = append(interfaces, "WebhookVerifier")
 	}
+	if o.HasDerivers() {
+		// The database's types, which type the derivers' methods (D74).
+		uses = append(uses, "use crate::"+DatabaseTypesModule+";")
+	}
 	uses = append(uses, rustutil.UseLine("crate::interfaces", interfaces))
-	if o.HasBackgroundWork() {
-		// The Jobs and Workers traits, after crate's paths, as rustfmt
-		// orders them.
+	if o.HasTraits() {
+		// The Jobs, Workers and derivers' traits, after crate's paths, as
+		// rustfmt orders them.
 		uses = append(uses, "use async_trait::async_trait;")
+	}
+	if o.HasDerivers() {
+		uses = append(uses, "use serde::{Deserialize, Serialize};")
 	}
 	var runtime []string
 	if o.Deps != nil && len(o.Deps.Buckets) > 0 {
@@ -411,8 +427,19 @@ func (o *APIOutput) DepsUses() []string {
 	if o.HasJobs() {
 		runtime = append(runtime, "Shutdown")
 	}
+	engine := ""
+	if o.HasDerivers() {
+		engine = rustutil.UseLine(o.Deps.Engine.CrateIdent()+"::derive", []string{"DerivationAnswer", "DerivationItem"})
+	}
+	if engine != "" && o.Deps.Engine.CrateIdent() < o.RuntimeCrateIdent {
+		uses = append(uses, engine)
+		engine = ""
+	}
 	if len(runtime) > 0 {
 		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
+	}
+	if engine != "" {
+		uses = append(uses, engine)
 	}
 	return uses
 }
@@ -533,7 +560,7 @@ func (s ImplementationScaffold) APIUse() string {
 			names = append(names, endpoint.ArgsName)
 		}
 	}
-	if s.HasBackgroundWork() {
+	if s.HasTraits() {
 		names = append(names, "BoxError")
 	}
 	if s.HasJobs() {
@@ -541,6 +568,18 @@ func (s ImplementationScaffold) APIUse() string {
 	}
 	if s.HasWorkers() {
 		names = append(names, "Workers", DatabaseTypesModule)
+	}
+	if s.HasDerivers() {
+		if !s.HasWorkers() {
+			names = append(names, DatabaseTypesModule)
+		}
+		names = append(names, "DerivedAnswer", "DerivedItem", "Derivers")
+		for _, d := range s.Derivers {
+			names = append(names, d.Trait)
+		}
+		for _, m := range s.DerivedInputs() {
+			names = append(names, m.Inputs)
+		}
 	}
 	if len(s.ManualEndpoints) > 0 {
 		names = append(names, "ManualRoutes")
@@ -589,7 +628,7 @@ func (s ImplementationScaffold) ManualMethodSignature(endpoint EndpointInfo) str
 // #[async_trait] and hold their deps in an Arc: a namespace's, the
 // authenticator's, Jobs, Workers or ManualRoutes.
 func (s ImplementationScaffold) Async() bool {
-	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasBackgroundWork() || len(s.ManualEndpoints) > 0
+	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasTraits() || len(s.ManualEndpoints) > 0
 }
 
 // RuntimeUse is the use declaration of what the implementation names from

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -532,5 +533,32 @@ export const db: ServiceHandle<"DB"> = ShopApi;
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("the typed sentinel does not type-check: %v\n%s", err, out)
+	}
+}
+
+// TestHandleContentTypesAnAPIsDerivers: an API's derivers are the fifth
+// type argument, beside its jobs and its workers or never (D74), and a
+// written sentinel reads back to the types it was written with.
+func TestHandleContentTypesAnAPIsDerivers(t *testing.T) {
+	got := HandleContent("shop-support", ir.SchemaKindAPI, naming.Default(), HandleTypes{Derivers: []string{"FillAll", "TriageTickets"}})
+	if want := `export const ShopSupport = service<"API", unknown, never, never, "FillAll" | "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });`; !strings.Contains(got, want) {
+		t.Errorf("HandleContent = %s, want %s", got, want)
+	}
+	types := HandleTypes{Jobs: []string{"Reindex"}, Workers: []string{"FulfilOrders"}, Derivers: []string{"TriageTickets"}}
+	got = HandleContent("shop-support", ir.SchemaKindAPI, naming.Default(), types)
+	if want := `service<"API", unknown, "Reindex", "FulfilOrders", "TriageTickets">`; !strings.Contains(got, want) {
+		t.Errorf("HandleContent = %s, want %s", got, want)
+	}
+	path := filepath.Join(t.TempDir(), "service.generated.ts")
+	if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if read := writtenTypes(path); !reflect.DeepEqual(read, types) {
+		t.Errorf("writtenTypes = %+v, want %+v", read, types)
+	}
+	schema := ir.NewSchema("shop-support", ir.SchemaKindAPI)
+	schema.Derivers = []*ir.Deriver{{Name: "TriageTickets"}, {Name: "FillAll"}}
+	if got := DeriversOf(schema); strings.Join(got, ",") != "FillAll,TriageTickets" {
+		t.Errorf("DeriversOf = %v, want them sorted", got)
 	}
 }

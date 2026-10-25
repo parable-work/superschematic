@@ -1084,6 +1084,244 @@ func PersonFromYAMLNonStrict(data []byte) (*Person, error) {
 	return decoded, nil
 }
 
+// Request - A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
+type Request struct {
+	Subject string `json:"subject"`
+
+	Body string `json:"body,omitempty"`
+
+	Category string `json:"category,omitempty"`
+
+	Summary string `json:"summary,omitempty"`
+}
+
+// MaskSecrets returns a copy of Request with secret fields cleared.
+func (t *Request) MaskSecrets() *Request {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Request{}
+
+	masked.Subject = t.Subject
+
+	masked.Body = t.Body
+
+	masked.Category = t.Category
+
+	masked.Summary = t.Summary
+
+	return masked
+}
+
+// JSONFieldNames are the keys Request's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Request) JSONFieldNames() []string {
+	return []string{"subject", "body", "category", "summary"}
+}
+
+// Validate validates all fields in Request
+func (t *Request) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	return errors
+}
+
+// MarshalJSON marshals Request to JSON
+func (t *Request) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Request
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals Request from JSON with validation
+func (t *Request) UnmarshalJSON(data []byte) error {
+	type Alias Request
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Request into a map representation.
+func (t *Request) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Request to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Request to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Request from a map using lenient decoding.
+func (t *Request) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Request from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Request from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Request from a map and rejects unknown fields.
+func (t *Request) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Request from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Request from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Request from JSON and rejects unknown fields.
+func (t *Request) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Request from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Request from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Request from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Request from JSON using lenient decoding.
+func (t *Request) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Request from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Request from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Request from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Request from YAML and rejects unknown fields.
+func (t *Request) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Request from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Request from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Request from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Request from YAML using lenient decoding.
+func (t *Request) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Request from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Request from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Request from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RequestFromMap builds Request from a map using lenient decoding.
+func RequestFromMap(value map[string]any) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RequestFromMapStrict builds Request from a map and rejects unknown fields.
+func RequestFromMapStrict(value map[string]any) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RequestFromJSON builds Request from JSON and rejects unknown fields.
+func RequestFromJSON(data []byte) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RequestFromJSONNonStrict builds Request from JSON using lenient decoding.
+func RequestFromJSONNonStrict(data []byte) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RequestFromYAML builds Request from YAML and rejects unknown fields.
+func RequestFromYAML(data []byte) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RequestFromYAMLNonStrict builds Request from YAML using lenient decoding.
+func RequestFromYAMLNonStrict(data []byte) (*Request, error) {
+	decoded := &Request{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Ticket - A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
 type Ticket struct {
 	Title string `json:"title"`

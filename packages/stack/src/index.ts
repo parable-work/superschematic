@@ -30,7 +30,8 @@ export interface Targets {
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container and of its storage emulator
  * (D54), a server's and a site's settings its port, and a database, a job,
- * a worker, a bucket and an engine's runner (D58) take no settings. A port
+ * a worker, a bucket, an engine's runner (D58) and a deriver (D74) take no
+ * settings. A port
  * left out is derived from the stack, the environment and the deployable.
  */
 export interface LocalTarget {
@@ -47,13 +48,15 @@ export interface LocalTarget {
   worker: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   runner: {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  deriver: {};
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -213,6 +216,32 @@ type RunnerElementOf<T, Of> =
     ? { readonly of: Of; readonly runner: true; readonly platform?: string } & RunnerRun & SettingsOf<T, "runner">
     : never;
 
+/**
+ * How a deriver runs in an environment (D74): whether its one instance
+ * runs, and how many answers it runs at a time. A deriver that is off runs
+ * no instance, and its fields stay stale until it is on again.
+ */
+export type DeriverRun = {
+  /** How many instances run: one unless set, or zero. */
+  readonly instances?: 0 | 1;
+  /** How many answers an instance runs at a time; the `@deriver` concurrency unless set. */
+  readonly concurrency?: number;
+  /** Turns the deriver on or off. */
+  readonly enabled?: boolean;
+};
+
+/**
+ * What a deriver's settings element is: its API's handle in `of` and the
+ * deriver's class name in `deriver`, which the handle's derivers type, how
+ * it runs, the target's deriver settings, and an env of the API's config,
+ * over what the API's server is given.
+ */
+type DeriverElementOf<T, Of> =
+  Of extends ServiceHandle<"API", infer C, string, string, infer D>
+    ? { readonly of: Of; readonly deriver: D; readonly platform?: string; readonly env?: EnvOf<C> } & DeriverRun &
+        SettingsOf<T, "deriver">
+    : never;
+
 /** Every key of W, or of any member when W is a union. */
 type KeysOf<W> = W extends unknown ? keyof W : never;
 
@@ -223,9 +252,9 @@ type Exact<W, E> = W & { readonly [K in Exclude<keyof E, KeysOf<W>>]: never };
 type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<unknown>;
 
 /**
- * One settings element checked: its `of` picks the settings type, a `job`
- * or a `worker` beside an API's handle makes it the element of that job or
- * worker, and `runner: true` beside a DB's handle that of the engine's
+ * One settings element checked: its `of` picks the settings type, a `job`,
+ * a `worker` or a `deriver` beside an API's handle makes it the element of
+ * that job, worker or deriver, and `runner: true` beside a DB's handle that of the engine's
  * runner of the database; its env is the config's fields, and a key none
  * takes is refused. An element that names a platform, which may be another
  * target's, takes any settings key; the loader checks it against that
@@ -237,9 +266,11 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
         ? JobElementOf<E extends { readonly platform: string } ? undefined : T, Of>
         : E extends { readonly worker: unknown }
           ? WorkerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-          : E extends { readonly runner: unknown }
-            ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-            : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+          : E extends { readonly deriver: unknown }
+            ? DeriverElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+            : E extends { readonly runner: unknown }
+              ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+              : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
@@ -253,7 +284,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker` or `runner: true` beside a handle for a job, a worker or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker`, `deriver` or `runner: true` beside a handle for a job, a worker, a deriver or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];

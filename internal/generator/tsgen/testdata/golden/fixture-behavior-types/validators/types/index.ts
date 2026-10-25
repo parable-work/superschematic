@@ -3,5 +3,6 @@ export * from './batch';
 export * from './job';
 export * from './note';
 export * from './person';
+export * from './request';
 export * from './ticket';
 export * from './worker';

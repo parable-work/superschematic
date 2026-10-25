@@ -63,7 +63,7 @@ export interface TelemetryDefaults {
   /** The stack's name, service.namespace. */
   readonly stack?: string;
   /** The deployable's kind. */
-  readonly kind?: 'server' | 'job' | 'worker';
+  readonly kind?: 'server' | 'job' | 'worker' | 'deriver';
   /** Logs that export is on and what the SDK reports, such as an export that failed. */
   readonly logger?: Logger;
 }

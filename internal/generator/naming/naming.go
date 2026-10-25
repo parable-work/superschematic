@@ -1064,6 +1064,13 @@ func (n Naming) RustWorkerCrate(stack, worker string) string {
 	return strings.TrimSuffix(n.RustServerCrate(stack, worker), "-server") + "-worker"
 }
 
+// RustDeriverCrate returns the crate name of the entrypoint of a Rust
+// deriver of a stack (D74), as RustJobCrate names a job's, with the suffix
+// -deriver.
+func (n Naming) RustDeriverCrate(stack, deriver string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, deriver), "-server") + "-deriver"
+}
+
 // RustRunnerCrate returns the crate name of the entrypoint of a Rust
 // engine's runner of a stack (D58), as RustJobCrate names a job's, without
 // a suffix: a runner's deployable, <db>-engine-runner, names it.

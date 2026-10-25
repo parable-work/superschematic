@@ -5,6 +5,7 @@
 // operations and veto codes, as their configs narrow them.
 //
 // Schema Project: ProjectClient, projectClient.
+// Schema Request: RequestClient, requestClient.
 // Schema Spec: SpecClient, specClient.
 // Schema Task: TaskClient, taskClient.
 
@@ -136,6 +137,382 @@ export function projectClient(client: EngineClient): ProjectClient {
     },
     transition(id, params, options) {
       return client.instances.invoke<ProjectTransitionResult>('Project', id, 'transition', params, options);
+    },
+  };
+}
+
+// The Request schema.
+
+/** A Request's own fields, as a create gives them. A request whose category and summary a model fills (D73): a model outside the engine fills its category and summary from its subject and body, while it is new or in triage; a category under 0.8 confidence waits in review, and the request moves to assigned only once its category is reviewed. */
+export type RequestFields = {
+  subject: string;
+  body?: string | null;
+  category?: string | null;
+  summary?: string | null;
+};
+
+/** A Request's data as a read returns it: its own fields. Its behaviors' fields are in RequestBehaviors. */
+export type Request = RequestFields;
+
+/** The fields of a Request's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type RequestBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: RequestState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
+  };
+  readonly Derived: {
+    /** The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent. */
+    readonly fields: {
+      category?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+      summary?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+    };
+    /** The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. */
+    readonly stale: Array<'category' | 'summary'>;
+  };
+  readonly Provenance: {
+    /** By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    readonly fields: {
+      body?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      category?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      subject?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      summary?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+    };
+    /** Whether any recorded field is proposed. A list filters on it. */
+    readonly inReview: boolean;
+  };
+};
+
+/** A merge patch of a Request's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
+export type RequestPatch = {
+  subject?: string;
+  body?: string | null;
+  category?: string | null;
+  summary?: string | null;
+};
+
+/** A state of a Request's Workflow. */
+export type RequestState = 'new' | 'triage' | 'assigned';
+
+/** The parameters of Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+export type RequestTransitionParams = {
+  /** The state to move to. */
+  to: RequestState;
+};
+
+/** What Workflow's transition returns. */
+export type RequestTransitionResult = {
+  /** The state the instance was in. */
+  from: RequestState;
+  /** The state it is in now. */
+  to: RequestState;
+};
+
+/** The parameters of Derived's staleDerivations: Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission. */
+export type RequestStaleDerivationsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** Only this derived field. */
+  field?: 'category' | 'summary';
+  /** At most this many, 50 when absent. */
+  limit?: number;
+};
+
+/** What Derived's staleDerivations returns. */
+export type RequestStaleDerivationsResult = {
+  items: Array<{
+    /** Which attempt this is, from 1. */
+    attempt: number;
+    field: string;
+    id: string;
+    /** The inputs that hold a value, by field name. */
+    inputs: JSONObject;
+    instruction: string;
+    model: string;
+    /** The derived field's JSON Schema: what the value must be. */
+    output: JSONObject | boolean;
+    /** The hash of the inputs, instruction, model and output, which a settle presents. */
+    sourceHash: string;
+  }>;
+  /** The cursor of the next page; null on the last. */
+  next: string | null;
+};
+
+/** The parameters of Derived's settleDerivations: Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission. */
+export type RequestSettleDerivationsParams = {
+  items: Array<{
+    /** How sure the model is, from 0 to 1. */
+    confidence?: number;
+    /** Why no value came back. */
+    failure?: { class?: string; message: string };
+    field: string;
+    id: string;
+    sourceHash: string;
+    /** What the call cost, kept in the event's parameters for reports. */
+    usage?: {
+      costMicros?: number;
+      inputTokens?: number;
+      modelId?: string;
+      outputTokens?: number;
+    };
+    /** The value, which the derived field's type must accept. */
+    value?: unknown;
+  }>;
+};
+
+/** What Derived's settleDerivations returns. */
+export type RequestSettleDerivationsResult = {
+  /** How many failures were counted. */
+  failed: number;
+  /** How many values were written. */
+  settled: number;
+  skipped: Array<{
+    /** For vetoed, the behavior that vetoed. */
+    behavior?: string;
+    /** For vetoed, its veto code. */
+    code?: string;
+    field: string;
+    id: string;
+    /** For invalid, what the type refuses. */
+    issues?: unknown[];
+    /** not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed. */
+    reason: string;
+  }>;
+};
+
+/** The parameters of Derived's failedDerivations: Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission. */
+export type RequestFailedDerivationsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** At most this many, 50 when absent. */
+  limit?: number;
+};
+
+/** What Derived's failedDerivations returns. */
+export type RequestFailedDerivationsResult = {
+  items: Array<{ attempts: number; failure?: JSONObject; field: string; id: string }>;
+  next: string | null;
+};
+
+/** The parameters of Derived's applyDerived: Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it. */
+export type RequestApplyDerivedParams = {
+  fields: {
+    category?: {
+      confidence?: number;
+      sourceHash: string;
+      usage?: JSONObject;
+      value: NonNullable<RequestFields["category"]>;
+    };
+    summary?: {
+      confidence?: number;
+      sourceHash: string;
+      usage?: JSONObject;
+      value: NonNullable<RequestFields["summary"]>;
+    };
+  };
+};
+
+/** What Derived's applyDerived returns. */
+export type RequestApplyDerivedResult = {
+  /** The fields written, in the order given. */
+  settled: Array<'category' | 'summary'>;
+};
+
+/** The parameters of Derived's rederive: Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle. */
+export type RequestRederiveParams = { fields?: Array<'category' | 'summary'> };
+
+/** What Derived's rederive returns. */
+export type RequestRederiveResult = {
+  /** The derived fields stale after it. */
+  stale: Array<'category' | 'summary'>;
+};
+
+/** The parameters of Provenance's accept: Accepts proposed fields as they are, as the caller. Needs the review's permission. */
+export type RequestAcceptParams = { fields: Array<'body' | 'category' | 'subject' | 'summary'> };
+
+/** What Provenance's accept returns. */
+export type RequestAcceptResult = {
+  accepted: Array<'body' | 'category' | 'subject' | 'summary'>;
+  inReview: boolean;
+};
+
+/** The parameters of Provenance's reject: Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission. */
+export type RequestRejectParams = {
+  fields: Array<'body' | 'category' | 'subject' | 'summary'>;
+  /** Replacement values, by field of fields; a field it leaves out is cleared. */
+  patch?: Partial<Pick<RequestFields, "body" | "category" | "subject" | "summary">>;
+};
+
+/** What Provenance's reject returns. */
+export type RequestRejectResult = {
+  inReview: boolean;
+  rejected: Array<'body' | 'category' | 'subject' | 'summary'>;
+};
+
+/** Each operation a Request's behaviors add: its scope, parameters and result. */
+export type RequestOperations = {
+  transition: { scope: 'instance'; params: RequestTransitionParams; result: RequestTransitionResult };
+  staleDerivations: { scope: 'schema'; params: RequestStaleDerivationsParams; result: RequestStaleDerivationsResult };
+  settleDerivations: { scope: 'schema'; params: RequestSettleDerivationsParams; result: RequestSettleDerivationsResult };
+  failedDerivations: { scope: 'schema'; params: RequestFailedDerivationsParams; result: RequestFailedDerivationsResult };
+  applyDerived: { scope: 'instance'; params: RequestApplyDerivedParams; result: RequestApplyDerivedResult };
+  rederive: { scope: 'instance'; params: RequestRederiveParams; result: RequestRederiveResult };
+  accept: { scope: 'instance'; params: RequestAcceptParams; result: RequestAcceptResult };
+  reject: { scope: 'instance'; params: RequestRejectParams; result: RequestRejectResult };
+};
+
+/** The name of an operation on one Request. */
+export type RequestInstanceOperation = 'transition' | 'applyDerived' | 'rederive' | 'accept' | 'reject';
+
+/** The codes the vetoes of a Request's behaviors carry, by behavior: what a refused call's details.code holds. */
+export type RequestVetoes = {
+  Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
+  Derived: 'not_derived' | 'moved' | 'out_of_state' | 'overridden';
+  Provenance: 'not_recorded' | 'not_in_review' | 'unreviewed_fields';
+};
+
+/** A Request create's options: its id, and each behavior's create parameters. */
+export type RequestCreateOptions = Omit<CreateOptions, 'behaviors'>;
+
+/** A Request write's options: the sequence it expects, and each behavior's preconditions. */
+export type RequestWriteOptions = Omit<WriteOptions, 'preconditions'>;
+
+/** isRequestVeto is isVeto with the behaviors of a Request and their codes. */
+export function isRequestVeto<B extends keyof RequestVetoes>(error: unknown, behavior?: B, codes?: RequestVetoes[B] | ReadonlyArray<RequestVetoes[B]>): error is EngineVeto {
+  return isVeto(error, behavior, codes);
+}
+
+/** The Request schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
+export interface RequestClient {
+  /** create stores a new Request, with its behaviors' create parameters. */
+  create(data: RequestFields, options?: RequestCreateOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** get reads a Request; one that does not exist is 404 not_found. */
+  get(id: string, options?: CallOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** list returns a page in creation order. */
+  list(options?: ListOptions): Promise<InstancePage<Request, RequestBehaviors>>;
+  /** update applies a merge patch of the own fields. */
+  update(id: string, patch: RequestPatch, options?: RequestWriteOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** delete removes a Request. */
+  delete(id: string, options?: RequestWriteOptions): Promise<void>;
+  /** operate calls an instance operation and returns its result with the instance's sequence after it. */
+  operate<K extends RequestInstanceOperation>(id: string, operation: K, params: RequestOperations[K]['params'], options?: RequestWriteOptions): Promise<OperationOutcome<RequestOperations[K]['result']>>;
+  /** Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+  transition(id: string, params: RequestTransitionParams, options?: RequestWriteOptions): Promise<RequestTransitionResult>;
+  /** Derived's staleDerivations: Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission. */
+  staleDerivations(params?: RequestStaleDerivationsParams, options?: CallOptions): Promise<RequestStaleDerivationsResult>;
+  /** Derived's settleDerivations: Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission. */
+  settleDerivations(params: RequestSettleDerivationsParams, options?: CallOptions): Promise<RequestSettleDerivationsResult>;
+  /** Derived's failedDerivations: Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission. */
+  failedDerivations(params?: RequestFailedDerivationsParams, options?: CallOptions): Promise<RequestFailedDerivationsResult>;
+  /** Derived's applyDerived: Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it. */
+  applyDerived(id: string, params: RequestApplyDerivedParams, options?: RequestWriteOptions): Promise<RequestApplyDerivedResult>;
+  /** Derived's rederive: Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle. */
+  rederive(id: string, params?: RequestRederiveParams, options?: RequestWriteOptions): Promise<RequestRederiveResult>;
+  /** Provenance's accept: Accepts proposed fields as they are, as the caller. Needs the review's permission. */
+  accept(id: string, params: RequestAcceptParams, options?: RequestWriteOptions): Promise<RequestAcceptResult>;
+  /** Provenance's reject: Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission. */
+  reject(id: string, params: RequestRejectParams, options?: RequestWriteOptions): Promise<RequestRejectResult>;
+}
+
+/** requestClient wraps an EngineClient with the Request schema's types. */
+export function requestClient(client: EngineClient): RequestClient {
+  return {
+    create(data, options) {
+      return client.instances.create<Request, RequestBehaviors>('Request', data, options);
+    },
+    get(id, options) {
+      return client.instances.get<Request, RequestBehaviors>('Request', id, options);
+    },
+    list(options) {
+      return client.instances.list<Request, RequestBehaviors>('Request', options);
+    },
+    update(id, patch, options) {
+      return client.instances.update<Request, RequestBehaviors>('Request', id, patch, options);
+    },
+    delete(id, options) {
+      return client.instances.delete('Request', id, options);
+    },
+    operate<K extends RequestInstanceOperation>(id: string, operation: K, params: RequestOperations[K]['params'], options?: RequestWriteOptions) {
+      return client.instances.operate<RequestOperations[K]['result']>('Request', id, operation, params, options);
+    },
+    transition(id, params, options) {
+      return client.instances.invoke<RequestTransitionResult>('Request', id, 'transition', params, options);
+    },
+    staleDerivations(params, options) {
+      return client.instances.invokeSchema<RequestStaleDerivationsResult>('Request', 'staleDerivations', params ?? {}, options);
+    },
+    settleDerivations(params, options) {
+      return client.instances.invokeSchema<RequestSettleDerivationsResult>('Request', 'settleDerivations', params, options);
+    },
+    failedDerivations(params, options) {
+      return client.instances.invokeSchema<RequestFailedDerivationsResult>('Request', 'failedDerivations', params ?? {}, options);
+    },
+    applyDerived(id, params, options) {
+      return client.instances.invoke<RequestApplyDerivedResult>('Request', id, 'applyDerived', params, options);
+    },
+    rederive(id, params, options) {
+      return client.instances.invoke<RequestRederiveResult>('Request', id, 'rederive', params ?? {}, options);
+    },
+    accept(id, params, options) {
+      return client.instances.invoke<RequestAcceptResult>('Request', id, 'accept', params, options);
+    },
+    reject(id, params, options) {
+      return client.instances.invoke<RequestRejectResult>('Request', id, 'reject', params, options);
     },
   };
 }

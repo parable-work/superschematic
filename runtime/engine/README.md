@@ -4187,7 +4187,20 @@ afterConfigChange hashes every instance again, drops a removed field's
 rows and every row when the behavior goes, and counts a value an
 instance already holds as overridden, by `existing`. Vetoes:
 `not_derived`, `moved`, `out_of_state`, `overridden`. The guide's
-"Derived" section has the operations' shapes.
+"Derived" section has the operations' shapes. A `Secret<T>` field is
+refused as an input (D74).
+
+The deriver's loop is the engine's own (D74): `runDeriver({ source,
+schemas, answer, batchSize?, concurrency?, idleMs?, signal? })` in
+`src/client/deriver.ts`, which the package and `/client` export, over
+`inProcess(engine, principal, { namespace? })` (an `Engine` or an
+`AsyncEngine`, whose commits wake it) or an `EngineClient`'s `instances`;
+and `derive::run_deriver(background, principal, schemas, answer, options,
+shutdown)` in the Rust engine's `background` feature, which calls the
+engine on the blocking pool and waits on the storage's notifier. Each
+pages a schema's stale fields, answers a page `concurrency` at a time,
+settles it in one call, and settles an answer that throws or panics as a
+failure. A stack's `@deriver` deployables run them.
 
 #### Provenance
 

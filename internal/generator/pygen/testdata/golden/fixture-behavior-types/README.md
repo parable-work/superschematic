@@ -50,6 +50,7 @@ if errors:
 - `BatchBehaviors`
 - `JobBehaviors`
 - `NoteBehaviors`
+- `RequestBehaviors`
 - `TicketBehaviors`
 - `WorkerBehaviors`
 

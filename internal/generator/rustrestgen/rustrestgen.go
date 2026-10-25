@@ -408,6 +408,10 @@ type APIOutput struct {
 	// Workers trait deps.rs declares, which handles one message of the
 	// worker's queue (D53, D65).
 	Workers []WorkerInfo
+	// Derivers are the API's derivers, sorted by name: a trait each in
+	// deps.rs, which the implementation's create_derivers builds with the
+	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
+	Derivers []DeriverInfo
 }
 
 // HasRateLimits reports whether a route the router mounts, a manual one

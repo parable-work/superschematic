@@ -141,7 +141,7 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
-	"job": "@superschematic/api", "worker": "@superschematic/api",
+	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api",
 	"paginated": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
@@ -225,6 +225,41 @@ func (e *emitter) emitDocument() {
 	for _, worker := range e.doc.Workers {
 		e.emitWorker(worker)
 	}
+	for _, deriver := range e.doc.Derivers {
+		e.emitDeriver(deriver)
+	}
+}
+
+// emitDeriver renders a deriver as the class the reader reads it from
+// (D74): `@deriver({ schemas: ["<type>", ...], ... })` on an abstract class
+// with no members, or `@deriver()` when it sets nothing. Each schema is the
+// name of an engine type of the API's database, which the schema does not
+// import.
+func (e *emitter) emitDeriver(deriver *ir.Deriver) {
+	if deriver == nil {
+		return
+	}
+	var parts []string
+	if len(deriver.Schemas) > 0 {
+		var schemas []string
+		for _, schema := range deriver.Schemas {
+			schemas = append(schemas, quote(schema))
+		}
+		parts = append(parts, "schemas: ["+strings.Join(schemas, ", ")+"]")
+	}
+	if deriver.Concurrency != 0 {
+		parts = append(parts, fmt.Sprintf("concurrency: %d", deriver.Concurrency))
+	}
+	if deriver.BatchSize != 0 {
+		parts = append(parts, fmt.Sprintf("batchSize: %d", deriver.BatchSize))
+	}
+	args := ""
+	if len(parts) > 0 {
+		args = objectLiteral(parts)
+	}
+	e.body.WriteString("\n")
+	e.comment("", deriver.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("deriver"), args, e.ident(deriver.Name, "deriver"))
 }
 
 // emitWorker renders a worker as the class the reader reads it from (D53):

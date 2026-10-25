@@ -41,6 +41,19 @@
 //!
 //! which a {{ if .HasJobs }}job's{{ if .HasWorkers }} or a {{ end }}{{ end }}{{ if .HasWorkers }}worker's{{ end }} entrypoint calls with the API's Deps.
 {{- end }}
+{{- if .HasDerivers }}
+//!
+//! It also declares a trait per deriver of {{ .SchemaName }}, with a method per
+//! derived field it fills, typed by the field through the database's Rust
+//! types, and `Derivers`, which holds one of each (D74). The
+//! implementation's crate declares
+//!
+//! ```ignore
+//! pub async fn create_derivers(deps: Deps) -> Result<Derivers, BoxError>
+//! ```
+//!
+//! which a deriver's entrypoint calls with the API's Deps.
+{{- end }}
 {{- $handlers := .HandlersFields }}
 {{ if .WebhookProviders }}
 use std::collections::HashMap;
@@ -143,10 +156,17 @@ impl Implementations {
         }
     }
 }
-{{- if .HasBackgroundWork }}
+{{- if .HasTraits }}
+{{- if .HasDerivers }}
+
+/// The error a job's, a worker's or a deriver's method fails with: any
+/// error, which fails the run, the message or the field. It is the HTTP
+/// runtime's.
+{{- else }}
 
 /// The error a job's or a worker's method fails with: any error, which
 /// fails the run or the message. It is the HTTP runtime's.
+{{- end }}
 pub use {{ .RuntimeCrateIdent }}::BoxError;
 {{- end }}
 {{- if .HasJobs }}
@@ -181,4 +201,130 @@ pub trait Workers: Send + Sync {
 {{ $.WorkerSignature . }}
 {{- end }}
 }
+{{- end }}
+{{- if .HasDerivers }}
+
+/// A stale derived field, as a deriver's method gets it (D74): the
+/// instance's id, which attempt this is, from 1, the model label and the
+/// instruction of the field's Derived config, the inputs that hold a
+/// value, and the field's JSON Schema, which a model is held to. `I` is
+/// the inputs' struct.
+#[derive(Clone, Debug)]
+pub struct DerivedItem<I> {
+    pub id: String,
+    pub attempt: i64,
+    pub model: String,
+    pub instruction: String,
+    pub inputs: I,
+    pub output: serde_json::Value,
+}
+
+impl<I: serde::de::DeserializeOwned> DerivedItem<I> {
+    /// The item of a field `staleDerivations` lists, its inputs read as `I`.
+    pub fn of(item: &DerivationItem) -> Result<Self, BoxError> {
+        Ok(DerivedItem {
+            id: item.id.clone(),
+            attempt: item.attempt,
+            model: item.model.clone(),
+            instruction: item.instruction.clone(),
+            inputs: serde_json::from_value(serde_json::Value::Object(item.inputs.clone()))?,
+            output: item.output.clone(),
+        })
+    }
+}
+
+/// What a deriver's method answers: a value of the field's type `T`, with
+/// how sure the model is, from 0 to 1, and what the call cost, which the
+/// settle's event keeps; or why there is none. A failure, and a method that
+/// returns an error, count an attempt, and the field waits once its
+/// attempts are spent until its inputs move.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DerivedAnswer<T> {
+    Value {
+        value: T,
+        confidence: Option<f64>,
+        usage: Option<serde_json::Value>,
+    },
+    Failure {
+        class: Option<String>,
+        message: String,
+    },
+}
+
+impl<T> DerivedAnswer<T> {
+    /// A value with no confidence or usage.
+    pub fn value(value: T) -> Self {
+        DerivedAnswer::Value {
+            value,
+            confidence: None,
+            usage: None,
+        }
+    }
+
+    /// A failure of a class.
+    pub fn failure(class: impl Into<String>, message: impl Into<String>) -> Self {
+        DerivedAnswer::Failure {
+            class: Some(class.into()),
+            message: message.into(),
+        }
+    }
+}
+
+/// The engine's answer for what a deriver's method returned: its value as
+/// JSON, or its error as a failure, which counts an attempt.
+pub fn derivation_answer<T: Serialize>(
+    answered: Result<DerivedAnswer<T>, BoxError>,
+) -> DerivationAnswer {
+    match answered {
+        Ok(DerivedAnswer::Value {
+            value,
+            confidence,
+            usage,
+        }) => match serde_json::to_value(value) {
+            Ok(value) => DerivationAnswer::Value {
+                value,
+                confidence,
+                usage,
+            },
+            Err(err) => DerivationAnswer::failure("serialize", err.to_string()),
+        },
+        Ok(DerivedAnswer::Failure { class, message }) => {
+            DerivationAnswer::Failure { class, message }
+        }
+        Err(err) => DerivationAnswer::failure("error", err.to_string()),
+    }
+}
+
+/// The derivers of {{ .SchemaName }}, one per @deriver class, which the
+/// implementation's `create_derivers` builds. A deriver's entrypoint pulls
+/// the stale derived fields of its schemas and calls the method of each.
+pub struct Derivers {
+{{- range .Derivers }}
+    /// The deriver {{ .Name }}, which fills the derived fields of {{ join .Schemas ", " }}.
+    pub {{ .Field }}: Arc<dyn {{ .Trait }}>,
+{{- end }}
+}
+{{- range .Derivers }}
+
+/// The methods of the deriver {{ .Name }}, one per derived field it fills.
+#[async_trait]
+pub trait {{ .Trait }}: Send + Sync {
+{{- range .Methods }}
+    /// Derives {{ .Schema }}.{{ .Field }} from {{ .FromList }}, with the model `{{ .Model }}`.
+{{ $.DeriverSignature . }}
+{{- end }}
+}
+{{- end }}
+{{- range .DerivedInputs }}
+
+/// The inputs of {{ .Schema }}.{{ .Field }}: each field it is derived from, absent when it
+/// holds no value.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct {{ .Inputs }} {
+{{- range .From }}
+    #[serde(default{{ with .Rename }}, rename = "{{ . }}"{{ end }})]
+    pub {{ .RustName }}: Option<{{ .Type }}>,
+{{- end }}
+}
+{{- end }}
 {{- end }}

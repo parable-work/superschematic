@@ -250,8 +250,9 @@ type rustEnvConfig struct {
 	// identity config, which load_identity reads.
 	Stack    bool
 	Identity bool
-	// Background is true for an API with a callers field and a job or a
-	// worker: load_env_config and load_background_env_config, which leaves
+	// Background is true for an API with a callers field and a job, a
+	// worker or a deriver: load_env_config and load_background_env_config,
+	// which leaves
 	// the callers field without issuers, share load, which reads it or
 	// not (D65).
 	Background bool
@@ -274,8 +275,9 @@ type rustEnvField struct {
 	Read string
 	// Doc is its doc comment, one line per element.
 	Doc []string
-	// Callers is true for the callers field, which a job's and a worker's
-	// configuration leaves without issuers (rustEnvConfig.Background).
+	// Callers is true for the callers field, which a job's, a worker's and
+	// a deriver's configuration leaves without issuers
+	// (rustEnvConfig.Background).
 	Callers bool
 }
 

@@ -92,6 +92,93 @@ export interface JobBehaviors {
 /** NoteBehaviors holds the fields of a Note's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name. */
 export type NoteBehaviors = Record<string, never>;
 
+/** A state of a Request's Workflow. */
+export type RequestState = 'new' | 'triage' | 'assigned';
+
+/** RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name. */
+export interface RequestBehaviors {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: RequestState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
+  };
+  readonly Derived: {
+    /** The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent. */
+    readonly fields: {
+      category?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+      summary?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+    };
+    /** The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. */
+    readonly stale: Array<'category' | 'summary'>;
+  };
+  readonly Provenance: {
+    /** By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    readonly fields: {
+      body?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      category?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      subject?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      summary?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+    };
+    /** Whether any recorded field is proposed. A list filters on it. */
+    readonly inReview: boolean;
+  };
+}
+
 /** A state of a Ticket's Workflow. */
 export type TicketState = 'open' | 'in-progress' | 'done' | 'dropped';
 

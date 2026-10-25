@@ -26,7 +26,9 @@ import (
 //   - an API's workers, each a deployable of the stack, and a DB's
 //     queues, which a worker's queue is one of (D53);
 //   - whether a DB is an engine database, a type of it composing a
-//     behavior, whose engine's runner is a deployable of the stack (D58).
+//     behavior, whose engine's runner is a deployable of the stack (D58);
+//   - an API's derivers, each a deployable of the stack, and a DB's
+//     engine types that compose Derived, which a deriver fills (D74).
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -66,12 +68,25 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 				svc.Workers = append(svc.Workers, fact)
 			}
 		}
+		for _, deriver := range schema.Derivers {
+			if deriver != nil {
+				fact := *deriver
+				fact.Comment = ""
+				svc.Derivers = append(svc.Derivers, fact)
+			}
+		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 		}
-		svc.Engine = len(codegen.EngineTypes(schema)) > 0
+		engineTypes := codegen.EngineTypes(schema)
+		svc.Engine = len(engineTypes) > 0
+		for _, td := range engineTypes {
+			if td.ComposesDerived() {
+				svc.Derived = append(svc.Derived, td.Name)
+			}
+		}
 	case ir.SchemaKindSite:
 		// Its calls are the APIs its code calls from the browser; where its
 		// code is, the stack's build reads with SiteOf (D55).

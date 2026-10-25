@@ -69,6 +69,11 @@ type Document struct {
 	// a class (D53).
 	Workers []*ir.Worker `json:"workers,omitempty" yaml:"workers,omitempty"`
 
+	// Derivers lists an API service's derivers in declaration order:
+	// ir.Schema.Derivers, which the TypeScript form declares with @deriver
+	// on a class (D74).
+	Derivers []*ir.Deriver `json:"derivers,omitempty" yaml:"derivers,omitempty"`
+
 	// Documents holds sidecar documents keyed by document name, copied into
 	// [ir.Schema.Documents] in canonical JSON (see [ir.CanonicalJSON]).
 	Documents map[string]json.RawMessage `json:"documents,omitempty" yaml:"documents,omitempty"`
@@ -96,7 +101,7 @@ var singleDefKinds = map[string]bool{
 // TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
 	"imports", "references", "scalars", "types", "enums", "unions",
-	"operationSets", "jobs", "workers", "documents", "extensions",
+	"operationSets", "jobs", "workers", "derivers", "documents", "extensions",
 }
 
 // form identifies which on-disk shape a payload uses.

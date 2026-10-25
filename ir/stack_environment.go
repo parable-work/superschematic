@@ -126,6 +126,10 @@ type ResolvedDeployable struct {
 	// API whose language it is written in; nil for every other kind (D58).
 	Runner *ResolvedRunner `json:"runner,omitempty"`
 
+	// Deriver is what a deriver fills and how many of it run; nil for
+	// every other kind (D74).
+	Deriver *ResolvedDeriver `json:"deriver,omitempty"`
+
 	// Exposed is true for a server reachable from outside the environment,
 	// and for every site.
 	Exposed bool `json:"exposed,omitempty"`
@@ -262,6 +266,31 @@ type ResolvedRunner struct {
 	// runs while it holds the runner's lock, or zero when its settings
 	// turn the runner off.
 	Instances int `json:"instances"`
+}
+
+// ResolvedDeriver is a deriver's run in one environment (D74): the member
+// of its API's Derivers that answers its fields, the engine types whose
+// Derived fields it fills, and whether it runs.
+type ResolvedDeriver struct {
+	// API is the API service that declares the deriver; Name is its
+	// `@deriver` class's name.
+	API  string `json:"api"`
+	Name string `json:"name"`
+
+	// Database is the engine database its API connects to, and Schemas
+	// the engine types of it whose Derived fields it fills, as the
+	// decorator names them; empty is every type that composes Derived,
+	// which the API's build lists.
+	Database string   `json:"database"`
+	Schemas  []string `json:"schemas,omitempty"`
+
+	// Instances is how many instances the environment runs: one, or zero
+	// when its settings turn the deriver off. Concurrency is how many
+	// answers it runs at a time, and BatchSize how many stale fields a
+	// pull asks for.
+	Instances   int `json:"instances"`
+	Concurrency int `json:"concurrency"`
+	BatchSize   int `json:"batchSize"`
 }
 
 // UnmarshalJSON decodes a deployable and turns the references in its name
