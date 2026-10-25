@@ -658,13 +658,19 @@ BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
 ";
 
 // Postgres replaces the named CHECK in place; its identity is the table's
-// own, which the change leaves where it was.
+// own, which the change leaves where it was. The index is built first,
+// under the SHARE lock CREATE INDEX takes, which lets readers through; the
+// ALTER's ACCESS EXCLUSIVE lock, which stops every reader of the log, then
+// covers no build. Both CHECKs are added NOT VALID, so the ALTER scans no
+// row: the CHECK it drops, (instance_id IS NULL) = (seq IS NULL), already
+// holds every row to both, and NOT VALID still checks every row written
+// after.
 const POSTGRES_13: &str = "
-ALTER TABLE engine_events
-  DROP CONSTRAINT engine_events_instance_seq,
-  ADD CONSTRAINT engine_events_instance_seq CHECK (instance_id IS NOT NULL OR seq IS NULL),
-  ADD CONSTRAINT engine_events_beside_seq CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation');
-
 CREATE INDEX engine_events_instance_cursor ON engine_events (namespace, schema, instance_id, cursor)
   WHERE instance_id IS NOT NULL;
+
+ALTER TABLE engine_events
+  DROP CONSTRAINT engine_events_instance_seq,
+  ADD CONSTRAINT engine_events_instance_seq CHECK (instance_id IS NOT NULL OR seq IS NULL) NOT VALID,
+  ADD CONSTRAINT engine_events_beside_seq CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation') NOT VALID;
 ";
