@@ -231,6 +231,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkJobs(schema, r)
 	checkQueues(schema, r)
 	checkWorkers(schema, r)
+	checkDerivers(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)

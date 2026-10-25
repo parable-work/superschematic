@@ -81,6 +81,7 @@ export interface DatabaseDecl {
 
 export interface DeployableRef {
   deployable?: string;
+  deriver?: string;
   job?: string;
   runner?: boolean;
   service?: ServiceRef;
@@ -99,6 +100,14 @@ export interface DeployableSettings {
   schedule?: string;
   timeZone?: string;
   values?: { [key: string]: unknown };
+}
+
+export interface Deriver {
+  batchSize?: number;
+  comment?: string;
+  concurrency?: number;
+  name: string;
+  schemas?: string[];
 }
 
 /**
@@ -122,6 +131,7 @@ export interface DisplayState {
 
 export interface Document {
   comment?: string;
+  derivers?: Deriver[];
   description?: string;
   documents?: Documents;
   enums?: { [key: string]: EnumDef };

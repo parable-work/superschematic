@@ -13,8 +13,8 @@ export default defineConfig({
     // SQLite too: the Topcoat app in topcoat/ can keep the shop in a
     // SQLite file, migrated from the SQLite plan.
     sql: { dialects: ["postgres", "sqlite"] },
-    // Inventory, CollectionPoint, Checkout and Refund compose behaviors, so
-    // they are engine types (D58, D70): the build writes their engine
+    // Inventory, CollectionPoint, Checkout, Refund and Ticket compose
+    // behaviors, so they are engine types (D58, D70, D73): the build writes their engine
     // document, and the project's engine crate with the commerce crate,
     // which every server, job, worker and runner on shop-db opens.
     engine: {
@@ -30,19 +30,26 @@ export default defineConfig({
       // signs refunds off, and issuing one asks the checkout's Payments for
       // it (refundFor); orders.any reads every checkout; stock.write and
       // calendar.manage keep the stock and the collection points.
+      // shop-cart opens a shopper's support tickets, its deriver
+      // shop-cart-triage-tickets fills in their category, priority and
+      // summary, and support.review accepts or corrects what the model was
+      // unsure of (D74).
       policy: {
         rules: [
           { service: ["shop-orders"], action: ["read", "write"], allow: true },
           { service: ["shop-cart"], schema: ["Checkout"], action: ["read", "write"], allow: true },
           { service: ["shop-cart"], schema: ["Inventory", "CollectionPoint"], action: "read", allow: true },
+          { service: ["shop-cart"], schema: ["Ticket"], action: ["read", "write"], allow: true },
           { service: ["shop-stock"], schema: ["Inventory"], action: ["read", "write"], allow: true },
           { service: true, allow: false },
           { subject: ["shop-db-engine-runner"], require: "{schema}" },
+          { subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true },
           { schema: ["Refund"], action: ["read", "write"], require: "refunds.approve" },
           { schema: ["Checkout"], action: "write", operation: ["refundFor"], require: "refunds.approve" },
           { schema: ["Checkout"], action: "read", require: ["orders.any", "refunds.approve"] },
           { schema: ["Inventory"], action: ["read", "write"], require: "stock.write" },
-          { schema: ["CollectionPoint"], action: ["read", "write"], require: "calendar.manage" }
+          { schema: ["CollectionPoint"], action: ["read", "write"], require: "calendar.manage" },
+          { schema: ["Ticket"], action: ["read", "write"], require: "support.review" }
         ]
       },
       tools: {

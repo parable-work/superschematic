@@ -720,6 +720,43 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}}}, nil
 }
 
+// lowerDeriver lowers a deriver to its process (D74): the entrypoint
+// module the build wrote at `server/<stack>/<deriver>`, its environment as
+// a server's is, with WorkerConcurrencyVariable set to the concurrency the
+// environment gives it, no port, and a readiness of started. stack dev
+// runs one process for it, and none when the environment turns it off.
+func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Deriver == nil {
+		return registry.Lowered{}, fmt.Errorf("deriver %s has no run", d.Name)
+	}
+	if d.Deriver.Instances == 0 {
+		return registry.Lowered{}, nil
+	}
+	env, err := processEnv(d, func(name string) error {
+		if name == WorkerConcurrencyVariable {
+			return fmt.Errorf("config field %s is the variable the local platform sets to the deriver's concurrency; set it with the deriver's concurrency setting instead", WorkerConcurrencyVariable)
+		}
+		return nil
+	})
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	env = append(env, map[string]any{"name": WorkerConcurrencyVariable, "value": strconv.Itoa(d.Deriver.Concurrency)})
+	return registry.Lowered{Resources: []*ir.Resource{{
+		ID:   processID(d.Name),
+		Type: TypeProcess,
+		Properties: map[string]any{
+			"name":      d.ResourceName,
+			"module":    ModulePath(ctx.Environment.Stack, d.Name),
+			"language":  strings.ToLower(d.Language),
+			"kind":      "deriver",
+			"readiness": ReadinessStarted,
+			"env":       env,
+		},
+	}}}, nil
+}
+
 // jobID is the ID of a job's node.
 func jobID(deployable string) string { return deployable + ".job" }
 

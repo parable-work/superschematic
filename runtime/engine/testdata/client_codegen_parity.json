@@ -477,6 +477,116 @@
     },
     {
       "kind": "General",
+      "name": "Request",
+      "description": "A request whose category and summary a model fills (D73): a model outside the engine fills its category and summary from its subject and body, while it is new or in triage; a category under 0.8 confidence waits in review, and the request moves to assigned only once its category is reviewed.",
+      "types": {
+        "Request": {
+          "name": "Request",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "config": {
+                "states": [
+                  "new",
+                  "triage",
+                  "assigned"
+                ],
+                "transitions": [
+                  {
+                    "from": "new",
+                    "to": "triage"
+                  },
+                  {
+                    "from": "new",
+                    "to": "assigned"
+                  },
+                  {
+                    "from": "triage",
+                    "to": "assigned"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Derived",
+              "config": {
+                "fields": {
+                  "category": {
+                    "from": [
+                      "subject",
+                      "body"
+                    ],
+                    "instruction": "Classify the request.",
+                    "model": "standard",
+                    "states": [
+                      "new",
+                      "triage"
+                    ]
+                  },
+                  "summary": {
+                    "from": [
+                      "body"
+                    ],
+                    "instruction": "Summarize it in one sentence.",
+                    "model": "simple"
+                  }
+                },
+                "permission": "requests.derive"
+              }
+            },
+            {
+              "name": "Provenance",
+              "config": {
+                "review": {
+                  "sources": [
+                    "Derived"
+                  ],
+                  "below": 0.8,
+                  "permission": "requests.review"
+                },
+                "gates": {
+                  "assigned": {
+                    "reviewed": [
+                      "category"
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "subject",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "body",
+              "typeRef": {
+                "name": "string"
+              }
+            },
+            {
+              "name": "category",
+              "typeRef": {
+                "name": "string"
+              }
+            },
+            {
+              "name": "summary",
+              "typeRef": {
+                "name": "string"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "General",
       "name": "notes",
       "description": "A note that moves from draft through review to published, collects comments, and keeps its revisions. A change to it can be proposed for an editor to approve.",
       "types": {
@@ -2164,6 +2274,339 @@
                 "issued",
                 "rejected",
                 "failed"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        }
+      }
+    },
+    "Request": {
+      "createParams": {},
+      "fields": {
+        "Derived": {
+          "fields": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.",
+              "properties": {
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "overridden": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "by",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    "settledAt": {
+                      "type": "integer"
+                    },
+                    "settledBy": {
+                      "type": "string"
+                    },
+                    "sourceHash": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "overridden": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "by",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    "settledAt": {
+                      "type": "integer"
+                    },
+                    "settledBy": {
+                      "type": "string"
+                    },
+                    "sourceHash": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          },
+          "stale": {
+            "schema": {
+              "description": "The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order.",
+              "items": {
+                "enum": [
+                  "category",
+                  "summary"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "present": true
+          }
+        },
+        "Provenance": {
+          "fields": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.",
+              "properties": {
+                "body": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "subject": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          },
+          "inReview": {
+            "schema": {
+              "description": "Whether any recorded field is proposed. A list filters on it.",
+              "type": "boolean"
+            },
+            "present": true
+          }
+        },
+        "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "status": {
+            "schema": {
+              "description": "The state the instance is in.",
+              "enum": [
+                "new",
+                "triage",
+                "assigned"
               ],
               "type": "string"
             },

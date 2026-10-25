@@ -3,6 +3,7 @@ export {
   allowService,
   auth,
   bodyLimit,
+  deriver,
   docs,
   encrypted,
   hmacVerified,
@@ -28,6 +29,7 @@ export {
 } from "./decorators";
 export type {
   BodyLimitConfig,
+  DeriverOptions,
   DocsConfig,
   DocsError,
   DocsLifecycle,

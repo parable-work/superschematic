@@ -53,6 +53,8 @@ pub mod background;
 pub mod behaviors;
 pub mod calls;
 mod deploy;
+#[cfg(feature = "background")]
+pub mod derive;
 mod engine;
 pub mod errors;
 mod events;

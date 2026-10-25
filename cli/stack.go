@@ -539,6 +539,10 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  worker   %-24s off: queue %s waits", d.Name, d.Worker.Queue))
 		case d.Kind == ir.DeployableWorker && d.Worker != nil:
 			lines = append(lines, fmt.Sprintf("  worker   %-24s handles %s of %s, %d at a time", d.Name, d.Worker.Queue, d.Worker.Database, d.Worker.Concurrency))
+		case d.Kind == ir.DeployableDeriver && d.Deriver != nil && d.Deriver.Instances == 0:
+			lines = append(lines, fmt.Sprintf("  deriver  %-24s off: the derived fields of %s wait", d.Name, strings.Join(d.Deriver.Schemas, ", ")))
+		case d.Kind == ir.DeployableDeriver && d.Deriver != nil:
+			lines = append(lines, fmt.Sprintf("  deriver  %-24s fills the derived fields of %s, %d at a time", d.Name, strings.Join(d.Deriver.Schemas, ", "), d.Deriver.Concurrency))
 		case d.Kind == ir.DeployableRunner && d.Runner != nil && d.Runner.Instances > 0:
 			lines = append(lines, fmt.Sprintf("  runner   %-24s runs the engine's reactions, schedules and deadlines of %s", d.Name, d.Runner.Database))
 		}

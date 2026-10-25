@@ -82,6 +82,10 @@ const (
 	// gcp.
 	RunnerPlatform = "local.runner"
 
+	// DeriverPlatform runs a deriver as a process with no port, ready once
+	// it starts, as a worker is (D74).
+	DeriverPlatform = "local.deriver"
+
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
 	// and JobHTTPConnector connect a job, whose edges are its API's, the
@@ -115,6 +119,14 @@ const (
 	// RunnerSQLConnector connects an engine's runner to its engine
 	// database, its one edge (D58).
 	RunnerSQLConnector = "local.runner-postgres"
+
+	// DeriverSQLConnector, DeriverSQLiteConnector, DeriverHTTPConnector and
+	// DeriverBucketConnector connect a deriver, whose edges are its API's,
+	// as a worker's connectors do (D74).
+	DeriverSQLConnector    = "local.deriver-postgres"
+	DeriverSQLiteConnector = "local.deriver-sqlite"
+	DeriverHTTPConnector   = "local.deriver-process"
+	DeriverBucketConnector = "local.deriver-gcs"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -158,9 +170,9 @@ const (
 
 	// TypeProcess is a process run from its entrypoint: built from its
 	// module or its crate, or run by Bun. A server's listens on its port
-	// and is ready once its readiness path answers; a worker's, and an
-	// engine's runner's, has no port and is ready once it starts
-	// (ReadinessStarted, D53, D58).
+	// and is ready once its readiness path answers; a worker's, an
+	// engine's runner's and a deriver's have no port and are ready once
+	// they start (ReadinessStarted, D53, D58, D74).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -254,6 +266,15 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerRunner,
 		},
 		{
+			Name: DeriverPlatform,
+			Kind: ir.DeployableDeriver,
+			// In its API's language, TypeScript or Rust (D74).
+			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			NameOf:    processName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerDeriver,
+		},
+		{
 			Name:      DatabasePlatform,
 			Kind:      ir.DeployableDatabase,
 			Dialects:  []string{registry.SQLDialectPostgres},
@@ -298,6 +319,10 @@ func Register(r *registry.Registry) error {
 		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: RunnerSQLConnector, Edge: ir.EdgeSQL, From: RunnerPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: DeriverSQLConnector, Edge: ir.EdgeSQL, From: DeriverPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: DeriverSQLiteConnector, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLitePlatform, Connect: connectSQLite},
+		{Name: DeriverHTTPConnector, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: DeriverBucketConnector, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -320,6 +345,7 @@ func Register(r *registry.Registry) error {
 			ir.DeployableBucket:   BucketPlatform,
 			ir.DeployableWorker:   WorkerPlatform,
 			ir.DeployableRunner:   RunnerPlatform,
+			ir.DeployableDeriver:  DeriverPlatform,
 		},
 		DatabasePlatforms: map[string]string{registry.SQLDialectSQLite: SQLitePlatform},
 		Values:            json.RawMessage(targetValues),
@@ -436,7 +462,7 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript", "rust"]},
-	    "kind": {"enum": ["worker", "runner"]},
+	    "kind": {"enum": ["worker", "runner", "deriver"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
 	    "env": {"type": "array", "items": {

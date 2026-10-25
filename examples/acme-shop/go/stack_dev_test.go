@@ -319,6 +319,41 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("StartCheckout beyond the stock: %v, want 409 unavailable", err)
 	}
 
+	// A support ticket (D74): shop-cart opens it in new, and its deriver
+	// TriageTickets, a Bun process of its own, fills in its category,
+	// priority and summary from shop-db's engine. The keyword rules are sure
+	// of this one, so Provenance accepts each field with no reviewer and the
+	// runner's Reactions rules assign the ticket.
+	status, body = call(t, http.MethodPost, carts+"/api/tickets", token,
+		`{"subject": "Charged twice for my order", "body": "My card was charged twice at checkout. Please refund one of them."}`)
+	var ticket struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &ticket) != nil || ticket.Data.ID == "" {
+		t.Fatalf("open a ticket: %d %s", status, body)
+	}
+	var triaged struct {
+		Data struct {
+			Status, Category, Priority, Summary string
+			InReview                            bool
+		} `json:"data"`
+	}
+	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(250 * time.Millisecond) {
+		status, body = call(t, http.MethodGet, carts+"/api/tickets/"+ticket.Data.ID, token, "")
+		if status == http.StatusOK && json.Unmarshal(body, &triaged) == nil && triaged.Data.Status == "assigned" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the deriver did not triage the ticket within a minute: %d %s", status, body)
+		}
+	}
+	if triaged.Data.Category != "payments" || triaged.Data.Priority != "urgent" || triaged.Data.InReview ||
+		triaged.Data.Summary != "My card was charged twice at checkout." {
+		t.Fatalf("the triaged ticket = %+v; want payments, urgent, the first sentence, out of review", triaged.Data)
+	}
+
 	// acmepay, the fake provider, at the address shop-orders' ACMEPAY_URL
 	// defaults to, with the environment's keys: staff pay on its page with
 	// a test token, it posts the capture to shop-orders' webhook, signed,

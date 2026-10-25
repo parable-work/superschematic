@@ -28,6 +28,11 @@ pub use {{ .RuntimeCrateIdent }} as runtime;
 /// workers handle, and the descriptors of their queues, which a worker claims
 /// with and an implementation enqueues with (D65).
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
+{{- else if .HasDerivers }}
+
+/// The Rust types of {{ .Deps.Database }}, the API's database: the engine types
+/// whose derived fields its derivers fill, which type their methods (D74).
+pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- end }}
 
 {{ if .Deps -}}

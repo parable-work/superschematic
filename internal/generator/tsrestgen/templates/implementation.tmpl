@@ -9,6 +9,9 @@
 {{- if .HasWorkers }}
 // Each worker fails every message until you implement it.
 {{- end }}
+{{- if .HasDerivers }}
+// Each deriver fails every field until you implement it.
+{{- end }}
 
 import { notImplemented{{ if .WebhookProviders }}, unauthorized{{ end }} } from '{{ .RuntimePackage }}';
 import type {
@@ -17,6 +20,9 @@ import type {
 {{- end }}
   Constructor,
   Deps,
+{{- if .HasDerivers }}
+  DeriversConstructor,
+{{- end }}
 {{- if .HasJobs }}
   JobsConstructor,
 {{- end }}
@@ -103,6 +109,27 @@ export const createWorkers: WorkersConstructor = deps => ({
 {{- range .Workers }}
   async {{ .Method }}(message) {
     throw notImplemented('worker {{ .Name }}');
+  },
+{{- end }}
+});
+{{- end }}
+{{- if .HasDerivers }}
+
+/**
+ * Builds the derivers of {{ .SchemaName }} from its dependencies. Its type is the
+ * generated DeriversConstructor. A deriver's entrypoint calls the method of
+ * each stale derived field, which asks a model; a value settles the field,
+ * and a failure or a rejection counts an attempt.
+ */
+export const createDerivers: DeriversConstructor = deps => ({
+{{- range .Derivers }}
+  {{ .Member }}: {
+{{- $deriver := . }}
+{{- range .Methods }}
+    async {{ .Method }}(item) {
+      throw notImplemented('deriver {{ $deriver.Name }}, {{ .Schema }}.{{ .Field }}');
+    },
+{{- end }}
   },
 {{- end }}
 });

@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { Batch, Job, Note, Person, Ticket, Worker,  } from '@schemas/fixture-behavior-types/types';
+import type { Batch, Job, Note, Person, Request, Ticket, Worker,  } from '@schemas/fixture-behavior-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-behavior-types';
@@ -81,7 +81,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (6)
+### Types (7)
 
 
 - **Batch** - A batch stamped into steps, which counts its jobs.
@@ -91,6 +91,8 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Note** - A note whose behaviors add no field: its behaviors' type has no member.
 
 - **Person** - A type with no behavior, which gets no behaviors' type.
+
+- **Request** - A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
 
 - **Ticket** - A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
 

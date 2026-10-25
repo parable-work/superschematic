@@ -150,3 +150,23 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 		t.Fatalf("an own status beside Workflow's: errors = %v, want none", got)
 	}
 }
+
+// Derived refuses a secret field as an input, at build (D74): a deriver
+// sends its inputs to a model outside the engine.
+func TestBehaviorsVerifyDerivedRefusesASecretInput(t *testing.T) {
+	core := registry.New(naming.Naming{})
+	derived := ir.BehaviorRef{Name: "Derived", Config: json.RawMessage(`{"fields":{"summary":{"from":["body","apiKey"],"instruction":"Summarize it.","model":"simple"}},"permission":"items.derive"}`)}
+	schema := behaviorSchema(derived)
+	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields,
+		&ir.FieldDef{Name: "body", TypeRef: ir.TypeRef{Name: "string"}},
+		&ir.FieldDef{Name: "summary", TypeRef: ir.TypeRef{Name: "string"}},
+		&ir.FieldDef{Name: "apiKey", TypeRef: ir.TypeRef{Name: "string"}, Secret: true})
+	r := Run(schema, Input{Registry: core})
+	if want := "type Item: Derived field summary is derived from apiKey, which is secret: a secret never goes to a model"; !hasError(r, want) {
+		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
+	}
+	schema.Types["Item"].Fields[len(schema.Types["Item"].Fields)-1].Secret = false
+	if got := errorStrings(Run(schema, Input{Registry: core})); len(got) != 0 {
+		t.Fatalf("an input that is not secret: errors = %v, want none", got)
+	}
+}

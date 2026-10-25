@@ -28,6 +28,7 @@
       "dependencies": {
         "@acme/shop-cart-api": "workspace:*",
         "@acme/shop-cart-types": "workspace:*",
+        "@acme/shop-db-types": "workspace:*",
         "@superschematic/engine": "*",
         "@superschematic/http-runtime": "*",
         "superscalar": "*",
@@ -87,6 +88,7 @@
       },
       "peerDependencies": {
         "@acme/shop-cart-types": "*",
+        "@acme/shop-db-types": "*",
         "@superschematic/engine": "*",
         "@superschematic/http-runtime": "*",
         "hono": "4.13.8",
@@ -183,6 +185,30 @@
     },
     "server/shop-stack/shop-cart": {
       "name": "@acme/shop-stack-shop-cart-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@acme/shop-cart-api": "workspace:*",
+        "@acme/shop-cart-implementation": "workspace:*",
+        "@acme/shop-db-types": "workspace:*",
+        "@opentelemetry/api": "1.9.1",
+        "@opentelemetry/context-async-hooks": "2.12.0",
+        "@opentelemetry/core": "2.12.0",
+        "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+        "@opentelemetry/resources": "2.12.0",
+        "@opentelemetry/sdk-trace": "2.12.0",
+        "@superschematic/engine": "*",
+        "@superschematic/http-runtime": "*",
+        "hono": "4.13.8",
+        "pg": "8.23.0",
+      },
+      "devDependencies": {
+        "@types/node": "22.19.9",
+        "@types/pg": "8.23.1",
+        "typescript": "5.9.3",
+      },
+    },
+    "server/shop-stack/shop-cart-triage-tickets": {
+      "name": "@acme/shop-stack-shop-cart-triage-tickets-server",
       "version": "0.0.0",
       "dependencies": {
         "@acme/shop-cart-api": "workspace:*",
@@ -395,6 +421,8 @@
     "@acme/shop-orders-types": ["@acme/shop-orders-types@workspace:types/typescript/shop-orders"],
 
     "@acme/shop-stack-shop-cart-server": ["@acme/shop-stack-shop-cart-server@workspace:server/shop-stack/shop-cart"],
+
+    "@acme/shop-stack-shop-cart-triage-tickets-server": ["@acme/shop-stack-shop-cart-triage-tickets-server@workspace:server/shop-stack/shop-cart-triage-tickets"],
 
     "@acme/shop-stack-shop-storefront-server": ["@acme/shop-stack-shop-storefront-server@workspace:server/shop-stack/shop-storefront"],
 
@@ -1080,6 +1108,12 @@
 
     "@acme/shop-stack-shop-cart-server/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
 
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@superschematic/engine": ["@superschematic/engine@file:../../../../runtime/engine/typescript", { "devDependencies": { "@hono/node-server": "2.1.1", "@modelcontextprotocol/client": "2.2.0", "@napi-rs/cli": "3.10.5", "@types/node": "22.19.9", "ajv": "8.20.0", "hono": "4.13.8", "typescript": "5.9.3" }, "peerDependencies": { "@superschematic/http-runtime": "*", "hono": "4.13.8" }, "optionalPeers": ["@superschematic/http-runtime", "hono"] }],
+
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "@opentelemetry/api", "@opentelemetry/context-async-hooks", "@opentelemetry/core", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/otlp-transformer", "@opentelemetry/resources", "@opentelemetry/sdk-trace", "pg"] }],
+
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
+
     "@acme/shop-stack-shop-storefront-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "@opentelemetry/api": "1.9.1", "@opentelemetry/context-async-hooks": "2.12.0", "@opentelemetry/core": "2.12.0", "@opentelemetry/exporter-trace-otlp-proto": "0.223.0", "@opentelemetry/otlp-transformer": "0.223.0", "@opentelemetry/resources": "2.12.0", "@opentelemetry/sdk-trace": "2.12.0", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "@opentelemetry/api", "@opentelemetry/context-async-hooks", "@opentelemetry/core", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/otlp-transformer", "@opentelemetry/resources", "@opentelemetry/sdk-trace", "pg"] }],
 
     "@acme/shop-stack-shop-storefront-server/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
@@ -1196,6 +1230,8 @@
 
     "@acme/shop-stack-shop-cart-server/@superschematic/engine/@napi-rs/cli": ["@napi-rs/cli@3.10.5", "", { "dependencies": { "@inquirer/prompts": "^8.5.2", "@napi-rs/cross-toolchain": "^1.0.3", "@napi-rs/wasm-tools": "^1.1.0", "@octokit/rest": "^22.0.1", "clipanion": "^4.0.0-rc.4", "colorette": "^2.0.20", "es-toolkit": "^1.47.0", "js-yaml": "^5.0.0", "obug": "^3.0.0", "semver": "^7.8.2", "typanion": "^3.14.0", "typescript": "^6.0.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || ^2.0.0-alpha.4", "@emnapi/runtime": "^1.7.1 || ^2.0.0-alpha.4", "emnapi": "^1.7.1 || ^2.0.0-alpha.4" }, "optionalPeers": ["@emnapi/core", "@emnapi/runtime", "emnapi"], "bin": { "napi": "dist/cli.js", "napi-raw": "cli.mjs" } }, "sha512-GF4WXmLLQk3uQvkPuLCOSH50DN4GUKZw1zHlMDh4rRF5TWpfOj3a8DkZ2PWCTwpPDMD4ex05sAjrCEwNdukEjg=="],
 
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@superschematic/engine/@napi-rs/cli": ["@napi-rs/cli@3.10.5", "", { "dependencies": { "@inquirer/prompts": "^8.5.2", "@napi-rs/cross-toolchain": "^1.0.3", "@napi-rs/wasm-tools": "^1.1.0", "@octokit/rest": "^22.0.1", "clipanion": "^4.0.0-rc.4", "colorette": "^2.0.20", "es-toolkit": "^1.47.0", "js-yaml": "^5.0.0", "obug": "^3.0.0", "semver": "^7.8.2", "typanion": "^3.14.0", "typescript": "^6.0.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || ^2.0.0-alpha.4", "@emnapi/runtime": "^1.7.1 || ^2.0.0-alpha.4", "emnapi": "^1.7.1 || ^2.0.0-alpha.4" }, "optionalPeers": ["@emnapi/core", "@emnapi/runtime", "emnapi"], "bin": { "napi": "dist/cli.js", "napi-raw": "cli.mjs" } }, "sha512-GF4WXmLLQk3uQvkPuLCOSH50DN4GUKZw1zHlMDh4rRF5TWpfOj3a8DkZ2PWCTwpPDMD4ex05sAjrCEwNdukEjg=="],
+
     "@acme/shop-storefront-implementation/@superschematic/http-runtime/hono": ["hono@4.13.8", "", {}, "sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ=="],
 
     "@acme/shop-storefront-types/superscalar/@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
@@ -1261,6 +1297,10 @@
     "@acme/shop-stack-shop-cart-server/@superschematic/engine/@napi-rs/cli/js-yaml": ["js-yaml@5.4.3", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.mjs" } }, "sha512-yzzNtgczwgoVHNigCyKTXcQJU4Y8t/ikU4UxXW0BvrLfHTGWZhsNcOT2s/a7vn81/4KqVnNmHjaUEPlvWnNwVw=="],
 
     "@acme/shop-stack-shop-cart-server/@superschematic/engine/@napi-rs/cli/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@superschematic/engine/@napi-rs/cli/js-yaml": ["js-yaml@5.4.3", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.mjs" } }, "sha512-yzzNtgczwgoVHNigCyKTXcQJU4Y8t/ikU4UxXW0BvrLfHTGWZhsNcOT2s/a7vn81/4KqVnNmHjaUEPlvWnNwVw=="],
+
+    "@acme/shop-stack-shop-cart-triage-tickets-server/@superschematic/engine/@napi-rs/cli/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "@acme/shop-storefront-types/superscalar/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 

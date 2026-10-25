@@ -30,6 +30,12 @@ const ordersAsApi: ServiceHandle<"API"> = ShopOrders;
 const ShopFulfilment = service<"API", unknown, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
 const fulfilmentAsApi: ServiceHandle<"API"> = ShopFulfilment;
 
+// An API with @deriver classes: the sentinel writes their names as the
+// fifth type argument, with the jobs and the workers `never` when it
+// declares none, and the handle is still an API handle (D74).
+const ShopSupport = service<"API", unknown, never, never, "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });
+const supportAsApi: ServiceHandle<"API"> = ShopSupport;
+
 // Every handle is a ServiceHandle, so authDb and dependencies take any kind.
 const anyHandles: readonly ServiceHandle[] = [ShopApi, ShopDb, ShopCommon, ShopCatalog, handWrittenApi, ShopOrders];
 
@@ -47,6 +53,9 @@ const untypedJobs: ServiceHandle<"API", unknown, "ExpireCarts"> = handWrittenApi
 
 // @ts-expect-error a handle that may have any worker does not stand for one whose workers are named
 const untypedWorkers: ServiceHandle<"API", unknown, never, "FulfilOrders"> = handWrittenApi;
+
+// @ts-expect-error a handle that may have any deriver does not stand for one whose derivers are named
+const untypedDerivers: ServiceHandle<"API", unknown, never, never, "TriageTickets"> = handWrittenApi;
 
 export const refusedDbCall = defineConfig({
   name: "shop-storefront",
@@ -121,5 +130,7 @@ export const checked = {
   untypedJobs,
   bucketHandle,
   fulfilmentAsApi,
-  untypedWorkers
+  untypedWorkers,
+  supportAsApi,
+  untypedDerivers
 };

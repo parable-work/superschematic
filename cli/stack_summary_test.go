@@ -28,3 +28,23 @@ func TestPrintLocalSummaryNamesTheSQLiteFile(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintLocalSummaryNamesTheDerivers: a deriver's line says which
+// schemas' derived fields it fills, and how many answers it runs at a
+// time, or that they wait when the environment turns it off (D74).
+func TestPrintLocalSummaryNamesTheDerivers(t *testing.T) {
+	env := &ir.ResolvedEnvironment{Stack: "shop-stack", Environment: "Dev", Resources: &ir.ResourceGraph{}, Deployables: []*ir.ResolvedDeployable{
+		{Name: "shop-cart-triage-tickets", Kind: ir.DeployableDeriver, Deriver: &ir.ResolvedDeriver{Schemas: []string{"Ticket"}, Instances: 1, Concurrency: 4}},
+		{Name: "shop-cart-fill-all", Kind: ir.DeployableDeriver, Deriver: &ir.ResolvedDeriver{Schemas: []string{"Article", "Ticket"}}},
+	}}
+	var out bytes.Buffer
+	printLocalSummary(&out, env, "/state")
+	for _, want := range []string{
+		"  deriver  shop-cart-triage-tickets fills the derived fields of Ticket, 4 at a time\n",
+		"  deriver  shop-cart-fill-all       off: the derived fields of Article, Ticket wait\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the summary lacks %q:\n%s", want, out.String())
+		}
+	}
+}

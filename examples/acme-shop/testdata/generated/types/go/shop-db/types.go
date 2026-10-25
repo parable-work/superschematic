@@ -5519,6 +5519,326 @@ func StockLowFromYAMLNonStrict(data []byte) (*StockLow, error) {
 	return decoded, nil
 }
 
+// Ticket - A shopper's support ticket, which a model triages and a person confirms
+// (D73, D74): shop-cart's deriver TriageTickets fills its category,
+// priority and summary from its subject and body while it is new or in
+// triage. A category or priority the model is less than 0.8 sure of waits
+// in review: the ticket moves to triage, and on to assigned once support
+// staff (support.review) accept or correct it. A ticket the model is sure
+// of is assigned with no person. The summary is derived in every state, so
+// it follows the body.
+type Ticket struct {
+	CustomerId string `json:"customerId"`
+
+	Subject string `json:"subject"`
+
+	Body string `json:"body,omitempty"`
+
+	OrderId string `json:"orderId,omitempty"`
+
+	Category *TicketCategory `json:"category,omitempty"`
+
+	Priority *TicketPriority `json:"priority,omitempty"`
+
+	Summary string `json:"summary,omitempty"`
+}
+
+// MaskSecrets returns a copy of Ticket with secret fields cleared.
+func (t *Ticket) MaskSecrets() *Ticket {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Ticket{}
+
+	masked.CustomerId = t.CustomerId
+
+	masked.Subject = t.Subject
+
+	masked.Body = t.Body
+
+	masked.OrderId = t.OrderId
+
+	masked.Category = t.Category
+
+	masked.Priority = t.Priority
+
+	masked.Summary = t.Summary
+
+	return masked
+}
+
+// JSONFieldNames are the keys Ticket's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*Ticket) JSONFieldNames() []string {
+	return []string{"customerId", "subject", "body", "orderId", "category", "priority", "summary"}
+}
+
+// Validate validates all fields in Ticket
+func (t *Ticket) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	{
+		value := t.CustomerId
+
+		if utf8.RuneCountInString(string(value)) > 64 {
+			errors.AddFieldError("customerId", "maxLength", "must be at most 64 characters")
+		}
+
+	}
+
+	{
+		value := t.Subject
+
+		if utf8.RuneCountInString(string(value)) > 200 {
+			errors.AddFieldError("subject", "maxLength", "must be at most 200 characters")
+		}
+
+	}
+
+	if !reflect.ValueOf(t.Body).IsZero() {
+		value := t.Body
+
+		if utf8.RuneCountInString(string(value)) > 10000 {
+			errors.AddFieldError("body", "maxLength", "must be at most 10000 characters")
+		}
+
+	}
+
+	if !reflect.ValueOf(t.OrderId).IsZero() {
+		value := t.OrderId
+
+		if utf8.RuneCountInString(string(value)) > 64 {
+			errors.AddFieldError("orderId", "maxLength", "must be at most 64 characters")
+		}
+
+	}
+
+	// Validate category (optional)
+
+	// Validate optional pointer field
+	if t.Category != nil {
+		if valid, fieldErrs := t.Category.Validate(); !valid {
+			errors.SetFieldErrors("category", fieldErrs)
+		}
+	}
+
+	// Validate priority (optional)
+
+	// Validate optional pointer field
+	if t.Priority != nil {
+		if valid, fieldErrs := t.Priority.Validate(); !valid {
+			errors.SetFieldErrors("priority", fieldErrs)
+		}
+	}
+
+	if !reflect.ValueOf(t.Summary).IsZero() {
+		value := t.Summary
+
+		if utf8.RuneCountInString(string(value)) > 500 {
+			errors.AddFieldError("summary", "maxLength", "must be at most 500 characters")
+		}
+
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Ticket to JSON
+func (t *Ticket) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Ticket
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals Ticket from JSON with validation
+func (t *Ticket) UnmarshalJSON(data []byte) error {
+	type Alias Ticket
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Ticket into a map representation.
+func (t *Ticket) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Ticket to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Ticket to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Ticket from a map using lenient decoding.
+func (t *Ticket) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Ticket from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Ticket from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Ticket from a map and rejects unknown fields.
+func (t *Ticket) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Ticket from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Ticket from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Ticket from JSON and rejects unknown fields.
+func (t *Ticket) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Ticket from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Ticket from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Ticket from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Ticket from JSON using lenient decoding.
+func (t *Ticket) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Ticket from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Ticket from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Ticket from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Ticket from YAML and rejects unknown fields.
+func (t *Ticket) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Ticket from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Ticket from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Ticket from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Ticket from YAML using lenient decoding.
+func (t *Ticket) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Ticket from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Ticket from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Ticket from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// TicketFromMap builds Ticket from a map using lenient decoding.
+func TicketFromMap(value map[string]any) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketFromMapStrict builds Ticket from a map and rejects unknown fields.
+func TicketFromMapStrict(value map[string]any) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketFromJSON builds Ticket from JSON and rejects unknown fields.
+func TicketFromJSON(data []byte) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketFromJSONNonStrict builds Ticket from JSON using lenient decoding.
+func TicketFromJSONNonStrict(data []byte) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketFromYAML builds Ticket from YAML and rejects unknown fields.
+func TicketFromYAML(data []byte) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketFromYAMLNonStrict builds Ticket from YAML using lenient decoding.
+func TicketFromYAMLNonStrict(data []byte) (*Ticket, error) {
+	decoded := &Ticket{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // User - A person who can sign in to the shop, with their email and a password.
 // The User trait makes the table the core user model's (D50): the build
 // adds the Session and UserCredential tables beside it, and both APIs sign

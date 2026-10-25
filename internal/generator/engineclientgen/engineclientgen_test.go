@@ -46,6 +46,7 @@ var (
 		"internal/generator/engineclientgen/testdata/fixture/Spec.schema.json",
 		"internal/generator/engineclientgen/testdata/fixture/Task.schema.json",
 		"internal/generator/engineclientgen/testdata/fixture/Project.schema.json",
+		"internal/generator/engineclientgen/testdata/fixture/Request.schema.json",
 	}
 )
 

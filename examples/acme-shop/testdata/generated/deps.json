@@ -281,7 +281,8 @@
       "path": "api/shop-cart",
       "service": "shop-cart",
       "deps": [
-        "shop-cart-types"
+        "shop-cart-types",
+        "shop-db-types"
       ]
     },
     {

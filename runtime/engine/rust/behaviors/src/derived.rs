@@ -927,8 +927,8 @@ impl Behavior for Derived {
 
     // The configSchema holds the shape; this holds every derived and input
     // field to the type's own top-level fields, a field to inputs that are
-    // not derived, its states to the type's Workflow, and a derived field
-    // to one Constants does not keep.
+    // neither derived nor secret, its states to the type's Workflow, and a
+    // derived field to one Constants does not keep.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<DerivedConfig> {
         let empty = Map::new();
         let fields = raw
@@ -947,6 +947,7 @@ impl Behavior for Derived {
                 .get("Constants")
                 .and_then(|constants| constants.get("fields")),
         );
+        let secrets = target.secret_fields();
         let mut parsed = Vec::new();
         for name in js_keys(fields) {
             let entry = &fields[name];
@@ -977,6 +978,11 @@ impl Behavior for Derived {
                     return Err(Error::config(format!(
                         "fields: {name} is derived from {input}, which {} does not have",
                         target.type_name()
+                    )));
+                }
+                if secrets.contains(input) {
+                    return Err(Error::config(format!(
+                        "fields: {name} is derived from {input}, which is secret: a secret never goes to a model"
                     )));
                 }
             }

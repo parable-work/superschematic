@@ -358,6 +358,32 @@ export function worker(_options: WorkerOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of a deriver: the engine types whose Derived fields it fills, and how. */
+export type DeriverOptions = {
+  /** The names of the engine types of the API's database whose Derived fields the deriver fills; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
+  readonly schemas?: readonly string[];
+  /** How many answers an instance runs at a time; four unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How many stale fields a pull asks for, 1 to 100; fifty unless set. */
+  readonly batchSize?: number;
+};
+
+/**
+ * Declares a deriver of the API service: a deployable that fills the
+ * Derived fields of the engine types of the API's database (D74). It pulls
+ * the stale fields, calls the project's generated Derivers for each, which
+ * asks a model, and settles the answers. The class's name is the
+ * deriver's, and the class holds nothing:
+ *
+ * ```ts
+ * @deriver({ schemas: ["Ticket"], concurrency: 4 })
+ * export abstract class TriageTickets {}
+ * ```
+ */
+export function deriver(_options?: DeriverOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 /** A UI schema renderer hides the field. */

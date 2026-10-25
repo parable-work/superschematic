@@ -21,6 +21,8 @@ export type { CreateOptions, EngineClientOptions, ListOptions, OperationOutcome,
 export { EngineProblem, EngineTransportError, EngineVeto, isProblem, isVeto } from './errors.js';
 export type { ProblemChange, ProblemDocument, ProblemIssue } from './errors.js';
 export { Reconciler, memoryCursor, reconcile } from './reconcile.js';
+export { runDeriver } from './deriver.js';
+export type { DerivationAnswer, DerivationItem, DerivationSource, DeriverOptions, SettleResult } from './deriver.js';
 export type { CursorStore, ReconcileOptions } from './reconcile.js';
 export {
   DEFAULT_RECONNECT_INITIAL_MS,

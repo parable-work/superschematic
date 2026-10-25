@@ -80,10 +80,11 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 	return objectLiteral(parts)
 }
 
-// settingsLiteral renders one settings element: of, a job's or a worker's
-// name beside its API's handle, platform, a job's schedule, timeZone,
-// enabled and onDeploy, a worker's instances, concurrency and enabled, env,
-// and the platform settings in every other key.
+// settingsLiteral renders one settings element: of, a job's, a worker's or
+// a deriver's name beside its API's handle, or runner: true beside a DB's,
+// platform, a job's schedule, timeZone, enabled and onDeploy, a worker's
+// and a deriver's instances, concurrency and enabled, env, and the
+// platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
 	if settings.Of.Job != "" {
@@ -91,6 +92,12 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if settings.Of.Worker != "" {
 		parts = append(parts, "worker: "+quote(settings.Of.Worker))
+	}
+	if settings.Of.Deriver != "" {
+		parts = append(parts, "deriver: "+quote(settings.Of.Deriver))
+	}
+	if settings.Of.Runner {
+		parts = append(parts, "runner: true")
 	}
 	if settings.Platform != "" {
 		parts = append(parts, "platform: "+quote(settings.Platform))
@@ -115,7 +122,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
-		case "of", "job", "worker", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
+		case "of", "job", "worker", "deriver", "runner", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}
@@ -164,6 +171,8 @@ func (e *emitter) deployableRef(owner string, ref ir.DeployableRef) string {
 		e.failf("%s names job %s of no API service; the TypeScript form writes a job beside its API's handle", owner, ref.Job)
 	case ref.Worker != "":
 		e.failf("%s names worker %s of no API service; the TypeScript form writes a worker beside its API's handle", owner, ref.Worker)
+	case ref.Deriver != "":
+		e.failf("%s names deriver %s of no API service; the TypeScript form writes a deriver beside its API's handle", owner, ref.Deriver)
 	case ref.Deployable != "":
 		return e.ident(ref.Deployable, "deployable")
 	default:
