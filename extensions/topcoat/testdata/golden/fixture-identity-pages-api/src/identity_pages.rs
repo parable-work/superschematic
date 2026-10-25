@@ -61,14 +61,16 @@ path_param!(pub role_id);
 /// see, after the resources' and the engine's: Users and Roles to a caller
 /// whose permissions hold `identity.users.read` and `identity.roles.read`,
 /// then the account and a sign-out button. A caller who is not signed in
-/// gets the sign-in page.
+/// gets the sign-in page, in the nav only: the index
+/// links to signing in itself.
 pub async fn nav_links(cx: &Cx) -> Vec<NavLink> {
-    let link = |href: &str, label: &str, post: bool| NavLink { href: href.to_owned(), label: label.to_owned(), post };
+    let link = |href: &str, label: &str, post: bool| NavLink { href: href.to_owned(), label: label.to_owned(), post, nav_only: false };
+    let nav_only = |link: NavLink| NavLink { nav_only: true, ..link };
     let (Ok(service), Ok(Some(caller))) = (service(cx), signed_in(cx).await) else {
         let path = uri(cx).path();
         let own = path == SIGN_IN_PAGE;
         let href = if own { Some(SIGN_IN_PAGE.to_owned()) } else { Settings::of(cx).sign_in_href(&current(cx)) };
-        let sign_in = href.as_deref().map(|href| link(href, "Sign in", false));
+        let sign_in = href.as_deref().map(|href| nav_only(link(href, "Sign in", false)));
         return sign_in.into_iter().collect();
     };
     let mut links = Vec::new();

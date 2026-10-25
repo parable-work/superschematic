@@ -202,7 +202,7 @@ async fn offered(cx: &Cx) -> Result<HashSet<String>, Refusal> {
 /// resources': none when the caller may read none of them.
 pub async fn nav_link(cx: &Cx) -> Option<NavLink> {
     let readable = readable(cx).await.ok()?;
-    (!readable.is_empty()).then(|| NavLink { href: ENGINE.to_owned(), label: "Engine".to_owned(), post: false })
+    (!readable.is_empty()).then(|| NavLink { href: ENGINE.to_owned(), label: "Engine".to_owned(), post: false, nav_only: false })
 }
 
 /// The trail of the engine's page at `path` after the index, each step's
@@ -1191,11 +1191,10 @@ async fn generic_panel(panel: GenericPanel) -> topcoat::Result<impl View> {
 /// form of `operation` itself, so the instance's page leaves it out of the
 /// operations no panel shows. A core behavior's panel (Workflow, Approvals,
 /// Branches) renders every operation of its behavior. A commerce panel
-/// renders those `engine_panels::commerce_shows` names, which the commerce
-/// panels' merge calls here; until then none, so each is listed.
+/// renders those `engine_panels::commerce_shows` names, and the others are
+/// listed.
 fn panel_shows(behavior: &str, operation: &str) -> bool {
-    let _ = operation;
-    !matches!(behavior, "Stock" | "Calendar" | "Holds" | "Payments")
+    !matches!(behavior, "Stock" | "Calendar" | "Holds" | "Payments") || crate::engine_panels::commerce_shows(behavior, operation)
 }
 
 /// An instance's page: its title, its own fields, then a section per

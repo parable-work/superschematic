@@ -4,11 +4,35 @@
 //! the crate knows, which `panel` picks by the behavior's name. A behavior
 //! without one gets the engine pages' generic panel, its fields and its
 //! operations.
+//!
+//! - Workflow shows the state by its display label, a button per
+//!   transition the display labels out of it, and a form for the moves it
+//!   does not label.
+//! - Approvals shows each gate's sign-offs against its count, who signed,
+//!   and the caller's own sign-off or withdraw form.
+//! - Branches (D32) shows the refs, primary first, a ref's commits newest
+//!   first (`?ref=`), a diff of two commits (`?from=&to=`), the release
+//!   log, and the writes: branch, commit, merge, release and discard.
+//!
+//! A panel's form posts its operation's parameters by name, with the
+//! instance's `expectedSeq`, to the instance's operation route, as the
+//! generic form does. A panel reads the engine, as Branches does, in-process
+//! on the blocking pool as the page's caller, so the engine's policy decides
+//! what it shows; with no caller it reads nothing.
 
-use serde_json::Value;
-use superschematic_engine::InstanceRecord;
+use std::sync::Arc;
+
+use serde_json::{Map, Value, json};
+use superschematic_engine::{Engine, InstanceRecord, Principal, WriteOptions, covers};
 use topcoat::context::Cx;
-use topcoat::view::BoxView;
+use topcoat::router::request::uri;
+use topcoat::view::{BoxView, ViewExt, view};
+
+use crate::pages::{decode, encode};
+
+/// Where the engine's pages are served: an instance's page is
+/// `{ENGINE}/{schema}/{id}`, and its operations post under it.
+const ENGINE: &str = "/console/engine";
 
 /// The panel of `behavior` on `record`'s page: `describe` is the type's
 /// describe document, whose `behaviors` give each one's config, fields and
@@ -17,12 +41,1812 @@ use topcoat::view::BoxView;
 /// does, and owns what it shows of `describe` and `record`, so the page
 /// that read them returns it.
 pub async fn panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
-    commerce_panel(cx, behavior, describe, record).await
+    match behavior {
+        "Workflow" => Some(workflow_panel(cx, describe, record)),
+        "Approvals" => Some(approvals_panel(cx, describe, record).await),
+        "Branches" => Some(branches_panel(cx, record).await),
+        _ => commerce_panel(cx, behavior, describe, record).await,
+    }
+}
+
+/// The page of `record`, under which its operations post.
+fn item_href(record: &InstanceRecord) -> String {
+    format!("{ENGINE}/{}/{}", encode(&record.schema), encode(&record.id))
+}
+
+/// The route `operation` of `record` posts to.
+fn operation_href(record: &InstanceRecord, operation: &str) -> String {
+    format!("{}/operations/{}", item_href(record), encode(operation))
+}
+
+/// The config the type gives `behavior`: its entry's in the describe
+/// document's `behaviors`, null when it has none.
+fn config_of<'v>(describe: &'v Value, behavior: &str) -> &'v Value {
+    describe["behaviors"]
+        .as_array()
+        .and_then(|behaviors| behaviors.iter().find(|entry| entry["name"] == behavior))
+        .map_or(&Value::Null, |entry| &entry["config"])
+}
+
+/// The label the type's display gives a Workflow state, else the state.
+fn state_label(describe: &Value, state: &str) -> String {
+    describe["display"]["states"][state]["label"]
+        .as_str()
+        .filter(|label| !label.is_empty())
+        .unwrap_or(state)
+        .to_owned()
+}
+
+/// The engine's principal of the page's caller, mapped as the engine's
+/// routes map the API's (`Principal::new(subject, permissions).with_claims`):
+/// none without a caller.
+async fn caller_principal(cx: &Cx) -> Option<Principal> {
+    let caller = crate::caller(cx).await.ok()?.as_ref()?;
+    Some(Principal::new(caller.subject.clone(), caller.permissions.clone()).with_claims(caller.claims.clone()))
+}
+
+/// A move of the Workflow panel: the route it posts to, the instance's
+/// sequence, the state it enters and what its button says.
+struct Move {
+    action: String,
+    seq: String,
+    to: String,
+    label: String,
+}
+
+/// The Workflow panel: the state by its display label and tone, a button
+/// per transition the display labels out of it, and a form whose choices
+/// are the moves out of it the display does not label, by the state each
+/// enters.
+fn workflow_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
+    let status = record.behavior_field("Workflow", "status").and_then(Value::as_str).map(str::to_owned);
+    let label = status.as_deref().map_or_else(|| "No status".to_owned(), |status| state_label(describe, status));
+    let tone = status.as_deref().and_then(|status| describe["display"]["states"][status]["tone"].as_str()).map(str::to_owned);
+    let labels = status.as_deref().map_or(&Value::Null, |status| &describe["display"]["transitions"][status]);
+    let mut buttons = Vec::new();
+    let mut others = Vec::new();
+    for transition in config_of(describe, "Workflow")["transitions"].as_array().into_iter().flatten() {
+        let (Some(from), Some(to)) = (transition["from"].as_str(), transition["to"].as_str()) else {
+            continue;
+        };
+        if Some(from) != status.as_deref() {
+            continue;
+        }
+        let action = operation_href(record, "transition");
+        let seq = record.seq.to_string();
+        match labels[to].as_str().filter(|label| !label.is_empty()) {
+            Some(label) => buttons.push(Move { action, seq, to: to.to_owned(), label: label.to_owned() }),
+            None => others.push((to.to_owned(), state_label(describe, to))),
+        }
+    }
+    let stays = buttons.is_empty() && others.is_empty();
+    let other = (!others.is_empty()).then(|| (operation_href(record, "transition"), record.seq.to_string(), others));
+    view! { cx =>
+        <section class="ss-panel" data-behavior="Workflow">
+            <h2>"Workflow"</h2>
+            <p class="ss-state" data-state=(status) data-tone=(tone)>(label)</p>
+            if stays {
+                <p class="ss-empty">"No move leaves this state."</p>
+            }
+            for button in buttons {
+                <form method="post" action=(button.action) class="ss-move">
+                    <input type="hidden" name="expectedSeq" value=(button.seq)>
+                    <input type="hidden" name="to" value=(button.to)>
+                    <button type="submit">(button.label)</button>
+                </form>
+            }
+            if let Some((action, seq, others)) = other {
+                <form method="post" action=(action) class="ss-move">
+                    <input type="hidden" name="expectedSeq" value=(seq)>
+                    <label>"Move to " <select name="to">
+                        for (to, label) in others {
+                            <option value=(to)>(label)</option>
+                        }
+                    </select></label>
+                    <button type="submit">"Move"</button>
+                </form>
+            }
+        </section>
+    }
+    .boxed()
+}
+
+/// What the caller may do at a gate of the Approvals panel.
+enum Signing {
+    /// Sign off: the route, the instance's sequence.
+    SignOff(String, String),
+    /// Withdraw their sign-off: the route, the instance's sequence.
+    Withdraw(String, String),
+    /// Nothing, for the reason given.
+    Not(&'static str),
+    /// Nothing, and nothing to say: no caller, or one whose permissions
+    /// do not cover the gate's.
+    Nothing,
+}
+
+/// A gate of the Approvals panel: the state it gates, by its label, the
+/// sign-offs it needs, those that count, and what the caller may do.
+struct Gate {
+    state: String,
+    label: String,
+    count: i64,
+    signed: Vec<String>,
+    signing: Signing,
+}
+
+/// The Approvals panel: per gate, its sign-offs against its count, who
+/// signed, and the caller's sign-off form, or their withdraw button once
+/// they have signed. A gate offers no sign-off while the instance is in
+/// its state, to its creator when the gate excludes them, or to a caller
+/// whose permissions do not cover the gate's; the engine refuses each.
+async fn approvals_panel<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord) -> BoxView<'a> {
+    let caller = caller_principal(cx).await;
+    let status = record.behavior_field("Workflow", "status").and_then(Value::as_str);
+    let signed_of = record.behavior_field("Approvals", "gates");
+    let mut gates = Vec::new();
+    for (state, gate) in config_of(describe, "Approvals")["gates"].as_object().into_iter().flatten() {
+        let signed: Vec<String> = signed_of
+            .and_then(|gates| gates[state]["signedBy"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|subject| subject.as_str().map(str::to_owned))
+            .collect();
+        let permission = gate["permission"].as_str().unwrap_or_default();
+        let signing = match &caller {
+            None => Signing::Nothing,
+            Some(caller) if signed.contains(&caller.subject) => {
+                Signing::Withdraw(operation_href(record, "withdrawSignOff"), record.seq.to_string())
+            }
+            Some(_) if status == Some(state.as_str()) => Signing::Not("It is in this state, so no sign-off is taken for it."),
+            Some(caller) if gate["excludeCreator"] != false && caller.subject == record.created_by => {
+                Signing::Not("You created it, so you cannot sign off for this state.")
+            }
+            Some(caller) if caller.permissions.iter().any(|held| covers(held, permission)) => {
+                Signing::SignOff(operation_href(record, "signOff"), record.seq.to_string())
+            }
+            Some(_) => Signing::Nothing,
+        };
+        gates.push(Gate {
+            state: state.clone(),
+            label: state_label(describe, state),
+            count: gate["count"].as_i64().unwrap_or_default(),
+            signed,
+            signing,
+        });
+    }
+    view! { cx =>
+        <section class="ss-panel" data-behavior="Approvals">
+            <h2>"Approvals"</h2>
+            for gate in gates {
+                <div class="ss-gate" data-state=(gate.state.clone())>
+                    <h3>(gate.label)</h3>
+                    <p class="ss-count">(format!("{} of {} sign-offs", gate.signed.len(), gate.count))</p>
+                    if gate.signed.is_empty() {
+                        <p class="ss-empty">"No one has signed off."</p>
+                    } else {
+                        <ul class="ss-signed">
+                            for subject in gate.signed {
+                                <li>(subject)</li>
+                            }
+                        </ul>
+                    }
+                    match gate.signing {
+                        Signing::SignOff(action, seq) => <form method="post" action=(action) class="ss-sign-off">
+                            <input type="hidden" name="expectedSeq" value=(seq)>
+                            <input type="hidden" name="state" value=(gate.state)>
+                            <label>"Note " <textarea name="note" maxlength="10000"></textarea></label>
+                            <button type="submit">"Sign off"</button>
+                        </form>,
+                        Signing::Withdraw(action, seq) => <form method="post" action=(action) class="ss-withdraw">
+                            <input type="hidden" name="expectedSeq" value=(seq)>
+                            <input type="hidden" name="state" value=(gate.state)>
+                            <button type="submit">"Withdraw my sign-off"</button>
+                        </form>,
+                        Signing::Not(reason) => <p class="ss-note">(reason)</p>,
+                        Signing::Nothing => "",
+                    }
+                </div>
+            }
+        </section>
+    }
+    .boxed()
+}
+
+/// What the Branches panel reads of an instance's version graph, each
+/// read's refusal as its message.
+struct GraphRead {
+    refs: Result<Vec<Value>, String>,
+    releases: Result<Vec<Value>, String>,
+    history: Option<Result<Vec<Value>, String>>,
+    diff: Option<Result<Value, String>>,
+    before: Option<Value>,
+}
+
+/// A ref of the Branches panel's table.
+struct RefRow {
+    name: String,
+    href: String,
+    head: String,
+    version: String,
+    state: &'static str,
+    current: Option<&'static str>,
+}
+
+/// A commit of a ref's history.
+struct CommitRow {
+    id: String,
+    short: String,
+    message: String,
+    sequence: Option<String>,
+    by: String,
+    at: String,
+    changes: Option<String>,
+    release: Option<(String, String)>,
+}
+
+/// A row of a diff: the entity's path, its change, and its content
+/// before and after.
+struct ChangeRow {
+    path: String,
+    change: &'static str,
+    before: String,
+    after: String,
+}
+
+/// The selected ref's writes: commit, merge into its parent and discard,
+/// each a route and its hidden parameters. A primary line takes none, and
+/// a sealed draft only the merge.
+struct Writes {
+    commit: Option<(String, String, String)>,
+    merge: Option<(String, String, String, String, String)>,
+    discard: Option<(String, String, String)>,
+}
+
+/// The parameters of a Branches read the page's query asks for: `ref`,
+/// `from` and `to`, each decoded, an empty one absent.
+fn graph_query(cx: &Cx) -> (Option<String>, Option<String>, Option<String>) {
+    let (mut selected, mut from, mut to) = (None, None, None);
+    for pair in uri(cx).query().unwrap_or_default().split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = decode(&value.replace('+', " "));
+        if value.is_empty() {
+            continue;
+        }
+        match name {
+            "ref" => selected = Some(value),
+            "from" => from = Some(value),
+            "to" => to = Some(value),
+            _ => {}
+        }
+    }
+    (selected, from, to)
+}
+
+/// A commit's or a ref's id as the panel shows it: its first eight
+/// characters.
+fn short(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+/// The columns of a version-graph row that are not its content: its
+/// role's and its audit's (the version graph's role columns).
+const ROLE_COLUMNS: [&str; 10] = [
+    "id",
+    "entity_key",
+    "ref_id",
+    "root_id",
+    "deleted_on_ref",
+    "_version",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+];
+
+/// A row's content, its fields without its role and audit columns, as
+/// JSON text: empty for none.
+fn content_of(row: Option<&Value>) -> String {
+    let Some(row) = row.and_then(Value::as_object) else {
+        return String::new();
+    };
+    let content: Map<String, Value> =
+        row.iter().filter(|(name, _)| !ROLE_COLUMNS.contains(&name.as_str())).map(|(name, value)| (name.clone(), value.clone())).collect();
+    serde_json::to_string(&content).unwrap_or_default()
+}
+
+/// The items of a paged read's result.
+fn items_of(result: Value, key: &str) -> Vec<Value> {
+    match result {
+        Value::Object(mut result) => match result.remove(key) {
+            Some(Value::Array(items)) => items,
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// Reads the version graph of `record` as `principal`: its refs, its
+/// release log, the history of `selected` (else of the primary line), and
+/// the diff of `from` and `to` with the earlier commit's tree. Called on
+/// the blocking pool.
+fn read_graph(
+    engine: &Engine,
+    principal: &Principal,
+    record: &InstanceRecord,
+    selected: Option<&str>,
+    span: Option<(&str, &str)>,
+) -> GraphRead {
+    let options = WriteOptions { namespace: Some(&record.namespace), ..WriteOptions::default() };
+    let read = |operation: &str, params: Value| {
+        engine.instances().invoke(principal, &record.schema, &record.id, operation, &params, options).map_err(|err| err.to_string())
+    };
+    let refs = read("refs", json!({ "limit": 500 })).map(|result| items_of(result, "items"));
+    let releases = read("releases", json!({ "limit": 500 })).map(|result| items_of(result, "items"));
+    let primary = refs.as_ref().ok().and_then(|refs| refs.first()).and_then(|first| first["id"].as_str()).map(str::to_owned);
+    let history = selected
+        .map(str::to_owned)
+        .or(primary)
+        .map(|selected| read("history", json!({ "ref": selected })).map(|result| items_of(result, "commits")));
+    let (diff, before) = match span {
+        Some((from, to)) => {
+            let diff = read("diff", json!({ "from": from, "to": to }));
+            let before = diff.is_ok().then(|| read("materialize", json!({ "commit": from })).ok()).flatten();
+            (Some(diff), before)
+        }
+        None => (None, None),
+    };
+    GraphRead { refs, releases, history, diff, before }
+}
+
+/// The Branches panel (D32): the refs, primary first, each with its head
+/// and a link to its history; the history of the ref the query names, else
+/// of the primary line, newest first, each commit with a link to its
+/// changes and, when tagged, a release button; the diff of the query's
+/// `from` and `to` as a table of path, change, before and after; the
+/// release log, with `behaviors.Branches.release`; and the writes: the
+/// selected draft's commit, merge into its parent and discard, and a
+/// branch form.
+async fn branches_panel<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> {
+    let Some(principal) = caller_principal(cx).await else {
+        return panel_message(cx, "Branches", "Sign in to see its branches.".to_owned());
+    };
+    let Ok(setup) = crate::setup(cx) else {
+        return panel_message(cx, "Branches", "The app does not host the engine.".to_owned());
+    };
+    let engine = Arc::clone(&setup.engine);
+    let (selected, from, to) = graph_query(cx);
+    let owned = record.clone();
+    let (query_ref, query_from, query_to) = (selected.clone(), from.clone(), to.clone());
+    let read = tokio::task::spawn_blocking(move || {
+        let span = query_from.as_deref().zip(query_to.as_deref());
+        read_graph(&engine, &principal, &owned, query_ref.as_deref(), span)
+    })
+    .await;
+    let graph = match read {
+        Ok(graph) => graph,
+        Err(err) => return panel_message(cx, "Branches", format!("Its branches could not be read: {err}")),
+    };
+    let refs = match graph.refs {
+        Ok(refs) => refs,
+        Err(message) => return panel_message(cx, "Branches", message),
+    };
+    let item = item_href(record);
+    let release = record.behavior_field("Branches", "release").and_then(Value::as_i64);
+    let selected = selected.or_else(|| refs.first().and_then(|first| first["id"].as_str()).map(str::to_owned));
+    let name_of = |id: &str| {
+        refs.iter().find(|entry| entry["id"] == id).and_then(|entry| entry["name"].as_str()).unwrap_or(id).to_owned()
+    };
+    let rows: Vec<RefRow> = refs
+        .iter()
+        .map(|entry| {
+            let id = entry["id"].as_str().unwrap_or_default();
+            RefRow {
+                name: entry["name"].as_str().unwrap_or(id).to_owned(),
+                href: format!("{item}?ref={}", encode(id)),
+                head: entry["head"].as_str().map_or_else(|| "No commits".to_owned(), short),
+                version: entry["version"].to_string(),
+                state: if entry["parent"].is_null() {
+                    "Primary line"
+                } else if entry["sealed"] == true {
+                    "Sealed"
+                } else {
+                    "Draft"
+                },
+                current: (selected.as_deref() == Some(id)).then_some("true"),
+            }
+        })
+        .collect();
+    let chosen = selected.as_deref().and_then(|id| refs.iter().find(|entry| entry["id"] == id));
+    let heading = selected.as_deref().map(|id| format!("History of {}", name_of(id)));
+    let release_version = release.unwrap_or(0).to_string();
+    let (history, history_error) = match graph.history {
+        Some(Ok(commits)) => (commits, None),
+        Some(Err(message)) => (Vec::new(), Some(message)),
+        None => (Vec::new(), None),
+    };
+    let ref_query = selected.as_deref().map(|id| format!("ref={}&", encode(id))).unwrap_or_default();
+    let commits: Vec<CommitRow> = history
+        .iter()
+        .map(|commit| {
+            let id = commit["id"].as_str().unwrap_or_default();
+            CommitRow {
+                id: id.to_owned(),
+                short: short(id),
+                message: commit["message"].as_str().unwrap_or_default().to_owned(),
+                sequence: commit["sequence"].as_i64().map(|sequence| format!("#{sequence}")),
+                by: commit["createdBy"].as_str().unwrap_or_default().to_owned(),
+                at: commit["createdAt"].as_str().unwrap_or_default().to_owned(),
+                changes: commit["parent"]
+                    .as_str()
+                    .map(|parent| format!("{item}?{ref_query}from={}&to={}", encode(parent), encode(id))),
+                release: commit["sequence"]
+                    .as_i64()
+                    .map(|_| (operation_href(record, "releaseCommit"), release_version.clone())),
+            }
+        })
+        .collect();
+    // The compare form's choices: the history's commits, the query's from
+    // and to chosen, else the commit before the newest and the newest.
+    let compare = (commits.len() > 1).then(|| {
+        let choices = |chosen: Option<&str>, at: usize| -> Vec<(String, String, bool)> {
+            commits
+                .iter()
+                .enumerate()
+                .map(|(index, commit)| {
+                    let picked = chosen.map_or(index == at, |chosen| chosen == commit.id);
+                    (commit.id.clone(), format!("{} {}", commit.short, commit.message), picked)
+                })
+                .collect()
+        };
+        (selected.clone().unwrap_or_default(), choices(from.as_deref(), 1), choices(to.as_deref(), 0))
+    });
+    let changes: Option<Result<Vec<ChangeRow>, String>> = graph.diff.map(|diff| {
+        diff.and_then(|diff| {
+            let Some(listed) = diff["changes"].as_array() else {
+                return Err(serde_json::to_string_pretty(&diff).unwrap_or_default());
+            };
+            Ok(listed
+                .iter()
+                .map(|change| {
+                    let kind = change["kind"].as_str().unwrap_or_default();
+                    let key = change["entityKey"].as_str().unwrap_or_default();
+                    let operation = change["operation"].as_str().unwrap_or_default();
+                    let before = graph
+                        .before
+                        .as_ref()
+                        .and_then(|tree| tree["tree"][kind].as_array())
+                        .and_then(|rows| rows.iter().find(|row| row["entity_key"] == key));
+                    ChangeRow {
+                        path: format!("{kind}/{key}"),
+                        change: match operation {
+                            "ADD" => "Added",
+                            "UPDATE" => "Updated",
+                            "DELETE" => "Deleted",
+                            _ => "Changed",
+                        },
+                        before: content_of(before),
+                        after: if operation == "DELETE" { String::new() } else { content_of(change.get("row")) },
+                    }
+                })
+                .collect())
+        })
+    });
+    let span = from.zip(to).map(|(from, to)| format!("Changes from {} to {}", short(&from), short(&to)));
+    let (diff_rows, diff_message) = match changes {
+        Some(Ok(rows)) => (rows, None),
+        Some(Err(message)) => (Vec::new(), Some(message)),
+        None => (Vec::new(), None),
+    };
+    let writes = chosen.filter(|entry| !entry["parent"].is_null() && entry["discarded"] != true).map(|entry| {
+        let id = entry["id"].as_str().unwrap_or_default().to_owned();
+        let version = entry["version"].to_string();
+        let sealed = entry["sealed"] == true;
+        let parent = entry["parent"].as_str().unwrap_or_default();
+        let merge = refs.iter().find(|other| other["id"] == parent).map(|target| {
+            (
+                operation_href(record, "merge"),
+                id.clone(),
+                parent.to_owned(),
+                target["version"].to_string(),
+                format!("Merge into {}", name_of(parent)),
+            )
+        });
+        Writes {
+            commit: (!sealed).then(|| (operation_href(record, "commit"), id.clone(), version.clone())),
+            merge,
+            discard: (!sealed).then(|| (operation_href(record, "discard"), id, version)),
+        }
+    });
+    let released = release.map_or_else(|| "Not released yet.".to_owned(), |release| format!("Release {release} is current."));
+    let (releases, releases_error) = match graph.releases {
+        Ok(releases) => (releases, None),
+        Err(message) => (Vec::new(), Some(message)),
+    };
+    let releases: Vec<(String, String, String, String)> = releases
+        .iter()
+        .map(|entry| {
+            (
+                entry["version"].to_string(),
+                short(entry["commit"].as_str().unwrap_or_default()),
+                entry["releasedBy"].as_str().unwrap_or_default().to_owned(),
+                entry["releasedAt"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    let branch_froms: Vec<(String, String, bool)> = refs
+        .iter()
+        .filter(|entry| entry["discarded"] != true)
+        .map(|entry| {
+            let id = entry["id"].as_str().unwrap_or_default();
+            (id.to_owned(), entry["name"].as_str().unwrap_or(id).to_owned(), selected.as_deref() == Some(id))
+        })
+        .collect();
+    let branch_action = operation_href(record, "branch");
+    let branch_seq = record.seq.to_string();
+    let seq = record.seq.to_string();
+    view! { cx =>
+        <section class="ss-panel" data-behavior="Branches">
+            <h2>"Branches"</h2>
+            <p class="ss-release">(released)</p>
+            <table class="ss-table ss-refs">
+                <thead>
+                    <tr>
+                        <th scope="col">"Ref"</th>
+                        <th scope="col">"Head"</th>
+                        <th scope="col">"Version"</th>
+                        <th scope="col">"State"</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    for row in rows {
+                        <tr aria-current=(row.current)>
+                            <td><a href=(row.href)>(row.name)</a></td>
+                            <td><code>(row.head)</code></td>
+                            <td>(row.version)</td>
+                            <td>(row.state)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            if let Some(heading) = heading {
+                <h3>(heading)</h3>
+            }
+            if let Some(message) = history_error {
+                <p class="ss-refusal">(message)</p>
+            }
+            if commits.is_empty() {
+                <p class="ss-empty">"It has no commits."</p>
+            } else {
+                <table class="ss-table ss-history">
+                    <thead>
+                        <tr>
+                            <th scope="col">"Commit"</th>
+                            <th scope="col">"Message"</th>
+                            <th scope="col">"Tag"</th>
+                            <th scope="col">"By"</th>
+                            <th scope="col">"At"</th>
+                            <th scope="col">"Changes"</th>
+                            <th scope="col">"Release"</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        for commit in commits {
+                            <tr data-commit=(commit.id.clone())>
+                                <td><code>(commit.short)</code></td>
+                                <td>(commit.message)</td>
+                                <td>(commit.sequence)</td>
+                                <td>(commit.by)</td>
+                                <td><time datetime=(commit.at.clone())>(commit.at)</time></td>
+                                <td>
+                                    if let Some(href) = commit.changes {
+                                        <a href=(href)>"Changes"</a>
+                                    }
+                                </td>
+                                <td>
+                                    if let Some((action, version)) = commit.release {
+                                        <form method="post" action=(action) class="ss-release-commit">
+                                            <input type="hidden" name="expectedSeq" value=(seq.clone())>
+                                            <input type="hidden" name="commit" value=(commit.id)>
+                                            <input type="hidden" name="version" value=(version)>
+                                            <button type="submit">"Release"</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            if let Some((selected, froms, tos)) = compare {
+                <form method="get" action=(item.clone()) class="ss-compare">
+                    <input type="hidden" name="ref" value=(selected)>
+                    <label>"From " <select name="from">
+                        for (id, label, picked) in froms {
+                            <option value=(id) selected=(picked)>(label)</option>
+                        }
+                    </select></label>
+                    <label>" to " <select name="to">
+                        for (id, label, picked) in tos {
+                            <option value=(id) selected=(picked)>(label)</option>
+                        }
+                    </select></label>
+                    <button type="submit">"Compare"</button>
+                </form>
+            }
+            if let Some(span) = span {
+                <h3>(span)</h3>
+                if let Some(message) = diff_message {
+                    <pre class="ss-diff">(message)</pre>
+                } else if diff_rows.is_empty() {
+                    <p class="ss-empty">"They do not differ."</p>
+                } else {
+                    <table class="ss-table ss-diff">
+                        <thead>
+                            <tr>
+                                <th scope="col">"Path"</th>
+                                <th scope="col">"Change"</th>
+                                <th scope="col">"Before"</th>
+                                <th scope="col">"After"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            for row in diff_rows {
+                                <tr>
+                                    <td><code>(row.path)</code></td>
+                                    <td>(row.change)</td>
+                                    <td><code>(row.before)</code></td>
+                                    <td><code>(row.after)</code></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+            if let Some(writes) = writes {
+                if let Some((action, id, version)) = writes.commit {
+                    <form method="post" action=(action) class="ss-commit">
+                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
+                        <input type="hidden" name="ref" value=(id)>
+                        <input type="hidden" name="version" value=(version)>
+                        <label>"Message " <input type="text" name="message" maxlength="10000"></label>
+                        <label><input type="checkbox" name="tag" value="true">" Tag it, so it can be released"</label>
+                        <button type="submit">"Commit"</button>
+                    </form>
+                }
+                if let Some((action, source, target, version, label)) = writes.merge {
+                    <form method="post" action=(action) class="ss-merge">
+                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
+                        <input type="hidden" name="source" value=(source)>
+                        <input type="hidden" name="target" value=(target)>
+                        <input type="hidden" name="targetVersion" value=(version)>
+                        <label>"Message " <input type="text" name="message" maxlength="10000"></label>
+                        <button type="submit">(label)</button>
+                    </form>
+                }
+                if let Some((action, id, version)) = writes.discard {
+                    <form method="post" action=(action) class="ss-discard">
+                        <input type="hidden" name="expectedSeq" value=(seq.clone())>
+                        <input type="hidden" name="ref" value=(id)>
+                        <input type="hidden" name="version" value=(version)>
+                        <button type="submit">"Discard"</button>
+                    </form>
+                }
+            }
+            <form method="post" action=(branch_action) class="ss-branch">
+                <input type="hidden" name="expectedSeq" value=(branch_seq)>
+                <label>"Name " <input type="text" name="name" required="" maxlength="200"></label>
+                <label>" from " <select name="fromRef">
+                    for (id, name, chosen) in branch_froms {
+                        <option value=(id) selected=(chosen)>(name)</option>
+                    }
+                </select></label>
+                <button type="submit">"Branch"</button>
+            </form>
+            <h3>"Releases"</h3>
+            if let Some(message) = releases_error {
+                <p class="ss-refusal">(message)</p>
+            } else if releases.is_empty() {
+                <p class="ss-empty">"Nothing has been released."</p>
+            } else {
+                <table class="ss-table ss-releases">
+                    <thead>
+                        <tr>
+                            <th scope="col">"Release"</th>
+                            <th scope="col">"Commit"</th>
+                            <th scope="col">"By"</th>
+                            <th scope="col">"At"</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        for (version, commit, by, at) in releases {
+                            <tr>
+                                <td>(version)</td>
+                                <td><code>(commit)</code></td>
+                                <td>(by)</td>
+                                <td><time datetime=(at.clone())>(at)</time></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+    }
+    .boxed()
+}
+
+/// A panel that shows only a message: why it shows nothing else.
+fn panel_message<'a>(cx: &'a Cx, behavior: &'static str, message: String) -> BoxView<'a> {
+    view! { cx =>
+        <section class="ss-panel" data-behavior=(behavior)>
+            <h2>(behavior)</h2>
+            <p class="ss-refusal">(message)</p>
+        </section>
+    }
+    .boxed()
 }
 
 /// The panel of a commerce behavior (D70), `panel`'s for Stock, Calendar,
 /// Holds and Payments: none for any other behavior.
 async fn commerce_panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
-    let _ = (cx, behavior, describe, record);
-    None
+    commerce::panel(cx, behavior, describe, record).await
+}
+
+/// Whether the panel of a commerce behavior shows `operation` itself, as a
+/// form or a table, so the instance's page need not list it again: Stock's
+/// receive, adjust and count forms and its movements, Calendar's bookings,
+/// and Payments' refund.
+pub fn commerce_shows(behavior: &str, operation: &str) -> bool {
+    commerce::SHOWN.iter().any(|(name, operations)| *name == behavior && operations.contains(&operation))
+}
+
+/// The commerce behaviors' panels. Each reads its behavior's fields from
+/// the record, and its config and operations from the describe document.
+/// What a panel reads from the engine besides (Stock's movements,
+/// Calendar's bookings, the types whose instances refund a Payments type)
+/// it reads as the page's caller, on the blocking pool, and a refusal shows
+/// as the engine words it. A form appears whenever the describe document
+/// lists its operation, and posts to that operation's route of the engine
+/// pages, so the engine's policy and the behaviors' vetoes decide every
+/// call that moves stock or money. Amounts show through
+/// `views::money_text`, each in the currency the behavior names.
+mod commerce {
+    use std::fmt::Write as _;
+    use std::sync::Arc;
+
+    use serde_json::{Value, json};
+    use superschematic_engine::{Engine, EngineErrorKind, Error, InstanceRecord, Principal, SchemaTarget, WriteOptions};
+    use topcoat::context::Cx;
+    use topcoat::router::request::uri;
+    use topcoat::view::{BoxView, ViewExt, view};
+
+    use crate::views::money_text;
+
+    /// Where the engine pages are: an instance's page is
+    /// `<BASE>/<schema>/<id>`, and an operation's route
+    /// `<BASE>/<schema>/<id>/operations/<operation>`.
+    const BASE: &str = "/console/engine";
+
+    /// The operations each commerce panel shows itself, by behavior.
+    pub(super) const SHOWN: &[(&str, &[&str])] = &[
+        ("Stock", &["receiveStock", "adjustStock", "countStock", "listStockMovements"]),
+        ("Calendar", &["listBookings"]),
+        ("Holds", &[]),
+        ("Payments", &["refundPayment"]),
+    ];
+
+    /// How many movements or bookings a panel shows at a time.
+    const PAGE: i64 = 20;
+
+    /// The days of bookings a Calendar panel shows when the query names
+    /// none: today and the six after it, in UTC.
+    const WINDOW_DAYS: i64 = 7;
+
+    const DAY_MS: i64 = 86_400_000;
+
+    /// The months as an instant's text names them.
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    /// The days of Calendar's hours, by their key, in the week's order.
+    const DAYS: [(&str, &str); 7] = [
+        ("mon", "Monday"),
+        ("tue", "Tuesday"),
+        ("wed", "Wednesday"),
+        ("thu", "Thursday"),
+        ("fri", "Friday"),
+        ("sat", "Saturday"),
+        ("sun", "Sunday"),
+    ];
+
+    static NULL: Value = Value::Null;
+
+    /// The panel of `behavior` on `record`'s page, reading what it needs
+    /// from the engine first; none for a behavior that is not commerce's.
+    pub(super) async fn panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
+        match behavior {
+            "Stock" => {
+                let cursor = query_value(cx, "movements");
+                let movements = match offered(describe, "Stock", "listStockMovements") {
+                    Some(_) => {
+                        let mut params = json!({ "limit": PAGE });
+                        if let Some(cursor) = &cursor {
+                            params["cursor"] = json!(cursor);
+                        }
+                        Some(read(cx, record, "listStockMovements", params).await)
+                    }
+                    None => None,
+                };
+                Some(stock_view(cx, describe, record, movements, cursor.is_some()))
+            }
+            "Calendar" => {
+                let window = Window::of(query_value(cx, "bookingsFrom"), query_value(cx, "bookingsTo"), now_ms());
+                let cursor = query_value(cx, "bookings");
+                let bookings = match (offered(describe, "Calendar", "listBookings"), &window.range) {
+                    (Some(_), Ok((start, end))) => {
+                        let mut params = json!({ "startMs": start, "endMs": end, "limit": PAGE });
+                        if let Some(cursor) = &cursor {
+                            params["cursor"] = json!(cursor);
+                        }
+                        Some(read(cx, record, "listBookings", params).await)
+                    }
+                    _ => None,
+                };
+                Some(calendar_view(cx, describe, record, window, bookings, cursor.is_some()))
+            }
+            "Holds" => Some(holds_view(cx, record)),
+            "Payments" => {
+                let refunds = if refund_link(describe).is_some() { Vec::new() } else { refund_types(cx, record).await };
+                Some(payments_view(cx, describe, record, &refunds))
+            }
+            _ => None,
+        }
+    }
+
+    /// The engine and the page's caller as the engine's principal, mapped
+    /// as the engine's routes map the API's `Authenticator`'s; why not when
+    /// there is no caller.
+    async fn engine_caller(cx: &Cx) -> Result<(Arc<Engine>, Principal), String> {
+        let engine = Arc::clone(&crate::setup(cx).map_err(|err| err.message)?.engine);
+        let principal = crate::caller(cx).await.map_err(|err| err.message.clone())?.clone();
+        let principal = principal.ok_or_else(|| "sign in to see it".to_owned())?;
+        Ok((engine, Principal::new(principal.subject, principal.permissions).with_claims(principal.claims)))
+    }
+
+    /// What a read-only operation of `record` answers the page's caller, or
+    /// what refused it.
+    async fn read(cx: &Cx, record: &InstanceRecord, operation: &'static str, params: Value) -> Result<Value, String> {
+        let (engine, principal) = engine_caller(cx).await?;
+        let (schema, id, namespace) = (record.schema.clone(), record.id.clone(), record.namespace.clone());
+        tokio::task::spawn_blocking(move || {
+            let options = WriteOptions { namespace: Some(&namespace), ..WriteOptions::default() };
+            engine.instances().invoke(&principal, &schema, &id, operation, &params, options)
+        })
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(|err| refusal(&err))
+    }
+
+    /// A refusal as the engine words it: its code, a veto's own code in
+    /// place of `vetoed`, then its message.
+    fn refusal(err: &Error) -> String {
+        let Some(refused) = err.engine() else {
+            return err.to_string();
+        };
+        let code = match refused.kind() {
+            EngineErrorKind::BehaviorVeto { veto_code: Some(code), .. } => code.clone(),
+            _ => refused.code().as_str().to_owned(),
+        };
+        format!("{code}: {}", refused.message())
+    }
+
+    /// The types of `record`'s namespace whose instances refund one of its
+    /// type through Approvals' sign-offs (`refunds_through_approvals`), as
+    /// far as the caller may read them.
+    async fn refund_types(cx: &Cx, record: &InstanceRecord) -> Vec<String> {
+        let Ok((engine, principal)) = engine_caller(cx).await else {
+            return Vec::new();
+        };
+        let (schema, namespace) = (record.schema.clone(), record.namespace.clone());
+        tokio::task::spawn_blocking(move || {
+            let schemas = engine.schemas();
+            let target = SchemaTarget { namespace: Some(&namespace) };
+            let Ok(summaries) = schemas.list(&principal, target) else {
+                return Vec::new();
+            };
+            summaries
+                .iter()
+                .filter_map(|summary| schemas.live(&principal, &summary.name, target).ok().flatten())
+                .filter(|live| refunds_through_approvals(&live.document, &live.instance_type, &schema))
+                .map(|live| live.name)
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Whether the type `instance_type` of a schema document refunds an
+    /// instance of `schema` that Approvals signs off: its Payments' `refundOf`
+    /// names a link of its Links whose target is `schema`, and it composes
+    /// Approvals.
+    pub(super) fn refunds_through_approvals(document: &Value, instance_type: &str, schema: &str) -> bool {
+        let behaviors = document["types"][instance_type]["behaviors"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let config = |name: &str| behaviors.iter().find(|behavior| behavior["name"] == name).map(|behavior| &behavior["config"]);
+        let Some(link) = config("Payments").and_then(|payments| payments["refundOf"]["link"].as_str()) else {
+            return false;
+        };
+        config("Approvals").is_some() && config("Links").is_some_and(|links| links["links"][link]["schema"] == schema)
+    }
+
+    /// The link a refund instance's Payments refunds through (`refundOf`);
+    /// none for a type that is no refund.
+    fn refund_link(describe: &Value) -> Option<&str> {
+        config(describe, "Payments")["refundOf"]["link"].as_str()
+    }
+
+    /// `behavior`'s config in the describe document.
+    fn config<'d>(describe: &'d Value, behavior: &str) -> &'d Value {
+        describe["behaviors"]
+            .as_array()
+            .and_then(|behaviors| behaviors.iter().find(|entry| entry["name"] == behavior))
+            .map_or(&NULL, |entry| &entry["config"])
+    }
+
+    /// The describe document's entry of `behavior`'s `operation`, when the
+    /// type offers it to the caller.
+    fn offered<'d>(describe: &'d Value, behavior: &str, operation: &str) -> Option<&'d Value> {
+        describe["operations"]
+            .as_array()?
+            .iter()
+            .find(|entry| entry["behavior"] == behavior && entry["name"] == operation)
+    }
+
+    /// `behavior`'s fields in the record, as the read returns them (D16).
+    fn fields<'r>(record: &'r InstanceRecord, behavior: &str) -> &'r Value {
+        record.behaviors.get(behavior).unwrap_or(&NULL)
+    }
+
+    /// The page of an instance.
+    fn instance_href(schema: &str, id: &str) -> String {
+        format!("{BASE}/{}/{}", encode(schema), encode(id))
+    }
+
+    /// The route an operation of `record`'s form posts to.
+    fn action(record: &InstanceRecord, operation: &str) -> String {
+        format!("{}/operations/{}", instance_href(&record.schema, &record.id), encode(operation))
+    }
+
+    /// A claim's or a supply's link, `{ schema, id }`, by its schema and id.
+    fn link_to(value: &Value) -> Option<(String, String)> {
+        let (schema, id) = (value["schema"].as_str()?, value["id"].as_str()?);
+        Some((instance_href(schema, id), format!("{schema} {id}")))
+    }
+
+    /// An amount as money in `currency`, `<data value="450">`, or as a
+    /// number when no currency is named; nothing when there is no amount.
+    fn amount<'a>(cx: &'a Cx, value: Option<i64>, currency: Option<&str>) -> BoxView<'a> {
+        let __cx = cx;
+        match (value, currency) {
+            (Some(value), Some(currency)) => {
+                let text = money_text(value, currency);
+                view! { <data value=(value.to_string())>(text)</data> }.boxed()
+            }
+            (Some(value), None) => view! { <data value=(value.to_string())>(value.to_string())</data> }.boxed(),
+            (None, _) => view! { "" }.boxed(),
+        }
+    }
+
+    /// An instant in epoch milliseconds as a reader reads it, in UTC to the
+    /// minute ("9 Oct 2026, 14:30 UTC"), in a `<time>` that keeps it to the
+    /// second.
+    fn instant<'a>(cx: &'a Cx, ms: i64) -> BoxView<'a> {
+        let __cx = cx;
+        let (year, month, day) = civil_from_days(ms.div_euclid(DAY_MS));
+        let seconds = ms.rem_euclid(DAY_MS) / 1000;
+        let (hour, minute, second) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+        let datetime = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z");
+        let text = format!("{day} {} {year}, {hour:02}:{minute:02} UTC", MONTHS[month as usize - 1]);
+        view! { <time datetime=(datetime)>(text)</time> }.boxed()
+    }
+
+    /// An instant in a JSON member, or nothing.
+    fn instant_of<'a>(cx: &'a Cx, value: &Value) -> BoxView<'a> {
+        let __cx = cx;
+        match value.as_i64() {
+            Some(ms) => instant(cx, ms),
+            None => view! { "" }.boxed(),
+        }
+    }
+
+    /// A control of a panel's form.
+    struct Control {
+        id: String,
+        name: &'static str,
+        label: String,
+        kind: &'static str,
+        step: Option<&'static str>,
+        required: bool,
+        min: Option<String>,
+        max: Option<String>,
+        minlength: Option<String>,
+        maxlength: Option<String>,
+        hint: Option<String>,
+    }
+
+    /// The controls of an operation's form, one per parameter `labels`
+    /// names, in its order, each with the bounds its parameter's schema
+    /// gives: an integer a number input, anything else a text input. A
+    /// parameter the operation does not take has none.
+    fn controls(operation: &Value, form: &str, labels: Vec<(&'static str, String, Option<String>)>) -> Vec<Control> {
+        let params = &operation["params"]["properties"]["params"];
+        let required: Vec<&str> =
+            params["required"].as_array().map(|names| names.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        labels
+            .into_iter()
+            .filter_map(|(name, label, hint)| {
+                let property = params["properties"].get(name)?;
+                let integer = property["type"] == "integer";
+                let bound = |key: &str| property[key].as_i64().map(|bound| bound.to_string());
+                Some(Control {
+                    id: format!("{form}-{}", name.to_ascii_lowercase()),
+                    name,
+                    label,
+                    kind: if integer { "number" } else { "text" },
+                    step: integer.then_some("1"),
+                    required: required.contains(&name),
+                    min: if integer { bound("minimum") } else { None },
+                    max: if integer { bound("maximum") } else { None },
+                    minlength: if integer { None } else { bound("minLength") },
+                    maxlength: if integer { None } else { bound("maxLength") },
+                    hint,
+                })
+            })
+            .collect()
+    }
+
+    /// A form that posts an operation of the instance to its route, its
+    /// hidden values first, then its controls and its one button.
+    fn form<'a>(
+        cx: &'a Cx,
+        action: String,
+        operation: &'static str,
+        heading: &'static str,
+        hidden: Vec<(&'static str, String)>,
+        controls: Vec<Control>,
+        submit: &'static str,
+    ) -> BoxView<'a> {
+        let __cx = cx;
+        view! {
+            <form method="post" action=(action) class="ss-operation" data-operation=(operation)>
+                <h3>(heading)</h3>
+                for (name, value) in hidden {
+                    <input type="hidden" name=(name) value=(value)>
+                }
+                for Control { id, name, label, kind, step, required, min, max, minlength, maxlength, hint } in controls {
+                    let label_for = id.clone();
+                    <div class="field">
+                        <label for=(label_for)>(label)</label>
+                        <input id=(id) name=(name) type=(kind) step=(step) required=(required) min=(min) max=(max) minlength=(minlength) maxlength=(maxlength)>
+                        if let Some(hint) = hint {
+                            <p class="field-hint">(hint)</p>
+                        }
+                    </div>
+                }
+                <button type="submit">(submit)</button>
+            </form>
+        }
+        .boxed()
+    }
+
+    /// A read the panel could not make, as the engine refused it.
+    fn unread<'a>(cx: &'a Cx, what: &'static str, refusal: String) -> BoxView<'a> {
+        let __cx = cx;
+        view! { <p class="ss-refusal">(what) " could not be read: " (refusal)</p> }.boxed()
+    }
+
+    /// Stock's panel: the levels, low marked; the receive, adjust and count
+    /// forms; and the movements, newest first, a page at a time.
+    /// `movements` is listStockMovements' answer, none when the type does
+    /// not offer it; `older` says the page shows a later page of them.
+    pub(super) fn stock_view<'a>(
+        cx: &'a Cx,
+        describe: &Value,
+        record: &InstanceRecord,
+        movements: Option<Result<Value, String>>,
+        older: bool,
+    ) -> BoxView<'a> {
+        let __cx = cx;
+        let stock = fields(record, "Stock");
+        let count = |key: &str| stock[key].as_i64().map_or_else(String::new, |count| count.to_string());
+        let (on_hand, held, available) = (count("onHand"), count("held"), count("available"));
+        let low = stock["low"].as_bool().unwrap_or(false);
+        let forms: Vec<BoxView<'a>> = [
+            (
+                "receiveStock",
+                "Receive stock",
+                "Receive",
+                vec![("quantity", "Quantity".to_owned(), None), ("reason", "Reason".to_owned(), None), ("reference", "Reference".to_owned(), None)],
+            ),
+            ("adjustStock", "Adjust stock", "Adjust", vec![("delta", "Change".to_owned(), Some("Negative to take units away".to_owned())), ("reason", "Reason".to_owned(), None)]),
+            ("countStock", "Count stock", "Count", vec![("onHand", "Counted on hand".to_owned(), None), ("reason", "Reason".to_owned(), None)]),
+        ]
+        .into_iter()
+        .filter_map(|(operation, heading, submit, labels)| {
+            let offered = offered(describe, "Stock", operation)?;
+            let controls = controls(offered, &format!("stock-{}", operation.to_ascii_lowercase()), labels);
+            Some(form(cx, action(record, operation), operation, heading, Vec::new(), controls, submit))
+        })
+        .collect();
+        let here = instance_href(&record.schema, &record.id);
+        let movements = movements.map(|read| match read {
+            Ok(page) => {
+                let older = page["next"].as_str().map(|next| format!("{here}?movements={}", encode(next)));
+                movements_table(cx, &page["items"], older)
+            }
+            Err(refusal) => unread(cx, "The movements", refusal),
+        });
+        let newest = older.then_some(here);
+        view! {
+            <section class="ss-panel" data-behavior="Stock" data-low=(low.then_some("true"))>
+                <h2>"Stock"</h2>
+                <dl class="ss-fields">
+                    <div data-field="Stock.onHand">
+                        <dt>"On hand"</dt>
+                        <dd>(on_hand)</dd>
+                    </div>
+                    <div data-field="Stock.held">
+                        <dt>"Held"</dt>
+                        <dd>(held)</dd>
+                    </div>
+                    <div data-field="Stock.available">
+                        <dt>"Available"</dt>
+                        <dd>
+                            (available)
+                            if low {
+                                " " <strong class="ss-low">"Low"</strong>
+                            }
+                        </dd>
+                    </div>
+                    <div data-field="Stock.low">
+                        <dt>"Low"</dt>
+                        <dd>(if low { "Yes" } else { "No" })</dd>
+                    </div>
+                </dl>
+                for form in forms {
+                    (form)
+                }
+                if let Some(movements) = movements {
+                    <h3>"Movements"</h3>
+                    (movements)
+                    if let Some(href) = newest {
+                        <p><a href=(href)>"Newest movements"</a></p>
+                    }
+                }
+            </section>
+        }
+        .boxed()
+    }
+
+    /// Stock's movements as a table, and a link to the page of older ones.
+    fn movements_table<'a>(cx: &'a Cx, items: &Value, older: Option<String>) -> BoxView<'a> {
+        let __cx = cx;
+        let rows: Vec<_> = items
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| {
+                let text = |key: &str| item[key].as_str().unwrap_or_default().to_owned();
+                (
+                    instant_of(cx, &item["at"]),
+                    text("kind"),
+                    item["delta"].as_i64().map_or_else(String::new, |delta| format!("{delta:+}")),
+                    item["onHand"].as_i64().map_or_else(String::new, |count| count.to_string()),
+                    text("reason"),
+                    text("reference"),
+                    link_to(&item["holder"]),
+                    text("actor"),
+                )
+            })
+            .collect();
+        view! {
+            if rows.is_empty() {
+                <p class="ss-empty">"No movements."</p>
+            } else {
+                <table class="ss-table" data-operation="listStockMovements">
+                    <thead>
+                        <tr>
+                            <th scope="col">"When"</th>
+                            <th scope="col">"Kind"</th>
+                            <th scope="col">"Change"</th>
+                            <th scope="col">"On hand"</th>
+                            <th scope="col">"Reason"</th>
+                            <th scope="col">"Reference"</th>
+                            <th scope="col">"For"</th>
+                            <th scope="col">"By"</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        for (at, kind, delta, on_hand, reason, reference, holder, actor) in rows {
+                            <tr>
+                                <td>(at)</td>
+                                <td>(kind)</td>
+                                <td>(delta)</td>
+                                <td>(on_hand)</td>
+                                <td>(reason)</td>
+                                <td>(reference)</td>
+                                <td>
+                                    if let Some((href, label)) = holder {
+                                        <a href=(href)>(label)</a>
+                                    }
+                                </td>
+                                <td>(actor)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            if let Some(href) = older {
+                <p><a href=(href) rel="next">"Older movements"</a></p>
+            }
+        }
+        .boxed()
+    }
+
+    /// The days of bookings a Calendar panel shows: the query's
+    /// `bookingsFrom` and `bookingsTo`, each `YYYY-MM-DD` in UTC and both
+    /// included, else this week; and the window in epoch milliseconds, or
+    /// why a date is none. A window the engine refuses (too long, or
+    /// backwards) is the engine's to refuse.
+    pub(super) struct Window {
+        pub(super) from: String,
+        pub(super) to: String,
+        pub(super) range: Result<(i64, i64), String>,
+    }
+
+    impl Window {
+        pub(super) fn of(from: Option<String>, to: Option<String>, now: i64) -> Window {
+            let today = now.div_euclid(DAY_MS);
+            let from = from.unwrap_or_else(|| date_of(today));
+            let to = to.unwrap_or_else(|| date_of(today + WINDOW_DAYS - 1));
+            let range = match (day_of(&from), day_of(&to)) {
+                (Some(first), Some(last)) => Ok((first * DAY_MS, (last + 1) * DAY_MS)),
+                (None, _) => Err(format!("From is no date (YYYY-MM-DD): {from}")),
+                (_, None) => Err(format!("To is no date (YYYY-MM-DD): {to}")),
+            };
+            Window { from, to, range }
+        }
+    }
+
+    /// Calendar's panel: the time zone and capacity, the opening hours as a
+    /// week, the closures, and the bookings over the window, a page at a
+    /// time. `bookings` is listBookings' answer, none when the type does not
+    /// offer it or the window has no dates; `later` says the page shows a
+    /// later page of them.
+    pub(super) fn calendar_view<'a>(
+        cx: &'a Cx,
+        describe: &Value,
+        record: &InstanceRecord,
+        window: Window,
+        bookings: Option<Result<Value, String>>,
+        later: bool,
+    ) -> BoxView<'a> {
+        let __cx = cx;
+        let calendar = fields(record, "Calendar");
+        let time_zone = calendar["timeZone"].as_str().unwrap_or_default().to_owned();
+        let capacity = config(describe, "Calendar")["capacity"].as_i64().map(|capacity| capacity.to_string());
+        let week: Vec<(&'static str, String)> = DAYS
+            .iter()
+            .map(|(key, day)| {
+                let ranges: Vec<String> = calendar["hours"][*key]
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|range| Some(format!("{}–{}", range[0].as_str()?, range[1].as_str()?)))
+                    .collect();
+                (*day, if ranges.is_empty() { "Closed".to_owned() } else { ranges.join(", ") })
+            })
+            .collect();
+        let closures: Vec<_> = calendar["closures"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|closure| {
+                (
+                    closure["closure"].as_str().unwrap_or_default().to_owned(),
+                    instant_of(cx, &closure["startMs"]),
+                    instant_of(cx, &closure["endMs"]),
+                    closure["reason"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        let here = instance_href(&record.schema, &record.id);
+        let window_query = format!("bookingsFrom={}&bookingsTo={}", encode(&window.from), encode(&window.to));
+        let date_error = window.range.err();
+        let offers = offered(describe, "Calendar", "listBookings").is_some();
+        let bookings = bookings.map(|read| match read {
+            Ok(page) => {
+                let later = page["next"].as_str().map(|next| format!("{here}?{window_query}&bookings={}", encode(next)));
+                bookings_table(cx, &page["items"], later)
+            }
+            Err(refusal) => unread(cx, "The bookings", refusal),
+        });
+        let first = later.then(|| format!("{here}?{window_query}"));
+        let (from, to) = (window.from, window.to);
+        view! {
+            <section class="ss-panel" data-behavior="Calendar">
+                <h2>"Calendar"</h2>
+                <dl class="ss-fields">
+                    <div data-field="Calendar.timeZone">
+                        <dt>"Time zone"</dt>
+                        <dd>(time_zone)</dd>
+                    </div>
+                    if let Some(capacity) = capacity {
+                        <div data-field="capacity">
+                            <dt>"Capacity"</dt>
+                            <dd>(capacity)</dd>
+                        </div>
+                    }
+                </dl>
+                <table class="ss-table ss-week" data-field="Calendar.hours">
+                    <caption>"Opening hours"</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">"Day"</th>
+                            <th scope="col">"Hours"</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        for (day, hours) in week {
+                            <tr>
+                                <th scope="row">(day)</th>
+                                <td>(hours)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <h3>"Closures"</h3>
+                if closures.is_empty() {
+                    <p class="ss-empty">"No closures."</p>
+                } else {
+                    <table class="ss-table" data-field="Calendar.closures">
+                        <thead>
+                            <tr>
+                                <th scope="col">"Closure"</th>
+                                <th scope="col">"From"</th>
+                                <th scope="col">"To"</th>
+                                <th scope="col">"Reason"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            for (closure, start, end, reason) in closures {
+                                <tr>
+                                    <td>(closure)</td>
+                                    <td>(start)</td>
+                                    <td>(end)</td>
+                                    <td>(reason)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                if offers {
+                    <h3>"Bookings"</h3>
+                    <form method="get" action=(here) class="ss-filter" data-operation="listBookings">
+                        <div class="field">
+                            <label for="calendar-bookings-from">"From"</label>
+                            <input id="calendar-bookings-from" name="bookingsFrom" type="date" required=(true) value=(from)>
+                        </div>
+                        <div class="field">
+                            <label for="calendar-bookings-to">"To"</label>
+                            <input id="calendar-bookings-to" name="bookingsTo" type="date" required=(true) value=(to)>
+                        </div>
+                        <button type="submit">"Show bookings"</button>
+                    </form>
+                    if let Some(message) = date_error {
+                        <p class="form-error">(message)</p>
+                    }
+                    if let Some(bookings) = bookings {
+                        (bookings)
+                    }
+                    if let Some(href) = first {
+                        <p><a href=(href)>"First bookings"</a></p>
+                    }
+                }
+            </section>
+        }
+        .boxed()
+    }
+
+    /// Calendar's bookings as a table, and a link to the page of later ones.
+    fn bookings_table<'a>(cx: &'a Cx, items: &Value, later: Option<String>) -> BoxView<'a> {
+        let __cx = cx;
+        let rows: Vec<_> = items
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| {
+                let mut state = item["state"].as_str().unwrap_or_default().to_owned();
+                if item["retired"] == true {
+                    state.push_str(", retired");
+                }
+                let hold = format!("{}[{}]", item["hold"].as_str().unwrap_or_default(), item["item"].as_i64().unwrap_or_default());
+                (instant_of(cx, &item["startMs"]), instant_of(cx, &item["endMs"]), state, link_to(&item["holder"]), hold)
+            })
+            .collect();
+        view! {
+            if rows.is_empty() {
+                <p class="ss-empty">"No bookings."</p>
+            } else {
+                <table class="ss-table" data-operation="listBookings">
+                    <thead>
+                        <tr>
+                            <th scope="col">"Start"</th>
+                            <th scope="col">"End"</th>
+                            <th scope="col">"State"</th>
+                            <th scope="col">"For"</th>
+                            <th scope="col">"Hold"</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        for (start, end, state, holder, hold) in rows {
+                            <tr>
+                                <td>(start)</td>
+                                <td>(end)</td>
+                                <td>(state)</td>
+                                <td>
+                                    if let Some((href, label)) = holder {
+                                        <a href=(href)>(label)</a>
+                                    }
+                                </td>
+                                <td>(hold)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            if let Some(href) = later {
+                <p><a href=(href) rel="next">"Later bookings"</a></p>
+            }
+        }
+        .boxed()
+    }
+
+    /// Holds' panel: the state, the total as money ("Mixed currencies" when
+    /// the engine cannot sum it), and the items, each with what it asks of
+    /// its supply and its unit price as money.
+    pub(super) fn holds_view<'a>(cx: &'a Cx, record: &InstanceRecord) -> BoxView<'a> {
+        let __cx = cx;
+        let holds = fields(record, "Holds");
+        let state = holds["state"].as_str().unwrap_or_default().to_owned();
+        let total = match &holds["total"] {
+            Value::Null if holds.get("total").is_some() => view! { "Mixed currencies" }.boxed(),
+            Value::Object(total) => match total.get("currency").and_then(Value::as_str) {
+                Some(currency) => amount(cx, total.get("amount").and_then(Value::as_i64), Some(currency)),
+                None => view! { "Nothing priced" }.boxed(),
+            },
+            _ => view! { "" }.boxed(),
+        };
+        let items: Vec<_> = holds["items"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| {
+                let hold = format!("{}[{}]", item["hold"].as_str().unwrap_or_default(), item["item"].as_i64().unwrap_or_default());
+                let asks = match (item["quantity"].as_i64(), item["startMs"].as_i64(), item["endMs"].as_i64()) {
+                    (Some(1), _, _) => view! { "1 unit" }.boxed(),
+                    (Some(quantity), _, _) => {
+                        let units = format!("{quantity} units");
+                        view! { (units) }.boxed()
+                    }
+                    (None, Some(start), Some(end)) => {
+                        let (start, end) = (instant(cx, start), instant(cx, end));
+                        view! { (start) " to " (end) }.boxed()
+                    }
+                    _ => view! { "" }.boxed(),
+                };
+                let price = match item["unitPrice"].as_i64() {
+                    Some(price) => amount(cx, Some(price), item["currency"].as_str()),
+                    None => view! { "" }.boxed(),
+                };
+                (hold, link_to(item), asks, price, item["state"].as_str().unwrap_or_default().to_owned())
+            })
+            .collect();
+        view! {
+            <section class="ss-panel" data-behavior="Holds">
+                <h2>"Holds"</h2>
+                <dl class="ss-fields">
+                    <div data-field="Holds.state">
+                        <dt>"State"</dt>
+                        <dd>(state)</dd>
+                    </div>
+                    <div data-field="Holds.total">
+                        <dt>"Total"</dt>
+                        <dd>(total)</dd>
+                    </div>
+                </dl>
+                if items.is_empty() {
+                    <p class="ss-empty">"No items."</p>
+                } else {
+                    <table class="ss-table" data-field="Holds.items">
+                        <thead>
+                            <tr>
+                                <th scope="col">"Hold"</th>
+                                <th scope="col">"Supply"</th>
+                                <th scope="col">"Asks"</th>
+                                <th scope="col">"Unit price"</th>
+                                <th scope="col">"State"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            for (hold, supply, asks, price, state) in items {
+                                <tr>
+                                    <td>(hold)</td>
+                                    <td>
+                                        if let Some((href, label)) = supply {
+                                            <a href=(href)>(label)</a>
+                                        }
+                                    </td>
+                                    <td>(asks)</td>
+                                    <td>(price)</td>
+                                    <td>(state)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        .boxed()
+    }
+
+    /// Payments' panel: every amount as money in its currency, the state
+    /// and the attempts; then how the instance is refunded. A refund
+    /// instance links the instance it refunds. A type that another type's
+    /// instances refund through Approvals (`refund_types`) links to those
+    /// types, where refunds are signed off. Any other holds refundPayment's
+    /// form when the type offers it, under an idempotency key of the
+    /// instance's sequence, so a form sent twice refunds once.
+    pub(super) fn payments_view<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord, refund_types: &[String]) -> BoxView<'a> {
+        let __cx = cx;
+        let payments = fields(record, "Payments");
+        let currency = payments["currency"].as_str().map(str::to_owned);
+        let amounts: Vec<(String, &'static str, BoxView<'a>)> = [
+            ("due", "Due"),
+            ("authorized", "Authorized"),
+            ("captured", "Captured"),
+            ("refunded", "Refunded"),
+            ("outstanding", "Outstanding"),
+            ("overpaid", "Overpaid"),
+        ]
+        .into_iter()
+        .map(|(key, label)| (format!("Payments.{key}"), label, amount(cx, payments[key].as_i64(), currency.as_deref())))
+        .collect();
+        let state = payments["state"].as_str().unwrap_or_default().to_owned();
+        let attempts: Vec<_> = payments["attempts"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|attempt| {
+                let text = |key: &str| attempt[key].as_str().unwrap_or_default().to_owned();
+                let card = match (attempt["brand"].as_str(), attempt["last4"].as_str()) {
+                    (Some(brand), Some(last4)) => format!("{brand} ending {last4}"),
+                    (None, Some(last4)) => format!("ending {last4}"),
+                    (Some(brand), None) => brand.to_owned(),
+                    (None, None) => String::new(),
+                };
+                (
+                    text("attempt"),
+                    text("provider"),
+                    amount(cx, attempt["amount"].as_i64(), attempt["currency"].as_str().or(currency.as_deref())),
+                    text("status"),
+                    card,
+                    instant_of(cx, &attempt["openedAt"]),
+                    instant_of(cx, &attempt["updatedAt"]),
+                )
+            })
+            .collect();
+        let refunds = refunds_section(cx, describe, record, refund_types, currency.as_deref());
+        view! {
+            <section class="ss-panel" data-behavior="Payments">
+                <h2>"Payments"</h2>
+                <dl class="ss-fields">
+                    for (field, label, value) in amounts {
+                        <div data-field=(field)>
+                            <dt>(label)</dt>
+                            <dd>(value)</dd>
+                        </div>
+                    }
+                    <div data-field="Payments.state">
+                        <dt>"State"</dt>
+                        <dd>(state)</dd>
+                    </div>
+                </dl>
+                <h3>"Attempts"</h3>
+                if attempts.is_empty() {
+                    <p class="ss-empty">"No attempts."</p>
+                } else {
+                    <table class="ss-table" data-field="Payments.attempts">
+                        <thead>
+                            <tr>
+                                <th scope="col">"Attempt"</th>
+                                <th scope="col">"Provider"</th>
+                                <th scope="col">"Amount"</th>
+                                <th scope="col">"Status"</th>
+                                <th scope="col">"Card"</th>
+                                <th scope="col">"Opened"</th>
+                                <th scope="col">"Updated"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            for (attempt, provider, value, status, card, opened, updated) in attempts {
+                                <tr>
+                                    <td>(attempt)</td>
+                                    <td>(provider)</td>
+                                    <td>(value)</td>
+                                    <td>(status)</td>
+                                    <td>(card)</td>
+                                    <td>(opened)</td>
+                                    <td>(updated)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                if let Some(refunds) = refunds {
+                    (refunds)
+                }
+            </section>
+        }
+        .boxed()
+    }
+
+    /// How a Payments instance is refunded (`payments_view`), or nothing to
+    /// say.
+    fn refunds_section<'a>(
+        cx: &'a Cx,
+        describe: &Value,
+        record: &InstanceRecord,
+        refund_types: &[String],
+        currency: Option<&str>,
+    ) -> Option<BoxView<'a>> {
+        let __cx = cx;
+        if let Some(link) = refund_link(describe) {
+            let refunded = link_to(&record.behaviors.get("Links").unwrap_or(&NULL)["targets"][link])?;
+            return Some(view! { <p class="ss-refunds">"Refunds " <a href=(refunded.0)>(refunded.1)</a> "."</p> }.boxed());
+        }
+        if !refund_types.is_empty() {
+            let types: Vec<(String, String)> =
+                refund_types.iter().map(|name| (format!("{BASE}/{}", encode(name)), name.clone())).collect();
+            let schema = record.schema.clone();
+            return Some(
+                view! {
+                    <p class="ss-refunds">
+                        "A refund of this " (schema) " is signed off through Approvals: see "
+                        for (index, (href, name)) in types.into_iter().enumerate() {
+                            if index > 0 {
+                                ", "
+                            }
+                            <a href=(href)>(name)</a>
+                        }
+                        "."
+                    </p>
+                }
+                .boxed(),
+            );
+        }
+        let offered = offered(describe, "Payments", "refundPayment")?;
+        let unit = currency.map_or_else(|| "Amount, in minor units".to_owned(), |currency| format!("Amount, in minor units of {currency}"));
+        let controls = controls(offered, "payments-refundpayment", vec![("amount", unit, None), ("reason", "Reason".to_owned(), None)]);
+        let key = vec![("idempotencyKey", format!("console-refund-{}", record.seq))];
+        Some(form(cx, action(record, "refundPayment"), "refundPayment", "Refund", key, controls, "Refund"))
+    }
+
+    /// The value of `key` in the page's query, decoded; none when absent
+    /// or empty.
+    fn query_value(cx: &Cx, key: &str) -> Option<String> {
+        uri(cx)
+            .query()?
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| decode(value))
+            .filter(|value| !value.is_empty())
+    }
+
+    /// Percent-encodes each byte of `value` but a letter, a digit and
+    /// `-._~`, for a path's segment or a query's value.
+    fn encode(value: &str) -> String {
+        let mut out = String::with_capacity(value.len());
+        for byte in value.bytes() {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                out.push(char::from(byte));
+            } else {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+        out
+    }
+
+    /// A query's value as text: `+` a space, and each `%XX` its byte.
+    fn decode(value: &str) -> String {
+        let bytes = value.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut at = 0;
+        while at < bytes.len() {
+            let escaped = bytes
+                .get(at + 1..at + 3)
+                .filter(|_| bytes[at] == b'%')
+                .and_then(|hex| std::str::from_utf8(hex).ok())
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+            match (escaped, bytes[at]) {
+                (Some(byte), _) => {
+                    out.push(byte);
+                    at += 3;
+                }
+                (None, b'+') => {
+                    out.push(b' ');
+                    at += 1;
+                }
+                (None, byte) => {
+                    out.push(byte);
+                    at += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// Now, in epoch milliseconds.
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(i64::MAX))
+    }
+
+    /// The date `days` after 1970-01-01, `YYYY-MM-DD`.
+    fn date_of(days: i64) -> String {
+        let (year, month, day) = civil_from_days(days);
+        format!("{year:04}-{month:02}-{day:02}")
+    }
+
+    /// The days from 1970-01-01 to a date, `YYYY-MM-DD`; none for text that
+    /// is no such date.
+    fn day_of(text: &str) -> Option<i64> {
+        let mut parts = text.splitn(3, '-');
+        let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+        if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+            return None;
+        }
+        let (year, month, day) = (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?);
+        if !(1..=12).contains(&month) || day == 0 {
+            return None;
+        }
+        let days = days_from_civil(year, month, day);
+        (civil_from_days(days) == (year, month, day)).then_some(days)
+    }
+
+    /// The days from 1970-01-01 to a date of the proleptic Gregorian calendar.
+    fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+        let year = if month <= 2 { year - 1 } else { year };
+        let (era, year_of_era) = (year.div_euclid(400), year.rem_euclid(400));
+        let day_of_year = (153 * ((i64::from(month) + 9) % 12) + 2) / 5 + i64::from(day) - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        era * 146_097 + day_of_era - 719_468
+    }
+
+    /// The date `days` after 1970-01-01: its year, month and day.
+    fn civil_from_days(days: i64) -> (i64, u32, u32) {
+        let days = days + 719_468;
+        let (era, day_of_era) = (days.div_euclid(146_097), days.rem_euclid(146_097));
+        let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let shifted = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * shifted + 2) / 5 + 1;
+        let month = if shifted < 10 { shifted + 3 } else { shifted - 9 };
+        (year_of_era + era * 400 + i64::from(month <= 2), month as u32, day as u32)
+    }
 }

@@ -329,13 +329,15 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 /// A link the console's own pages add to the nav and the index, after the
 /// resources' lists: the engine's types (`engine_pages::nav_link`), the
 /// account, users and roles (`identity_pages::nav_links`). A `post` link is
-/// a button that posts to `href`, as signing out does, which the index
-/// leaves out.
+/// a button that posts to `href`, as signing out does. A `nav_only` link,
+/// such as signing in, is the nav's alone, and the index leaves it out, as
+/// it does a `post` link: the index has its own link to sign in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavLink {
     pub href: String,
     pub label: String,
     pub post: bool,
+    pub nav_only: bool,
 }
 
 /// The console's own pages' links, in the nav and the index after the
@@ -601,9 +603,13 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     let (links, signed_out) = listed(cx).await;
     let sign_in = if *signed_out { settings.sign_in_href(&current(cx)) } else { None };
     // The console's own pages' links, after the resources': a post's button
-    // is the nav's alone.
-    let console: Vec<(String, String)> =
-        console_links(cx).await.iter().filter(|link| !link.post).map(|link| (link.href.clone(), link.label.clone())).collect();
+    // and a nav-only link are the nav's alone.
+    let console: Vec<(String, String)> = console_links(cx)
+        .await
+        .iter()
+        .filter(|link| !link.post && !link.nav_only)
+        .map(|link| (link.href.clone(), link.label.clone()))
+        .collect();
     Ok(view! {
         <h1>(settings.site_title())</h1>
         if links.is_empty() && console.is_empty() {
