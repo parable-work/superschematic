@@ -112,12 +112,15 @@ import (
 // Topcoat crate in apps/backoffice, runs as a process of its own on its
 // generated entrypoint, over shop-db's Postgres and its engine: Ada signs
 // in through its sign-in page and receives stock through the engine
-// console's Inventory page, which shop-stock then counts. Its build needs
+// console's Inventory page, which shop-stock then counts. The app serves
+// its pages alone: neither shop-stock's JSON API nor the engine's routes
+// answer on its address. Its build needs
 // the Topcoat extension, which the core binary refuses to build without,
 // so the test runs superschematic-topcoat.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC_TOPCOAT to
-// superschematic-topcoat, the core with the Topcoat extension linked, and
+// superschematic-topcoat, the installed binary with the Topcoat extension
+// linked too, and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
 // without Docker, or without cargo, which builds shop-stock's server, the
 // test skips.
@@ -1438,7 +1441,9 @@ func signInAs(ctx context.Context, t *testing.T, shopAPI string, user stackUser)
 // receiveThroughTheBackoffice receives a delivery of the product in
 // shop-stock's Backoffice at app (D78), as a member of staff would in a
 // browser: signed out, the product's Inventory page in the engine console
-// asks for a caller; user signs in through the app's sign-in page, which
+// asks for a caller, and neither shop-stock's JSON API nor the engine's
+// routes are on the app's address; user signs in through the app's
+// sign-in page, which
 // sets the session cookie and goes on to the page; the page shows the
 // Stock panel, whose receiveStock form takes five, 303 back to the page,
 // which lists the delivery; and shop-stock, through stock, counts five
@@ -1479,6 +1484,11 @@ func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, 
 
 	if status, _, body := send(http.MethodGet, page, "", nil); status != http.StatusUnauthorized {
 		t.Fatalf("the Backoffice's %s, signed out: %d %s", page, status, body)
+	}
+	for _, path := range []string{"/api/stock", "/engine/namespaces/shop-db/schemas/Inventory/instances"} {
+		if status, _, body := send(http.MethodGet, path, "", nil); status != http.StatusNotFound {
+			t.Fatalf("the Backoffice answered GET %s %d, want 404: it serves its pages alone %s", path, status, body)
+		}
 	}
 	before, err := stock.StockNamespace.GetStock(ctx, product.String())
 	if err != nil {

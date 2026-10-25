@@ -8,6 +8,7 @@ import (
 
 	"github.com/parable-work/superschematic/extensions/topcoat"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	"github.com/parable-work/superschematic/registry"
 )
 
 // The extension's fixtures of a stack app (D78): fixture-app-api, whose
@@ -21,13 +22,15 @@ const (
 
 // TestTheCrateServesAStackApp builds fixture-app-api's crates with the
 // pages on: the API crate declares apps::BackofficeParts, and the Topcoat
-// crate's fixture_app_api_with_parts takes them, converted into AppParts.
-// Then cargo clippy and cargo test run appPartsTest: the program's serve
-// binds parts.addr and serves the router fixture_app_api_with_parts builds
-// there; a user the mounted JSON API signs in is the caller of the pages,
-// through the identity page authenticator over the parts'
-// implementations; and the engine pages read the engine the parts hold,
-// which a note created through the engine's routes is in.
+// crate's fixture_app_api_with_parts and fixture_app_api_with_parts_and_api
+// take them, converted into AppParts. Then cargo clippy and cargo test run
+// appPartsTest: the program's serve binds parts.addr and serves the router
+// fixture_app_api_with_parts builds there, its pages and no JSON API or
+// engine routes; a user who signs in through the sign-in page is the
+// caller of the pages, through the identity page authenticator over the
+// parts' implementations; with the API too, a user the mounted JSON API
+// signs in is, and the engine pages read the engine the parts hold, which
+// a note created through the engine's routes is in.
 func TestTheCrateServesAStackApp(t *testing.T) {
 	root := testpaths.TempDir(t)
 	if _, err := buildService(t, appDatabase, root, engineDatabaseOutputs()); err != nil {
@@ -42,8 +45,11 @@ func TestTheCrateServesAStackApp(t *testing.T) {
 	}
 	for _, want := range []string{
 		"fn fixture_app_api_with_parts(self, parts: impl Into<AppParts>) -> Self;",
-		"let page_authenticator = IdentityPageAuthenticator::of(&parts.implementations);",
-		"set_up(self, parts.implementations, Arc::new(page_authenticator), parts.engine, true)",
+		"fn fixture_app_api_with_parts_and_api(self, parts: impl Into<AppParts>) -> Self;",
+		"set_up_parts(self, parts.into(), false)",
+		"set_up_parts(self, parts.into(), true)",
+		"let page_authenticator: Arc<dyn PageAuthenticator> = Arc::new(IdentityPageAuthenticator::of(&parts.implementations));",
+		"set_up(router, parts.implementations, page_authenticator, parts.engine, api)",
 		"impl From<api::apps::BackofficeParts> for AppParts {",
 	} {
 		if !strings.Contains(string(lib), want) {
@@ -213,13 +219,57 @@ async fn sign_in(router: &Router, login: &str) -> String {
     reply.cookies.first().expect("the session cookie").split(';').next().unwrap().to_string()
 }
 
+// Signs in through the app's sign-in page, as a browser on the app's own
+// site would, and answers the Cookie header that carries the session.
+async fn sign_in_page(router: &Router, login: &str) -> String {
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/console/sign-in")
+        .header("host", "app.example.com")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("sec-fetch-site", "same-origin")
+        .body(Body::from(format!("login={}&password={}&next=%2Fconsole", login.replace('@', "%40"), PASSWORD.replace(' ', "+"))))
+        .unwrap();
+    let response = router.handle(request).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let cookie = response.headers().get("set-cookie").expect("the session cookie").to_str().unwrap();
+    cookie.split(';').next().unwrap().to_string()
+}
+
 const NOTES: &str = "/engine/namespaces/fixture-app-db/schemas/Note/instances";
+
+// The app serves its pages from the parts and mounts no JSON API or engine
+// routes: a stack may expose the app and keep its API internal.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_parts_set_up_the_pages_alone() {
+    let parts = parts(SocketAddr::from(([127, 0, 0, 1], 0))).await;
+    let router = Router::builder().discover().fixture_app_api_with_parts(parts).build();
+
+    let credentials = json!({"login": "ada@example.com", "password": PASSWORD, "session": "cookie"});
+    let reply = send(&router, "POST", "/api/auth/login", &[("sec-fetch-site", "same-origin")], Some(credentials)).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
+    let reply = send(&router, "GET", "/api/notes/count", &[], None).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
+    let reply = send(&router, "GET", NOTES, &[], None).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
+
+    // The pages call the API and the engine in-process, as the caller the
+    // sign-in page's session gives them.
+    let reply = send(&router, "GET", "/console/engine", &[], None).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    let ada = sign_in_page(&router, "ada@example.com").await;
+    let reply = send(&router, "GET", "/console/engine", &[("cookie", &ada)], None).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("<a href=\"/console/engine/Note\">Notes</a>"), "{}", reply.body);
+    let reply = send(&router, "GET", "/console/engine/Note", &[("cookie", &ada)], None).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_parts_set_up_the_pages_the_api_and_the_engine() {
     let parts = parts(SocketAddr::from(([127, 0, 0, 1], 0))).await;
     let engine = Arc::clone(&parts.engine);
-    let router = Router::builder().discover().fixture_app_api_with_parts(parts).build();
+    let router = Router::builder().discover().fixture_app_api_with_parts_and_api(parts).build();
 
     // The pages ask for a caller, whom the API's session gives them.
     let reply = send(&router, "GET", "/console/engine", &[], None).await;
@@ -286,7 +336,137 @@ async fn serve_listens_on_the_parts_address() {
     .unwrap();
     assert_eq!(status, "HTTP/1.1 401 Unauthorized");
     let status = tokio::task::spawn_blocking(move || get(addr, "/api/notes/count")).await.unwrap();
-    assert_eq!(status, "HTTP/1.1 401 Unauthorized");
+    assert_eq!(status, "HTTP/1.1 404 Not Found");
     served.abort();
+}
+`
+
+// appCopy copies fixture-app-api into a directory of the test's own, with
+// no authDb, so its crate has no identity runtime and no engine, and its
+// schema without the user sessions that need one; with auth off, its
+// operations need no caller either.
+func appCopy(t *testing.T, auth bool) string {
+	t.Helper()
+	dir := filepath.Join(testpaths.TempDir(t), appService)
+	for _, file := range []string{"schema.config.yaml", filepath.Join("src", "app.schema.yaml")} {
+		data, err := os.ReadFile(filepath.Join(serviceDir(appService), file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		for _, cut := range []string{"authDb: fixture-app-db\n", "  - name: Account\n    userSessions: {}\n    operations: []\n"} {
+			text = strings.ReplaceAll(text, cut, "")
+		}
+		if !auth {
+			text = strings.ReplaceAll(text, "        auth: true\n", "")
+		}
+		path := filepath.Join(dir, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild builds the Topcoat crate
+// of fixture-app-api's app with no identity runtime and no engine (D78):
+// an API with auth of its own takes the app's page authenticator in
+// fixture_app_api_with_parts and fixture_app_api_with_parts_and_api, as
+// their doc's serve does, and one without auth takes the parts alone.
+// AppParts then holds the implementations alone. cargo clippy and cargo
+// test compile a program that calls each.
+func TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		auth bool
+		want []string
+		test string
+	}{
+		{"own auth", true, []string{
+			"fn fixture_app_api_with_parts(self, parts: impl Into<AppParts>, page_authenticator: impl PageAuthenticator) -> Self;",
+			"///     let page_authenticator = MyPageAuthenticator::new(&parts.implementations);",
+			"set_up_parts(self, parts.into(), Arc::new(page_authenticator), true)",
+		}, ownAuthAppTest},
+		{"no auth", false, []string{
+			"fn fixture_app_api_with_parts(self, parts: impl Into<AppParts>) -> Self;",
+			"set_up(router, parts.implementations, api)",
+		}, noAuthAppTest},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := appCopy(t, c.auth)
+			root := testpaths.TempDir(t)
+			if _, err := buildDir(t, registry.DefaultNaming(), dir, root, pagesOutputs(), nil); err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			lib, err := os.ReadFile(filepath.Join(topcoat.Dir(root, appService), "src", "lib.rs"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range append(c.want, "pub struct AppParts {\n    pub implementations: Implementations,\n}") {
+				if !strings.Contains(string(lib), want) {
+					t.Errorf("lib.rs lacks %s:\n%s", want, lib)
+				}
+			}
+			if strings.Contains(string(lib), "IdentityPageAuthenticator") || strings.Contains(string(lib), "parts.engine") {
+				t.Errorf("lib.rs of an API with no identity runtime or engine has one:\n%s", lib)
+			}
+			cargoTestCrateWith(t, appService, c.test, crateOptions{outputs: pagesOutputs(), dir: dir})
+		})
+	}
+}
+
+// ownAuthAppTest is the program of the app of an API with auth that is
+// not the identity runtime's: it hands its own page authenticator over
+// with the parts.
+const ownAuthAppTest = `use async_trait::async_trait;
+use schemas_fixture_app_api_topcoat::api::apps::BackofficeParts;
+use schemas_fixture_app_api_topcoat::api::runtime::{ApiError, Principal};
+use schemas_fixture_app_api_topcoat::{PageAuthenticator, RouterBuilderFixtureAppApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{Router, RouterBuilderDiscoverExt};
+
+struct NoOne;
+
+#[async_trait]
+impl PageAuthenticator for NoOne {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+fn pages(parts: BackofficeParts) -> Router {
+    Router::builder().discover().fixture_app_api_with_parts(parts, NoOne).build()
+}
+
+fn pages_and_api(parts: BackofficeParts) -> Router {
+    Router::builder().discover().fixture_app_api_with_parts_and_api(parts, NoOne).build()
+}
+
+#[test]
+fn builds() {
+    let _ = [pages as fn(BackofficeParts) -> Router, pages_and_api];
+}
+`
+
+// noAuthAppTest is the program of the app of an API without auth: the
+// parts alone set the crate up.
+const noAuthAppTest = `use schemas_fixture_app_api_topcoat::api::apps::BackofficeParts;
+use schemas_fixture_app_api_topcoat::RouterBuilderFixtureAppApiExt;
+use topcoat::router::{Router, RouterBuilderDiscoverExt};
+
+fn pages(parts: BackofficeParts) -> Router {
+    Router::builder().discover().fixture_app_api_with_parts(parts).build()
+}
+
+fn pages_and_api(parts: BackofficeParts) -> Router {
+    Router::builder().discover().fixture_app_api_with_parts_and_api(parts).build()
+}
+
+#[test]
+fn builds() {
+    let _ = [pages as fn(BackofficeParts) -> Router, pages_and_api];
 }
 `
