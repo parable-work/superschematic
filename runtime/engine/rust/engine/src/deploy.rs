@@ -361,22 +361,28 @@ mod tests {
         let old = note(&["body"]);
         let new = note(&["body", "title"]);
         assert_eq!(
-            engine.undeployed(&[old.clone()], None).expect("read"),
+            engine
+                .undeployed(std::slice::from_ref(&old), None)
+                .expect("read"),
             vec!["Note".to_owned()],
             "nothing is live yet"
         );
-        engine.deploy(&[old.clone()], None).expect("deploy");
+        engine
+            .deploy(std::slice::from_ref(&old), None)
+            .expect("deploy");
         assert!(engine
             .undeployed(&[serde_json::Value::from(old.to_string())], None)
             .expect("read")
             .is_empty());
         assert_eq!(
-            engine.undeployed(&[new.clone()], None).expect("read"),
+            engine
+                .undeployed(std::slice::from_ref(&new), None)
+                .expect("read"),
             vec!["Note".to_owned()],
             "a newer document is not live"
         );
         engine
-            .deploy(&[new.clone()], None)
+            .deploy(std::slice::from_ref(&new), None)
             .expect("deploy the change");
         assert_eq!(
             engine.undeployed(&[old], None).expect("read"),
