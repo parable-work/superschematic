@@ -4,22 +4,30 @@ import "testing"
 
 // TestTheEnginePanels builds fixture-engine-api's crate over
 // fixture-engine-db, whose engine pages write the engine panels, and runs
-// cargo clippy, then cargo
-// test, with enginePanelsTest: pages of the test hand engine_panels::panel
-// canned describe documents and records, and Branches' a document the test
-// seeds, and drop both before they return its view.
+// cargo clippy, then cargo test, with enginePanelsTest. Pages of the test
+// hand engine_panels::panel canned describe documents and records, and
+// Branches' a document the test seeds, and drop both before they return
+// its view; the console's own pages then run the panels' forms.
 //
 //   - Workflow shows the state by its display label, a button per labeled
-//     move out of it, a form for the unlabeled ones, and none in a terminal
-//     state.
+//     move out of it, a form for the unlabeled ones, none in a terminal
+//     state, and only the moves the caller is offered and holds the
+//     permission of.
 //   - Approvals shows a gate's sign-offs against its count and who signed,
 //     and offers the caller a sign-off, their withdraw, or why neither: the
 //     creator, the gated state, or a caller whose permissions do not cover
 //     the gate's.
 //   - Branches shows the refs and the release log, a draft's history
-//     newest first with its commit, merge, discard and release forms, the
-//     diff of two commits with each entity's content before and after, and
-//     the engine's refusal to a caller who may not read the document.
+//     newest first, 50 commits a page, with the generic forms of its writes
+//     and release buttons, the diff of two commits of that history (at
+//     most 200 rows) with each entity's content before and after, and the
+//     engine's refusal to a caller who may not read the document.
+//   - Through the console: a move into approved is refused 409
+//     approvals_missing, then made after two sign-offs; a draft is saved
+//     and committed through the panel's forms, a stale version refused 409;
+//     and every operation of Workflow, Approvals and Branches has a form on
+//     the instance's page, the panel's or the generic one, or is a read
+//     the panel shows.
 //   - A behavior with no panel of its own gets none.
 func TestTheEnginePanels(t *testing.T) {
 	cargoTestCrateWith(t, engineService, enginePanelsTest, crateOptions{
@@ -38,7 +46,7 @@ use schemas_fixture_engine_api_topcoat::api::runtime::{ApiError, Authenticator, 
 use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation, NotesListNotesArgs};
 use schemas_fixture_engine_api_topcoat::{engine, engine_panels, PageAuthenticator, RouterBuilderFixtureEngineApiExt, Setup};
 use serde_json::{json, Map, Value};
-use superschematic_engine::{CreateOptions, Engine, GetOptions, InstanceRecord, WriteOptions};
+use superschematic_engine::{CreateOptions, Engine, GetOptions, InstanceRecord, ToolTarget, WriteOptions};
 use topcoat::context::{Cx, app_context};
 use topcoat::router::request::{headers, uri};
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
@@ -77,7 +85,7 @@ const REQUEST_DESCRIBE: &str = r#"{
         "transitions": [
           {"from": "open", "to": "approved"},
           {"from": "open", "to": "rejected"},
-          {"from": "approved", "to": "closed"}
+          {"from": "approved", "to": "closed", "permission": "requests.close"}
         ]
       },
       "fields": [{"name": "status"}, {"name": "enteredAt"}],
@@ -91,37 +99,20 @@ const REQUEST_DESCRIBE: &str = r#"{
     }
   ],
   "operations": [
-    {"name": "transition", "behavior": "Workflow", "scope": "instance", "writes": true},
-    {"name": "signOff", "behavior": "Approvals", "scope": "instance", "writes": true},
-    {"name": "withdrawSignOff", "behavior": "Approvals", "scope": "instance", "writes": true},
-    {"name": "listSignOffs", "behavior": "Approvals", "scope": "instance", "writes": false}
-  ]
-}"#;
-
-// Document's describe document, trimmed.
-const DOCUMENT_DESCRIBE: &str = r#"{
-  "namespace": "fixture-engine-db",
-  "name": "Document",
-  "instanceType": "Document",
-  "display": {"noun": "Document", "plural": "Documents", "titleField": "title"},
-  "fields": [{"name": "title"}, {"name": "template"}],
-  "behaviors": [
-    {
-      "name": "Branches",
-      "config": {"kinds": {"section": {"type": "Section"}}},
-      "fields": [{"name": "release"}],
-      "operations": ["branch", "save", "commit", "seal", "merge", "rebase", "revert", "releaseCommit", "discard", "refs", "releases", "compose", "materialize", "released", "diff", "history"]
-    }
+    {"name": "transition", "behavior": "Workflow", "scope": "instance", "writes": true, "tool": "request.transition"},
+    {"name": "signOff", "behavior": "Approvals", "scope": "instance", "writes": true, "tool": "request.signOff"},
+    {"name": "withdrawSignOff", "behavior": "Approvals", "scope": "instance", "writes": true, "tool": "request.withdrawSignOff"},
+    {"name": "listSignOffs", "behavior": "Approvals", "scope": "instance", "writes": false, "tool": "request.listSignOffs"}
   ]
 }"#;
 
 // What each subject holds: nobody nothing, a reader the types, and anyone
-// else the types and the gate's permission too.
+// else the types, the gate's permission and closing's too.
 fn permissions_of(subject: &str) -> Vec<&'static str> {
     match subject {
         "nobody" => vec![],
         "reader" => vec!["Note", "Request", "Document"],
-        _ => vec!["Note", "Request", "Document", "requests.approve"],
+        _ => vec!["Note", "Request", "Document", "requests.approve", "requests.close"],
     }
 }
 
@@ -236,22 +227,21 @@ async fn request_panels(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
-// The Branches panel of the Document the query names (?id=), read as ada,
-// shown to the page's caller.
+// The Branches panel of the Document the query names (?id=), its describe
+// document and its record read as ada, shown to the page's caller.
 #[page("/panels/document")]
 async fn document_panel(cx: &Cx) -> topcoat::Result<impl View> {
     let setup: &Setup = app_context(cx);
     let engine = Arc::clone(&setup.engine);
     let id = query_value(cx, "id");
-    let record = tokio::task::spawn_blocking(move || {
+    let (describe, record) = tokio::task::spawn_blocking(move || {
         let ada = superschematic_engine::Principal::new("ada", permissions_of("ada"));
-        engine.instances().get(&ada, "Document", &id, GetOptions { namespace: Some(NAMESPACE), ..GetOptions::default() })
+        let describe = engine.tools().describe(&ada, "Document", ToolTarget { namespace: Some(NAMESPACE), filter: None }).expect("Document's describe document");
+        let record = engine.instances().get(&ada, "Document", &id, GetOptions { namespace: Some(NAMESPACE), ..GetOptions::default() });
+        (describe, record.expect("the document's read").expect("the document"))
     })
     .await
-    .expect("the read")
-    .expect("the document's read")
-    .expect("the document");
-    let describe: Value = serde_json::from_str(DOCUMENT_DESCRIBE).expect("Document's describe document");
+    .expect("the read");
     let panel = engine_panels::panel(cx, "Branches", &describe, &record).await;
     drop(record);
     drop(describe);
@@ -376,6 +366,15 @@ async fn the_workflow_panel_offers_the_moves_out_of_the_state() {
     let (_, body) = get(&router, "/panels/request?status=rejected", Some("bob")).await;
     has(&body, &[r#"data-tone="danger""#, "No move leaves this state."]);
     lacks(&body, &["operations/transition"]);
+    // A reader holds no requests.close, so is offered the moves out of open
+    // but not the one out of approved; with no caller, none is offered.
+    let (_, body) = get(&router, "/panels/request?status=open", Some("reader")).await;
+    has(&body, &[">Approve</button>", ">Reject</button>"]);
+    let (_, body) = get(&router, "/panels/request?status=approved", Some("reader")).await;
+    has(&body, &[">Approved</p>"]);
+    lacks(&body, &["Move to", "operations/transition", "No move leaves this state."]);
+    let (_, body) = get(&router, "/panels/request?status=open", None).await;
+    lacks(&body, &["operations/transition", "No move leaves this state."]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -411,10 +410,19 @@ async fn the_approvals_panel_offers_the_caller_their_sign_off() {
         has(&body, &["2 of 2 sign-offs", "<li>cy</li>"]);
         lacks(&body, &[">Sign off</button>", ">Withdraw my sign-off</button>"]);
     }
-    // In the gated state, no sign-off is taken for it.
+    // In the gated state, entered through the gate, the gate was met: its
+    // sign-offs were consumed, so it counts none and takes none. Past it,
+    // in closed, which only approved leads to, it was met too; rejected
+    // skipped it, so its gate still counts.
     let (_, body) = get(&router, "/panels/request?status=approved", Some("cy")).await;
-    has(&body, &["It is in this state, so no sign-off is taken for it."]);
-    lacks(&body, &[">Sign off</button>"]);
+    has(&body, &[r#"<p class="ss-met">Met: it entered Approved with its 2 sign-offs.</p>"#]);
+    lacks(&body, &[">Sign off</button>", "0 of 2 sign-offs", "No one has signed off.", "It is in this state"]);
+    let (_, body) = get(&router, "/panels/request?status=closed", Some("cy")).await;
+    has(&body, &["Met: it passed Approved with its 2 sign-offs."]);
+    lacks(&body, &["0 of 2 sign-offs"]);
+    let (_, body) = get(&router, "/panels/request?status=rejected", Some("cy")).await;
+    has(&body, &["0 of 2 sign-offs"]);
+    lacks(&body, &["Met:"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -441,8 +449,10 @@ async fn the_branches_panel_shows_the_refs_a_history_and_a_diff() {
         "History of main",
         "It has no commits.",
         &format!("<code>{}</code>", short(&seeded.first)),
+        "A new draft of main.",
         &format!(r#"action="{item}/operations/branch""#),
-        &format!(r#"<option value="{}" selected="">main</option>"#, seeded.main),
+        &format!(r#"<input type="hidden" name="fromRef" value="{}">"#, seeded.main),
+        r#"name="name" type="text" required"#,
     ]);
     assert!(body.find(">main</a>").unwrap() < body.find(">draft</a>").unwrap(), "the primary line comes first:\n{body}");
     lacks(&body, &["operations/commit", "operations/discard"]);
@@ -455,15 +465,26 @@ async fn the_branches_panel_shows_the_refs_a_history_and_a_diff() {
         &format!(r#"action="{item}/operations/releaseCommit""#),
         &format!(r#"name="commit" value="{}""#, seeded.first),
         r#"name="version" value="1""#,
+        &format!("Commits draft at version {}.", seeded.draft_version),
         &format!(r#"action="{item}/operations/commit""#),
-        &format!(r#"name="ref" value="{}""#, seeded.draft),
-        &format!(r#"name="version" value="{}""#, seeded.draft_version),
-        r#"name="tag" value="true""#,
+        &format!(r#"<input type="hidden" name="ref" value="{}">"#, seeded.draft),
+        &format!(r#"<input type="hidden" name="version" value="{}">"#, seeded.draft_version),
+        r#"name="message" type="text""#,
+        r#"<select id="engine-panel-commit-tag" name="tag""#,
+        &format!(r#"action="{item}/operations/save""#),
+        r#"<textarea id="engine-panel-save-edits" name="edits""#,
+        &format!(r#"action="{item}/operations/seal""#),
+        &format!(r#"action="{item}/operations/rebase""#),
+        &format!(r#"<input type="hidden" name="draft" value="{}">"#, seeded.draft),
+        &format!(r#"action="{item}/operations/revert""#),
+        "Merges draft into main.",
         &format!(r#"action="{item}/operations/merge""#),
-        &format!(r#"name="target" value="{}""#, seeded.main),
-        r#"name="targetVersion" value="1""#,
-        ">Merge into main</button>",
+        &format!(r#"<input type="hidden" name="source" value="{}">"#, seeded.draft),
+        &format!(r#"<input type="hidden" name="target" value="{}">"#, seeded.main),
+        r#"<input type="hidden" name="targetVersion" value="1">"#,
+        "Discards draft, which frees its name.",
         &format!(r#"action="{item}/operations/discard""#),
+        &format!(r#"<input type="hidden" name="fromRef" value="{}">"#, seeded.draft),
         ">Compare</button>",
         &format!(r#"<option value="{}" selected="">"#, seeded.second),
         &format!(r#"<option value="{}" selected="">"#, seeded.third),
@@ -493,5 +514,247 @@ async fn the_branches_panel_shows_the_refs_a_history_and_a_diff() {
     lacks(&body, &[">draft</a>"]);
     let (_, body) = get(&router, &page, None).await;
     has(&body, &["Sign in to see its branches."]);
+}
+
+// The operations the describe document of schema declares for its
+// behaviors, read as ada.
+async fn declared(engine: &Arc<Engine>, schema: &'static str) -> Vec<String> {
+    let engine = Arc::clone(engine);
+    tokio::task::spawn_blocking(move || {
+        let ada = superschematic_engine::Principal::new("ada", permissions_of("ada"));
+        let describe = engine.tools().describe(&ada, schema, ToolTarget { namespace: Some(NAMESPACE), filter: None }).expect("the describe document");
+        describe["behaviors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|behavior| behavior["operations"].as_array().cloned().unwrap_or_default())
+            .filter_map(|operation| operation.as_str().map(str::to_owned))
+            .collect()
+    })
+    .await
+    .expect("the read")
+}
+
+// Every operation the behaviors of a type declare has its form on one of
+// the instance's pages, the panel's or the generic one, or, for a read the
+// panel shows (shown), what the panel shows of it.
+fn every_operation_has_a_form(item: &str, operations: &[String], pages: &[&str], shown: &[(&str, &str)]) {
+    for operation in operations {
+        let action = format!(r#"action="{item}/operations/{operation}""#);
+        let found = pages.iter().any(|page| page.contains(&action))
+            || shown.iter().any(|(read, mark)| read == operation && pages.iter().any(|page| page.contains(mark)));
+        assert!(found, "no form or view of {operation} on {item}:\n{}", pages.join("\n\n"));
+    }
+}
+
+// Percent-encodes a form's pairs as a browser sends them.
+fn form_body(pairs: &[(&str, &str)]) -> String {
+    let encode = |text: &str| {
+        text.bytes()
+            .map(|byte| if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) { char::from(byte).to_string() } else { format!("%{byte:02X}") })
+            .collect::<String>()
+    };
+    pairs.iter().map(|(name, value)| format!("{}={}", encode(name), encode(value))).collect::<Vec<_>>().join("&")
+}
+
+// Posts a form's pairs to a console page as bearer, holds the answer to the
+// enter rule, and returns its status, its body and where it goes.
+async fn post(router: &Router, uri: &str, bearer: &str, pairs: &[(&str, &str)]) -> (StatusCode, String, Option<String>) {
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("authorization", format!("Bearer {bearer}"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(form_body(pairs)))
+        .unwrap();
+    let response = router.handle(request).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let location = headers.get("location").map(|value| value.to_str().unwrap().to_owned());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &body);
+    (status, body, location)
+}
+
+// Through the console's own pages: a move into approved is vetoed for
+// missing sign-offs (409, the veto's code and message the form's), each
+// of two staff signs off through the panel's form, and the move is then
+// made.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_console_moves_a_request_after_two_sign_offs() {
+    let (router, engine) = app();
+    let seeding = Arc::clone(&engine);
+    tokio::task::spawn_blocking(move || {
+        let engine = seeding;
+        let ada = superschematic_engine::Principal::new("ada", permissions_of("ada"));
+        let options = CreateOptions { namespace: Some(NAMESPACE), id: Some("req1"), ..CreateOptions::default() };
+        engine.instances().create(&ada, "Request", &json!({"title": "Laptop"}), options).expect("create a request");
+    })
+    .await
+    .expect("the seed");
+    const ITEM: &str = "/console/engine/Request/req1";
+    let transition = format!("{ITEM}/operations/transition");
+    let (status, body) = get(&router, ITEM, Some("bob")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    has(&body, &[
+        r#"data-behavior="Workflow""#,
+        r#"data-behavior="Approvals""#,
+        &format!(r#"<form method="post" action="{transition}" class="ss-move">"#),
+        ">Approve</button>",
+        &format!(r#"action="{ITEM}/operations/signOff""#),
+    ]);
+    // The panels show their behaviors' operations: none is listed again.
+    assert_eq!(body.matches(&format!(r#"action="{transition}""#)).count(), 2, "{body}");
+    lacks(&body, &[r#"data-operation="transition""#, r#"data-operation="signOff""#]);
+
+    let (status, body, _) = post(&router, &transition, "bob", &[("to", "approved")]).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    has(&body, &["approvals_missing: Request req1 cannot move to approved with 0 of the 2 sign-offs it needs"]);
+
+    // ada created it, so she is not offered the sign-off; bob and cy sign.
+    let (_, body) = get(&router, ITEM, Some("ada")).await;
+    has(&body, &["You created it, so you cannot sign off for this state."]);
+    let (status, body, _) = post(&router, &format!("{ITEM}/operations/signOff"), "bob", &[("state", "approved")]).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    // Each operation of Workflow and Approvals has its form: bob withdraws,
+    // cy signs, and listSignOffs is the generic form.
+    let (_, signed) = get(&router, ITEM, Some("bob")).await;
+    let (_, unsigned) = get(&router, ITEM, Some("cy")).await;
+    has(&signed, &[&format!(r#"<form method="get" action="{ITEM}/operations/listSignOffs""#)]);
+    let operations = declared(&engine, "Request").await;
+    assert_eq!(operations, ["transition", "signOff", "withdrawSignOff", "listSignOffs"]);
+    every_operation_has_a_form(ITEM, &operations, &[&signed, &unsigned], &[]);
+    let (status, body, _) = post(&router, &format!("{ITEM}/operations/withdrawSignOff"), "bob", &[("state", "approved")]).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    for signer in ["bob", "cy"] {
+        let (status, body, location) = post(&router, &format!("{ITEM}/operations/signOff"), signer, &[("state", "approved"), ("note", "Fine")]).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{signer}: {body}");
+        assert_eq!(location.as_deref(), Some(ITEM));
+    }
+    let (_, body) = get(&router, ITEM, Some("bob")).await;
+    has(&body, &["2 of 2 sign-offs", "<li>bob</li>", "<li>cy</li>", ">Withdraw my sign-off</button>"]);
+
+    let (status, body, location) = post(&router, &transition, "bob", &[("to", "approved")]).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    assert_eq!(location.as_deref(), Some(ITEM));
+    let (_, body) = get(&router, ITEM, Some("bob")).await;
+    has(&body, &[
+        r#"data-state="approved""#,
+        ">Approved</p>",
+        "Move to",
+        r#"<option value="closed">Closed</option>"#,
+        "Met: it entered Approved with its 2 sign-offs.",
+    ]);
+    lacks(&body, &["0 of 2 sign-offs", "<li>bob</li>"]);
+}
+
+// Through the console's own pages: a draft's history and a diff on the
+// document's page, then rows saved and committed through the panel's
+// generic forms, the commit tagged.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_console_shows_a_history_and_a_diff_and_commits() {
+    let (router, engine) = app();
+    let seeded = {
+        let engine = Arc::clone(&engine);
+        tokio::task::spawn_blocking(move || seed(&engine)).await.expect("the seed")
+    };
+    let item = format!("/console/engine/Document/{}", seeded.document);
+    let history = format!("{item}?ref={}", seeded.draft);
+    let (status, body) = get(&router, &history, Some("ada")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    has(&body, &["<h1>Guide</h1>", r#"data-behavior="Branches""#, "History of draft", "<td>third</td>", "<td>first</td>", "Release 1 is current."]);
+    lacks(&body, &[r#"data-operation="history""#, r#"data-operation="diff""#]);
+    // Each operation of Branches has its form, the panel's or the generic
+    // one (compose, materialize, released), or is a read the panel shows.
+    let operations = declared(&engine, "Document").await;
+    assert_eq!(operations.len(), 16, "{operations:?}");
+    let reads = [
+        ("refs", r#"<table class="ss-table ss-refs">"#),
+        ("releases", r#"<table class="ss-table ss-releases">"#),
+        ("history", r#"<table class="ss-table ss-history">"#),
+        ("diff", r#"class="ss-compare""#),
+    ];
+    every_operation_has_a_form(&item, &operations, &[&body], &reads);
+    has(&body, &[&format!(r#"<form method="get" action="{item}/operations/compose""#)]);
+
+    let (_, body) = get(&router, &format!("{history}&from={}&to={}", seeded.first, seeded.third), Some("ada")).await;
+    has(&body, &["<td>Added</td>", "<td>Updated</td>", r#"{"body":"Hello there","heading":"Intro"}"#]);
+
+    // Saved, then committed and tagged, through the panel's forms, as the
+    // page holds them.
+    let version = seeded.draft_version.to_string();
+    let edits = r#"{"section": {"upsert": [{"heading": "Outro", "body": "Bye"}]}}"#;
+    let (status, body, location) =
+        post(&router, &format!("{item}/operations/save"), "ada", &[("ref", &seeded.draft), ("version", &version), ("edits", edits)]).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    assert_eq!(location.as_deref(), Some(item.as_str()));
+    let (_, body) = get(&router, &history, Some("ada")).await;
+    let saved = (seeded.draft_version + 1).to_string();
+    has(&body, &[&format!("Commits draft at version {saved}."), &format!(r#"<input type="hidden" name="version" value="{saved}">"#)]);
+    let (status, body, _) = post(
+        &router,
+        &format!("{item}/operations/commit"),
+        "ada",
+        &[("ref", &seeded.draft), ("version", &saved), ("message", "fourth"), ("tag", "true")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    let (_, body) = get(&router, &history, Some("ada")).await;
+    has(&body, &["<td>fourth</td>", "<td>#2</td>"]);
+    assert!(body.find("<td>fourth</td>").unwrap() < body.find("<td>third</td>").unwrap(), "newest first:\n{body}");
+
+    // A stale version is the veto's 409.
+    let (status, body, _) = post(&router, &format!("{item}/operations/commit"), "ada", &[("ref", &seeded.draft), ("version", &version)]).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    has(&body, &["version_conflict"]);
+}
+
+// The history shows 50 commits at a time, newest first, with links to the
+// older and the newer ones; a diff shows at most 200 rows and says how many
+// more there are; and a diff of a commit the history does not hold is
+// refused, so the panel materializes no other commit.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_branches_panel_pages_a_long_history() {
+    let (router, engine) = app();
+    let seeding = Arc::clone(&engine);
+    let (document, draft, commits, other) = tokio::task::spawn_blocking(move || {
+        let engine = seeding;
+        let ada = superschematic_engine::Principal::new("ada", permissions_of("ada"));
+        let options = CreateOptions { namespace: Some(NAMESPACE), ..CreateOptions::default() };
+        let document = engine.instances().create(&ada, "Document", &json!({"title": "Long"}), options).expect("create a document").id;
+        let branched = call(&engine, &document, "branch", json!({"name": "long"}));
+        let draft = branched["id"].as_str().expect("the draft").to_owned();
+        let mut version = branched["version"].clone();
+        let mut commits = Vec::new();
+        for n in 1..=52 {
+            // The second commit adds 201 sections at once.
+            let rows: Vec<Value> = (0..if n == 2 { 201 } else { 1 }).map(|row| json!({"heading": format!("{n}.{row}")})).collect();
+            let saved = call(&engine, &document, "save", json!({"ref": draft, "version": version, "edits": {"section": {"upsert": rows}}}));
+            let committed = call(&engine, &document, "commit", json!({"ref": draft, "version": saved["ref"]["version"], "message": format!("commit {n}")}));
+            version = committed["ref"]["version"].clone();
+            commits.push(committed["commit"]["id"].as_str().expect("the commit").to_owned());
+        }
+        let other = seed(&engine).first;
+        (document, draft, commits, other)
+    })
+    .await
+    .expect("the seed");
+    let item = format!("/console/engine/Document/{document}");
+    let history = format!("{item}?ref={draft}");
+    let (_, body) = get(&router, &history, Some("ada")).await;
+    has(&body, &["Commits 1 to 50 of 52, newest first.", "<td>commit 52</td>", "<td>commit 3</td>", &format!(r#"<a rel="next" href="{history}&amp;skip=50">Older commits</a>"#)]);
+    lacks(&body, &["<td>commit 2</td>", "Newer commits"]);
+    assert_eq!(body.matches("<tr data-commit=").count(), 50, "{body}");
+    let (_, body) = get(&router, &format!("{history}&skip=50"), Some("ada")).await;
+    has(&body, &["Commits 51 to 52 of 52, newest first.", "<td>commit 2</td>", "<td>commit 1</td>", &format!(r#"<a rel="prev" href="{history}&amp;skip=0">Newer commits</a>"#)]);
+    lacks(&body, &["<td>commit 3</td>", "Older commits"]);
+
+    let (_, body) = get(&router, &format!("{history}&from={}&to={}", commits[0], commits[1]), Some("ada")).await;
+    assert_eq!(body.matches("<td>Added</td>").count(), 200, "{body}");
+    has(&body, &["1 more change is not shown."]);
+
+    let (_, body) = get(&router, &format!("{history}&from={other}&to={}", commits[1]), Some("ada")).await;
+    has(&body, &["Compare two commits of the history shown."]);
+    lacks(&body, &["<td>Added</td>"]);
 }
 `

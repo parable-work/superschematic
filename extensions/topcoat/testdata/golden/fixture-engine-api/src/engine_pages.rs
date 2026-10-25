@@ -1187,14 +1187,13 @@ async fn generic_panel(panel: GenericPanel) -> topcoat::Result<impl View> {
     .boxed())
 }
 
-/// Whether the panel of `behavior`, one of `engine_panels`' own, renders the
-/// form of `operation` itself, so the instance's page leaves it out of the
-/// operations no panel shows. A core behavior's panel (Workflow, Approvals,
-/// Branches) renders every operation of its behavior. A commerce panel
-/// renders those `engine_panels::commerce_shows` names, and the others are
-/// listed.
+/// Whether the panel of `behavior`, one of `engine_panels`' own, shows
+/// `operation` itself, so the instance's page leaves it out of the
+/// operations no panel shows: those a core panel (Workflow, Approvals,
+/// Branches) names in `engine_panels::core_shows`, and a commerce panel in
+/// `engine_panels::commerce_shows`. The others are listed.
 fn panel_shows(behavior: &str, operation: &str) -> bool {
-    !matches!(behavior, "Stock" | "Calendar" | "Holds" | "Payments") || crate::engine_panels::commerce_shows(behavior, operation)
+    crate::engine_panels::core_shows(behavior, operation) || crate::engine_panels::commerce_shows(behavior, operation)
 }
 
 /// An instance's page: its title, its own fields, then a section per
