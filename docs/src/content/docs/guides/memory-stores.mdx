@@ -1,0 +1,446 @@
+---
+title: Memory stores
+description: Share wake-ups, counters and claims between the replicas of a server through a Redis or Valkey store that a MemoryStore service declares. Declare its channels and keys, list it in an API's config, use it from Deps in Go, TypeScript or Rust, share a rate limit, and run it locally on Valkey and on gcp on Memorystore for Valkey.
+sidebar:
+  order: 5.65
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A memory store is a Redis or Valkey server that every replica of a
+server, job or worker shares, for data whose loss costs a sample, never a
+record: a wake-up when another replica commits, a counter, a claim that
+stops a piece of work running twice at once. It is a service of the core
+kind `MemoryStore`. Its schema declares each channel and key it carries,
+and an API that uses it lists it in its config, as it lists its
+`buckets`. D75 in `docs/DECISIONS.md` records the decision, and section
+8.12 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
+the design.
+
+Three rules hold throughout:
+
+- **The store never holds a fact.** A channel carries a wake-up or a
+  sample that a replica can lose. A key holds a counter or a claim, and
+  every key expires. A fact stays in the database, and a waiter that hears
+  a wake-up reads the fact there.
+- **The code works without the store.** A disabled or unreachable store
+  refuses every call at once, and the caller takes the path it had before
+  the store existed. Readiness never waits for the store.
+- **No job queue.** Durable work that workers claim and retry is a
+  [queue](/superschematic/guides/queues/).
+
+| Built | Not built yet |
+| --- | --- |
+| the `MemoryStore` kind, `@channel` and `@key`, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, and `enabled: false` | |
+| typed definitions of each store in Go, TypeScript and Rust, and `inventory.json` | the scaffolded implementations do not depend on the definitions package yet; add it by hand |
+| `Deps` gains a store per listed store, in Go, TypeScript and Rust, on Redis or Valkey, with a disabled and an in-process store | |
+| the shared rate limit in each language | |
+| `stack dev` runs one Valkey container per environment | |
+| on gcp, a Memorystore for Valkey instance per store, with its network and grants | a run against Google Cloud |
+| | metrics from the TypeScript and Rust runtimes; Go's metrics reach no exporter yet |
+| | a memory store on cloudflare, which refuses one unless the environment turns it off |
+
+## Declare a store
+
+`superschematic new service shop-cache --kind MemoryStore` writes a
+MemoryStore service with a starter schema
+([CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystore)).
+Its config names the languages its definitions are written in, under
+`outputs.types`:
+
+<Snippet file="schemas/services/shop-cache/schema.config.ts" />
+
+Its schema declares each channel and key with `@channel` or `@key`, from
+`@superschematic/memory-store`, on an abstract class. The class is a
+declaration, not a type: no type library emits it. Its fields, in order,
+are the parts of the declaration's name:
+
+<Snippet file="schemas/services/shop-cache/src/cache.schema.ts" />
+
+- **Parts.** Each field is a required scalar: a string, an integer, a
+  boolean, an enum, or a superscalar scalar whose wire form is a string or
+  an integer, such as `Identity.UUID`. A part is not optional, a list, a
+  map or an object.
+- **Names.** A declaration's name is its class's name in kebab case:
+  `ProductChanged` is `product-changed`. `name` in the decorator sets it,
+  for a name that must outlive a rename of the class. A name is one
+  segment (below). The name `rate-limit` is the core's, which every store
+  declares for the [shared rate limit](#share-a-rate-limit).
+- **Channels.** `@channel()` with no payload is a signal, whose name is
+  the whole message. `@channel({ payload: StockLevel })` carries an object
+  type a dependency of the store's schema declares; the store's config
+  lists that dependency. A payload type that is `@strictJSON` is refused:
+  a channel's decoder ignores keys its type does not declare, at every
+  depth, so replicas of two releases share a channel while a deploy rolls.
+  A message is at most 64 KiB encoded.
+- **Keys.** `@key({ use: "counter" })` counts, and `@key({ use: "claim"
+  })` lets one caller do a piece of work once. Every key expires: it sets
+  exactly one of `ttlSeconds`, its TTL from the write that creates it, and
+  `maxTtlSeconds`, the longest TTL a call may give it, for a key whose life
+  depends on the call. Both are 1 to 604800 seconds (7 days). A channel
+  takes neither.
+
+A MemoryStore schema declares only channels and keys. `superschematic
+check` refuses a key without exactly one TTL, a channel with one, a part
+that is not a required scalar, a name that is not a segment, two
+declarations of one name, and any type, enum or operation in the schema.
+
+A segment is 1 to 128 bytes, with no `:`, `*`, `?`, `[`, `]`, `@`, `\`
+or control character. A part's value at run time is held to the same
+rule, and a value that breaks it is refused at the call, never escaped. A
+key's full name in the server is the store's name, the declaration's, then
+each part's wire form, joined by colons:
+
+```text
+shop-cache:product-changed:<productId>
+shop-cache@pr123:product-changed:<productId>   in a member of a parameterized environment
+```
+
+A part's wire form is the string its value takes in the API's JSON: a
+UUID's compact base62 form, an integer in base 10, `true` or `false`, an
+enum's wire value. So a name built from a value read off the wire in any
+language is the same name. The store's build also writes
+`inventory.json`, under `memorystore/<store>/` in the output root, with each
+declaration's symbol, kind, name pattern, parts, payload, TTL and owning
+file, so a reviewer sees what the store holds.
+
+## List it in an API
+
+An API lists the stores it uses in `memoryStores`, beside `buckets`.
+`rateLimitStore` names the store its `@rateLimit` routes count in, which
+lists it too. Several APIs may list one store:
+
+<Snippet file="schemas/services/shop-api/schema.config.ts" />
+
+Both take only MemoryStore handles, so tsc refuses another kind's there.
+In a data form they are `{ name, kind }` pairs, `memoryStores: [{ name:
+shop-cache, kind: MemoryStore }]` and `rateLimitStore: { name: shop-cache,
+kind: MemoryStore }`. A store builds before each API that lists it, since
+the API's server imports its definitions.
+
+## The definitions
+
+The store's build writes one package of definitions per language its
+`outputs.types` names, under `types/<language>/<store>`. Each declaration
+is one value with a typed constructor that takes the parts in order, so a
+caller never formats a name. A key with `maxTtlSeconds` has a constructor
+that takes the TTL first, and refuses one above the maximum.
+
+| Language | Package | A channel | A key with `maxTtlSeconds` |
+| --- | --- | --- | --- |
+| Go | the module `<go_module_root>/types/go/<store>`, package `shopcache` | `shopcache.ProductChanged.For(id)`, a `memorystore.Channel[memorystore.Signal]` | `ForTTL(ttl, parts...)`, a `memorystore.Key` |
+| TypeScript | `<npm_scope>/<store>-types` | `productChanged.for(id)`, a `Channel<Signal>` | `forTTL(ttlMs, ...parts)`, a `Key` |
+| Rust | the crate `<rust_crate_prefix><store>-types` | `PRODUCT_CHANGED.for_(&id)`, a `Channel<Signal>` | `for_ttl(ttl, ...)`, a `Key` |
+
+In Go, a channel with a payload is a `memorystore.Channel[T]` of the
+payload's type in its schema's types module:
+
+```go
+// StockSamples is the channel stock-samples, {store}:stock-samples:{productId}, whose
+// messages are shopcachecommontypes.StockLevel.
+func (stockSamplesDef) For(productID scalars.IdentityUUID) (memorystore.Channel[shopcachecommontypes.StockLevel], error)
+
+// ProductViews is the counter views, {store}:views:{productId}:{day}:{region}:{mobile}:{label}, whose TTL
+// each call gives, at most 86400s.
+func (productViewsDef) ForTTL(ttl time.Duration, productID scalars.IdentityUUID, day scalars.GenericInt64, region shopcachecommontypes.Region, mobile bool, label string) (memorystore.Key, error)
+```
+
+In TypeScript each declaration is a `const` the package exports:
+
+```ts
+export const receiptSent = {
+  name: 'receipt-sent',
+  ttlMs: 600_000,
+  for(orderId: string): Key { ... },
+} as const;
+
+export const stockChanged = {
+  name: 'stock-changed',
+  for(productId: string): Channel<Signal> { ... },
+} as const;
+```
+
+In Rust each is a unit struct and a constant:
+
+```rust
+pub const STOCK_CHANGED: StockChanged = StockChanged;
+
+impl StockChanged {
+    pub const NAME: &'static str = "stock-changed";
+
+    pub fn for_(
+        &self,
+        product_id: &superscalar::Uuid,
+    ) -> Result<Channel<Signal>, MemoryStoreError> { ... }
+}
+```
+
+These come from the generator's goldens,
+`internal/generator/memorystoregen/testdata/golden`. A part that is no
+segment is an error from Go's `For`, a `MemoryStoreNameError` thrown by
+TypeScript's `for`, and `MemoryStoreError::Name` from Rust's `for_`.
+
+## What an API gets
+
+The API's config gains a field per store, which the stack derives:
+`{SERVICE}_MEMORY_STORE`, from the naming file's
+[`[derived_fields] memory_store`](/superschematic/reference/naming/#derived_fieldsmemory_store)
+template. It holds how to reach the store and no credential:
+
+| Field | Variables |
+| --- | --- |
+| `SHOP_CACHE_MEMORY_STORE` | `SHOP_CACHE_MEMORY_STORE_STORE`, the store's name; `_URL`, `redis://` locally and `rediss://` on gcp; `_CA`, the server's CA in PEM, with `rediss://` only; `_AUTH`, `iam` or `none`; and `_MEMBER`, the member's name in a member of a parameterized environment |
+
+A field none of whose variables is set is a disabled store. A field that
+is set but malformed, such as a URL with a password in it or `auth: iam`
+over `redis://`, fails the config's load, as any refused field does.
+
+`Deps` gains the store, named after the service: `ShopCache
+memorystore.Store` in Go, from `runtime/http/go/memorystore`, `shopCache:
+MemoryStore` in TypeScript, from `@superschematic/http-runtime`, and
+`shop_cache: Arc<dyn MemoryStore>` in Rust, from the Rust HTTP runtime's
+`memorystore` module. A definition's channel or key takes the store as an
+argument:
+
+| Go | TypeScript | Rust | Does |
+| --- | --- | --- | --- |
+| `ch.Publish(ctx, store, msg)` | `ch.publish(store, msg)` | `ch.publish(store, &msg)` | sends a message to every subscriber that is connected now |
+| `ch.Subscribe(ctx, store, h)` | `ch.subscribe(store, h)` | `ch.subscribe(store, h)` | calls `h` with each message that decodes, until the subscription is closed (`Close`, `unsubscribe()`, or drop in Rust) |
+| `key.Increment(ctx, store)` | `key.increment(store)` | `key.increment(store)` | adds one and returns the count; the increment that creates the key sets its TTL |
+| `key.Count(ctx, store)` | `key.count(store)` | `key.count(store)` | the count, 0 when the key is absent |
+| `key.Claim(ctx, store)` | `key.claim(store)` | `key.claim(store)` | takes the claim for its TTL; true when this call took it |
+| `key.Delete(ctx, store)` | `key.delete(store)` | `key.delete(store)` | gives a claim back, or starts a count again |
+| `store.Available()` | `store.available()` | `store.available()` | whether the store takes calls now |
+
+While the store is unavailable, every call fails at once:
+`memorystore.ErrUnavailable` in Go, `MemoryStoreUnavailableError` in
+TypeScript and `MemoryStoreError::Unavailable` in Rust. The caller takes
+its fallback path. A process has one subscriber connection per store, and
+one subscription per channel, which wakes every local handler. A handler
+runs on the store's delivery path, so it returns quickly. Go's
+`Subscribe` returns `ErrUnavailable` while the store is down; the
+TypeScript and Rust stores keep the subscription and subscribe again when
+they reconnect. Either way, a waiter polls as it did before.
+
+The acme shop's `shop-api` takes a claim so that one upload of a
+product's image is signed at a time, on every replica, and gives it back
+once the URL is signed. While the store is unavailable no request is
+refused:
+
+<Snippet file="go/shop-api/products.go" symbol="Products.CreateProductImageUpload" />
+
+In TypeScript, with the default naming file's scope:
+
+```ts
+import { MemoryStoreUnavailableError, signal } from '@superschematic/http-runtime';
+import { stockChanged } from '@schemas/shop-cache-types';
+
+try {
+  await stockChanged.for(productId).publish(deps.shopCache, signal);
+} catch (error) {
+  if (!(error instanceof MemoryStoreUnavailableError)) throw error;
+}
+```
+
+In Rust:
+
+```rust
+use schemas_shop_cache_types::STOCK_CHANGED;
+use superschematic_http_runtime::memorystore::{MemoryStoreError, Signal};
+
+let changed = STOCK_CHANGED.for_(&product_id)?;
+match changed.publish(deps.shop_cache.as_ref(), &Signal).await {
+    Ok(()) | Err(MemoryStoreError::Unavailable) => {}
+    Err(err) => tracing::warn!(error = %err, "the change was not published"),
+}
+```
+
+The store opens once per process, in the generated entrypoint, which
+hands it to every API that lists it and closes it on shutdown. Opening
+never fails for a server that is down: it pings once within a second,
+then reconnects in the background with a jittered backoff from 100 ms to
+5 s, and a health ping every 2 s keeps `Available` true to the
+connection. A call has 500 ms, and one retry covers a stale pooled
+connection. A field that is unset, or that the client cannot use, opens a
+disabled store after one log line. The client sends no `CLIENT` command
+and asks for no maintenance notifications, which managed servers refuse,
+and no log line holds a URL, a token or a part.
+
+Only a workload whose APIs list a store links a Redis client: go-redis in
+the `memorystores.go` the build writes beside a Go entrypoint's
+`main.go`, `@redis/client` in a TypeScript server's `package.json`, and
+the HTTP runtime's `memorystore-redis` feature in a Rust crate. A
+TypeScript Worker on cloudflare holds a disabled store and imports no
+Redis client.
+
+## Wait for another replica's commit
+
+A request that waits for a commit another replica makes takes one
+pattern:
+
+1. The replica that commits publishes on a channel whose parts name the
+   row, after the commit.
+2. The waiter subscribes before it reads the row, so a commit between the
+   two still wakes it.
+3. It reads the row again on each wake-up, and on a slow poll as well,
+   since a wake-up can be lost.
+4. While the store is unavailable, it polls as it did before the store
+   existed.
+
+A message never carries the row: the waiter would trust it over the
+database. `shop-api`'s `waitForProductImage` waits for a product's image
+this way, and `createProductImageUpload` publishes `product-changed`
+after it records the image:
+
+<Snippet file="go/shop-api/products.go" symbol="Products.WaitForProductImage" />
+
+## Share a rate limit
+
+A route's `@rateLimit` budget is each replica's own by default. An API
+whose config names a `rateLimitStore` counts its `@rateLimit` routes in
+that store instead, so every replica spends one budget. The rule is the
+sliding window of httprate, the Go runtime's limiter, in every language:
+
+- For a window of length W and a request at time t, the current window
+  starts at `floor(t/W)*W`. The estimate is the previous window's count,
+  weighted by the part of it still inside the window, plus the current
+  window's count.
+- The request is allowed when `round(estimate) + 1 <= limit`, rounding
+  half away from zero. It then increments the current window's counter,
+  whose TTL is two windows and five seconds.
+- Otherwise it is refused with 429 and `Retry-After` the window's length
+  in seconds.
+
+The counters are keys of the reserved `rate-limit` declaration, one per
+service, operation, window start in Unix seconds and client:
+`shop-cache:rate-limit:shop-api:<operation>:<window>:<client>`. The
+client part is the lowercase hex SHA-256 of the limiter's client key, so
+an IP address is not in the store. While the store is unavailable, or a
+call to it fails, each route falls back to the in-process limiter it had
+before, with each replica on its own budget. In Go the counter plugs into
+httprate as its `LimitCounter`, and never returns an error to it.
+`runtime/http/testdata/memorystore_parity.json` holds the rule's vectors,
+which the three runtimes pass.
+
+## Run it locally
+
+`superschematic stack dev` runs Valkey in one container per environment
+and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`,
+from `valkey/valkey:8.0.2-alpine`, the engine version the gcp platform
+pins. It runs with no persistence and no TLS, publishes its port on
+127.0.0.1 only, and is ready once `valkey-cli ping` answers. Every store
+of the environment shares it: each store's names start with its own name.
+The field is `redis://127.0.0.1:<port>/0` with `auth: none`, and the
+store's keys do not outlive the container. `--remove-data` removes it
+with the other containers.
+
+The environment's `memoryStoreImage` and `memoryStorePort` values change
+its image and its host port, which is otherwise a hash of the stack and
+the environment from 26000, shifted by the checkout
+([Run it locally](/superschematic/guides/stacks/#run-it-locally)):
+
+```ts
+@environment({ target: "local", local: { memoryStorePort: 26379 } })
+export abstract class Dev {}
+```
+
+An environment can run without a store: `settings: [{ of: ShopCache,
+enabled: false }]` creates nothing and leaves the field unset, so every
+workload opens the store disabled and takes its fallback paths.
+`environment.json` lists the store under `disabled`. A store that is off
+takes no platform and no settings.
+
+The acme shop's `go/stack_dev_test.go` runs `shop-api` on the store and
+talks to the Valkey container directly, as another replica would: a
+request waiting for a product's image wakes when its upload is signed, an
+upload whose claim another replica holds is refused 409, and counts other
+replicas add to `getProduct`'s rate limit refuse it 429.
+
+## On Google Cloud
+
+The gcp target places each MemoryStore service on the `gcp.memorystore`
+platform: a Memorystore for Valkey instance in the environment's region,
+named `<project>-<stack>-<store>`, at 4 to 63 characters. Its shape is
+fixed: `VALKEY_8_0`, cluster mode disabled, one shard, transit encryption
+`SERVER_AUTHENTICATION`, authorization `IAM_AUTH`, no persistence and no
+deletion protection, since the store holds no fact.
+
+| Setting | Default |
+| --- | --- |
+| `nodeType` | `SHARED_CORE_NANO`; Memorystore's node types, such as `STANDARD_SMALL` |
+| `replicas` | `1`: replicas of the one shard, 0 to 5 |
+
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-prod", region: "us-east1", production: true },
+  settings: [{ of: ShopCache, nodeType: "STANDARD_SMALL", replicas: 2 }]
+})
+export abstract class Production {}
+```
+
+- **The network.** The instance creates its own Private Service Connect
+  endpoint on the environment's network. That needs a service connection
+  policy for Memorystore (`gcp-memorystore`) on the network in the
+  region, whose endpoints take their addresses from a subnet of their own,
+  `<stack>-memorystore` (`10.8.16.0/24`). Every store of the environment
+  shares the policy and the subnet. A server, job, worker or deriver whose
+  APIs list a store reaches the endpoint through Direct VPC egress, as a
+  calling server does.
+- **The grant.** Each workload's account gets
+  `roles/memorystore.dbConnectionUser` on the project, held to the
+  instance by an IAM condition on its resource name: Memorystore has no
+  IAM policy per instance.
+- **The field.** The URL is `rediss://<ip>:<port>` of the endpoint, the CA
+  is the first certificate of the instance's managed server CA chain, and
+  `auth` is `iam`. Each new connection sends an OAuth access token for the
+  workload's account from the metadata server as the password of user
+  `default`, refreshed before it expires.
+- **Members.** A member of a parameterized environment shares its
+  parent's instance, policy and subnet. Its names start
+  `<store>@<member>`, the member named as the target suffixes its other
+  names (`pr123`), and its destroy deletes nothing, since every key
+  expires.
+- **Policy and bootstrap.** The `memory-stores-tls-and-iam` policy rule
+  refuses an instance without `SERVER_AUTHENTICATION` or `IAM_AUTH`.
+  `stack bootstrap` enables the Memorystore and Network Connectivity APIs
+  when the environment has a store, and gives `deployer`
+  `roles/memorystore.admin` and
+  `roles/networkconnectivity.consumerNetworkAdmin`.
+
+No memory store has run on Google Cloud yet. The first live run checks
+that Cloud Run reaches the endpoint through the egress subnet, that the
+first connection the instance lists is its primary's, that the node types
+take this shape, that the IAM condition holds for this resource type,
+that `deployer`'s roles are enough, the CA chain's length and order, and
+whether the subscriber connection must authenticate again when its token
+expires.
+
+## On Cloudflare
+
+The cloudflare target has no memory store platform, so it refuses a
+stack that places a store there with it on. The refusal names the fix:
+`settings: [{ of: ShopCache, enabled: false }]`, under which the Workers
+run with the store disabled.
+
+## Test it
+
+Each runtime has an in-process store with real semantics, for a unit test
+of code that uses the store: Go's `memorystore.NewInProcess(name)`,
+TypeScript's `new InProcessMemoryStore(name)` and Rust's
+`InProcessMemoryStore::new(name)`. Keys expire against a clock the test
+sets, and a message published reaches the process's subscribers. Go's
+`SetAvailable(false)` and TypeScript's `setAvailable(false)` stand for an
+outage; `Disabled(name)`, `disabledMemoryStore(name)` and
+`DisabledMemoryStore::new(name)` refuse every call.
+
+A test against a real server reads `SUPERSCHEMATIC_TEST_MEMORY_STORE`, a
+`redis://` URL whose host is loopback and whose database is not 0, so a
+test never touches the keys of a running `stack dev`; unset, those tests
+skip. The TypeScript runtime's
+[README](https://github.com/parable-work/superschematic/blob/main/runtime/http/typescript/README.md)
+lists the variables of its TLS and IAM cases, and the Rust runtime's
+`tests/memorystore_redis.rs` its own. servergen's `TestMemoryStoresOnRedis`
+starts a Valkey container of its own when Docker runs and the variable is
+unset.
