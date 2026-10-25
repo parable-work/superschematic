@@ -85,7 +85,7 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
 		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
@@ -264,7 +264,10 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {"in review": "failure"}}`, "behavior Workflow config: "},
 		{comments, ``, ""},
 		{comments, `{}`, ""},
-		{comments, `{"maxLength": 10}`, "behavior Comments takes no config"},
+		{comments, `{"maxBodyLength": 2000, "editWindowMs": 900000, "blocks": ["ref"], "moderatePermission": "comments.moderate", "pinPermission": "comments.pin", "resolvePermission": "comments.resolve"}`, ""},
+		{comments, `{"maxLength": 10}`, "behavior Comments config: "},
+		{comments, `{"maxBodyLength": 40001}`, "behavior Comments config: "},
+		{comments, `{"blocks": ["code"]}`, "behavior Comments config: "},
 		{revisions, ``, ""},
 		{revisions, `{"review": {"permission": "documents.review"}}`, ""},
 		{revisions, `{"review": {}}`, "behavior Revisions config: "},
