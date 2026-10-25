@@ -333,7 +333,7 @@
       ]
     },
     {
-      "name": "Comments (node) > deleting the instance deletes its conversation",
+      "name": "Comments (node) > deleting the instance deletes its conversation, and a re-created one numbers its messages on from it",
       "behaviors": ["Comments"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"bob":{"subject":"bob","permissions":[]}},
       "steps": [
@@ -349,7 +349,7 @@
         {"call":"instances.create","principal":"alice","args":["Review",{"title":"Q3 plan, again"},{"id":"r1"}],"expect":{"namespace":"default","schema":"Review","id":"r1","schemaNamespace":"default","version":1,"seq":3,"data":{"title":"Q3 plan, again"},"behaviors":{"Comments":{"messages":0,"threads":{"open":0,"resolved":0}}},"createdAt":"{{time:6}}","createdBy":"alice","updatedAt":"{{time:6}}","updatedBy":"alice"}},
         {"call":"instances.get","principal":"alice","args":["Review","r1"],"expect":{"namespace":"default","schema":"Review","id":"r1","schemaNamespace":"default","version":1,"seq":3,"data":{"title":"Q3 plan, again"},"behaviors":{"Comments":{"messages":0,"threads":{"open":0,"resolved":0}}},"createdAt":"{{time:6}}","createdBy":"alice","updatedAt":"{{time:6}}","updatedBy":"alice"}},
         {"call":"instances.invoke","principal":"alice","args":["Review","r1","listMessages",{}],"expect":{"items":[],"before":null,"after":null}},
-        {"call":"instances.invoke","principal":"alice","args":["Review","r1","post",{"body":"Fresh."}],"expect":{"id":1,"author":"alice","state":"posted","body":"Fresh.","blocks":[],"mentions":[],"reactions":{},"createdAt":"{{time:7}}","edits":0,"pinned":false,"replies":0,"participants":["alice"]}}
+        {"call":"instances.invoke","principal":"alice","args":["Review","r1","post",{"body":"Fresh."}],"expect":{"id":3,"author":"alice","state":"posted","body":"Fresh.","blocks":[],"mentions":[],"reactions":{},"createdAt":"{{time:7}}","edits":0,"pinned":false,"replies":0,"participants":["alice"]}}
       ]
     },
     {

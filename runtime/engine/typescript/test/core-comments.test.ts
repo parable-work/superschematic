@@ -408,7 +408,7 @@ for (const driver of drivers) {
       );
     });
 
-    test('deleting the instance deletes its conversation', () => {
+    test('deleting the instance deletes its conversation, and a re-created one numbers its messages on from it', () => {
       const engine = published();
       on(engine, alice, 'post', { body: 'Hello.' });
       on(engine, bob, 'post', { body: 'Hi.', thread: 1 });
@@ -417,7 +417,8 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Review', { title: 'Q3 plan, again' }, { id: 'r1' });
       assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 } });
       assert.deepEqual(on(engine, alice, 'listMessages'), { items: [], before: null, after: null });
-      assert.equal((on(engine, alice, 'post', { body: 'Fresh.' }) as Message).id, 1);
+      // The instance's events span both lives, so no id is used twice.
+      assert.equal((on(engine, alice, 'post', { body: 'Fresh.' }) as Message).id, 3);
     });
 
     test('Comments joins a schema that has instances, which start with no messages, and does not leave one', () => {
