@@ -29,7 +29,7 @@
 {{ if .DepsPool }}
 import type { Pool } from 'pg';
 {{- end }}
-import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger } from '{{ .RuntimePackage }}';
+import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger{{ if .Deps.MemoryStores }}, MemoryStore{{ end }} } from '{{ .RuntimePackage }}';
 {{- if .DepsSQLite }}
 import type { SqlDatabase } from '{{ .RuntimePackage }}/d1';
 {{- end }}
@@ -74,6 +74,14 @@ export interface Deps {
 {{- range .Deps.Buckets }}
   /** {{ .Service }}, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly {{ .Field }}: Bucket;
+{{- end }}
+{{- range .Deps.MemoryStores }}
+  /**
+   * {{ .Service }}, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path.
+   */
+  readonly {{ .Field }}: MemoryStore;
 {{- end }}
 {{- with .Deps.Engine }}
   /**

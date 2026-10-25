@@ -749,7 +749,7 @@ func (r run) databaseDialect() (string, error) {
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its
 // config and logger (D51): a pg Pool for the API's database, its authDb or
 // its one DB-kind dependency, a client of each calls entry's TypeScript
-// SDK, and the HTTP runtime's Bucket per buckets entry (D54). A callee whose config the build has must generate that
+// SDK, the HTTP runtime's Bucket per buckets entry (D54), and its MemoryStore per memory store it lists (D75). A callee whose config the build has must generate that
 // SDK; the database needs nothing generated, since the pool is pg's.
 func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
@@ -784,6 +784,12 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	}
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
+	}
+	for _, m := range r.Schema.MemoryStores {
+		deps.MemoryStores = append(deps.MemoryStores, tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)})
+	}
+	if r.Schema.RateLimitStore != nil {
+		deps.RateLimitStore = r.Schema.RateLimitStore.Name
 	}
 	return deps, nil
 }

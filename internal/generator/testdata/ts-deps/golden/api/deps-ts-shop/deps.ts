@@ -6,7 +6,7 @@
 // connections and clients the server shares between the APIs it serves.
 
 import type { Pool } from 'pg';
-import type { Authenticator, Bucket, Logger } from '@superschematic/http-runtime';
+import type { Authenticator, Bucket, Logger, MemoryStore } from '@superschematic/http-runtime';
 import type { DepsTsPricingSDK } from '@schemas/deps-ts-pricing-sdk';
 import type { EnvConfig } from './config';
 import type { Implementations } from './interfaces';
@@ -21,6 +21,12 @@ export interface Deps {
   readonly depsTsPricing: DepsTsPricingSDK;
   /** deps-media, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly depsMedia: Bucket;
+  /**
+   * deps-cache, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path.
+   */
+  readonly depsCache: MemoryStore;
   /** The API's logger. */
   readonly logger: Logger;
 }

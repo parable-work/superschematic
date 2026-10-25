@@ -128,6 +128,7 @@ async function build() {
   const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
 {{- end }}
 {{- end }}
+{{- template "ts-workers-memory-stores" . }}
 
   // {{ $api.Service }}: its jobs, built from its Deps.
   {{ template "ts-deps" $api }}
