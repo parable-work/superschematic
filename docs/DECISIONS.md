@@ -9982,11 +9982,14 @@ Three rules hold throughout.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| A signal is a message about one instance that the engine delivers to the event streams open on it and does not keep. A behavior declares its signals, `signals: [{ name, paramsSchema, access }]`, `access` being `read` or `write`; the engine checks a signal's data against its schema, at most 4 KB of JSON, and asks the policy `access` with the operation `signal:<name>`. | Ephemeral events in the log with a short retention, which every cursor still has to scan past, and which replay sends to a client that reconnects an hour later. |
+| A signal is a message about one instance that the engine delivers to the event streams open on it and does not keep. A behavior declares its signals, `signals: [{ name, paramsSchema, access }]`, `access` being `read`, `write` or `operation` (below); the engine checks a signal's data against its schema, at most 4 KB of JSON, and asks the policy `access` with the operation `signal:<name>`. | Ephemeral events in the log with a short retention, which every cursor still has to scan past, and which replay sends to a client that reconnects an hour later. |
 | A caller sends one with `engine.signals.send(principal, { namespace, schema, instanceId, behavior, name, data })`, `POST .../instances/{id}/signals/{behavior}/{name}`. A behavior's operation sends one with `cx.signal(name, data)`, delivered after its call commits and dropped when it rolls back. The engine stamps `from`, the sender's subject, and `at`. | Signals only from operations, which a client's typing indicator would have to call a writing operation for. |
 | A stream opened with `signals=1` receives each signal on an instance its filters keep, which its principal may read, as an `event: signal` message with no `id:`, so `Last-Event-ID` and a reconnect's replay never see it. Without `signals=1` a stream is as it was. | A stream of its own for signals, which a client would open beside the event stream for every conversation it shows. |
 | Delivery is at most once and in no order with the events. On SQLite the in-process watcher carries it; on Postgres a `pg_notify` channel of its own, under that channel's 8000-byte payload limit, which is why a signal holds 4 KB. | A broker (Redis, NATS) beside the database, a dependency every stack would need for a typing indicator. |
 | The engine limits each principal's signals per instance (`signals.perSecond`, 20 when absent), and drops the rest with a 429 to a caller. | No limit, which lets one client fan out to every reader of a busy instance as fast as it can send. |
+| A third `access`, `operation`, is a signal only the behavior's own operations send, through `cx.signal`: Comments' `draft`, whose offsets only `appendDraft` knows. A signal an operation sends is not limited by `signals.perSecond`, since the operation that sends it already wrote and was asked of the policy; an agent appending faster than the limit loses no chunk. | Every signal a caller's, so a client could forge a draft chunk of someone else's reply. |
+| The call is `signals.send` (`sendSignal` is its alias, and the HTTP route's name). The 4 KB is the data's; the whole signal, envelope and all, is at most 7900 bytes, under `pg_notify`'s limit with room for the tag that keeps Postgres from folding two identical notifications of one transaction into one. Each engine schema has a channel of its own, `superschematic_engine_signals.<schema>`, beside its commit channel, and one listener hears both. | One channel for every engine on a database, which hands each listener every other engine's signals to drop. |
+| A signal wakes a waiting stream without a read of the log: the notifier counts signals' wakes apart from commits, the runner and `events.watch` wake for commits alone, and a stream reads the log again only when a commit moved since its last read. A stream holds at most 256 signals and drops the oldest. | Waking every stream as a commit does, a read of the log per signal per stream. |
 
 ### Primitive 3: namespace operations
 
@@ -10034,9 +10037,10 @@ Operations, each beside the instance (primitive 1):
 | Operation | What it does | Logged |
 |-----------|--------------|--------|
 | `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })` | posts a message, top-level or into `thread`; `clientId`, the caller's key, makes a retry return the message it posted | yes |
-| `begin({ thread?, quotes?, clientId? })` | starts a `composing` message, which holds its place in the thread and shows who is writing | yes |
-| `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }` | no |
+| `begin({ thread?, quotes?, clientId? })` | starts a `composing` message, which holds its place in the thread and shows who is writing; at most `maxDrafts` (5 when absent) per author on an instance | yes |
+| `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }`, `offset` in code points; an empty `text` appends nothing and keeps the draft from going idle, for an agent busy in a tool call | no |
 | `finish({ message, body?, blocks?, mentions? })` | posts a composing message, its body the draft when `body` is absent | yes |
+| `interrupt({ message })` | ends a composing message: its draft becomes its body as `interrupted`, or an empty draft a deleted message. Its author or `moderatePermission` at any time; anyone the policy lets write once the draft is idle, which is how the runner's schedule calls it | yes |
 | `edit({ message, body?, blocks?, mentions? })` | its author, or `moderatePermission`, within `editWindowMs` when the config sets one; the text before is kept (`listEdits`) | yes |
 | `deleteMessage({ message })` | its author or `moderatePermission`: the message becomes `deleted`, its body and blocks cleared, its replies kept. Not `delete`, which every schema has | yes |
 | `purge({ message })` | `moderatePermission`: removes the message, its edits and its reactions from the tables; a top-level message's whole thread with it | yes |
@@ -10052,6 +10056,20 @@ by a client every few seconds while it shows the conversation, and
 and who is looking from the signals of the last few seconds; the engine
 holds no presence for them (the work queue's `Presence` is for a worker,
 durable and swept).
+
+A message stands once it is `posted` or `interrupted`: the counts, the
+replies and `lastMessageAt` count standing messages, and move at `post`,
+`finish` and `interrupt`, never at `begin`. A streamed reply keeps
+`createdAt`, its begin time, for its place in the thread, and gains
+`postedAt` when it stands; `lastMessageAt`, `lastReplyAt` and
+`editWindowMs` read `postedAt`, so a long reply is not stale, or past its
+edit window, the moment it finishes. While a message is composing, edits,
+reactions, pins, resolves, replies into it and quotes of it are refused
+(`composing`). A reader subscribes with `signals=1` before it reads, so
+no chunk falls between the read and the stream; it appends a chunk whose
+offset is the length it holds, ignores one it holds already, reads the
+message again past a gap, and ignores the chunks of a message no longer
+composing, since signals keep no order with the events.
 
 Namespace operations (primitive 3):
 
@@ -10075,12 +10093,13 @@ nothing for `composeTimeoutMs` (60000 when absent) becomes `interrupted`
 on the runner's schedule, its draft kept as its body, so a crashed agent
 leaves what it wrote and no message stuck as writing.
 
-Fields, all volatile (primitive 1): `messages`, the posted messages;
+Fields, all volatile (primitive 1): `messages`, the standing messages;
 `lastMessageAt`; `threads`, `{ open, resolved }`; `unread`, the caller's;
 `composing`, the subjects writing now. `commentCount` goes; a type's
 list shows `Comments.messages`.
 
 Config, all optional: `maxBodyLength`; `editWindowMs`; `composeTimeoutMs`;
+`maxDrafts`;
 `blocks`, the kinds a message may hold (all four when absent);
 `moderatePermission`, `pinPermission`, `resolvePermission`,
 `anchorPermission`, `deliverPermission`; `maxAttempts` for deliveries (5
