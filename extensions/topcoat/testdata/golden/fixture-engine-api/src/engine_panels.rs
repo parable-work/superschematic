@@ -940,21 +940,24 @@ pub fn commerce_shows(behavior: &str, operation: &str) -> bool {
 /// What a panel reads from the engine besides (Stock's movements,
 /// Calendar's bookings, the types whose instances refund a Payments type)
 /// it reads as the page's caller, on the blocking pool, and a refusal shows
-/// as the engine words it. A form appears whenever the describe document
-/// lists its operation, and posts to that operation's route of the engine
-/// pages, so the engine's policy and the behaviors' vetoes decide every
-/// call that moves stock or money. Amounts show through
-/// `views::money_text`, each in the currency the behavior names.
+/// as the engine words it. A form appears, and a read is made, only for an
+/// operation the caller is offered (`engine_pages::operations`): one the
+/// deployment does not hide and the policy does not refuse them. A form
+/// posts to its operation's route of the engine pages, so the engine's
+/// policy and the behaviors' vetoes decide every call that moves stock or
+/// money. Amounts show through `views::money_text`, each in the currency
+/// the behavior names.
 mod commerce {
     use std::fmt::Write as _;
     use std::sync::Arc;
 
     use serde_json::{Value, json};
-    use superschematic_engine::{Engine, EngineErrorKind, Error, InstanceRecord, Principal, SchemaTarget, WriteOptions};
+    use superschematic_engine::{Engine, EngineErrorKind, Error, InstanceRecord, Principal, SchemaTarget, UuidSource, WriteOptions};
     use topcoat::context::Cx;
     use topcoat::router::request::uri;
     use topcoat::view::{BoxView, ViewExt, view};
 
+    use crate::engine_pages::{EngineOperation, SEQ, operations};
     use crate::views::money_text;
 
     /// Where the engine pages are: an instance's page is
@@ -995,13 +998,30 @@ mod commerce {
 
     static NULL: Value = Value::Null;
 
-    /// The panel of `behavior` on `record`'s page, reading what it needs
-    /// from the engine first; none for a behavior that is not commerce's.
+    /// The panel of `behavior` on `record`'s page, with the operations the
+    /// caller is offered; none for a behavior that is not commerce's.
     pub(super) async fn panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
+        if !SHOWN.iter().any(|(name, _)| *name == behavior) {
+            return None;
+        }
+        let offered = operations(cx, describe).await;
+        panel_offering(cx, behavior, describe, record, &offered).await
+    }
+
+    /// The panel of `behavior` on `record`'s page, its forms and reads
+    /// those of `offered`, reading what it needs from the engine first;
+    /// none for a behavior that is not commerce's.
+    pub(super) async fn panel_offering<'a>(
+        cx: &'a Cx,
+        behavior: &str,
+        describe: &Value,
+        record: &InstanceRecord,
+        offered: &[EngineOperation],
+    ) -> Option<BoxView<'a>> {
         match behavior {
             "Stock" => {
                 let cursor = query_value(cx, "movements");
-                let movements = match offered(describe, "Stock", "listStockMovements") {
+                let movements = match offer(offered, "Stock", "listStockMovements") {
                     Some(_) => {
                         let mut params = json!({ "limit": PAGE });
                         if let Some(cursor) = &cursor {
@@ -1011,12 +1031,12 @@ mod commerce {
                     }
                     None => None,
                 };
-                Some(stock_view(cx, describe, record, movements, cursor.is_some()))
+                Some(stock_view(cx, record, offered, movements, cursor.is_some()))
             }
             "Calendar" => {
                 let window = Window::of(query_value(cx, "bookingsFrom"), query_value(cx, "bookingsTo"), now_ms());
                 let cursor = query_value(cx, "bookings");
-                let bookings = match (offered(describe, "Calendar", "listBookings"), &window.range) {
+                let bookings = match (offer(offered, "Calendar", "listBookings"), &window.range) {
                     (Some(_), Ok((start, end))) => {
                         let mut params = json!({ "startMs": start, "endMs": end, "limit": PAGE });
                         if let Some(cursor) = &cursor {
@@ -1026,12 +1046,12 @@ mod commerce {
                     }
                     _ => None,
                 };
-                Some(calendar_view(cx, describe, record, window, bookings, cursor.is_some()))
+                Some(calendar_view(cx, describe, record, offered, window, bookings, cursor.is_some()))
             }
             "Holds" => Some(holds_view(cx, record)),
             "Payments" => {
                 let refunds = if refund_link(describe).is_some() { Vec::new() } else { refund_types(cx, record).await };
-                Some(payments_view(cx, describe, record, &refunds))
+                Some(payments_view(cx, describe, record, offered, &refunds))
             }
             _ => None,
         }
@@ -1126,13 +1146,9 @@ mod commerce {
             .map_or(&NULL, |entry| &entry["config"])
     }
 
-    /// The describe document's entry of `behavior`'s `operation`, when the
-    /// type offers it to the caller.
-    fn offered<'d>(describe: &'d Value, behavior: &str, operation: &str) -> Option<&'d Value> {
-        describe["operations"]
-            .as_array()?
-            .iter()
-            .find(|entry| entry["behavior"] == behavior && entry["name"] == operation)
+    /// `behavior`'s `operation`, when the caller is offered it.
+    fn offer<'o>(offered: &'o [EngineOperation], behavior: &str, operation: &str) -> Option<&'o EngineOperation> {
+        offered.iter().find(|offered| offered.behavior == behavior && offered.name == operation)
     }
 
     /// `behavior`'s fields in the record, as the read returns them (D16).
@@ -1211,8 +1227,8 @@ mod commerce {
     /// names, in its order, each with the bounds its parameter's schema
     /// gives: an integer a number input, anything else a text input. A
     /// parameter the operation does not take has none.
-    fn controls(operation: &Value, form: &str, labels: Vec<(&'static str, String, Option<String>)>) -> Vec<Control> {
-        let params = &operation["params"]["properties"]["params"];
+    fn controls(operation: &EngineOperation, form: &str, labels: Vec<(&'static str, String, Option<String>)>) -> Vec<Control> {
+        let params = &operation.params;
         let required: Vec<&str> =
             params["required"].as_array().map(|names| names.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
         labels
@@ -1279,13 +1295,16 @@ mod commerce {
     }
 
     /// Stock's panel: the levels, low marked; the receive, adjust and count
-    /// forms; and the movements, newest first, a page at a time.
-    /// `movements` is listStockMovements' answer, none when the type does
-    /// not offer it; `older` says the page shows a later page of them.
+    /// forms of those `offered` holds, each with the seq the page was read
+    /// at, so a form sent twice, or from a page read before another move,
+    /// is refused (409) rather than moving stock again; and the movements,
+    /// newest first, a page at a time. `movements` is listStockMovements'
+    /// answer, none when the caller is not offered it; `older` says the
+    /// page shows a later page of them.
     pub(super) fn stock_view<'a>(
         cx: &'a Cx,
-        describe: &Value,
         record: &InstanceRecord,
+        offered: &[EngineOperation],
         movements: Option<Result<Value, String>>,
         older: bool,
     ) -> BoxView<'a> {
@@ -1306,9 +1325,10 @@ mod commerce {
         ]
         .into_iter()
         .filter_map(|(operation, heading, submit, labels)| {
-            let offered = offered(describe, "Stock", operation)?;
+            let offered = offer(offered, "Stock", operation)?;
             let controls = controls(offered, &format!("stock-{}", operation.to_ascii_lowercase()), labels);
-            Some(form(cx, action(record, operation), operation, heading, Vec::new(), controls, submit))
+            let seq = vec![(SEQ, record.seq.to_string())];
+            Some(form(cx, action(record, operation), operation, heading, seq, controls, submit))
         })
         .collect();
         let here = instance_href(&record.schema, &record.id);
@@ -1454,13 +1474,14 @@ mod commerce {
 
     /// Calendar's panel: the time zone and capacity, the opening hours as a
     /// week, the closures, and the bookings over the window, a page at a
-    /// time. `bookings` is listBookings' answer, none when the type does not
-    /// offer it or the window has no dates; `later` says the page shows a
-    /// later page of them.
+    /// time. `bookings` is listBookings' answer, none when the caller is
+    /// not offered it or the window has no dates; `later` says the page
+    /// shows a later page of them.
     pub(super) fn calendar_view<'a>(
         cx: &'a Cx,
         describe: &Value,
         record: &InstanceRecord,
+        offered: &[EngineOperation],
         window: Window,
         bookings: Option<Result<Value, String>>,
         later: bool,
@@ -1499,7 +1520,7 @@ mod commerce {
         let here = instance_href(&record.schema, &record.id);
         let window_query = format!("bookingsFrom={}&bookingsTo={}", encode(&window.from), encode(&window.to));
         let date_error = window.range.err();
-        let offers = offered(describe, "Calendar", "listBookings").is_some();
+        let offers = offer(offered, "Calendar", "listBookings").is_some();
         let bookings = bookings.map(|read| match read {
             Ok(page) => {
                 let later = page["next"].as_str().map(|next| format!("{here}?{window_query}&bookings={}", encode(next)));
@@ -1743,9 +1764,16 @@ mod commerce {
     /// instance links the instance it refunds. A type that another type's
     /// instances refund through Approvals (`refund_types`) links to those
     /// types, where refunds are signed off. Any other holds refundPayment's
-    /// form when the type offers it, under an idempotency key of the
-    /// instance's sequence, so a form sent twice refunds once.
-    pub(super) fn payments_view<'a>(cx: &'a Cx, describe: &Value, record: &InstanceRecord, refund_types: &[String]) -> BoxView<'a> {
+    /// form when the caller is offered it, under an idempotency key made as
+    /// the form renders (`refund_key`), so a form sent twice refunds once,
+    /// and two forms refund twice.
+    pub(super) fn payments_view<'a>(
+        cx: &'a Cx,
+        describe: &Value,
+        record: &InstanceRecord,
+        offered: &[EngineOperation],
+        refund_types: &[String],
+    ) -> BoxView<'a> {
         let __cx = cx;
         let payments = fields(record, "Payments");
         let currency = payments["currency"].as_str().map(str::to_owned);
@@ -1785,7 +1813,7 @@ mod commerce {
                 )
             })
             .collect();
-        let refunds = refunds_section(cx, describe, record, refund_types, currency.as_deref());
+        let refunds = refunds_section(cx, describe, record, offered, refund_types, currency.as_deref());
         view! {
             <section class="ss-panel" data-behavior="Payments">
                 <h2>"Payments"</h2>
@@ -1846,6 +1874,7 @@ mod commerce {
         cx: &'a Cx,
         describe: &Value,
         record: &InstanceRecord,
+        offered: &[EngineOperation],
         refund_types: &[String],
         currency: Option<&str>,
     ) -> Option<BoxView<'a>> {
@@ -1874,11 +1903,23 @@ mod commerce {
                 .boxed(),
             );
         }
-        let offered = offered(describe, "Payments", "refundPayment")?;
+        let offered = offer(offered, "Payments", "refundPayment")?;
         let unit = currency.map_or_else(|| "Amount, in minor units".to_owned(), |currency| format!("Amount, in minor units of {currency}"));
         let controls = controls(offered, "payments-refundpayment", vec![("amount", unit, None), ("reason", "Reason".to_owned(), None)]);
-        let key = vec![("idempotencyKey", format!("console-refund-{}", record.seq))];
+        let key = vec![("idempotencyKey", refund_key())];
         Some(form(cx, action(record, "refundPayment"), "refundPayment", "Refund", key, controls, "Refund"))
+    }
+
+    /// A refund form's idempotency key, new each time the form renders:
+    /// `console-refund-` and 32 random hex digits. The form holds it, so
+    /// the same form sent again is the same refund, which Payments answers
+    /// once, and another form is another refund.
+    fn refund_key() -> String {
+        let mut key = String::from("console-refund-");
+        for byte in UuidSource::random().next_bytes() {
+            let _ = write!(key, "{byte:02x}");
+        }
+        key
     }
 
     /// The value of `key` in the page's query, decoded; none when absent

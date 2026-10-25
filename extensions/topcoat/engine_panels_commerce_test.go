@@ -15,19 +15,23 @@ import (
 // engine reads them: each describe document is built from the behaviors'
 // own declarations (commerceDescribe), and each record holds the fields
 // the guide's shop types hold. Through Router::handle, test pages render
-// each panel:
-//   - Stock: its levels, low marked, a form per operation the type offers
-//     (receive, adjust, count) posting to its route of the engine pages, a
-//     hidden one left out, and its movements, or the engine's refusal of
-//     the read;
+// each panel, most with every operation of the describe document offered
+// to the caller:
+//   - Stock: its levels, low marked, a form per operation the caller is
+//     offered (receive, adjust, count) posting to its route of the engine
+//     pages with the record's seq, a hidden one left out, and its
+//     movements, or the engine's refusal of the read; and, through the
+//     fixture's engine, which offers none of Inventory's operations, no
+//     form and no read;
 //   - Calendar: the time zone, the week's hours, the closures, and the
 //     bookings over a window of dates, or the engine's refusal, or the
 //     date the query got wrong;
 //   - Holds: the items with their unit prices as money, the total as
 //     money, "Mixed currencies" when it is null, and the state;
 //   - Payments: every amount as money, the attempts, and refundPayment's
-//     form, or the types a refund is signed off through, or, on a refund,
-//     the instance it refunds;
+//     form under an idempotency key new to each render, or the types a
+//     refund is signed off through, or, on a refund, the instance it
+//     refunds;
 //   - and no panel for a behavior that is not commerce's.
 //
 // The fixture's engine composes none of commerce's behaviors, so a read a
@@ -96,64 +100,82 @@ fn commerce_shown<'a>(cx: &'a topcoat::context::Cx, panel: Option<topcoat::view:
     }
 }
 
-/// commerce_panel of a case's record.
+/// commerce_panel of a case's record, which asks the fixture's engine what
+/// the caller is offered.
 async fn commerce_case_panel<'a>(cx: &'a topcoat::context::Cx, case: &str, behavior: &str) -> Option<topcoat::view::BoxView<'a>> {
     let (describe, record, _) = commerce_case(case);
     commerce_panel(cx, behavior, &describe, &record).await
 }
 
+/// Every operation a describe document lists, as offered to the caller.
+fn commerce_offered(describe: &serde_json::Value) -> Vec<crate::engine_pages::EngineOperation> {
+    describe["operations"].as_array().into_iter().flatten().filter_map(crate::engine_pages::EngineOperation::of).collect()
+}
+
+/// The panel of a case's record with every operation its describe document
+/// lists offered, as a type of the commerce guide's shop offers staff.
+async fn commerce_case_offering<'a>(cx: &'a topcoat::context::Cx, case: &str, behavior: &str) -> Option<topcoat::view::BoxView<'a>> {
+    let (describe, record, _) = commerce_case(case);
+    commerce::panel_offering(cx, behavior, &describe, &record, &commerce_offered(&describe)).await
+}
+
 #[topcoat::router::page("/panels/stock")]
 pub async fn commerce_stock_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "stock", "Stock").await))
+}
+
+#[topcoat::router::page("/panels/stock/engine")]
+pub async fn commerce_stock_engine_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
     Ok(commerce_shown(cx, commerce_case_panel(cx, "stock", "Stock").await))
 }
 
 #[topcoat::router::page("/panels/stock/movements")]
 pub async fn commerce_stock_movements_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
     let (describe, record, read) = commerce_case("stock");
-    Ok(commerce_shown(cx, Some(commerce::stock_view(cx, &describe, &record, Some(Ok(read)), true))))
+    Ok(commerce_shown(cx, Some(commerce::stock_view(cx, &record, &commerce_offered(&describe), Some(Ok(read)), true))))
 }
 
 #[topcoat::router::page("/panels/stock/low")]
 pub async fn commerce_stock_low_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "stockLow", "Stock").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "stockLow", "Stock").await))
 }
 
 #[topcoat::router::page("/panels/calendar")]
 pub async fn commerce_calendar_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "calendar", "Calendar").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "calendar", "Calendar").await))
 }
 
 #[topcoat::router::page("/panels/calendar/bookings")]
 pub async fn commerce_calendar_bookings_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
     let (describe, record, read) = commerce_case("calendar");
     let window = commerce::Window::of(Some("2026-10-26".to_owned()), Some("2026-10-27".to_owned()), 0);
-    Ok(commerce_shown(cx, Some(commerce::calendar_view(cx, &describe, &record, window, Some(Ok(read)), false))))
+    Ok(commerce_shown(cx, Some(commerce::calendar_view(cx, &describe, &record, &commerce_offered(&describe), window, Some(Ok(read)), false))))
 }
 
 #[topcoat::router::page("/panels/holds")]
 pub async fn commerce_holds_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "checkout", "Holds").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "checkout", "Holds").await))
 }
 
 #[topcoat::router::page("/panels/holds/mixed")]
 pub async fn commerce_holds_mixed_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "mixed", "Holds").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "mixed", "Holds").await))
 }
 
 #[topcoat::router::page("/panels/payments")]
 pub async fn commerce_payments_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "checkout", "Payments").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "checkout", "Payments").await))
 }
 
 #[topcoat::router::page("/panels/payments/approved")]
 pub async fn commerce_payments_approved_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
     let (describe, record, _) = commerce_case("checkout");
-    Ok(commerce_shown(cx, Some(commerce::payments_view(cx, &describe, &record, &["Refund".to_owned()]))))
+    Ok(commerce_shown(cx, Some(commerce::payments_view(cx, &describe, &record, &commerce_offered(&describe), &["Refund".to_owned()]))))
 }
 
 #[topcoat::router::page("/panels/refund")]
 pub async fn commerce_refund_page(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::view::View> {
-    Ok(commerce_shown(cx, commerce_case_panel(cx, "refund", "Payments").await))
+    Ok(commerce_shown(cx, commerce_case_offering(cx, "refund", "Payments").await))
 }
 
 #[topcoat::router::page("/panels/other")]
@@ -278,6 +300,13 @@ fn money(amount: i64, currency: &str) -> String {
     format!(r#"<data value="{amount}">{}</data>"#, views::money_text(amount, currency))
 }
 
+/// The idempotency key of a page's refund form.
+fn refund_key(body: &str) -> String {
+    let start = r#"name="idempotencyKey" value=""#;
+    let at = body.find(start).unwrap_or_else(|| panic!("no refund key in:\n{body}")) + start.len();
+    body[at..at + body[at..].find('"').unwrap()].to_owned()
+}
+
 fn has(body: &str, wants: &[&str]) {
     for want in wants {
         assert!(body.contains(want), "lacks {want}:\n{body}");
@@ -310,12 +339,24 @@ async fn stock_shows_its_levels_its_forms_and_its_movements() {
         r#"<input id="stock-adjuststock-delta" name="delta" type="number" step="1" required="" min="-9007199254740991" max="9007199254740991">"#,
         r#"action="/console/engine/Inventory/tea/operations/countStock""#,
         r#"<input id="stock-countstock-onhand" name="onHand" type="number" step="1" required="" min="0""#,
+        // Each names the seq its page was read at, so a form sent twice,
+        // or from a page read before a move, is refused (409).
+        r#"data-operation="receiveStock"><h3>Receive stock</h3><input type="hidden" name="expectedSeq" value="4">"#,
+        r#"data-operation="adjustStock"><h3>Adjust stock</h3><input type="hidden" name="expectedSeq" value="4">"#,
+        r#"data-operation="countStock"><h3>Count stock</h3><input type="hidden" name="expectedSeq" value="4">"#,
         // The fixture's engine has no Inventory: the read's refusal, as
         // the engine words it.
         "<h3>Movements</h3>",
         r#"<p class="ss-refusal">The movements could not be read: forbidden: ada may not read Inventory in namespace fixture-engine-db</p>"#,
     ]);
     lacks(&body, &["data-low", "Newest movements"]);
+
+    // Through the engine, which offers ada none of Inventory's operations
+    // (the fixture's engine has no such type), the panel shows no form
+    // and reads no movements.
+    let body = page(&router, "/panels/stock/engine").await;
+    has(&body, &[r#"<div data-field="Stock.onHand"><dt>On hand</dt><dd>12</dd></div>"#]);
+    lacks(&body, &["<form", "Movements", "ss-refusal"]);
 
     let body = page(&router, "/panels/stock/movements").await;
     has(&body, &[
@@ -409,11 +450,17 @@ async fn payments_show_their_amounts_and_how_they_are_refunded() {
         // Approvals, so the panel holds refundPayment's form, which the
         // engine's policy and Payments decide.
         r#"<form method="post" action="/console/engine/Checkout/c-1/operations/refundPayment" class="ss-operation" data-operation="refundPayment">"#,
-        r#"<input type="hidden" name="idempotencyKey" value="console-refund-7">"#,
+        r#"<input type="hidden" name="idempotencyKey" value="console-refund-"#,
         r#"<label for="payments-refundpayment-amount">Amount, in minor units of GBP</label><input id="payments-refundpayment-amount" name="amount" type="number" step="1" required="" min="1""#,
         r#"name="reason" type="text" required="" minlength="1" maxlength="500">"#,
     ]);
-    lacks(&body, &["listPaymentActions", "ss-refusal"]);
+    lacks(&body, &["listPaymentActions", "ss-refusal", "console-refund-7\""]);
+
+    // The key is the form's own, made as it renders: a form sent twice
+    // refunds once, and two forms, even of one seq, refund twice.
+    let again = page(&router, "/panels/payments").await;
+    let (key, other) = (refund_key(&body), refund_key(&again));
+    assert!(key.len() > "console-refund-".len() + 16 && key != other, "{key} {other}");
 
     let body = page(&router, "/panels/payments/approved").await;
     has(&body, &[r#"<p class="ss-refunds">A refund of this Checkout is signed off through Approvals: see <a href="/console/engine/Refund">Refund</a>.</p>"#]);
