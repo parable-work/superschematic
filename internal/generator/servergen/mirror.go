@@ -325,9 +325,9 @@ func (m *RustMirror) header() string {
 # (D65; docs/stack-model.md, section 8.6). Each build of a stack copies the
 # crate's files here and writes this file from its Cargo.toml, with each
 # path dependency re-based for this directory, the API crate's naming this
-# output root's, and the crate's own workspace left out. The server, job
-# and worker crates of the output root depend on the mirror. Edit the
-# crate, not the mirror.
+# output root's, and the crate's own workspace left out. The server, job,
+# worker, deriver and app crates of the output root depend on the mirror.
+# Edit the crate, not the mirror.
 
 `
 }
