@@ -657,7 +657,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	service := map[string]any{
 		"name":     d.ResourceName,
-		"image":    kebab(d.Name),
+		"image":    ImageRepository(d.Name),
 		"account":  member,
 		"language": strings.ToLower(d.Language),
 		"public":   d.Exposed || d.Settings["public"] == true,
@@ -797,7 +797,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	job := map[string]any{
 		"name":           d.ResourceName,
-		"image":          kebab(d.Name),
+		"image":          ImageRepository(d.Name),
 		"account":        member,
 		"language":       strings.ToLower(d.Language),
 		"timeoutSeconds": d.Job.TimeoutSeconds,
@@ -886,7 +886,7 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Worker.Instances,
@@ -915,7 +915,7 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Runner.Instances,
@@ -943,7 +943,7 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Deriver.Instances,
@@ -1246,6 +1246,17 @@ func Join(parts ...any) any {
 
 // kebab lowercases a name and joins its words with hyphens: Orders is
 // orders, shop-api stays shop-api.
+// ImageRepository is the repository path the fake platforms write as a
+// deployable's image, with no tag or digest, which a deploy pins
+// (stackdeploy.PinImages) and the fake builder returns at a digest. It
+// lies under a registry host, as a real platform's does, so that it
+// equals no other property of the deployable's nodes, such as its
+// account's name: a deploy that pins an image no node holds fails here
+// as it does on a real target.
+func ImageRepository(deployable string) string {
+	return "images.fake.test/" + kebab(deployable)
+}
+
 func kebab(name string) string {
 	var b strings.Builder
 	for i, r := range name {

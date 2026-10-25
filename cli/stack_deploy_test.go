@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -167,7 +168,7 @@ func useTerminal(t *testing.T, term *fakeTerminal) {
 }
 
 func demoImage(n int) string {
-	return "demo-api=demo-api@sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
+	return "demo-api=" + stacktest.ImageRepository("demo-api") + "@sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
 }
 
 // TestStackCommands runs plan, deploy, secrets set, outputs, bootstrap and
@@ -375,7 +376,7 @@ func TestStackBuild(t *testing.T) {
 
 	out, err := run("build", "Staging")
 	require.NoError(t, err)
-	assert.Regexp(t, `^--image demo-api=demo-api@sha256:[0-9a-f]{64}\n$`, out)
+	assert.Regexp(t, `^--image demo-api=`+regexp.QuoteMeta(stacktest.ImageRepository("demo-api"))+`@sha256:[0-9a-f]{64}\n$`, out)
 	assert.Equal(t, []string{"build demo-api: schemas/dist/server/demo-stack/demo-api/Dockerfile"}, ext.Provisioner.Calls())
 	assert.Equal(t, []string{"schemas/dist/server/", "schemas/dist/server/demo-stack/", "schemas/dist/server/demo-stack/demo-api/",
 		"schemas/dist/server/demo-stack/demo-api/Dockerfile", "schemas/dist/server/demo-stack/demo-api/Dockerfile.dockerignore"},
