@@ -36,7 +36,8 @@ type Deps struct {
 	// example.com/acme/types/go/shop-cache, name its channels and keys.
 	// While the store is disabled or unreachable every call returns
 	// memorystore.ErrUnavailable at once, and the implementation takes the
-	// path it had without it.
+	// path it had without it; a Subscribe while it is unreachable is held
+	// until it reconnects.
 	ShopCache memorystore.Store
 
 	// Engine is the engine of shop-db, the API's engine database
