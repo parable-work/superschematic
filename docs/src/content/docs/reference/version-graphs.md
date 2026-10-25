@@ -884,9 +884,10 @@ row through the value's JSON (an instant is its ISO string) and back
 through the type's generated `parse<Type>FromJSON`, so a field comes back
 in its canonical form: an instant as a `Date` in UTC, a time of day as
 `HH:MM:SS`, a duration in the scalar core's form and a UUID in base62. A
-relation field comes back as an object holding the target's key. There is
-no TypeScript ORM, so refs, commits and release pointers come back as the
-engine's `Ref`, `Commit` and `Release`.
+relation field comes back as an object holding the target's key. The
+TypeScript repositories (D79) leave a graph's own tables to the facade, so
+refs, commits and release pointers come back as the engine's `Ref`,
+`Commit` and `Release`.
 
 ```
 make versiongraph-scenarios-ts   # every scenario on SQLite, the SQLite adapter's tests and the SQLite vectors; then every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests; a gained column end to end on each backend

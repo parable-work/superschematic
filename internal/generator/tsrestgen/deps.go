@@ -62,8 +62,15 @@ type DepsInfo struct {
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
 	// definitions from its ./queues entry, which a worker claims with and
-	// an implementation enqueues with. Empty otherwise.
+	// an implementation enqueues with. It is set too when Deps holds the
+	// database's repositories (ORM). Empty otherwise.
 	DatabaseTypesPackage string
+
+	// ORM is the type of the repositories Deps.orm holds (D79), which
+	// DatabaseTypesPackage's ./orm entry exports: ShopDbOrm. Set when
+	// Deps.db is a pool and Database's TypeScript types write orm.ts;
+	// empty otherwise.
+	ORM string
 }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine
@@ -115,6 +122,12 @@ func (o *APIOutput) DepsPool() bool {
 	return o.Deps.Database != "" && !o.DepsSQLite()
 }
 
+// DepsORM reports whether Deps holds the database's repositories, orm
+// (D79): Deps.db is a pool, and the database's types write orm.ts.
+func (o *APIOutput) DepsORM() bool {
+	return o.DepsPool() && o.Deps.ORM != "" && o.Deps.DatabaseTypesPackage != ""
+}
+
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
 // database whose DB service lists sqlite first (D64).
 func (o *APIOutput) DepsSQLite() bool {
@@ -123,7 +136,7 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "engine", "logger"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 
 // SetDeps sets what Deps holds, refusing a client or a bucket whose member
 // would take the name of another of its members.
@@ -169,14 +182,15 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
-// or whose engine types the Derivers interface's methods fill (D74),
-// then the engine's package, when Deps holds the engine (D58).
+// whose engine types the Derivers interface's methods fill (D74), or whose
+// repositories Deps.orm holds (D79), then the engine's package, when Deps
+// holds the engine (D58).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
 		out = append(out, call.Package)
 	}
-	if (o.HasWorkers() || o.HasDerivers()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
+	if (o.HasWorkers() || o.HasDerivers() || o.DepsORM()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
 	}
 	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {

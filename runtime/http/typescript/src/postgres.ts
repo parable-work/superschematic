@@ -308,3 +308,41 @@ export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, Que
 export { uuidFromDb, uuidToDb } from './uuid.js';
 export { PG_TYPES, columnKey, decodeRow, decodeValue, encodeParam, parseInt8, postgresTypeParsers, withTypeParsers } from './pgcodec.js';
 export type { RowField, TypeParsers, ValueCodec } from './pgcodec.js';
+
+// The generated repositories (D79): the tables a DB's types package
+// describes in its ./orm entry, whose createOrm calls ormOf over a pool.
+export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, fill, ormOf } from './orm.js';
+export type {
+  Actor,
+  BoolFilter,
+  Clauses,
+  DateFilter,
+  DateTimeFilter,
+  DurationFilter,
+  FindOptions,
+  NullFilter,
+  NumberFilter,
+  OrderBy,
+  Orm,
+  OrmDefinition,
+  OrmMembers,
+  OrmPool,
+  OrmQueryConfig,
+  OrmQueryResult,
+  OrmQueryable,
+  OrmTx,
+  PageOptions,
+  PageSortOf,
+  PointFilter,
+  ReferenceDefinition,
+  ReferencedByFilter,
+  Repository,
+  RowPage,
+  SoftDeleteRepository,
+  StringFilter,
+  TableColumn,
+  TableDefinition,
+  TableStatements,
+  UniqueKeyDefinition,
+  UuidFilter,
+} from './orm.js';

@@ -24,7 +24,7 @@ schema's instances into claimable work, are another thing.
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
-| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
+| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
 | `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
@@ -99,32 +99,23 @@ an optional field you leave unset takes its column's default.
 
 ### From TypeScript
 
-There is no TypeScript ORM, so the DB service's TypeScript types package
-carries each queue as data in its `./queues` entry: `orderPlacedQueue`,
-the queue's table, its arguments, the column each field writes, and the
-statements the Go ORM runs, written from one place, so a message one
-language enqueues the other claims alike. Enable the database's
-TypeScript types (`outputs.types` for TypeScript), and enqueue with the
-HTTP runtime's `enqueue`, which takes the client of the transaction you
-write in:
+The DB service's TypeScript types package carries each queue as data in
+its `./queues` entry: `orderPlacedQueue`, the queue's table, its
+arguments, the column each field writes, and the statements the Go ORM
+runs, written from one place, so a message one language enqueues the
+other claims alike. Enable the database's TypeScript types
+(`outputs.types` for TypeScript), and enqueue with the HTTP runtime's
+`enqueue`, which takes the transaction you write in: a transaction of the
+database's repositories, `Deps.orm`
+([Database tables](/superschematic/guides/database-tables/#typescript)).
+`shop-cart`'s reorder writes an order, its lines and its `OrderPlaced` in
+one, which `shop-orders`' Go worker fulfils:
 
-```ts
-import { enqueue } from '@superschematic/http-runtime/postgres';
-import { orderPlacedQueue } from '@acme/shop-db-types/queues';
+<Snippet file="typescript/shop-cart/index.ts" symbol="reorders" />
 
-const client = await deps.db.connect();
-try {
-  await client.query('BEGIN');
-  const orderId = await placeOrder(client, input); // your writes, on the same client
-  await enqueue(client, orderPlacedQueue, { orderId });
-  await client.query('COMMIT');
-} catch (error) {
-  await client.query('ROLLBACK');
-  throw error;
-} finally {
-  client.release();
-}
-```
+The transaction's `query` takes the statement `enqueue` passes it, as a
+`pg` client does, so `enqueue` takes a `pg` client of your own too, in a
+transaction you began on it.
 
 `enqueue` is typed by the definition: the message is `OrderPlaced` from
 the database's types. A field writes its column as the Go ORM writes
@@ -140,7 +131,8 @@ list of either, a `POINT[]` or an `INTERVAL[]` column, stays out of
 `./queues` for now, which says so, and the Go ORM refuses it; hold such a
 list in a `@jsonField` type. The implementation's
 `package.json` depends on the database's types package by its name, with
-`workspace:*`; the scaffold adds it for an API with workers.
+`workspace:*`; the scaffold adds it for an API with workers, or whose
+`Deps` holds the repositories.
 
 ### From Rust
 

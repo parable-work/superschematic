@@ -70,6 +70,7 @@ import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
 {{- end }}
+{{- template "ts-orm-imports" . }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}

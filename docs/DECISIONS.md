@@ -10577,3 +10577,112 @@ Status: built.
 Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
+
+## D79. TypeScript repositories run the Go ORM's statements, which sqlutil writes once, over a Postgres value codec
+
+A TypeScript API got a raw `pg` Pool as `Deps.db`, and nothing else. The
+Go ORM (repositories, typed filters, `FindPage`, `Transaction`, soft
+delete, audit stamping) was Go's alone, so a TypeScript implementation
+hand-wrote every INSERT, UPDATE, SELECT and DELETE of its tables, their
+column mapping and keyset paging, and nothing checked that SQL against the
+schema. Two value problems sat under it:
+- `connectPostgres` opened a pool with pg's parsers, so a BIGINT and a
+  NUMERIC came back as text, and a DATE as a `Date` at local midnight.
+- A UUID is base62 on the wire and in the TypeScript types, and
+  hyphenated in Postgres. The conversion lived privately in the identity
+  store, so `ctx.principal.subject` could not be passed to SQL.
+
+This entry adds:
+- a value codec in `@superschematic/http-runtime/postgres`: `uuidToDb`,
+  `uuidFromDb`, `decodeRow`, `encodeParam`, and per-pool type parsers;
+- the per-table statements in `internal/generator/sqlutil`, which the Go
+  ORM is ported onto and the TypeScript repositories carry;
+- `orm.ts`, the `./orm` entry of a DB service's TypeScript types, a typed
+  repository per table, and `Deps.orm` on an API whose database has one;
+- `UpsertOne` in Go and `upsertOne` in TypeScript.
+
+### The codec
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One copy of a UUID's two forms, `runtime/http/typescript/src/uuid.ts`: `uuidToDb` writes either form hyphenated, `uuidFromDb` reads either as base62. The identity store and both queue clients convert through it. | The identity store's private copy, which each implementation re-implemented. |
+| `decodeRow(row, fields)` and `encodeParam(value, codec)` are driven by the per-field descriptors the types already carry: a queue's fields in `./queues`, and now a table's columns in `./orm`. A `RowField` is a `QueueField` with `date`, `int64` and `numeric` flags beside its own. A column the row does not hold is left out, so a query may select a few. | A codec keyed by scalar name, which would copy the compiler's scalar-to-SQL table into the runtime. |
+| `connectPostgres` gives each pool its own parsers, through pg's per-client `types`, never `pg.types`: BIGINT a number, refused past 2^53 - 1 with an error that names the cast; NUMERIC its exact text; DATE its `YYYY-MM-DD` text. Lists of each alike. | Global `pg.types`, which changes every pool in the process. A `bigint`, which the TypeScript types do not hold. |
+| The parsers are on by default, and `typeParsers: false` keeps pg's. Of the callers in the repository, the identity store reads no BIGINT and no DATE, the queue claims and the repositories pass per-query types of their own, and the generated entrypoints open every pool through it; only an implementation's raw query of a BIGINT, NUMERIC or DATE sees a change, and it now sees the type its schema declares. | Opt-in, which every generated server would then turn on, leaving a raw pool that disagrees with the types. |
+
+`Identity.UUID` takes three forms. On the wire and in the TypeScript types
+it is base62, the scalar's canonical form, which `normalizeIdentityUUID`
+writes. In Postgres it is a `UUID` column, which reads and writes
+lowercase hyphenated text, as SQLite's TEXT column holds it. In Go it is
+`types.IdentityUUID`, a UUID whose JSON is base62 and whose `ToUUID()`
+pgx binds.
+
+### One source of statements
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil.TablesOf` models every table both ORMs keep: its columns in the DDL's order (fields and to-one foreign keys in schema order, an added `id` first and `_version` last), each column's class, filter kind and whether it sorts, its unique keys, the relations that point at it, soft delete and the history actor. `TableStatementsOf` writes the statements as format strings of `%s` and `%d`, and `PostgresClauses` the clauses around a column: a condition's operator, an assignment, a page key, `WHERE`, `ORDER BY`, `LIMIT`. Table and column names come from `TableName`, `ColumnName` and `ForeignKeyColumn` alone. | Each generator naming and writing its own SQL, as before, which drifts. |
+| The Go ORM's templates write the statements as sqlutil gives them, and ormgen refuses a repository whose columns differ from the model's. Its goldens are byte for byte the same but for the filters and the upsert below. | Rewriting the Go repositories, which a reviewer could not compare. |
+| `orm.ts` carries each table's statements and the clauses as data, and the runtime's `ormOf` fills them in the Go ORM's order: the count before a page of `findMany`, the key first in a single insert and at its place in a batch, a column one row of a batch leaves unset written `DEFAULT`, the fields' conditions before the relations', the probes, then the search's words. `TestTableParityOfGoAndTypeScriptOnPostgres` runs one script through both and requires the same statements, call by call. | Generated TypeScript code per table, a second copy of the Go templates' logic. A shared description each runtime assembles freely, which only a test of the text could hold together anyway. |
+
+### The TypeScript repositories
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `orm.ts` declares per table a `<T>Row`, `<T>Create`, `<T>Update` and `<T>Filter`, `<T>OrderField`, `<T>SortField`, `<T>UniqueKey` and `<T>PageKey`, and `<T>Repository`; then `<Db>Repositories`, `<Db>Orm`, `<Db>Tx` and `createOrm(pool, user?)`. A row holds a to-one relation's key as `<field>Id`, typed by the target's key. | The generated table types, whose relation fields hold the related row, which a read of one table cannot fill. |
+| The repository is the gap's interface: `getOne`, `getManyByIds`, `findOne`, `findMany`, `findPage`, `createOne`, `createMany`, `updateOne`, `updateMany`, `upsertOne`, `deleteOne`, `deleteMany`, and `hardDeleteOne` on a soft-deletable table. `getOne` and `updateOne` throw `NotFoundError`; `findOne` answers null. A relation's rows load through the target's `getManyByIds`. | Field selection and include, which the Go ORM has; they can follow. |
+| An API whose database lists postgres first and generates TypeScript types with a table gets `Deps.orm`, typed `<Db>Orm`, which every entrypoint builds over the pool it opens: `orm: createShopDbOrm(shopDbPool)`. `Deps.db` stays the raw pool. | `createRepositories(deps.db)` in each implementation, which every implementation would repeat. |
+| `withUser(id)` and `as(ctx.principal)` return the ORM acting as a user. A create of a table with `createdBy` and a delete of a soft-deletable table throw `NoUserError` without one, where the Go ORM returns `ErrNoUserInContext`; an update stamps `updatedBy` when there is a user, as Go does. | Requiring a user for every write of such a table, which Go does not. |
+| `transaction(fn)` runs fn with repositories on one connection and `query` and `exec` for raw SQL, rolls back when it throws, and returns the connection broken when it cannot end. `query` takes a pg query config too, so `enqueue(tx, queue, message)` writes the message in the transaction with no change to `enqueue`. | A transaction handle that `enqueue` would have to learn. |
+| The filters are the Go ORM's, per column kind. Both now offer `In` on integers, numbers and dates and `IsNull` on every kind (additive Go fields), which the gap asked of every column; TypeScript offers `isNull` only on a column that may be null. | The Go filters as they were, which lack both. |
+| A create writes a member's schema default when the input leaves it unset, where Go can write only an enum's, since a Go struct cannot tell unset from zero; once columns carry their defaults (D78) the two agree. A key a create sets is written whatever its scalar; Go writes a UUID key alone. | The Go zero value, which TypeScript has no reason to copy. |
+
+### Upsert
+
+`UpsertOne(ctx, input, on, update)` and `upsertOne(input, on, update)`
+insert `input`, or, when a row holds its value of the unique key `on`,
+apply `update` to that row and return it. A key is the primary key, a
+`@unique` field or a unique `@index`, named by its fields:
+`ReviewUniqueByProductAuthor` in Go, `['product', 'author']` in
+TypeScript. A unique index of a soft-deletable table is partial, over the
+live rows, so the conflict target names its predicate, and a deleted row
+never conflicts with it. A conflict with a deleted row on a full key, such
+as the primary key, is not updated, and the upsert fails as not found. An
+update that sets no field leaves the row as it is, stamps and all.
+
+### What D83 builds on
+
+- `nearest(field, vector, { k, metric, filter })`: a statement of
+  `TableStatementsOf` beside `Page`, whose filter is the table's
+  conditions, run by a repository method of both ORMs.
+- `Encrypted<T>`: a codec flag of `RowField`, which `encodeParam` and
+  `decodeValue` pass through a hook per column.
+- `@table` and `@column`: `sqlutil.TableName`, `ColumnName` and
+  `ForeignKeyColumn` take the definition, and every generator names
+  through them.
+- SQLite and D1: a second `TableStatementsOf` and clauses per dialect,
+  which `OrmDefinition` carries by dialect.
+
+Status: built.
+- **The codec:** `runtime/http/typescript/src/pgcodec.test.ts` covers the
+  two forms, the parsers and their refusal, `decodeRow` over pg's forms
+  and text, and `encodeParam`. The acceptance is `TestRepositoriesOnPostgres`
+  (`internal/generator/tsgen`): a raw query on `connectPostgres`'s pool,
+  through `decodeRow`, reads wire-form ids and numeric amounts, and a
+  principal's base62 subject matches its user row through `uuidToDb`.
+- **The statements:** sqlutil's table tests, ormgen's goldens and its
+  Postgres tests, and `TestTableParityOfGoAndTypeScriptOnPostgres`.
+- **The repositories:** `TestRepositoriesOnPostgres` runs bun tests on
+  Postgres over four fixtures: `fixture-ledger-db` (CRUD, filters, search,
+  pages, upsert, the acting user, soft delete, a transaction with an
+  enqueue), and the counterparts of `page_postgres_test.go`,
+  `order_by_postgres_test.go` and `user_model_postgres_test.go`.
+- **acme-shop:** shop-cart, on Bun over shop-db, keeps a shopper's
+  reviews (a page with a search, an upsert, a soft delete) and reorders
+  (a transaction that writes an order, its lines and `OrderPlaced`, which
+  the Go worker fulfils) through `Deps.orm`, with no SQL of its own, in
+  `TestStackDevRunsTheShop`.
+
+Left: field selection, include and one-to-many loading in TypeScript; the
+`@versioned` history readers and the `IfVersion` fences in TypeScript;
+SQLite and D1 repositories; and `nearest` and `Encrypted<T>` (D83).

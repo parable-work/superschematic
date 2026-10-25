@@ -357,7 +357,10 @@ server's does
 ([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
 `deps.ts` declares `Deps`, which holds the API's `config` when it has
 one, a `pg` Pool `db` for its database (its `authDb`, or its one DB
-dependency), a TypeScript SDK client of each API it `calls` (`shopApi`
+dependency), and `orm`, the database's generated repositories, when the
+database has tables and TypeScript types
+([Database tables](/superschematic/guides/database-tables/#typescript)),
+a TypeScript SDK client of each API it `calls` (`shopApi`
 for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route

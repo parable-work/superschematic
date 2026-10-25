@@ -1,0 +1,165 @@
+package tsgen
+
+import (
+	"embed"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
+	ir "github.com/parable-work/superschematic/ir"
+)
+
+//go:embed testdata/orm/*.ts
+var ormTests embed.FS
+
+// repositoryCase is a generated package's repository test: the fixture,
+// the test file of testdata/orm it runs, and the tests that must pass.
+type repositoryCase struct {
+	fixture string
+	test    string
+	tests   []string
+}
+
+// repositoryCases are the TypeScript repositories' Postgres tests (D79),
+// the counterparts of the Go ORM's: fixture-ledger-db's CRUD, filters,
+// search, pages, upsert, acting user, soft delete, transaction with a
+// queued message and raw rows through the codec; fixture-db's pages, the
+// counterpart of page_postgres_test.go; fixture-queue-db's order by on a
+// keyword table, order_by_postgres_test.go's; and fixture-user-model-db's
+// user model tables, user_model_postgres_test.go's.
+var repositoryCases = []repositoryCase{
+	{fixture: "fixture-ledger-db", test: "ledger.test.ts", tests: []string{
+		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
+		"a relation loads in a batch through getManyByIds, keyed by base62",
+		"a write that stamps a user needs one, as the Go ORM refuses with ErrNoUserInContext",
+		"createMany writes one INSERT, DEFAULT for a column one row leaves unset that another sets",
+		"the filters mirror the Go ORM: equality, in, ranges, null, a key, a relation, a reference and a search",
+		"findMany counts every row the filter finds, and reads a limit after an offset, in order",
+		"findPage reads keyset pages by a sort field, ties broken by the key, and refuses a key that names no row",
+		"updateOne stamps updatedAt and updatedBy, sets a column null with null, and refuses a key no live row holds",
+		"upsertOne inserts, then updates the row that holds its unique key, and an empty update leaves it as it is",
+		"a soft delete stamps deletedAt and deletedBy, and reads leave the row out unless they include deleted rows",
+		"a transaction writes rows and enqueues their message together, and rolls both back when it throws",
+		"a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts",
+	}},
+	{fixture: "fixture-db", test: "page.test.ts", tests: []string{
+		"pages by text, a number and a time, each way, ties broken by the key in the sort's direction",
+		"a filter and a search sit beside the keyset, and a deleted member is out of every page unless included",
+		"a key is the row's id alone, which places a page however the row changed since",
+		"a page reads in a transaction",
+	}},
+	{fixture: "fixture-queue-db", test: "order_by.test.ts", tests: []string{
+		"findMany and findOne order a keyword-named table by a column, each way",
+	}},
+	{fixture: "fixture-user-model-db", test: "user_model.test.ts", tests: []string{
+		"a login that differs only in case is the same login, and the identity tables keep their keys unique",
+		"deleting a user deletes its sessions, credential and grants, and deleting a role its grants",
+		"a principal's base62 subject matches its user row through uuidToDb",
+	}},
+}
+
+// TestRepositoriesOnPostgres generates each repositoryCase's TypeScript
+// types package, orm.ts among it, type-checks it (buildTSPackages), and
+// runs its test with bun against the Postgres at
+// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, each in a schema of its own
+// (D79). It skips without the database, and without bun unless
+// SUPERSCHEMATIC_REQUIRE_TS_CHECKS says the gate must run.
+func TestRepositoriesOnPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the TypeScript repositories against Postgres")
+	}
+	harness, err := ormTests.ReadFile("testdata/orm/harness.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packages []tsPackageCase
+	files := map[string]map[string]string{}
+	for _, rc := range repositoryCases {
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, rc.fixture))
+		if err != nil {
+			t.Fatalf("load %s: %v", rc.fixture, err)
+		}
+		source, err := ormTests.ReadFile("testdata/orm/" + rc.test)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packages = append(packages, tsPackageCase{name: rc.fixture, schema: schema})
+		files[rc.fixture] = map[string]string{
+			"harness.ts": string(harness),
+			rc.test:      string(source),
+			"create.sql": createSQLOf(t, schema, rc.fixture),
+		}
+	}
+	typesRoot, bunPath := buildTSPackages(t, packages)
+	// The tests are written once the packages type-check: bun runs them
+	// without a check of its own, and tsc has no bun:test.
+	for fixture, extra := range files {
+		for name, text := range extra {
+			if err := os.WriteFile(filepath.Join(typesRoot, fixture, name), []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, rc := range repositoryCases {
+		t.Run(rc.fixture, func(t *testing.T) {
+			dir := filepath.Join(typesRoot, rc.fixture)
+			report := filepath.Join(dir, "orm.junit.xml")
+			// A test and a hook, which creates a database and runs its DDL,
+			// may take longer than bun's 5s on a loaded machine.
+			run := exec.Command(bunPath, "test", "./"+rc.test, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
+			run.Dir = dir
+			out, err := run.CombinedOutput()
+			if err != nil {
+				t.Fatalf("the repository test failed: %v\n%s", err, out)
+			}
+			junit, err := os.ReadFile(report)
+			if err != nil {
+				t.Fatalf("read bun's report: %v\n%s", err, out)
+			}
+			cases, err := junitTestcases(junit)
+			if err != nil {
+				t.Fatalf("parse bun's report: %v\n%s", err, junit)
+			}
+			for _, name := range rc.tests {
+				tc, ok := cases[name]
+				if !ok {
+					t.Fatalf("bun did not run %q:\n%s", name, junit)
+				}
+				if tc.Failure != nil || tc.Skipped != nil {
+					t.Fatalf("%q did not pass:\n%s", name, junit)
+				}
+			}
+			if len(cases) != len(rc.tests) {
+				t.Fatalf("bun ran %d tests of %s, and the case names %d:\n%s", len(cases), rc.test, len(rc.tests), junit)
+			}
+			t.Logf("bun ran the repository tests:\n%s", out)
+		})
+	}
+}
+
+// createSQLOf is the Postgres create.sql of schema, with its extensions
+// created in public first (pgtest.CreateSQL), as the Go ORM's tests apply
+// it.
+func createSQLOf(t *testing.T, schema *ir.Schema, name string) string {
+	t.Helper()
+	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: name})
+	if err != nil {
+		t.Fatalf("generate %s's DDL: %v", name, err)
+	}
+	dir := t.TempDir()
+	if err := sqlgen.WriteDDL(ddl, dir); err != nil {
+		t.Fatalf("write %s's DDL: %v", name, err)
+	}
+	createSQL, err := os.ReadFile(filepath.Join(dir, "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pgtest.CreateSQL(createSQL))
+}

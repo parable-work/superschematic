@@ -82,8 +82,8 @@ Its entry points:
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
-  database connection, the Postgres value codec, and a queue's enqueue
-  and claims (below). It is
+  database connection, the Postgres value codec, the generated
+  repositories' runtime, and a queue's enqueue and claims (below). It is
   the only entry that imports `pg`.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
@@ -373,6 +373,18 @@ column takes, and `uuidFromDb` reads one back as base62, the form
 types package describes (a table's `columns` in its `./orm` entry, a
 queue's `fields` in its `./queues` entry), and `encodeParam(value, codec)`
 binds a value as its column takes it.
+
+`ormOf(pool, definition, user?)` runs a DB's generated repositories, which
+its types' `./orm` entry describes and whose `createOrm(pool)` calls it
+(D79): each table's statements, which the generator writes from the one
+source the Go ORM's come from, filled in the Go ORM's order, so the two
+send the same SQL. A repository reads and writes rows through the codec;
+`withUser(id)` and `as(principal)` act as a user, whom `createdBy`,
+`updatedBy` and `deletedBy` record, and a write that needs one throws
+`NoUserError` without it; `transaction(fn)` gives `fn` repositories on one
+connection, with `query` and `exec`, and rolls back when it throws. A key
+no live row holds is `NotFoundError`, and a page key that names no row
+`PageKeyError`.
 
 The same entry runs a queue (D53) over a definition a DB service's
 TypeScript types export from their `./queues` entry, such as

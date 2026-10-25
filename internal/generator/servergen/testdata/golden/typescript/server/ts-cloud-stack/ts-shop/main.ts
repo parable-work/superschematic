@@ -28,6 +28,7 @@ import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
 import * as tsShopApi from '@schemas/ts-shop-api';
 import * as tsShopImpl from '@schemas/ts-shop-implementation';
+import { createOrm as createTsDbOrm } from '@schemas/ts-db-types/orm';
 import * as tsPricingSdk from '@schemas/ts-pricing-sdk';
 
 /** The port the server listens on when $PORT is unset. */
@@ -117,6 +118,7 @@ async function main(): Promise<void> {
   const tsShopDeps: tsShopApi.Deps = {
     config: tsShopConfig,
     db: tsDbPool,
+    orm: createTsDbOrm(tsDbPool),
     tsPricing: tsPricingClient,
     tsMedia: tsMediaBucket,
     logger: logger.child({ api: 'ts-shop' }),

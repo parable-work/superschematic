@@ -36,6 +36,7 @@ import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
+{{- template "ts-orm-imports" . }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}

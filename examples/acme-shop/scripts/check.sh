@@ -514,6 +514,7 @@ QUOTED=(
   sql/shop-db/create.sql
   orm/shop-db/interfaces.go
   types/go/shop-db/types.go
+  types/typescript/shop-db/orm.ts
   api/shop-api/interfaces.go
   api/shop-api/routes.go
   api/shop-api/deps.go

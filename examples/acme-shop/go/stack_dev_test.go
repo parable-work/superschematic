@@ -74,7 +74,11 @@ import (
 // routes is made at acmepay by SettlePayments, run with stack run.
 // shop-orders' worker FulfilOrders, a process of its own on its generated
 // entrypoint with the implementation's NewWorkers, claims the OrderPlaced
-// message and fulfils the order (section 8.8, D53). It reads the static site shop-web, which
+// message and fulfils the order (section 8.8, D53). shop-cart, through
+// shop-db's generated TypeScript repositories (D79), upserts, searches and
+// soft-deletes the shopper's review, and reorders the order in one
+// transaction with its OrderPlaced, which FulfilOrders fulfils too. It
+// reads the static site shop-web, which
 // stack dev built and serves with its config, and asks shop-api, as a
 // browser would, whether the site's origin may call it, and another origin
 // (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
@@ -456,6 +460,70 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		return s.Service() == fulfilOrders && s.Kind == otlptest.KindConsumer && s.Name == "process OrderPlaced"
 	})
 
+	// shop-cart keeps a shopper's own reviews and reorders in shop-db's
+	// tables through Deps.orm, the database's generated TypeScript
+	// repositories (D79), with no SQL of its own: a review written twice is
+	// one row, by the review's unique key, which a search of the shopper's
+	// reviews finds and a delete hides, the row kept; a reorder writes an
+	// order, its lines and its OrderPlaced in one transaction, which
+	// shop-orders' Go worker FulfilOrders fulfils.
+	myReview := carts + "/api/my/reviews/" + product.Id.String()
+	type reviewView struct {
+		ID     string `json:"id"`
+		Rating int    `json:"rating"`
+		Title  string `json:"title"`
+	}
+	var written, rewritten struct {
+		Data reviewView `json:"data"`
+	}
+	status, body = call(t, http.MethodPut, myReview, token, `{"rating": 4, "title": "Grassy", "body": "A bright green tea."}`)
+	if status != http.StatusOK || json.Unmarshal(body, &written) != nil || written.Data.ID == "" {
+		t.Fatalf("write a review on shop-cart: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodPut, myReview, token, `{"rating": 5, "title": "Grassy and sweet", "body": "A bright green tea."}`)
+	if status != http.StatusOK || json.Unmarshal(body, &rewritten) != nil || rewritten.Data.ID != written.Data.ID || rewritten.Data.Rating != 5 {
+		t.Fatalf("write the review again: %d %s, want the review %s changed", status, body, written.Data.ID)
+	}
+	var mine struct {
+		Data struct {
+			Items []reviewView `json:"items"`
+			Next  *string      `json:"next"`
+		} `json:"data"`
+	}
+	status, body = call(t, http.MethodGet, carts+"/api/my/reviews?q=SWEET&sort=-rating&limit=1", token, "")
+	if status != http.StatusOK || json.Unmarshal(body, &mine) != nil || len(mine.Data.Items) != 1 || mine.Data.Items[0].ID != written.Data.ID || mine.Data.Next != nil {
+		t.Fatalf("the shopper's reviews that hold sweet: %d %s", status, body)
+	}
+	if status, body := call(t, http.MethodDelete, carts+"/api/my/reviews/"+written.Data.ID, token, ""); status != http.StatusOK {
+		t.Fatalf("delete the review: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodGet, carts+"/api/my/reviews", token, "")
+	if status != http.StatusOK || json.Unmarshal(body, &mine) != nil || len(mine.Data.Items) != 0 {
+		t.Fatalf("the shopper's reviews after the delete: %d %s, want none", status, body)
+	}
+	reviews, err := pgx.Connect(ctx, env.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deletedBy string
+	err = reviews.QueryRow(ctx, "SELECT deleted_by::text FROM review WHERE id = $1", mustUUID(t, written.Data.ID).ToUUID().String()).Scan(&deletedBy)
+	reviews.Close(ctx)
+	if err != nil || deletedBy == "" {
+		t.Fatalf("the deleted review's row: deleted by %q, %v; want it kept and stamped", deletedBy, err)
+	}
+	status, body = call(t, http.MethodPost, carts+"/api/orders/"+order.Id.String()+"/reorder", token, "")
+	var reordered struct {
+		Data struct {
+			OrderID    string `json:"orderId"`
+			TotalCents int64  `json:"totalCents"`
+			LineCount  int64  `json:"lineCount"`
+		} `json:"data"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &reordered) != nil || reordered.Data.TotalCents != 900 || reordered.Data.LineCount != 1 {
+		t.Fatalf("reorder the order on shop-cart: %d %s, want two teas at 450", status, body)
+	}
+	waitForStatus(ctx, t, orders, mustUUID(t, reordered.Data.OrderID), orderstypes.OrderStatus_Fulfilled, time.Minute)
+
 	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
 	// StockLow message the sale enqueued, and files the product's one open
 	// restock request, for enough units to bring its level of one back to
@@ -680,7 +748,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// The orders, oldest first: a page of one order at a time holds each
 	// order once, in the order of one page of them all, the two staff
-	// placed last, and a status filter holds on every page.
+	// placed last with the shopper's reorder between them, and a status
+	// filter holds on every page.
 	var paged []orderstypes.IdentityUUID
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, nil, orderspages.PageRequest{Limit: 1}) {
 		if err != nil {
@@ -697,8 +766,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			t.Fatalf("order %d is %s on a page of 100 and %s on the pages of one", i, listed.Id, paged[i])
 		}
 	}
-	if len(paged) < 2 || paged[len(paged)-2] != order.Id || paged[len(paged)-1] != next.Id {
-		t.Fatalf("ListOrdersAll = %v, want %s and %s last", paged, order.Id, next.Id)
+	reorder := mustUUID(t, reordered.Data.OrderID)
+	if len(paged) < 3 || paged[len(paged)-3] != order.Id || paged[len(paged)-2] != reorder || paged[len(paged)-1] != next.Id {
+		t.Fatalf("ListOrdersAll = %v, want %s, %s and %s last", paged, order.Id, reorder, next.Id)
 	}
 	placedOnly := &ordersns.OrderListOrdersQueryParams{Statuses: []orderstypes.OrderStatus{orderstypes.OrderStatus_Placed}}
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, placedOnly, orderspages.PageRequest{Limit: 1}) {

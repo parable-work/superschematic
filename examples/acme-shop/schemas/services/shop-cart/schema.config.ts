@@ -8,7 +8,10 @@ import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema
 // in-process. shop-db is its authDb, so the sessions shop-api's sign-in
 // starts authenticate its callers. shop-db's engine is a native addon, so
 // it runs on a server that builds an image, never as a Worker, which is
-// why the cart lives here and not in shop-storefront.
+// why the cart lives here and not in shop-storefront. A shopper's own
+// reviews and reorders are rows of shop-db's tables, which the
+// implementation reads and writes through Deps.orm, shop-db's generated
+// TypeScript repositories (D79).
 export default defineConfig({
   name: "shop-cart",
   kind: SchemaKind.API,
