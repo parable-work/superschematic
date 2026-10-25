@@ -7,6 +7,11 @@
 //! `{{ .SetupMethod }}_without_api` keeps them and mounts no JSON API, for an app
 //! that hosts several services' crates and serves at most one JSON API at
 //! `/api` (D61, amended).
+{{- if .Apps }}
+//! `{{ .SetupMethod }}_with_parts` sets it up from the parts of an app of
+//! {{ .SchemaName }} (D78), which the app's entrypoint builds on a stack, as
+//! `{{ .SetupMethod }}` would from them.
+{{- end }}
 //! It makes one registry of the operations' rate limiters
 //! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
 //! and every procedure, page and picker's shard that meets a route's rate
@@ -227,7 +232,7 @@ pub struct Setup {
     pub rate_limits: RateLimits,
 {{- with .Engine }}
     /// The engine of {{ .Database }} (D58), which [`engine::open`] opens in-process
-    /// on SQLite.
+    /// on SQLite{{ if $.Apps }}, or an app's entrypoint on the stack's database (D78){{ end }}.
     pub engine: Arc<{{ .EngineIdent }}::Engine>,
 {{- end }}
 }
@@ -268,6 +273,26 @@ pub trait {{ .ExtTrait }} {
 {{- end }}
     #[must_use]
     fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self;
+{{- if .Apps }}
+
+    /// `{{ .SetupMethod }}` with what the parts of an app of {{ .SchemaName }} hold
+    /// (D78): the API's implementations{{ if .Engine }}, and the engine its entrypoint opened
+    /// on the stack's database{{ end }}{{ if and .HasAuth .Identity }}, each page's caller read from the session
+    /// the API's identity runtime signed in (`IdentityPageAuthenticator::of`){{ end }}.
+    /// It mounts the JSON API at `/api`{{ if .Engine }} and the engine at `{{ engineMount }}`{{ end }}, as
+    /// `{{ .SetupMethod }}` does. The app's `serve` binds `parts.addr`, which its
+    /// entrypoint takes from `PORT`, before it hands the parts over:
+    ///
+    /// ```ignore
+    /// pub async fn serve(parts: api::apps::{{ index .Apps 0 }}) -> std::io::Result<()> {
+    ///     let listener = tokio::net::TcpListener::bind(parts.addr).await?;
+    ///     let router = Router::builder().discover().{{ .SetupMethod }}_with_parts(parts{{ if and .HasAuth (not .Identity) }}, page_authenticator{{ end }}).build();
+    ///     topcoat::serve(listener, router).await
+    /// }
+    /// ```
+    #[must_use]
+    fn {{ .SetupMethod }}_with_parts(self, parts: impl Into<AppParts>{{ if and .HasAuth (not .Identity) }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;
+{{- end }}
 }
 
 impl {{ .ExtTrait }} for RouterBuilder {
@@ -278,7 +303,42 @@ impl {{ .ExtTrait }} for RouterBuilder {
     fn {{ .SetupMethod }}_without_api(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self {
         set_up(self, implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}{{ if .Engine }}, engine{{ end }}, false)
     }
+{{- if .Apps }}
+
+    fn {{ .SetupMethod }}_with_parts(self, parts: impl Into<AppParts>{{ if and .HasAuth (not .Identity) }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self {
+        let parts = parts.into();
+{{- if and .HasAuth .Identity }}
+        let page_authenticator = IdentityPageAuthenticator::of(&parts.implementations);
+{{- end }}
+        set_up(self, parts.implementations{{ if .HasAuth }}, Arc::new(page_authenticator){{ end }}{{ if .Engine }}, parts.engine{{ end }}, true)
+    }
+{{- end }}
 }
+{{- if .Apps }}
+
+/// What `{{ .SetupMethod }}_with_parts` sets the crate up from: what it takes
+/// of an app's parts (D78), the API's implementations{{ if .Engine }} and its engine, open on the
+/// stack's database{{ end }}. The parts of each app of {{ .SchemaName }} convert into it.
+pub struct AppParts {
+    pub implementations: Implementations,
+{{- with .Engine }}
+    pub engine: Arc<{{ .EngineIdent }}::Engine>,
+{{- end }}
+}
+{{- range .Apps }}
+
+impl From<api::apps::{{ . }}> for AppParts {
+    fn from(parts: api::apps::{{ . }}) -> Self {
+        AppParts {
+            implementations: parts.implementations,
+{{- if $.Engine }}
+            engine: parts.engine,
+{{- end }}
+        }
+    }
+}
+{{- end }}
+{{- end }}
 
 /// The app's router with the crate's setup: a new registry of the
 /// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
