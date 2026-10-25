@@ -4052,9 +4052,9 @@ never waits for it.
   increment of the current window's counter with a TTL of two windows and
   five seconds; refused with `Retry-After` the window's length. The client
   part is the hex SHA-256 of the limiter's client key. While the store is
-  unavailable, or a call fails, the route counts in process. Go plugs the
-  counter in as httprate's `LimitCounter`, which never returns an error,
-  since httprate answers 428 on one.
+  unavailable, or a call fails, the route counts in process. Go runs the
+  runtime's own limiter, which holds no lock across its calls to the
+  store, and httprate's in-process limiter when it falls back.
 - **Local.** `stack dev` runs one Valkey container per environment and
   checkout, with no persistence and no TLS (section 8.3).
 - **gcp.** A store is a Memorystore for Valkey instance on
