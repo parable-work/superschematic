@@ -54,6 +54,15 @@ const untypedJobs: ServiceHandle<"API", unknown, "ExpireCarts"> = handWrittenApi
 // @ts-expect-error a handle that may have any worker does not stand for one whose workers are named
 const untypedWorkers: ServiceHandle<"API", unknown, never, "FulfilOrders"> = handWrittenApi;
 
+// An API with @app classes: the sentinel writes their names as the sixth
+// type argument, with the jobs, the workers and the derivers `never` when
+// it declares none, and the handle is still an API handle (D78).
+const ShopStock = service<"API", unknown, never, never, never, "Backoffice">({ name: "shop-stock", kind: SchemaKind.API });
+const stockAsApi: ServiceHandle<"API"> = ShopStock;
+
+// @ts-expect-error a handle that may have any app does not stand for one whose apps are named
+const untypedApps: ServiceHandle<"API", unknown, never, never, never, "Backoffice"> = handWrittenApi;
+
 // @ts-expect-error a handle that may have any deriver does not stand for one whose derivers are named
 const untypedDerivers: ServiceHandle<"API", unknown, never, never, "TriageTickets"> = handWrittenApi;
 
@@ -132,5 +141,7 @@ export const checked = {
   fulfilmentAsApi,
   untypedWorkers,
   supportAsApi,
-  untypedDerivers
+  untypedDerivers,
+  stockAsApi,
+  untypedApps
 };

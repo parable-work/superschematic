@@ -36,6 +36,30 @@ const (
 // for, by the names its assets carry.
 var Platforms = []string{"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"}
 
+// CLI is the installed binary a release ships, cmd/superschematic: the
+// core with the official extensions linked.
+const CLI = "superschematic"
+
+// ExtensionCLIs are the extensions a release ships a binary of beside
+// CLI, ExtensionCLI(ext): the installed binary with that extension linked
+// too (D44, amended; D78). The release workflow builds each as it builds
+// CLI, on the same runners, against the same archives and with their
+// digests linked in, and packs it under CLIName, listed in the same
+// SHA256SUMS. A stack whose app needs the extension runs it in CI.
+var ExtensionCLIs = []string{"topcoat"}
+
+// ExtensionCLI is the binary that links the extension ext beside the
+// official ones: superschematic-<ext>.
+func ExtensionCLI(ext string) string { return CLI + "-" + ext }
+
+// CLIName is the name of release version's tarball of the binary cli for
+// platform, without `.tar.gz`, and of the one directory it holds: the
+// binary, LICENSE, README.md and BUILD_COMMIT, the commit the release was
+// built from.
+func CLIName(cli, version, platform string) string {
+	return fmt.Sprintf("%s_%s_%s", cli, version, platform)
+}
+
 // Release is a release of superschematic, as the code it generates pins
 // it.
 type Release struct {
@@ -153,6 +177,15 @@ func (r Release) ModuleVersion() string {
 		return ""
 	}
 	return "v" + r.Version
+}
+
+// CLIVersion is the version a binary reports with --version: the release,
+// or 0.0.0, the unreleased version, for a binary built from a checkout.
+func (r Release) CLIVersion() string {
+	if r.Version == "" {
+		return "0.0.0"
+	}
+	return r.Version
 }
 
 // Archive returns the digest of the release's archives for platform.

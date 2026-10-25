@@ -111,6 +111,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// engine database's types (core_derivers.go, D74).
 	specs = append(specs, deriverDecorator())
 
+	// An API service's apps, the project's own HTTP programs over its Deps
+	// (core_apps.go, D78).
+	specs = append(specs, appDecorator())
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })

@@ -41,23 +41,25 @@ export enum TargetLanguage {
  * A handle to a service: what service() returns and a generated sentinel
  * exports. K is the service's kind, as a string ("API"), C the type of its
  * @envVars class, J the names of its @job classes, W the names of its
- * @worker classes and D the names of its @deriver classes. All five are
- * phantom: the sentinel generator writes them
- * (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
+ * @worker classes, D the names of its @deriver classes and A the names of
+ * its @app classes. All six are phantom: the sentinel generator writes
+ * them (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
  * and superschematic reads only name and kind. A DB or General handle has
- * no config type, no jobs, no workers and no derivers, nor has an API
- * without an @envVars class, a @job class, a @worker class or a @deriver
- * class, or a handle written by hand, so C, J, W and D keep their
- * defaults: any config, and any job, worker or deriver name. An API with
- * workers and no jobs has the jobs `never`, and one with derivers has
- * `never` for the jobs and the workers it lacks.
+ * no config type, no jobs, no workers, no derivers and no apps, nor has an
+ * API without an @envVars class, a @job class, a @worker class, a @deriver
+ * class or an @app class, or a handle written by hand, so C, J, W, D and A
+ * keep their defaults: any config, and any job, worker, deriver or app
+ * name. An API with workers and no jobs has the jobs `never`, one with
+ * derivers has `never` for the jobs and the workers it lacks, and one with
+ * apps `never` for the jobs, the workers and the derivers it lacks.
  */
 export type ServiceHandle<
   K extends SchemaKindName = SchemaKindName,
   C = unknown,
   J extends string = string,
   W extends string = string,
-  D extends string = string
+  D extends string = string,
+  A extends string = string
 > = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
@@ -70,6 +72,8 @@ export type ServiceHandle<
   readonly __workers?: W;
   /** Phantom: carries D for the type checker and is never set. */
   readonly __derivers?: D;
+  /** Phantom: carries A for the type checker and is never set. */
+  readonly __apps?: A;
 };
 
 export type TargetOutputConfig = {
@@ -366,10 +370,14 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
  * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
  * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
  */
-export function service<K extends SchemaKindName, C = unknown, J extends string = string, W extends string = string, D extends string = string>(cfg: {
-  readonly name: string;
-  readonly kind: K;
-}): ServiceHandle<`${K}`, C, J, W, D> {
+export function service<
+  K extends SchemaKindName,
+  C = unknown,
+  J extends string = string,
+  W extends string = string,
+  D extends string = string,
+  A extends string = string
+>(cfg: { readonly name: string; readonly kind: K }): ServiceHandle<`${K}`, C, J, W, D, A> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,
