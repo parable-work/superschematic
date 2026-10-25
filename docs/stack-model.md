@@ -74,6 +74,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | job | one `@job` of an API schema | a run to completion, on a schedule or on demand | its API's needs: the same connection and addresses (D52) |
 | worker | one `@worker` of an API schema | a loop that handles a queue's messages until stopped | its API's needs; its queue lives in one of the API's databases (D53) |
 | bucket | one Bucket schema | object storage, private, with signed URLs | nothing (D54) |
+| memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
 
@@ -109,6 +110,7 @@ kinds:
 | http | server, job or worker | server | `calls` in the config of each API the calling server serves |
 | site | site | server | `calls` in the Site service's config; the server must be exposed (D55, section 8.10) |
 | bucket | server or job | bucket | `buckets` in the config of each API the server serves (D54, section 8.9) |
+| memoryStore | server, job, worker or deriver | memoryStore | `memoryStores` and `rateLimitStore` in the config of each API the server serves (D75, section 8.12) |
 
 A site edge derives the API's public address and nothing else, since the
 browser carries its end user's token. Resolution refuses a site that
@@ -133,7 +135,9 @@ schema says that one API's implementation calls another API. It sits in
 the API service's config next to `authDb`, because both describe what the
 implementation needs, and the implementation belongs to the API (section
 8.5). `buckets` sits beside it, for the same reason: the Bucket services
-the implementation keeps objects in (section 8.9):
+the implementation keeps objects in (section 8.9). So do `memoryStores`
+and `rateLimitStore`, the MemoryStore services it shares wake-ups, counts
+and claims in (section 8.12):
 
 ```ts
 // schemas/services/shop-orders/schema.config.ts
@@ -181,6 +185,11 @@ bucket with its API, but no step waits for it. A server that serves two
 APIs listing one bucket has one bucket edge to it, as it has one http edge
 to an API both call.
 
+`memoryStores` is a build-order edge, unlike `buckets`: a MemoryStore
+service builds its definitions, which the API's server imports, so the
+store builds before each API that lists it. A server's memory stores are
+the union of its APIs', one edge each.
+
 Building is not deploying: two servers that call each other still have no
 callee-first rollout (section 5.3), and resolution refuses them
 (`call-cycle`, section 6.10) unless one server serves both APIs.
@@ -206,6 +215,10 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a bucket field per bucket edge. It holds the bucket's name and, for a
   bucket an emulator serves, the emulator's endpoint, with no credential
   (D54, section 8.9);
+- a memory store field per memoryStore edge. It holds the store's name,
+  its URL, the server's CA when it has one, the authentication and, in a
+  member of a parameterized environment, the member's name, with no
+  credential (D75, section 8.12);
 - a callers field per served API with a service clause, `<API>_CALLERS`
   (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
   name. It holds what the server's `ServiceAuthenticator` checks: the
@@ -240,7 +253,8 @@ dependency, as its sql edge does (section 3.3).
 
 The Go loader has the first three. The API package's `EnvConfig` embeds
 the `@envVars` type and adds a field per edge, a `stackconfig.Database`, a
-`stackconfig.Service` or a `stackconfig.Bucket` from the Go HTTP runtime,
+`stackconfig.Service`, a `stackconfig.Bucket` or a `stackconfig.MemoryStore`
+from the Go HTTP runtime,
 which `LoadEnvConfig` reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
@@ -266,6 +280,7 @@ connector's value against it and refuses one that breaks it with a
 | bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place; and, on Workers, `binding`, the name of the Worker's `r2_bucket` binding, with `r2`, the credential that signs URLs for the bucket's objects (D64): `account`, `accessKeyId` and `token`, a secret member (below). `r2` needs `binding`, and `binding` excludes `endpoint`. On gcp it holds no credential: the workload's own account reaches the bucket (D54) |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
+| memoryStore | `ir.MemoryStoreConnection` | `store`, the MemoryStore service's name; `url`, `redis://` or `rediss://`; `ca`, the PEM of the server's CA, with `rediss://` only; `auth`, `iam`, which needs `rediss://`, or `none`; and `member`, the member's name in a member of a parameterized environment (D75) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
 
 A member holds a string or a reference to an output or a parameter. A
@@ -320,9 +335,10 @@ member of it could come from a secret store.
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). The
 `[derived_fields]` table holds a template per edge kind, `database`,
-`service` and `bucket`, in which `{SERVICE}` is the DB, called API or
-Bucket service's name in upper snake case. They default to
-`{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and `{SERVICE}_BUCKET`. envgen
+`service`, `bucket` and `memory_store`, in which `{SERVICE}` is the DB,
+called API, Bucket or MemoryStore service's name in upper snake case.
+They default to `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE`,
+`{SERVICE}_BUCKET` and `{SERVICE}_MEMORY_STORE`. envgen
 and the resolver (`stack.Input.FieldNames`) name the fields by the same
 templates.
 
@@ -599,7 +615,8 @@ line that holds it.
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
   so tsc refuses a DB handle there, and `buckets` takes
   `ServiceHandle<"Bucket">`, which a Bucket service's sentinel gives
-  (D54). A third parameter, `J`, names an API's
+  (D54), and `memoryStores` and `rateLimitStore` take
+  `ServiceHandle<"MemoryStore">` (D75). A third parameter, `J`, names an API's
   jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
   "ShipOrders">`, with `unknown` for the config type of an API without
   one. It defaults to `string`, any job, and the sweep keeps it as it
@@ -645,6 +662,8 @@ line that holds it.
     runs once and every overdue deadline fires;
   - a Bucket handle takes the target's `bucket` settings and no `env`
     (D54);
+  - a MemoryStore handle takes the target's `memoryStore` settings,
+    `enabled` and no `env` (D75);
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
     serves;
@@ -1454,11 +1473,13 @@ Bootstrap reads the GitHub repository from the git remote.
 | job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the job exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
+| memoryStore | a Memorystore for Valkey instance (`gcp.memorystore`, D75, section 8.12) named `<project>-<stack>-<store>`, in the environment's region: `VALKEY_8_0`, cluster mode disabled, one shard, transit encryption `SERVER_AUTHENTICATION`, authorization `IAM_AUTH`, persistence and deletion protection off; its node type and replica count from the settings (section 7.5). It creates its own Private Service Connect endpoint on the environment's network, under a service connection policy for Memorystore (`network.memorystore`, service class `gcp-memorystore`) whose endpoints take addresses from a subnet of their own (`network.memorystore-subnet`, `<stack>-memorystore`, `10.8.16.0/24`); every store of the environment shares both |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the worker exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
 | runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account, which holds the Cloud Trace agent role when the runner exports its traces to Cloud Trace, and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
+| memoryStore edge | `roles/memorystore.dbConnectionUser` for the server's, the job's, the worker's or the deriver's account, granted on the project and held to the edge's instance by an IAM condition on its resource name, since Memorystore has no IAM policy per instance; Direct VPC egress for the workload, as a calling server has; the store's `rediss://` URL at its endpoint's address and port, the first certificate of the instance's managed server CA chain as `ca`, and `auth: iam`, which the connector derives with no credential: each new connection sends an access token for the workload's account from the metadata server. The same for Go, TypeScript and Rust (D75) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
@@ -1466,7 +1487,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | site edge | the server's public address in the site's config, and the site's origin in the server's CORS field (section 3.4). No grant: the server is exposed, with its invoker check off |
 | secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's, job's or worker's account, and an environment variable that references its latest version |
 | image | a server's, a job's or a worker's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
-| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits; a bucket per value, which the member's destroy empties |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits; a bucket per value, which the member's destroy empties; a memory store shared with the parent, whose names the member's own name (`pr123`) prefixes and whose destroy deletes nothing |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
 inside the VPC. Cloud Run counts a request from a VPC as internal, which
@@ -1514,7 +1535,9 @@ again: each step creates what is missing and leaves the rest.
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
    resource types need them, Cloud Run with any database for its migration
-   job, Cloud Scheduler for a job's schedule (D52), and, with Cloud Run,
+   job, Cloud Scheduler for a job's schedule (D52), Memorystore and
+   Network Connectivity for a memory store's instance and its service
+   connection policy (D75), and, with Cloud Run,
    the Telemetry and Cloud Trace APIs, which a deployable that exports to
    Cloud Trace uses (section 8.11), whether or not this environment
    exports, since another in the same project may. An API
@@ -1563,7 +1586,15 @@ again: each step creates what is missing and leaves the rest.
      `allUsers` and publish the site's files (D55): no narrower predefined
      role creates a bucket and sets its policy, and IAM checks a bucket's
      create on the project, where a condition on the bucket's name cannot
-     narrow it;
+     narrow it. It holds Memorystore's admin role, which creates, updates
+     and deletes a memory store's instance, and Network Connectivity's
+     consumer network admin role, which creates the service connection
+     policy on the environment's network (D75): Memorystore's editor role
+     neither creates nor deletes an instance, and an instance has no IAM
+     policy of its own to narrow a grant to. A memoryStore edge's
+     conditional project grant is one `resourcemanager.projectIamAdmin`
+     already sets, and `compute.networkAdmin` already makes the
+     endpoints' subnet;
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1676,6 +1707,8 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
+- a memory store on one `SHARED_CORE_NANO` node (`nodeType`) with one
+  replica (`replicas`, 0 to 5) (D75);
 - logs to Cloud Logging, and no trace export unless the environment's
   `telemetry` or the deployable's turns it on (section 8.11, D67,
   amended).
@@ -1712,6 +1745,11 @@ messages, so a worker's `cpu` is one or more (D53).
   reaches a bucket's objects through signed URLs. A site's own
   bucket is no Bucket service's, so this rule leaves it to
   `nothing-public-unless-exposed`.
+- `memory-stores-tls-and-iam`: a Memorystore instance has transit
+  encryption `SERVER_AUTHENTICATION` and authorization `IAM_AUTH` (D75),
+  so each client verifies it over TLS and authenticates as its own
+  account. A rate limit's key names a client, so no store goes without
+  either, whatever deployable owns it.
 
 ## 8. Generated build and runtime
 
@@ -2001,7 +2039,8 @@ runs an environment on the `local` target (`internal/stack/local`):
    job runs, and the queue each worker handles (section 8.8).
 4. It stops the sites, the servers and the workers, callers first, then
    the containers, which keep their data for the next run: the databases,
-   and the buckets' objects. `--remove-data` removes the checkout's
+   and the buckets' objects. The memory store's container keeps nothing,
+   since its Valkey runs with no persistence (D75). `--remove-data` removes the checkout's
    containers and their data instead, and no other checkout's;
    `--remove-database`, its name before the storage emulator joined
    Postgres, does the same.
@@ -2010,6 +2049,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | --- | --- |
 | database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
+| memoryStore | one Valkey container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`, on `local.valkey`, from `valkey/valkey:8.0.2-alpine`, the engine version `gcp.memorystore` pins, unless the `memoryStoreImage` value names another. It runs `valkey-server --save "" --appendonly no`, so it keeps nothing, with no TLS and no password, publishes its port on 127.0.0.1 only, and is ready once `valkey-cli ping` answers inside it. Every memoryStore deployable of the environment lowers to the same node, since each store's names start with its own name (D75) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, once after the rollout when its settings say `onDeploy`, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
@@ -2018,10 +2058,11 @@ runs an environment on the `local` target (`internal/stack/local`):
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable`, or for a SQLite file `sqlite:<absolute path>`, a reference to the file's node's `url` output, which the provisioner resolves from the state directory |
 | bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
+| memoryStore edge | the store's name, `redis://127.0.0.1:<port>/0` and `auth: none`, from a server, a job, a worker or a deriver in any language. The local target refuses a parameterized environment, so it names no member |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
-| port | a server's or a site's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout, else a hash of the stack, the environment and the deployable, shifted within its range by the checkout's offset: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator and 30000 to 32767 for Postgres, the same from run to run |
+| port | a server's or a site's `port` setting and the `postgresPort`, `storagePort` and `memoryStorePort` values, the same in every checkout, else a hash of the stack, the environment and the deployable, shifted within its range by the checkout's offset: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator, 26000 to 28767 for the memory store and 30000 to 32767 for Postgres, the same from run to run |
 | checkout | `<checkout>` is six hexadecimal digits of a SHA-256 of the absolute path of the environment's state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`, its links resolved. Each container carries it as the label `superschematic.checkout`, beside `superschematic.stack` and `superschematic.environment`, and read as a number modulo 2768 it is the offset that shifts every default port of the environment. So two checkouts of a repository run one environment side by side, one checkout keeps its containers from run to run, and a checkout that moves starts new ones |
 
 Every build of the CLI resolves a local environment in the checkout it
@@ -3887,6 +3928,143 @@ or on; the target sets the same variables as `plain_text` bindings, with
 `cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`,
 `cloud.account.id` and the bundle's digest as `service.version`, and the
 runtime's `./workers-telemetry` reads them (section 18.5, D64, amended).
+
+### 8.12 Memory stores
+
+A memory store is a Redis or Valkey server that the replicas of a stack's
+servers, jobs, workers and derivers share, for data whose loss costs a
+sample, never a record: a wake-up, a counter, a claim (D75). It is a
+service of the core kind `MemoryStore`. An API lists the stores it uses
+in its config, by handle, and may name one of them its `rateLimitStore`:
+
+```ts
+// schemas/services/shop-cache/schema.config.ts
+export default defineConfig({ name: "shop-cache", kind: SchemaKind.MemoryStore, outputs: { types: { [TargetLanguage.Go]: { enabled: true } } } });
+
+// schemas/services/shop-api/schema.config.ts
+export default defineConfig({ name: "shop-api", kind: SchemaKind.API, memoryStores: [ShopCache], rateLimitStore: ShopCache, ... });
+```
+
+The store never holds a fact, the code works without it, and it is no job
+queue. A disabled or unreachable store refuses every call at once, the
+caller takes the path it had before the store existed, and readiness
+never waits for it.
+
+- **Kind.** A MemoryStore schema declares only channels and keys:
+  `@channel` or `@key` from `@superschematic/memory-store` on an abstract
+  class, which no type library emits. The class's fields, in order, are
+  the declaration's parts, each a required scalar whose wire form is a
+  string, an integer, a boolean or an enum value
+  (`ir.MemoryStorePart.Format`). A channel's `payload` is an object type
+  of a dependency of the store's schema, never `@strictJSON`; one without
+  is a signal. A key is a `counter` or a `claim` and sets exactly one of
+  `ttlSeconds` and `maxTtlSeconds`, 1 to 604800. The IR records them as
+  `Schema.MemoryStoreDeclarations`, sorted by name, and the core adds the
+  reserved `rate-limit` counter to every store: parts `service`,
+  `operation`, `window` and `client`, `maxTtlSeconds` 86405. On an API,
+  `memoryStores` is `Schema.MemoryStores`, the `rateLimitStore` among
+  them, and `rateLimitStore` is `Schema.RateLimitStore`. The outputs are
+  `types` per language (`go`, `typescript`, `rust`); any other output key
+  is refused.
+- **Names.** A declaration's name is its class's in kebab case, or the
+  decorator's `name`. A name and each part's value at run time is one
+  segment: 1 to 128 bytes, without `:`, `*`, `?`, `[`, `]`, `@`, `\` or a
+  control character, refused and never escaped. A full name is
+  `<store>:<declaration>:<part>...`, and `<store>@<member>:...` in a
+  member of a parameterized environment. A part's wire string is the
+  value's string in the API's JSON: a UUID's compact base62 form, an
+  integer in base 10, `true` or `false`, an enum's wire value.
+  `runtime/http/testdata/memorystore_parity.json` holds the rule's
+  vectors.
+- **Build.** A MemoryStore builds before each API that lists it, since the
+  API's server imports its definitions. Its build writes, per language its
+  outputs name, a package of definitions under `types/<language>/<store>`:
+  Go's module is the service's types module, package `shopcache`, Go
+  `shopcache.ProductChanged.For(id)`; TypeScript's is the service's types
+  package, `productChanged.for(id)`; Rust's the service's types crate,
+  `PRODUCT_CHANGED.for_(&id)`. A key with `maxTtlSeconds` has `ForTTL`,
+  `forTTL` or `for_ttl`, which refuses a TTL above the maximum. A
+  channel's decoder keeps only the members its payload declares, at every
+  depth. Beside them, `memorystore/<store>/inventory.json` lists each
+  declaration's symbol, kind, name pattern, parts, payload or signal, TTL
+  and owning file.
+- **Deployable.** Each MemoryStore service an API of the stack lists is a
+  deployable of kind `memoryStore`, named after its service, which a
+  settings element names by its handle: `{ of: ShopCache, enabled?,
+  platform? }` and the target's `memoryStore` settings. It takes no `env`
+  and is never exposed, and its resources land in the infrastructure
+  step. Each server, job, worker and deriver of an API that lists it gets
+  a `memoryStore` edge to it; a server's stores are the union of its
+  APIs' (`ResolvedDeployable.MemoryStores`).
+- **Turned off.** `settings: [{ of: ShopCache, enabled: false }]` takes
+  the store out of the environment's deployables before any is placed:
+  no platform, no resource, no edge and no field, so each workload opens
+  it disabled. `environment.json` lists it under `disabled`, with its
+  name, kind, services and the environment that turned it off. A store
+  that is off and names a platform or settings is refused. A target with
+  no memoryStore platform refuses a store that is on, and its refusal
+  names `enabled: false`.
+- **Derived value.** A memoryStore edge derives an
+  `ir.MemoryStoreConnection`: `store`, `url` (`redis://` or `rediss://`),
+  `ca` with `rediss://` only, `auth` (`iam`, which needs `rediss://`, or
+  `none`) and `member`. It holds no credential. The field is
+  `{SERVICE}_MEMORY_STORE` (`[derived_fields] memory_store`), one variable
+  per member, `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL`, `_CA`, `_AUTH` and
+  `_MEMBER`, as every derived field's (section 3.4). None set is a
+  disabled store. Go's `stackconfig.LoadMemoryStore`, TypeScript's
+  `loadMemoryStore` and Rust's `stackconfig::load_memory_store` read it,
+  held to one encoding by `stackconfig_parity.json`; each refuses a URL
+  that holds a user or a password, and a field that is set and malformed
+  fails the config's load.
+- **Code.** `Deps` gains a field per listed store: Go's
+  `memorystore.Store` (`runtime/http/go/memorystore`), TypeScript's
+  `MemoryStore`, Rust's `Arc<dyn MemoryStore>`. The store has `Name`,
+  `Available`, `Publish`, `Subscribe`, `Increment`, `Count`, `Claim`,
+  `Delete` and `Close`, each by a `Ref` the definitions build. While it is
+  unavailable each call returns `ErrUnavailable`
+  (`MemoryStoreUnavailableError`, `MemoryStoreError::Unavailable`) at
+  once. Each runtime has `Disabled` and an in-process store for tests.
+- **Redis.** Each generated entrypoint opens each store once, hands it to
+  every API that lists it, and closes it on shutdown; a field that is
+  unset, or that the client cannot use, opens a disabled store after one
+  log line. Only a workload whose APIs list a store links a client:
+  go-redis in the `memorystores.go` the build writes beside `main.go`,
+  `@redis/client` from the TypeScript runtime's `./redis` entry, and the
+  Rust runtime's `memorystore-redis` feature over the `redis` crate. Open
+  never fails for a server that is down: it pings once within a second,
+  then pings every 2 seconds while up and backs off from 100 ms to 5
+  seconds, jittered, while down. A call has 500 ms and one retry. The
+  client sends no `CLIENT` command and asks for no maintenance
+  notifications. `rediss://` is TLS 1.2 or later against the field's CA;
+  `auth: iam` sends an access token for the workload's account from the
+  metadata server as the password of user `default` on each new
+  connection. A process holds one subscriber connection per store, whose
+  one subscription per channel wakes every local handler. A message over
+  64 KiB is refused before it is sent, and no log line holds a URL, a
+  token or a part. `Increment` is `INCR` and `PEXPIRE <ttl> NX` in one
+  transaction, `Count` a `GET`, `Claim` `SET <name> <token> PX <ttl> NX
+  GET`, true when nothing was there or the token read back is the call's
+  own, and `Delete` a `DEL`.
+- **Rate limit.** An API whose config names a `rateLimitStore` counts
+  each `@rateLimit` route there, by httprate's sliding window in every
+  language: allowed when `round(estimate) + 1 <= limit`, then an
+  increment of the current window's counter with a TTL of two windows and
+  five seconds; refused with `Retry-After` the window's length. The client
+  part is the hex SHA-256 of the limiter's client key. While the store is
+  unavailable, or a call fails, the route counts in process. Go plugs the
+  counter in as httprate's `LimitCounter`, which never returns an error,
+  since httprate answers 428 on one.
+- **Local.** `stack dev` runs one Valkey container per environment and
+  checkout, with no persistence and no TLS (section 8.3).
+- **gcp.** A store is a Memorystore for Valkey instance on
+  `gcp.memorystore`, reached over Private Service Connect as the
+  workload's own account (section 7.2). A member of a parameterized
+  environment shares its parent's instance; its names carry its own name,
+  and its destroy deletes nothing.
+- **cloudflare.** The target has no memoryStore platform, so it refuses a
+  store that is on (section 18.15).
+- **Engine.** The engine does not use the store: its runner and sweepers
+  keep the database's polls and locks.
 
 
 ## 9. End-user auth and service auth
@@ -6457,6 +6635,14 @@ runtime tests run fixture bundles under the `workerd` binary.
   candidate store.
 - `immutable` caching for a site's hashed files.
 - A bucket's CORS (section 18.7).
+- Memory stores (D75). The target has no memoryStore platform, so
+  resolution refuses a stack that places a store on it with the store on,
+  as `unrealizable`, and the refusal names `settings: [{ of: ShopCache,
+  enabled: false }]`. With the store off, the environment deploys, and
+  each Worker's `fetch.ts` and `scheduled.ts` hold a disabled store and
+  import no Redis client. A KV namespace or a Durable Object is not the
+  store: KV has no atomic increment, and either is a platform of its own
+  to design.
 
 Built so far: the target's values, state with a deploy lock per run,
 secrets, bootstrap and CI identity, and the Workers platform for
