@@ -9,8 +9,10 @@
 // exists.
 //
 // The build cache keys the generator's output on the stack service's inputs,
-// which hold its config and so the renderers' options, and on the binary,
-// whose release the workflow installs; it needs no key of its own.
+// which hold its config and so the renderers' options, on the binary,
+// whose release the workflow installs, and, for a stack whose config names
+// a renderer, on the root's other stacks and the services they reach,
+// whose apps choose the binary the workflow runs (rootApps).
 package cigen
 
 import (
@@ -26,6 +28,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
+	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -74,6 +77,10 @@ func Generate(c registry.GenerateContext) error {
 	for _, env := range resolved {
 		envs = append(envs, c.Registry.CIEnvironment(env))
 	}
+	rootApps, err := rootApps(c, st.Name)
+	if err != nil {
+		return err
+	}
 	rel := c.Options.ReleaseInfo()
 
 	type rendered struct {
@@ -94,6 +101,7 @@ func Generate(c registry.GenerateContext) error {
 			Options:      opts,
 			Version:      rel.Version,
 			Archives:     archives(rel),
+			RootApps:     rootApps,
 		})
 		if err != nil {
 			return fmt.Errorf("stack %s: CI renderer %s: %w", st.Name, name, err)
@@ -135,6 +143,75 @@ func Generate(c registry.GenerateContext) error {
 	}
 	c.Done(Name, dir)
 	return nil
+}
+
+// rootApps are the apps of the other stacks of the services root that
+// need an extension (D78). Every job of the workflow builds the whole
+// services root with build-all, which builds those stacks too, and
+// refuses an app whose extension the binary does not link, so the
+// workflow's binary is chosen from them as well as from the stack's own
+// apps. Building only the stack's closure instead would leave the output
+// root's Cargo and Bun workspaces, whose members are every stack's
+// deployables, short of the other stacks', and their committed lockfiles
+// would then not match. A service of the root is a directory with a
+// schema config, named as its directory, as a single build loads it.
+func rootApps(c registry.GenerateContext, name string) ([]registry.CIApp, error) {
+	dir, err := filepath.Abs(c.Options.ServicePath)
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Dir(dir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("stack %s: %w", name, err)
+	}
+	var out []registry.CIApp
+	for _, entry := range entries {
+		other := entry.Name()
+		if !entry.IsDir() || strings.HasPrefix(other, "_") || other == filepath.Base(dir) || !hasConfig(filepath.Join(root, other)) {
+			continue
+		}
+		cfg, err := c.Options.LoadDependencyConfig(other)
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: service %s of the services root, which the workflow builds: %w", name, other, err)
+		}
+		if cfg.Kind != ir.SchemaKindStack {
+			continue
+		}
+		schema, err := c.LoadDependency(other)
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: stack %s of the services root, which the workflow builds: %w", name, other, err)
+		}
+		st := ir.StackOf(schema)
+		if st == nil {
+			continue
+		}
+		services, err := stackgen.Services(c, st)
+		if err != nil {
+			return nil, err
+		}
+		apps, err := stack.Apps(stack.Input{Stack: st, Services: services})
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: stack %s of the services root, which the workflow builds: %w", name, st.Name, err)
+		}
+		for _, d := range apps {
+			if d.App != nil && len(d.App.Extensions) > 0 {
+				out = append(out, registry.CIApp{Stack: st.Name, App: *d.App})
+			}
+		}
+	}
+	return out, nil
+}
+
+// hasConfig reports whether dir holds a schema config, as a service of the
+// services root does.
+func hasConfig(dir string) bool {
+	for _, file := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // archives are the release's static archives by platform, with where

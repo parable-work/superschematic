@@ -34,8 +34,9 @@ const (
 	// (D63).
 	Provider = "fake"
 
-	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
-	// Postgres databases.
+	// RunPlatform runs Go, TypeScript and Rust servers, the last the
+	// servers of the Rust APIs whose apps AppPlatform runs (D78);
+	// SQLPlatform runs Postgres databases.
 	RunPlatform = "fake.run"
 	SQLPlatform = "fake.sql"
 
@@ -70,6 +71,15 @@ const (
 	DeriverSQLConnector    = "fake.deriver-sql"
 	DeriverHTTPConnector   = "fake.deriver-run"
 	DeriverBucketConnector = "fake.deriver-storage"
+
+	// AppPlatform runs Rust apps as a service, as gcp runs a server on
+	// Cloud Run (D78); AppSQLConnector, AppHTTPConnector and
+	// AppBucketConnector connect it, whose edges are its API's, as a job's
+	// connectors do.
+	AppPlatform        = "fake.app"
+	AppSQLConnector    = "fake.app-sql"
+	AppHTTPConnector   = "fake.app-run"
+	AppBucketConnector = "fake.app-storage"
 
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
@@ -291,7 +301,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		}
 	}
 	for _, spec := range []registry.PlatformSpec{
-		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript),
+		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust),
 		server(EdgePlatform, registry.APILanguageTypeScript),
 		{
 			Name:      BundlePlatform,
@@ -363,7 +373,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      RunnerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableRunner,
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			// A Rust API's engine runs its runner in Rust (D58), as its app
+			// does (D78).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerRunner,
@@ -376,6 +388,28 @@ func (e *Extension) Register(r *registry.Registry) error {
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerDeriver,
+		},
+		{
+			Name:      AppPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableApp,
+			Languages: []string{registry.APILanguageRust},
+			Settings:  json.RawMessage(serverSettings),
+			NameOf:    serverName,
+			// An app turned off runs no service, so it has no address.
+			AddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "url"}
+			},
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return publicAddress(ctx, ctx.Deployable.Name+".service")
+			},
+			Lower: lowerApp,
 		},
 	} {
 		spec.Provider = Provider
@@ -403,6 +437,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: AppSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: AppPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: AppHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: AppPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: AppBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: AppPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -434,6 +471,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableWorker:   WorkerPlatform,
 			ir.DeployableRunner:   RunnerPlatform,
 			ir.DeployableDeriver:  DeriverPlatform,
+			ir.DeployableApp:      AppPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -619,7 +657,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	service := map[string]any{
 		"name":     d.ResourceName,
-		"image":    kebab(d.Name),
+		"image":    ImageRepository(d.Name),
 		"account":  member,
 		"language": strings.ToLower(d.Language),
 		"public":   d.Exposed || d.Settings["public"] == true,
@@ -759,7 +797,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	job := map[string]any{
 		"name":           d.ResourceName,
-		"image":          kebab(d.Name),
+		"image":          ImageRepository(d.Name),
 		"account":        member,
 		"language":       strings.ToLower(d.Language),
 		"timeoutSeconds": d.Job.TimeoutSeconds,
@@ -848,7 +886,7 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Worker.Instances,
@@ -877,7 +915,7 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Runner.Instances,
@@ -905,7 +943,7 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Deriver.Instances,
@@ -916,6 +954,22 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
 	return out, nil
+}
+
+// lowerApp lowers an app (D78) as a server: an account, the secrets it
+// reads, and a service that runs its image, with a route when it is
+// exposed. An app the environment turns off lowers to its account and
+// secrets alone, and runs nothing.
+func lowerApp(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.App == nil {
+		return registry.Lowered{}, fmt.Errorf("app %s has no run", d.Name)
+	}
+	if !d.App.Enabled {
+		out, _, _, err := lowerAccount(ctx)
+		return out, err
+	}
+	return lowerServer(ctx)
 }
 
 // lowerDatabase lowers a database to an instance and a database per
@@ -1192,6 +1246,17 @@ func Join(parts ...any) any {
 
 // kebab lowercases a name and joins its words with hyphens: Orders is
 // orders, shop-api stays shop-api.
+// ImageRepository is the repository path the fake platforms write as a
+// deployable's image, with no tag or digest, which a deploy pins
+// (stackdeploy.PinImages) and the fake builder returns at a digest. It
+// lies under a registry host, as a real platform's does, so that it
+// equals no other property of the deployable's nodes, such as its
+// account's name: a deploy that pins an image no node holds fails here
+// as it does on a real target.
+func ImageRepository(deployable string) string {
+	return "images.fake.test/" + kebab(deployable)
+}
+
 func kebab(name string) string {
 	var b strings.Builder
 	for i, r := range name {

@@ -29,6 +29,10 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 			refs := make([]string, len(s.Expose))
 			for i, ref := range s.Expose {
 				refs[i] = e.deployableRef(fmt.Sprintf("type %s: @stack expose[%d]", def.Name, i), ref)
+				if ref.App != "" && ref.Service != nil {
+					// An app is exposed beside its API's handle (D78).
+					refs[i] = objectLiteral([]string{"of: " + refs[i], "app: " + quote(ref.App)})
+				}
 			}
 			parts = append(parts, "expose: ["+strings.Join(refs, ", ")+"]")
 		}
@@ -80,11 +84,11 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 	return objectLiteral(parts)
 }
 
-// settingsLiteral renders one settings element: of, a job's, a worker's or
-// a deriver's name beside its API's handle, or runner: true beside a DB's,
-// platform, a job's schedule, timeZone, enabled and onDeploy, a worker's
-// and a deriver's instances, concurrency and enabled, env, and the
-// platform settings in every other key.
+// settingsLiteral renders one settings element: of, a job's, a worker's,
+// a deriver's or an app's name beside its API's handle, or runner: true
+// beside a DB's, platform, a job's schedule, timeZone, enabled and
+// onDeploy, a worker's and a deriver's instances, concurrency and enabled,
+// an app's enabled, env, and the platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
 	if settings.Of.Job != "" {
@@ -95,6 +99,9 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if settings.Of.Deriver != "" {
 		parts = append(parts, "deriver: "+quote(settings.Of.Deriver))
+	}
+	if settings.Of.App != "" {
+		parts = append(parts, "app: "+quote(settings.Of.App))
 	}
 	if settings.Of.Runner {
 		parts = append(parts, "runner: true")
@@ -122,7 +129,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
-		case "of", "job", "worker", "deriver", "runner", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
+		case "of", "job", "worker", "deriver", "app", "runner", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}
@@ -173,6 +180,8 @@ func (e *emitter) deployableRef(owner string, ref ir.DeployableRef) string {
 		e.failf("%s names worker %s of no API service; the TypeScript form writes a worker beside its API's handle", owner, ref.Worker)
 	case ref.Deriver != "":
 		e.failf("%s names deriver %s of no API service; the TypeScript form writes a deriver beside its API's handle", owner, ref.Deriver)
+	case ref.App != "":
+		e.failf("%s names app %s of no API service; the TypeScript form writes an app beside its API's handle", owner, ref.App)
 	case ref.Deployable != "":
 		return e.ident(ref.Deployable, "deployable")
 	default:

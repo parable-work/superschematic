@@ -124,6 +124,10 @@ type Service struct {
 	// stack.
 	Derivers []ir.Deriver
 
+	// Apps are an API service's apps, its `@app` classes (D78), as
+	// ir.Schema.Apps holds them. Each is a deployable of the stack.
+	Apps []ir.App
+
 	// Queues are the names of a DB service's queues, its `@queue` classes
 	// (D53), sorted. A worker's queue is one of its API's database.
 	Queues []string

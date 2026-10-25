@@ -216,13 +216,19 @@ func (r *resolver) bindConfig() {
 		}
 		var callers, identity, cors map[string]string
 		refused := map[string]bool{}
-		if d.res.Kind == ir.DeployableServer {
+		if d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp {
+			// An app serves requests over its API's Deps as the API's
+			// server does, so it reads its API's callers and identity
+			// fields (D78). No deployable calls it and no site does, so
+			// its callers field lists no issuer and it has no CORS field.
 			callers = r.callersFields(d)
 			refused = r.checkCallersFields(d, callers, derived)
 			// A job serves no request: it builds no identity service, so
 			// it reads no identity config field (D50, D52).
 			identity = r.identityFields(d)
 			r.checkIdentityFields(d, identity, callers, derived)
+		}
+		if d.res.Kind == ir.DeployableServer {
 			cors = r.corsFields(d)
 			for key := range r.checkCORSFields(d, cors, callers, identity, derived) {
 				refused[key] = true

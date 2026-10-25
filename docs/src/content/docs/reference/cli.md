@@ -24,9 +24,14 @@ program's status.
 The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
 `new`, `stack` and `identity` groups, beside cobra's own `help` and
-`completion`. The
+`completion`. `--version` prints the binary's name and release,
+`superschematic version 1.2.3`, or `0.0.0` for a binary built from a
+checkout; a generated workflow checks the binary it installs with it. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner), which add none. The migration runner,
+target, and the Pulumi provisioner), which add none. Each release also
+ships `superschematic-topcoat`, the same binary with the
+[Topcoat](/superschematic/guides/topcoat/) extension linked too, which
+builds a stack whose app needs it. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
@@ -767,7 +772,8 @@ walks through it.
    that has a `tsconfig.json` also has one, `tsconfig.json` extending
    that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
    `@stack` deploys every API and every Site service and exposes as step 2
-   decided, with `Dev` on the local target and the cloud environment, and
+   decided, and every app of an API it deploys, `{ of: <Api>, app:
+   "<Class>" }`, since no one reaches an app it does not expose (D78), with `Dev` on the local target and the cloud environment, and
    the cloud target's values and settings types read from the JSON Schemas
    it registers: `src/gcp-target.ts` for a gcp environment,
    `src/cloudflare-target.ts` for a cloudflare one (D64).
@@ -1069,6 +1075,14 @@ target only when it links the target's extension and the provisioner's
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
 `prepare` reaches no target and takes its own flags.
+
+A stack with an app whose `@app` names an extension the binary does not
+link (D78) is refused by `prepare`, `build` and `deploy`, a deploy with
+`--prepared` included, since each builds images: `app Backoffice of
+shop-stock needs the topcoat extension, which this superschematic binary
+does not link; run superschematic-topcoat`. `prepare` and `deploy` with
+`--no-build` build nothing and are not refused. `plan` and the rest read
+the app as usual.
 
 Each of the others takes these flags:
 
