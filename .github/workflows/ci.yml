@@ -742,6 +742,20 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
+      - name: Start Valkey
+        # The memory store tests that read SUPERSCHEMATIC_TEST_MEMORY_STORE
+        # (D75) run against it, in database 1, and skip without it.
+        run: |
+          docker run --detach --name superschematic-valkey \
+            --publish 6379:6379 \
+            "valkey/valkey:${VALKEY_VERSION}-alpine"
+          for _ in $(seq 1 30); do
+            if docker exec superschematic-valkey valkey-cli ping >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-valkey
+          exit 1
+
       - name: packages/ typecheck + test
         working-directory: packages
         run: |
@@ -759,6 +773,10 @@ jobs:
 
       - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
+        env:
+          # src/redis.test.ts's tests against a real server, on the Valkey
+          # above.
+          SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -948,6 +966,20 @@ jobs:
         # superscalar is built here but that crate.
         run: scripts/superscalar-dep.sh --checkout
 
+      - name: Start Valkey
+        # The memory store tests that read SUPERSCHEMATIC_TEST_MEMORY_STORE
+        # (D75) run against it, in database 1, and skip without it.
+        run: |
+          docker run --detach --name superschematic-valkey \
+            --publish 6379:6379 \
+            "valkey/valkey:${VALKEY_VERSION}-alpine"
+          for _ in $(seq 1 30); do
+            if docker exec superschematic-valkey valkey-cli ping >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-valkey
+          exit 1
+
       # superscalar's default lossless-json feature turns on serde_json's
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
@@ -959,12 +991,14 @@ jobs:
       # log lines a test reads (D65); gcs, a bucket on GCS (D54), whose
       # tests run against fakes, the fake-gcs-server run skipping here, and
       # beside a worker's two, as a worker with a bucket builds;
-      # memorystore-redis, a memory store on Redis (D75), whose Valkey tests
-      # skip here, alone and beside a worker's two; and otel, a
+      # memorystore-redis, a memory store on Redis (D75), whose tests run
+      # on the Valkey above, alone and beside a worker's two; and otel, a
       # deployable's trace export, alone and with postgres, as a worker
       # builds it, whose message spans a test reads (D67).
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
+        env:
+          SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
