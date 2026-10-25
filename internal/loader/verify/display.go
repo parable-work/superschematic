@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	scalars "github.com/parable-work/superscalar/go"
+
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -40,23 +42,38 @@ func checkDisplays(schema *ir.Schema, reg *registry.Registry, r *Result) {
 }
 
 // checkFieldDisplays holds each field's @display (D48, amended) to a field
-// whose control it can say: multiline is for text, so the field holds a
-// string or a scalar whose values are strings, or a list of them (a
-// control per row), not a map; and the field is not secret, which a UI
-// renders as a password input, one line by nature. It reads the fields of
-// every type and input, and of a configurable trait's config, which
-// Schema.Validate holds to a field display's shape too.
+// whose control or value it can say:
+//
+//   - multiline is for text, so the field holds a string or a scalar whose
+//     values are strings, or a list of them (a control per row), not a
+//     map; and the field is not secret, which a UI renders as a password
+//     input, one line by nature;
+//   - currency is for an amount in minor units, so the field holds an
+//     integer scalar (Finance.Money, Generic.Int64), or a list of them,
+//     not a map. A literal is an active ISO 4217 code, as Finance.Currency
+//     takes one (in capitals: the scalar refuses usd); a field is one of
+//     the same type's own, by its name or its JSON key, that holds a
+//     single text value, a Finance.Currency or a string.
+//
+// It reads the fields of every type and input, and of a configurable
+// trait's config, which Schema.Validate holds to a field display's shape
+// too.
 func checkFieldDisplays(schema *ir.Schema, r *Result) {
 	check := func(td *ir.TypeDef, what string, fields []*ir.FieldDef) {
 		for _, f := range fields {
-			if f == nil || f.Display == nil || f.Display.Multiline == nil {
+			if f == nil || f.Display == nil {
 				continue
 			}
-			switch {
-			case f.TypeRef.IsMap || !ir.TextValue(schema, ir.TypeRef{Name: f.TypeRef.Name}):
-				r.errorf(td.Owner, "type %s: %s %s takes @display multiline, which is for text, but it is %s", td.Name, what, f.Name, typeLabel(f.TypeRef))
-			case f.Secret:
-				r.errorf(td.Owner, "type %s: %s %s takes @display multiline, but it is secret, a password input", td.Name, what, f.Name)
+			if f.Display.Multiline != nil {
+				switch {
+				case f.TypeRef.IsMap || !ir.TextValue(schema, ir.TypeRef{Name: f.TypeRef.Name}):
+					r.errorf(td.Owner, "type %s: %s %s takes @display multiline, which is for text, but it is %s", td.Name, what, f.Name, typeLabel(f.TypeRef))
+				case f.Secret:
+					r.errorf(td.Owner, "type %s: %s %s takes @display multiline, but it is secret, a password input", td.Name, what, f.Name)
+				}
+			}
+			if c := f.Display.Currency; c != nil {
+				checkDisplayCurrency(schema, td, what, fields, f, c, r)
 			}
 		}
 	}
@@ -72,6 +89,59 @@ func checkFieldDisplays(schema *ir.Schema, r *Result) {
 			}
 		}
 	}
+}
+
+// checkDisplayCurrency holds field f's @display currency, c, to an amount
+// field of td and a currency: an active code, or one of fields, f's
+// siblings, that holds text.
+func checkDisplayCurrency(schema *ir.Schema, td *ir.TypeDef, what string, fields []*ir.FieldDef, f *ir.FieldDef, c *ir.DisplayCurrency, r *Result) {
+	if f.TypeRef.IsMap || !integerValue(schema, ir.TypeRef{Name: f.TypeRef.Name}) {
+		r.errorf(td.Owner, "type %s: %s %s takes @display currency, which is for an amount in minor units, but it is %s", td.Name, what, f.Name, typeLabel(f.TypeRef))
+	}
+	if c.Code != "" {
+		if _, err := scalars.ParseFinanceCurrency(c.Code); err != nil {
+			r.errorf(td.Owner, "type %s: %s %s takes @display currency %q, which is not an active ISO 4217 currency code", td.Name, what, f.Name, c.Code)
+		}
+		return
+	}
+	var sibling *ir.FieldDef
+	for _, other := range fields {
+		if other != nil && (other.Name == c.Field || other.JSONTag != "" && other.JSONTag == c.Field) {
+			sibling = other
+			break
+		}
+	}
+	names := make([]string, 0, len(fields))
+	for _, other := range fields {
+		if other != nil && other != f {
+			names = append(names, other.Name)
+		}
+	}
+	switch {
+	case sibling == f:
+		r.errorf(td.Owner, "type %s: %s %s takes @display currency { field: %q }, which is the amount itself; the currency is another field of the type", td.Name, what, f.Name, c.Field)
+	case sibling == nil:
+		list := ""
+		if len(names) > 0 {
+			list = " (fields: " + strings.Join(names, ", ") + ")"
+		}
+		r.errorf(td.Owner, "type %s: %s %s takes @display currency { field: %q }, which is not a field of the type%s", td.Name, what, f.Name, c.Field, list)
+	case !ir.TextValue(schema, sibling.TypeRef):
+		r.errorf(td.Owner, "type %s: %s %s takes @display currency { field: %q }, which is %s; a currency field holds a single Finance.Currency or text value", td.Name, what, f.Name, c.Field, typeLabel(sibling.TypeRef))
+	}
+}
+
+// integerValue reports whether ref, read in schema, is a single whole
+// number: a scalar of the schema whose values are JSON integers, by its
+// json_schema type mapping (Finance.Money, Generic.Int64), not a list or a
+// map. It is the rule of a field's @display currency (D48, amended): an
+// amount in a currency's minor units.
+func integerValue(schema *ir.Schema, ref ir.TypeRef) bool {
+	if ref.IsArray || ref.IsMap || schema == nil {
+		return false
+	}
+	scalar := schema.Scalars[ref.Name]
+	return scalar != nil && scalar.TypeMappings["json_schema"] == "integer"
 }
 
 func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *Result) {

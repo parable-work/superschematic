@@ -13,8 +13,9 @@ import (
 )
 
 // loadPatchedDisplay copies fixture-display into a temporary service next
-// to it, replaces old with replacement in its ticket schema, and loads it.
-func loadPatchedDisplay(t *testing.T, old, replacement string) (*ir.Schema, error) {
+// to it, replaces old with replacement in its ticket schema, then each
+// further pair's first with its second, and loads it.
+func loadPatchedDisplay(t *testing.T, old, replacement string, more ...string) (*ir.Schema, error) {
 	t.Helper()
 	dir, err := os.MkdirTemp(filepath.Join("testdata", "services"), "fixture-display-patched-")
 	if err != nil {
@@ -29,10 +30,15 @@ func loadPatchedDisplay(t *testing.T, old, replacement string) (*ir.Schema, erro
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(source), old) {
-		t.Fatalf("fixture has no %q to replace", old)
+	text := string(source)
+	pairs := append([]string{old, replacement}, more...)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if !strings.Contains(text, pairs[i]) {
+			t.Fatalf("fixture has no %q to replace", pairs[i])
+		}
+		text = strings.Replace(text, pairs[i], pairs[i+1], 1)
 	}
-	if err := os.WriteFile(filename, []byte(strings.Replace(string(source), old, replacement, 1)), 0o600); err != nil {
+	if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	schema, _, err := LoadService(dir)
@@ -182,6 +188,49 @@ func TestDisplayIconAndMultilineLoadIntoIR(t *testing.T) {
 		if f.Name == "body" && (f.Display == nil || f.Display.Multiline == nil || *f.Display.Multiline) {
 			t.Fatalf("body display = %+v, want multiline false", f.Display)
 		}
+	}
+}
+
+// TestDisplayCurrencyLoadsIntoIR: @display({ currency }) on a field (D48,
+// amended) reads as a literal code or a sibling field, and a code that is
+// not three capital letters fails the read.
+func TestDisplayCurrencyLoadsIntoIR(t *testing.T) {
+	const fields = `@display({ multiline: true })
+  body?: string;
+
+  @display({ currency: "GBP" })
+  estimate?: Finance.Money;
+
+  @display({ currency: { field: "budgetCurrency" } })
+  budget: Generic.Int64[];
+
+  budgetCurrency?: Finance.Currency;`
+	load := func(t *testing.T, replacement string) (*ir.Schema, error) {
+		t.Helper()
+		const imports = `import { Validate, behavior, display, docs, icon } from "@superschematic/schema";`
+		return loadPatchedDisplay(t, "@display({ multiline: true })\n  body?: string;", replacement,
+			imports, `import { Finance, Generic } from "superscalar";`+"\n"+imports)
+	}
+	schema, err := load(t, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ir.DisplayCurrency{}
+	for _, f := range schema.Types["Ticket"].Fields {
+		if f.Display != nil && f.Display.Currency != nil {
+			got[f.Name] = *f.Display.Currency
+		}
+	}
+	want := map[string]ir.DisplayCurrency{"estimate": {Code: "GBP"}, "budget": {Field: "budgetCurrency"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currencies = %+v, want %+v", got, want)
+	}
+
+	// A code is three capital letters, as the argument's JSON Schema
+	// says; whether it is an active code, and whether the field holds an
+	// amount, is the loader's check (verify.checkFieldDisplays).
+	if _, err := load(t, "body?: string;\n\n  @display({ currency: \"gbp\" })\n  fee?: Finance.Money;"); err == nil || !strings.Contains(err.Error(), "@display") {
+		t.Fatalf("a lower-case code loaded: %v", err)
 	}
 }
 
