@@ -382,10 +382,13 @@ export class EventCalls {
    * subscribe opens the event stream: iterate the subscription for each
    * event and a `ready` per connection, and with `signals: true` each
    * signal (D77) as a `signal` message; it resumes by Last-Event-ID when
-   * the connection drops.
+   * the connection drops. Without `signals`, or with `false`, it hands out
+   * StreamMessages alone; with a `signals` known only as a boolean, it may
+   * hand out signals too, and is typed so.
    */
   subscribe(options: SubscribeOptions & { readonly signals: true }): EventSubscription<StreamMessage | SignalMessage>;
-  subscribe(options?: SubscribeOptions): EventSubscription;
+  subscribe(options?: SubscribeOptions & { readonly signals?: false }): EventSubscription;
+  subscribe(options: SubscribeOptions): EventSubscription<StreamMessage | SignalMessage>;
   subscribe(options: SubscribeOptions = {}): EventSubscription<StreamMessage | SignalMessage> {
     return new EventSubscription(this.scope.transport, `${this.scope.ns(options)}/events`, options);
   }
