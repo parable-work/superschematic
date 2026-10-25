@@ -75,7 +75,7 @@ func Schema(t *testing.T, reg *registry.Registry) *ir.Schema {
 // writes it back unchanged.
 const TicketBehaviors = `{
   "Workflow": { "status": "in-progress", "enteredAt": 1790790700324 },
-  "Comments": { "messages": 2, "lastMessageAt": 1790790800000, "threads": { "open": 1, "resolved": 0 } },
+  "Comments": { "messages": 2, "lastMessageAt": 1790790800000, "threads": { "open": 1, "resolved": 0 }, "composing": ["ana"] },
   "Revisions": { "revision": 3 },
   "Dependencies": { "blocked": false },
   "Links": { "targets": {
