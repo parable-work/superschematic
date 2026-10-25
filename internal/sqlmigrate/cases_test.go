@@ -249,7 +249,7 @@ var planCases = []planCase{
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}
 	}},
 	// A field whose type is a @jsonField class was a TEXT column before
-	// D78 and is JSONB now: the plan casts the text, which fails on text
+	// D81 and is JSONB now: the plan casts the text, which fails on text
 	// that is not JSON.
 	{name: "retype-text-to-jsonb",
 		before: func(s *ir.Schema) { addShippingAddress(s, stringRef) },
@@ -310,7 +310,7 @@ var planCases = []planCase{
 		fieldNamed(s, "Order", "customer").Relation.OnDelete = "CASCADE"
 	}},
 	// A nullable relation's rows lose the reference, not the row, when the
-	// referenced row goes (D78).
+	// referenced row goes (D81).
 	{name: "change-on-delete-to-set-null",
 		before: func(s *ir.Schema) { addLineProduct(s, "CASCADE") },
 		after:  func(s *ir.Schema) { addLineProduct(s, "SET NULL") }},
@@ -395,7 +395,7 @@ var planCases = []planCase{
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 
-	// Defaults and checks (D78).
+	// Defaults and checks (D81).
 	{name: "add-default", after: func(s *ir.Schema) {
 		zero := "0"
 		fieldNamed(s, "Order", "total").Default = &zero
@@ -404,7 +404,7 @@ var planCases = []planCase{
 		zero := "0"
 		fieldNamed(s, "Order", "total").Default = &zero
 	}},
-	// A deployment built before D78 held the enum as text with no check.
+	// A deployment built before D81 held the enum as text with no check.
 	{name: "add-enum-check",
 		before: func(s *ir.Schema) { addOrderStatus(s, stringRef) },
 		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
@@ -424,7 +424,7 @@ var planCases = []planCase{
 	{name: "drop-checked-column", before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) },
 		after: func(s *ir.Schema) { dropField(s, "Order", "note") }},
 
-	// Richer indexes (D78).
+	// Richer indexes (D81).
 	{name: "add-expression-index", after: func(s *ir.Schema) {
 		typeNamed(s, "Customer").Indexes = []ir.IndexDef{{Keys: []string{"email"}, Name: "email_lower", Expression: "lower(email)"}}
 	}},
@@ -440,7 +440,7 @@ var planCases = []planCase{
 		typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"title"}, Name: "title_trgm", Method: ir.IndexMethodGIN, Ops: "gin_trgm_ops"}}
 	}},
 
-	// Raw SQL (D78).
+	// Raw SQL (D81).
 	{name: "add-raw-sql", after: addOrderRawSQL},
 	{name: "change-raw-sql", before: addOrderRawSQL, after: func(s *ir.Schema) {
 		addOrderRawSQL(s)
@@ -557,7 +557,7 @@ func addLineProduct(s *ir.Schema, onDelete string) {
 }
 
 // addShippingAddress adds the @jsonField class Address and Order.shipTo,
-// typed ref: Address, or what the field was stored as before D78.
+// typed ref: Address, or what the field was stored as before D81.
 func addShippingAddress(s *ir.Schema, ref ir.TypeRef) {
 	s.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleDBTable, JsonField: true, Fields: []*ir.FieldDef{
 		{Name: "line1", TypeRef: stringRef, Required: true},

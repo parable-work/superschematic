@@ -21,7 +21,7 @@ import (
 //     previous model contract drops or replaces;
 //   - the version graphs of both models (expandedGraphs);
 //   - the new model's raw SQL, then the previous model's pieces contract
-//     undoes, in the order they ran (D78).
+//     undoes, in the order they ran (D81).
 //
 // Diff sets it on a plan with contract steps only.
 func (d *differ) expandedModel() (*Model, error) {

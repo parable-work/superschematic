@@ -10,7 +10,7 @@ import (
 )
 
 // ddlSchema is a soft-deletable table with indexes of every option, and
-// raw SQL at both places (D78).
+// raw SQL at both places (D81).
 func ddlSchema() *ir.Schema {
 	s := ir.NewSchema("ddl", ir.SchemaKindDB)
 	text := ir.TypeRef{Name: "string"}
@@ -40,7 +40,7 @@ func ddlSchema() *ir.Schema {
 // TestIndexOptionsAndRawSQL: an @index's method, operator class and
 // predicate reach create.sql, the operator class enables its extension, a
 // unique index's predicate is ANDed with the soft-delete one, and the raw
-// SQL runs at its place, its down first in drop.sql (D78).
+// SQL runs at its place, its down first in drop.sql (D81).
 func TestIndexOptionsAndRawSQL(t *testing.T) {
 	out, err := Generate(ddlSchema(), Options{SchemaName: "ddl"})
 	if err != nil {

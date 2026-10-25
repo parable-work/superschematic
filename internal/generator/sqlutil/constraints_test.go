@@ -12,7 +12,7 @@ func intPtr(n int) *int           { return &n }
 
 // TestColumnDefault: a required field's Default<T, V> is its column's
 // DEFAULT when V has a literal form in the column's type; every other field
-// keeps its default in the decoders (D78).
+// keeps its default in the decoders (D81).
 func TestColumnDefault(t *testing.T) {
 	field := func(def string, required bool, mods ...func(*ir.FieldDef)) *ir.FieldDef {
 		f := &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "x"}, Required: required, Default: strPtr(def)}

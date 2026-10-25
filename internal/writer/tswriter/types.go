@@ -649,7 +649,7 @@ func isZeroField(fd *ir.FieldDef) bool {
 }
 
 // rawSQLArgs renders @rawSql's options object, its SQL as template literals
-// when they span lines (D78).
+// when they span lines (D81).
 func rawSQLArgs(raw ir.RawSQLDef) string {
 	sql := func(s string) string {
 		if strings.Contains(s, "\n") && !strings.ContainsAny(s, "`\\") && !strings.Contains(s, "${") {

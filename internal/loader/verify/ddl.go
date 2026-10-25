@@ -9,7 +9,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The DDL a DB schema declares beyond its tables (D78): the options of an
+// The DDL a DB schema declares beyond its tables (D81): the options of an
 // @index, and the raw SQL of @rawSql.
 
 // checkIndexOptions refuses an @index option the DDL cannot honor: a

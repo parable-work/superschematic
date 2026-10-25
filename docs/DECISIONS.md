@@ -10578,7 +10578,7 @@ Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
 
-## D78. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
+## D81. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
 
 The DDL a DB service's build writes left out much of what its schema
 declares, so a row written outside the generated code was held to none of

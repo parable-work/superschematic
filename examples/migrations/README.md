@@ -31,7 +31,7 @@ v2 changes v1 in eight ways:
 | a materialized view of each project's open tasks, raw SQL on Postgres alone (`@rawSql`) | its statements, last in `expand` (`raw-sql`) | nothing: the piece names Postgres alone |
 
 A required column a version adds takes its `Default<T, V>` as its database
-default, when `V` is text, a number, a boolean or an enum member (D78), and
+default, when `V` is text, a number, a boolean or an enum member (D81), and
 the compiler gives some others one: an empty list for a list, the current
 time for a timestamp, a new UUID for a generated key. So the previous
 version's servers keep inserting rows without `status`. A required column

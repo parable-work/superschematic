@@ -204,7 +204,7 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 // checkUserCreatable refuses a User table that a row cannot be written to
 // from its key, login and name alone, the fields the routes that create
 // users write (D50, v1): every other field must be optional, take a
-// default its column carries (D78), be generated, or be a timestamp sqlgen
+// default its column carries (D81), be generated, or be a timestamp sqlgen
 // defaults to now.
 func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string, r *Result) {
 	written := map[string]bool{user.User.Login: true, user.User.NameField(): true}

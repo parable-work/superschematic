@@ -56,7 +56,7 @@ func (sqliteDialect) canAlter(c *change) bool {
 		// that adds the column does.
 		return c.phase == Expand && len(c.foreignKey.Columns) == 1
 	case opAddCheck:
-		// So is a check over a column the plan adds (D78).
+		// So is a check over a column the plan adds (D81).
 		return c.newColumn
 	}
 	return false
@@ -203,7 +203,7 @@ func sqliteIndexBlocking(step *Step, table, what string) {
 // with the check t has over it. A generated column is VIRTUAL: SQLite
 // computes it when a row is read, and ADD COLUMN cannot add a STORED one.
 // A check is the column's own, unnamed, as SQLite keeps no constraint
-// names, so DROP COLUMN drops it with the column (D78).
+// names, so DROP COLUMN drops it with the column (D81).
 func sqliteColumnSQL(t *Table, col *Column) string {
 	if col.Generated != "" {
 		return qs(col.Name) + " " + col.Type + " GENERATED ALWAYS AS (" + col.Generated + ") VIRTUAL"
@@ -258,7 +258,7 @@ func sqliteAddColumnSQL(c *change) string {
 
 // sqliteIndexSQL creates an index. SQLite has one access method, so the
 // model's BTREE is not written. An expression index covers its expression
-// (D78).
+// (D81).
 func sqliteIndexSQL(table string, idx *Index) string {
 	s := "CREATE "
 	if idx.Unique {

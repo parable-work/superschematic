@@ -25,7 +25,7 @@ const (
 	Contract Phase = "contract"
 )
 
-// HazardClass is one of the seven hazard classes of D27, or raw-sql (D78).
+// HazardClass is one of the seven hazard classes of D27, or raw-sql (D81).
 type HazardClass string
 
 const (
@@ -51,12 +51,12 @@ const (
 	// keeps.
 	HazardHistory HazardClass = "history"
 	// HazardRawSQL: the step runs raw SQL the schema declares, or would undo
-	// it, which the planner cannot judge (D78).
+	// it, which the planner cannot judge (D81).
 	HazardRawSQL HazardClass = "raw-sql"
 )
 
 // HazardClasses lists every class in the order D27 gives them, then
-// raw-sql (D78).
+// raw-sql (D81).
 var HazardClasses = []HazardClass{
 	HazardDestructive, HazardBlocking, HazardCompat, HazardDataDependent,
 	HazardCopyTable, HazardAPIBreaking, HazardHistory, HazardRawSQL,

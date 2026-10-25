@@ -63,7 +63,7 @@ func ElementType(typeName string, scalarTypes map[string]string) string {
 // Maps, @jsonField values and arrays of arrays (T[][]) are JSONB. A
 // @jsonField value is a field marked JsonField<T> or a field whose type is a
 // @jsonField class, alone or in a list: the Go ORM marshals either as one
-// JSON document (D78). A T[][] is never a native multi-dimensional array:
+// JSON document (D81). A T[][] is never a native multi-dimensional array:
 // Postgres requires those to be rectangular, and a list of lists is often
 // ragged. A list is a native array of its element's type. A nil schema
 // knows no @jsonField class.

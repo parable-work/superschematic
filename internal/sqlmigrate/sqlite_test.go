@@ -167,7 +167,7 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "from-empty", op: "createTable", phase: Expand},
 		{plan: "from-empty", op: "createIndex", phase: Expand},
 
-		// SQLite cannot change a default or a check in place (D78).
+		// SQLite cannot change a default or a check in place (D81).
 		{plan: "add-default", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}, reason: "change the default of total"},
 		{plan: "add-enum-check", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable}, reason: "add a check on status"},
 		{plan: "add-column-with-check", op: "addColumn", phase: Expand},

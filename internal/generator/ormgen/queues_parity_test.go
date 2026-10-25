@@ -1192,7 +1192,7 @@ func TestQueueParity(t *testing.T) {
 
 // testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL
 // writes a row whose ship_to, a JSON column, holds no address: on
-// Postgres, whose JSONB column refuses text that is not JSON (D78), a JSON
+// Postgres, whose JSONB column refuses text that is not JSON (D81), a JSON
 // string; on SQLite, text that is not JSON. The side's claim of both
 // returns the good message alone; the bad row, claimed and unread, is
 // failed with Unreadable and why, ready again after one attempt, and its

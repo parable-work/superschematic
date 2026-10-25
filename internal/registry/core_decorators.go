@@ -92,7 +92,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			return nil
 		},
 	})
-	// Raw SQL the DB service runs after its own objects (D78).
+	// Raw SQL the DB service runs after its own objects (D81).
 	specs = append(specs, DecoratorSpec{
 		Name: "rawSql", Packages: []string{pkgDB}, Target: TargetType,
 		Kinds: []string{string(ir.SchemaKindDB)},

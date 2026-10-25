@@ -9,7 +9,7 @@ import (
 )
 
 // TestVerifyDDLTS: the @index options and the @rawSql pieces the DDL cannot
-// honor fail the load, each naming the fix (D78).
+// honor fail the load, each naming the fix (D81).
 func TestVerifyDDLTS(t *testing.T) {
 	_, err := LoadService(filepath.Join("tsreader", "testdata", "services", "broken-ddl-db"))
 	if err == nil {

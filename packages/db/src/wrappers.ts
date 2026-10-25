@@ -1,6 +1,6 @@
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
-// column: the loader accepts it only on Nullable<Relation<T, ...>> (D78).
+// column: the loader accepts it only on Nullable<Relation<T, ...>> (D81).
 export type OnDeleteAction = "CASCADE" | "RESTRICT" | "NO ACTION" | "SET NULL";
 
 // Options carried by a relation's second type argument. onDelete controls the

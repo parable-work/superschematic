@@ -8,7 +8,7 @@ import (
 
 // TestDDLRoundTrips: fixture-ddl-db's @index options, its @rawSql pieces,
 // multi-line SQL among them, and its SET NULL relations are written to
-// TypeScript, JSON and YAML and read back to the same IR (D78).
+// TypeScript, JSON and YAML and read back to the same IR (D81).
 func TestDDLRoundTrips(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-ddl-db")
 	if err != nil {

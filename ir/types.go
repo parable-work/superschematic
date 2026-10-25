@@ -115,7 +115,7 @@ type TypeDef struct {
 	Indexes []IndexDef `json:"indexes,omitempty" yaml:"indexes,omitempty"`
 
 	// RawSQL lists the raw SQL the DB service declares on this type
-	// (@rawSql, D78). A piece belongs to the service, not the table: the
+	// (@rawSql, D81). A piece belongs to the service, not the table: the
 	// type is only where it is written.
 	RawSQL []RawSQLDef `json:"rawSql,omitempty" yaml:"rawSql,omitempty"`
 
@@ -642,7 +642,7 @@ type IndexDef struct {
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
-	// Method is the index's access method (D78): btree, gin, gist, brin,
+	// Method is the index's access method (D81): btree, gin, gist, brin,
 	// hnsw or ivfflat. Empty picks one from the key columns' types: GIST for
 	// ltree and geometric types, GIN for JSONB, arrays and tsvector, else
 	// BTREE.
@@ -685,14 +685,14 @@ const (
 var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, IndexMethodBRIN, IndexMethodHNSW, IndexMethodIVFFlat}
 
 // HasTableOptions reports whether the index sets an option only a table's
-// index has (D78): a method, an operator class, a predicate, an expression
+// index has (D81): a method, an operator class, a predicate, an expression
 // or the concurrency of its build. The engine indexes an engine type's
 // listed fields and reads none of them.
 func (idx IndexDef) HasTableOptions() bool {
 	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil
 }
 
-// RawSQLDef is a piece of raw SQL a DB service declares (@rawSql, D78):
+// RawSQLDef is a piece of raw SQL a DB service declares (@rawSql, D81):
 // statements its create.sql runs after the objects the schema declares,
 // which a migration plan records by id and checksum and runs again when
 // they change.

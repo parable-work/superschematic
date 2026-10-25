@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// The CHECK constraints and the raw SQL a schema declares (D78).
+// The CHECK constraints and the raw SQL a schema declares (D81).
 
 // diffChecks matches the checks of a table both models have by their
 // column, renamed, since a column has at most one. A check that loosens
@@ -171,7 +171,7 @@ func missing(a, b []string) []string {
 	return out
 }
 
-// diffRawSQL matches the pieces of raw SQL by id (D78). A new piece, and
+// diffRawSQL matches the pieces of raw SQL by id (D81). A new piece, and
 // one whose checksum changes, runs in expand, at its place among the
 // objects the plan creates; one the new model no longer declares runs its
 // down in contract, before anything is dropped, the last to run first.
