@@ -122,6 +122,20 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 				b.WriteString("\n")
 			}
 		}
+		if len(beh.Signals) > 0 {
+			b.WriteString("\nSignals (delivered to event streams opened with `signals=1`, never stored):\n\n")
+			for _, signal := range beh.Signals {
+				sender := "callers who may " + signal.Access
+				if signal.Access == registry.SignalAccessOperation {
+					sender = "its operations alone"
+				}
+				fmt.Fprintf(&b, "- `%s` (sent by %s)", signal.Name, sender)
+				if signal.Description != "" {
+					b.WriteString(": " + cell(signal.Description))
+				}
+				b.WriteString("\n")
+			}
+		}
 		if len(beh.Vetoes) > 0 {
 			codes := make([]string, len(beh.Vetoes))
 			for i, v := range beh.Vetoes {

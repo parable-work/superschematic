@@ -93,6 +93,9 @@ export type { BesideChange, DefineChange, EngineEvent, EventCause, EventKind, Ev
 // Event log retention (runtime/engine/README.md, "Retention").
 export { DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS, MAX_RETENTION_BATCH_SIZE } from './types/events.js';
 export type { RetentionOptions } from './types/events.js';
+// Signals (D77; runtime/engine/README.md, "The event stream").
+export { DEFAULT_SIGNALS_PER_SECOND, MAX_SIGNAL_DATA_BYTES } from './types/signals.js';
+export type { EngineSignal, SendSignalInput, SignalOptions } from './types/signals.js';
 
 // The value store (runtime/engine/README.md, "The value store").
 export {
@@ -135,9 +138,11 @@ export type {
   BehaviorDeclaration,
   BehaviorFieldDeclaration,
   BehaviorOperationDeclaration,
+  BehaviorSignalDeclaration,
   BehaviorVetoDeclaration,
   JSONSchema,
   OperationScope,
+  SignalAccess,
 } from './types/declarations.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").

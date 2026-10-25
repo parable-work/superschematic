@@ -7,7 +7,7 @@
 //! and SQL to read, its references and values) under [`InstanceCx`] (a
 //! write: columns and SQL that write, references and values that change,
 //! `call()`) under [`OperationCx`] (an operation: `update()`,
-//! `validate_update()`, `unchanged()`). Each derefs to the one below it.
+//! `validate_update()`, `unchanged()`, `signal()`). Each derefs to the one below it.
 //! [`ReferenceCx`], [`ValidationCx`], [`SchemaCx`], [`ReactionCx`],
 //! [`ScheduleCx`] and [`PublishCx`] are the other hooks' contexts.
 //!
@@ -174,6 +174,9 @@ pub(crate) trait Core {
         Err(unreachable_here("validateUpdate()"))
     }
     fn unchanged(&self) {}
+    fn signal(&self, _name: &str, _data: &Value) -> Result<()> {
+        Err(unreachable_here("signal()"))
+    }
     fn writing(&self) -> bool {
         false
     }
@@ -827,6 +830,17 @@ impl<C> OperationCx<'_, C> {
     /// instance keeps its seq; a call that wrote and says so is a defect.
     pub fn unchanged(&self) {
         self.cx.view.scope.core.unchanged();
+    }
+
+    /// Sends one of this behavior's signals on the instance (D77), of any
+    /// access its declaration gives it: the data is checked as a caller's
+    /// is, at most 4096 bytes of JSON its `paramsSchema` accepts, and a
+    /// refusal is a `BehaviorError`. It is delivered to the event streams
+    /// open on the instance once the call commits, in the order sent, and
+    /// dropped when the call, or the `call()` that sent it, rolls back. Its
+    /// `from` is the call's principal; no rate limit applies.
+    pub fn signal(&self, name: &str, data: &Value) -> Result<()> {
+        self.cx.view.scope.core.signal(name, data)
     }
 }
 

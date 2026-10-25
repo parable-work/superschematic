@@ -99,6 +99,10 @@ type BehaviorDeclaration struct {
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`
+	// Signals are the messages about an instance an engine delivers to
+	// the event streams open on it and keeps nowhere (D77): a client's
+	// typing indicator, a draft being written.
+	Signals []BehaviorSignal `json:"signals,omitempty"`
 	// PreconditionSchema is the JSON Schema of the entry a caller sends
 	// for the behavior in the preconditions of an update, a delete or an
 	// operation: an object schema that sets "additionalProperties": false,
@@ -178,6 +182,32 @@ type BehaviorOperation struct {
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
 }
 
+// The accesses a signal declares: who may send it.
+const (
+	// SignalAccessRead lets a caller who may read the schema send it.
+	SignalAccessRead = "read"
+	// SignalAccessWrite lets a caller who may write the schema send it.
+	SignalAccessWrite = "write"
+	// SignalAccessOperation lets only the behavior's own operations send
+	// it, through their context.
+	SignalAccessOperation = "operation"
+)
+
+// BehaviorSignal is a signal a behavior declares (D77). An engine checks a
+// sender's data against ParamsSchema, at most 4096 bytes of JSON, asks a
+// caller's of the access policy with the operation "signal:<name>", and
+// delivers it to the event streams opened with signals, stored nowhere.
+type BehaviorSignal struct {
+	// Name is camelCase, unique among the behavior's signals.
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// ParamsSchema is the JSON Schema of the signal's data.
+	ParamsSchema json.RawMessage `json:"paramsSchema"`
+	// Access is who may send it: SignalAccessRead, SignalAccessWrite or
+	// SignalAccessOperation.
+	Access string `json:"access"`
+}
+
 // Behavior is a registered behavior: its declaration, the extension that
 // registered it and its compiled config schema.
 type Behavior struct {
@@ -237,7 +267,9 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // an object schema or sets "additionalProperties" to neither false nor a
 // schema; an operation name that is not camelCase, repeats, or is one an
 // engine gives every schema (create, get, list, update, delete); a scope
-// other than "instance" or "schema"; a field name that is not an
+// other than "instance" or "schema"; a signal whose name is not camelCase
+// or repeats, whose paramsSchema is absent or does not compile, or whose
+// access is not "read", "write" or "operation"; a field name that is not an
 // identifier or repeats; a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // veto code that is not lowercase snake case of at most 64 characters, or
@@ -294,6 +326,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		return err
 	}
 	if err := checkBehaviorOperations(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorSignals(decl); err != nil {
 		return err
 	}
 	if err := checkBehaviorPrecondition(decl); err != nil {
@@ -442,6 +477,34 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 		}
 		if !closed {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
+		}
+	}
+	return nil
+}
+
+// checkBehaviorSignals holds each signal to its rule (D77): a camelCase
+// name declared once, a paramsSchema that compiles, and an access of read,
+// write or operation.
+func checkBehaviorSignals(decl BehaviorDeclaration) error {
+	seen := map[string]bool{}
+	for _, signal := range decl.Signals {
+		if !behaviorOperationName.MatchString(signal.Name) {
+			return fmt.Errorf("registry: behavior %s signal name %q is not camelCase", decl.Name, signal.Name)
+		}
+		if seen[signal.Name] {
+			return fmt.Errorf("registry: behavior %s declares signal %q twice", decl.Name, signal.Name)
+		}
+		seen[signal.Name] = true
+		if len(signal.ParamsSchema) == 0 {
+			return fmt.Errorf("registry: behavior %s signal %s has no paramsSchema", decl.Name, signal.Name)
+		}
+		if _, err := compileSchema(signal.ParamsSchema, "superschematic://behaviors/"+decl.Name+"/signals/"+signal.Name+"/paramsSchema.json"); err != nil {
+			return fmt.Errorf("registry: behavior %s signal %s paramsSchema: %w", decl.Name, signal.Name, err)
+		}
+		switch signal.Access {
+		case SignalAccessRead, SignalAccessWrite, SignalAccessOperation:
+		default:
+			return fmt.Errorf("registry: behavior %s signal %s access %q is not %q, %q or %q", decl.Name, signal.Name, signal.Access, SignalAccessRead, SignalAccessWrite, SignalAccessOperation)
 		}
 	}
 	return nil

@@ -26,7 +26,7 @@ use superschematic_engine_storage::behavior::{
 use superschematic_engine_storage::{migrate_in, Db, Dialect, Tx};
 use superschematic_schema_ir::ajv::{AjvError, AjvSchema};
 
-use super::declaration::{BehaviorDeclaration, OperationDeclaration, OperationScope};
+use super::declaration::{BehaviorDeclaration, OperationDeclaration, OperationScope, SignalAccess};
 use super::erased::{Erased, HookSet};
 use crate::errors::{Error, Result, SchemaIssue};
 use crate::json;
@@ -65,6 +65,13 @@ pub(crate) struct OperationSpec {
     pub result: AjvSchema,
 }
 
+/// One declared signal with its compiled schema (D77).
+pub(crate) struct SignalSpec {
+    pub name: String,
+    pub access: SignalAccess,
+    pub params: AjvSchema,
+}
+
 /// A field a behavior lets a list filter on, checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredFilter {
@@ -90,6 +97,8 @@ pub(crate) struct RegisteredBehavior {
     /// The compiled preconditionSchema; `None` when it takes none.
     pub precondition: Option<AjvSchema>,
     pub operations: Vec<OperationSpec>,
+    /// Its declared signals (D77), in declaration order.
+    pub signals: Vec<SignalSpec>,
     /// Its declared fields, in declaration order.
     pub fields: Vec<String>,
     /// Every column its migrations add, by its own name.
@@ -106,6 +115,11 @@ impl RegisteredBehavior {
         self.operations
             .iter()
             .find(|operation| operation.name == name)
+    }
+
+    /// The signal of a name.
+    pub fn signal(&self, name: &str) -> Option<&SignalSpec> {
+        self.signals.iter().find(|signal| signal.name == name)
     }
 }
 
@@ -307,6 +321,20 @@ fn compile(
             });
         }
     }
+    let mut signals = Vec::new();
+    for signal in &declaration.signals {
+        if let Some(params) = schema(
+            &signal.params_schema,
+            &format!("signal {} paramsSchema", signal.name),
+            &mut problems,
+        ) {
+            signals.push(SignalSpec {
+                name: signal.name.clone(),
+                access: signal.access,
+                params,
+            });
+        }
+    }
     let scoped = |scope: OperationScope| -> Vec<String> {
         declaration
             .operations
@@ -361,6 +389,7 @@ fn compile(
         create_params,
         precondition,
         operations,
+        signals,
         fields,
         columns,
         filters,

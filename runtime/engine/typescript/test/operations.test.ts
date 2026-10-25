@@ -457,3 +457,60 @@ describe("the core's behaviors over HTTP", () => {
     assert.equal((await problem(call(app, 'POST', `${DOCUMENT}/operations/post`, { token: 'reader', body: { body: 'Me too.' } }), 403)).code, 'forbidden');
   });
 });
+
+describe('the signal route', () => {
+  // test.Chatter (the test addon's) declares typing (read), nudge (write)
+  // and draft (operation) signals (D77).
+  function serveChat(engineOptions: Partial<TestEngineOptions> = {}): { engine: Engine; app: Hono } {
+    const engine = openTestEngine({ policy, metaSchema: openMetaSchema(), behaviors: ['test.Chatter'], ...engineOptions });
+    publishItem(engine, [{ name: 'test.Chatter' }]);
+    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+    return { engine, app: servedApp(engineApp, engine, { authenticate }) };
+  }
+
+  const route = (name: string, id = 'i1') => `/namespaces/default/schemas/Item/instances/${id}/signals/test.Chatter/${name}`;
+
+  test('sends a signal with the body as its data and answers 204 with no body, appending no event', async () => {
+    const { engine, app } = serveChat();
+    const head = engine.events.head();
+    for (const [name, token, body] of [
+      ['typing', 'reader', { thread: 1 }],
+      ['typing', 'bob', undefined],
+      ['nudge', 'bob', [1, 'two']],
+    ] as const) {
+      const response = await call(app, 'POST', route(name), { token, body });
+      assert.equal(response.status, 204, `${name} as ${token}`);
+      assert.equal(await response.text(), '');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+    assert.equal(engine.events.head(), head);
+  });
+
+  test('answers each refusal with its status, and a caller past its rate 429', async () => {
+    // A fixed clock, so no token comes back between the sends.
+    const { app } = serveChat({ signals: { perSecond: 2 }, clock: () => 1_790_000_000_000 });
+    const refusals: Array<[string, () => Promise<Response>, number, string]> = [
+      ['a write signal to a reader', () => call(app, 'POST', route('nudge'), { token: 'reader', body: {} }), 403, 'forbidden'],
+      ["an operation's signal", () => call(app, 'POST', route('draft'), { body: { thread: 1 } }), 403, 'forbidden'],
+      ['an undeclared signal', () => call(app, 'POST', route('whisper'), { body: {} }), 404, 'not_found'],
+      ['no such instance', () => call(app, 'POST', route('typing', 'nope'), { body: {} }), 404, 'not_found'],
+      ['data its schema refuses', () => call(app, 'POST', route('typing'), { body: [1] }), 400, 'invalid_argument'],
+      ['a body that is not JSON', () => call(app, 'POST', route('typing'), { body: '{' }), 400, 'bad_request'],
+      ['data past 4096 bytes', () => call(app, 'POST', route('nudge'), { body: JSON.stringify('x'.repeat(4095)) }), 400, 'invalid_argument'],
+      ['a body of another media type', () => call(app, 'POST', route('typing'), { body: '{}', type: 'text/plain' }), 415, 'unsupported_media_type'],
+    ];
+    for (const [what, request, status, code] of refusals) {
+      assert.equal((await problem(request(), status)).code, code, what);
+    }
+    for (let sent = 0; sent < 2; sent++) {
+      assert.equal((await call(app, 'POST', route('typing'), { token: 'bob', body: {} })).status, 204);
+    }
+    const limited = call(app, 'POST', route('typing'), { token: 'bob', body: {} });
+    const settled = await limited;
+    assert.equal(settled.headers.get('retry-after'), '1');
+    const body = (await settled.json()) as Record<string, unknown>;
+    assert.deepEqual([settled.status, body.code, body.title], [429, 'rate_limited', 'Too Many Requests']);
+    // Another caller's budget is its own.
+    assert.equal((await call(app, 'POST', route('typing'), { token: 'carol', body: {} })).status, 204);
+  });
+});
