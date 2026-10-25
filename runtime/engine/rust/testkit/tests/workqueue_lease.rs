@@ -1361,14 +1361,31 @@ fn a_write_that_presents_a_token_other_than_the_current_one_is_refused() {
             Some("token_stale".to_owned())
         );
         // A post is beside the instance: Lease's guard, which reads the
-        // token, is not asked.
+        // token, is not asked, so a token presented for it would fence
+        // nothing and is refused; a post that presents none is the
+        // holder's.
+        let refused = refusal(w.invoke(
+            &worker(),
+            "post",
+            json!({"body": "Done, I think."}),
+            "j1",
+            Some(1),
+        ));
+        assert_eq!(refused.code(), EngineErrorCode::InvalidArgument);
+        assert_eq!(
+            issues_of(&refused),
+            [issue(
+                "/Lease",
+                "operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease"
+            )]
+        );
         assert_eq!(
             w.invoke(
                 &worker(),
                 "post",
                 json!({"body": "Done, I think."}),
                 "j1",
-                Some(1)
+                None
             )
             .unwrap()["id"],
             1
