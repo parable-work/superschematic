@@ -10113,10 +10113,21 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: proposed; nothing is built. The order to build it in:
+Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
-   and the three bindings.
+   and the three bindings. Built. The engine's side is
+   `runtime/engine/rust/engine/src/behaviors/execution.rs` (`operate`'s
+   beside branch), `instances/mod.rs` (`run_beside`) and engine migration
+   13; `testkit/tests/behavior_beside.rs` holds it on both databases. A
+   beside operation refuses a precondition entry for any behavior but its
+   own (`invalid_argument`), since no other behavior's guard reads it.
+   Comments is `runtime/engine/rust/behaviors/src/comments/`, held to
+   `comments-contract.md` beside it by `testkit/tests/core_comments.rs`
+   and the TypeScript twin; the corpora are recorded again, and the
+   generators narrow its fields, its config's `blocks` and its records in
+   the typed clients. Deleting an instance keeps its conversation's
+   high-water marks, so a re-created instance never reuses a message id.
 2. Primitive 2, signals, on SQLite and Postgres and in the stream, with
    `typing`, `viewing` and streamed replies.
 3. Primitive 3, namespace operations, with the inbox, read state and
@@ -10125,8 +10136,7 @@ Status: proposed; nothing is built. The order to build it in:
    Provenance and Comments.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
 
-Left: listing a conversation's pinned messages; vectors over messages; moving Search's every-schema search onto
-namespace operations; the generators' narrowing of the new operations in
-the typed client (D49); a notifier and an agent dispatcher as stack
-workers; and a conversation UI. The rule is reversible until the first
+Left: listing a conversation's pinned messages; vectors over messages;
+moving Search's every-schema search onto namespace operations; a notifier
+and an agent dispatcher as stack workers; and a conversation UI. The rule is reversible until the first
 release.
