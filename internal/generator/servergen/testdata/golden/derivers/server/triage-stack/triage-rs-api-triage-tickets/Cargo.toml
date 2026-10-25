@@ -25,4 +25,4 @@ schemas-triage-rs-api-api = { path = "../../../api/triage-rs-api" }
 schemas-triage-rs-api-implementation = { path = "../../../impl/triage-rs-api" }
 superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false, features = ["background", "postgres"] }
 superschematic-engine-behaviors = { path = "../../../../../runtime/engine/rust/behaviors", default-features = false, features = ["postgres"] }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "otel", "postgres"] }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "memorystore-redis", "otel", "postgres"] }

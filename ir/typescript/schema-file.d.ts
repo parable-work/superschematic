@@ -11,7 +11,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack' | (string & {});
+export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -147,6 +147,7 @@ export interface Document {
   imports?: Import[];
   jobs?: Job[];
   kind?: SchemaKind;
+  memoryStoreDeclarations?: MemoryStoreDeclaration[];
   name?: string;
   operationSets?: OperationSet[];
   references?: ServiceRef[];
@@ -340,6 +341,25 @@ export interface MCPIcon {
   family?: string;
   name: string;
   style?: string;
+}
+
+export interface MemoryStoreDeclaration {
+  doc?: string;
+  file?: string;
+  kind: 'channel' | 'counter' | 'claim';
+  maxTtlSeconds?: number;
+  name: string;
+  parts?: MemoryStorePart[];
+  payload?: TypeRef;
+  reserved?: boolean;
+  symbol: string;
+  ttlSeconds?: number;
+}
+
+export interface MemoryStorePart {
+  format?: 'string' | 'integer' | 'boolean' | 'enum';
+  name: string;
+  type: TypeRef;
 }
 
 export interface MiddlewareConfig {
@@ -587,7 +607,7 @@ export interface ServiceCallers {
 }
 
 export interface ServiceRef {
-  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'Site' | 'Stack';
+  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack';
   name: string;
 }
 

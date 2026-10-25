@@ -3601,10 +3601,18 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],
           "type": "string"
+        },
+        "memoryStoreDeclarations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStoreDeclaration"
+          },
+          "type": "array"
         },
         "name": {
           "default": "",
@@ -4409,6 +4417,87 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "MemoryStoreDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "doc": {
+          "default": "",
+          "type": "string"
+        },
+        "file": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "channel",
+            "counter",
+            "claim"
+          ],
+          "type": "string"
+        },
+        "maxTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStorePart"
+          },
+          "type": "array"
+        },
+        "payload": {
+          "$ref": "#/$defs/TypeRef"
+        },
+        "reserved": {
+          "default": false,
+          "type": "boolean"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "ttlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "symbol",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "MemoryStorePart": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "default": "",
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "enum"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/TypeRef"
+        }
+      },
+      "required": [
+        "name",
+        "type"
       ],
       "type": "object"
     },
@@ -5377,6 +5466,7 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],

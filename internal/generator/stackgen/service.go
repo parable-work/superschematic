@@ -42,6 +42,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		Dependencies: schema.Dependencies,
 		Calls:        schema.Calls,
 		Buckets:      schema.Buckets,
+		MemoryStores: schema.MemoryStores,
 	}
 	if schema.AuthDB != "" {
 		svc.AuthDB = &ir.ServiceRef{Name: schema.AuthDB, Kind: ir.SchemaKindDB}

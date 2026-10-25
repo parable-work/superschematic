@@ -83,7 +83,8 @@ var (
 	// true, names the engine's runner of the DB of; enabled turns it on or
 	// off (D58). deriver names a deriver of the API of; enabled, instances
 	// and concurrency change how it runs (D74). app names an app of the API
-	// of; enabled turns it on or off (D78).
+	// of; enabled turns it on or off (D78). enabled beside a MemoryStore
+	// handle turns the store off, which no platform then places (D75).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -545,7 +546,10 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if settings.TimeZone != "" {
 			keys = append(keys, "timeZone")
 		}
-		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner {
+		// A worker, a runner, a deriver, an app and a memory store take
+		// enabled too (D53, D58, D74, D78, D75).
+		memoryStore := settings.Of.Service != nil && settings.Of.Service.Kind == ir.SchemaKindMemoryStore
+		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner && !memoryStore {
 			keys = append(keys, "enabled")
 		}
 		if settings.OnDeploy != nil {

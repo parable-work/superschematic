@@ -16,6 +16,7 @@
     "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
     "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace": "2.12.0",
+    "@redis/client": "5.12.1",
     "@schemas/triage-db-types": "workspace:*",
     "@schemas/triage-ts-api-api": "workspace:*",
     "@schemas/triage-ts-api-implementation": "workspace:*",

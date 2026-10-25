@@ -86,7 +86,7 @@ func TestInitWritesASchemasRoot(t *testing.T) {
 
 	assert.Contains(t, out, "Wrote the schemas root ./schemas:\n  superschematic.toml\n  tsconfig.base.json\n  .gitignore\n  services/\n")
 	assert.Contains(t, out, "Go modules under example.com/notes, npm packages under @notes")
-	assert.True(t, strings.HasSuffix(out, "\nNext, add a service:\n  superschematic new service <name> --kind DB|API|General|Bucket|Site\n"), out)
+	assert.True(t, strings.HasSuffix(out, "\nNext, add a service:\n  superschematic new service <name> --kind DB|API|General|Bucket|Site|MemoryStore\n"), out)
 }
 
 // TestInitDefaults: without a terminal, the module root and the scope come
@@ -241,6 +241,12 @@ func TestNewServiceEachKind(t *testing.T) {
 			config: []string{"kind: SchemaKind.Site\n"},
 			index:  "export * from \"./service.generated\";\n",
 		},
+		{
+			name: "notes-cache", kind: "memorystore",
+			files:  []string{"src/notes-cache.schema.ts"},
+			config: []string{"kind: SchemaKind.MemoryStore,", "[TargetLanguage.Go]: { enabled: true }", "[TargetLanguage.TypeScript]: { enabled: true }"},
+			index:  "export { ItemChanged, ItemNoticeSent } from \"./notes-cache.schema\";\nexport * from \"./service.generated\";\n",
+		},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			out, err := runCoreCmd(t, "new", "service", tc.name, "--kind", tc.kind)
@@ -271,13 +277,18 @@ func TestNewServiceEachKind(t *testing.T) {
 	// Another service imports a handle new service's first build wrote.
 	apiConfig := filepath.Join(services, "notes-api", "schema.config.ts")
 	config := readFile(t, apiConfig)
-	config = strings.Replace(config, "import {", "import { NotesDb } from \"@notes/notes-db\";\nimport { NotesMedia } from \"@notes/notes-media\";\nimport {", 1)
-	config = strings.Replace(config, "  kind: SchemaKind.API,\n", "  kind: SchemaKind.API,\n  authDb: NotesDb,\n  buckets: [NotesMedia],\n", 1)
+	config = strings.Replace(config, "import {", "import { NotesCache } from \"@notes/notes-cache\";\nimport { NotesDb } from \"@notes/notes-db\";\nimport { NotesMedia } from \"@notes/notes-media\";\nimport {", 1)
+	config = strings.Replace(config, "  kind: SchemaKind.API,\n", "  kind: SchemaKind.API,\n  authDb: NotesDb,\n  buckets: [NotesMedia],\n  memoryStores: [NotesCache],\n", 1)
 	require.NoError(t, os.WriteFile(apiConfig, []byte(config), 0o644))
 
-	out, err := runCoreCmd(t, "build-all", services, "--out", t.TempDir())
+	dist := t.TempDir()
+	out, err := runCoreCmd(t, "build-all", services, "--out", dist)
 	require.NoError(t, err, out)
-	assert.Contains(t, out, "All 5 schema services built successfully")
+	assert.Contains(t, out, "All 6 schema services built successfully")
+	// The memory store's starter lists Go and TypeScript types, so its
+	// first build writes its definitions in both.
+	assert.FileExists(t, filepath.Join(dist, "types", "go", "notes-cache", "definitions.go"))
+	assert.FileExists(t, filepath.Join(dist, "types", "typescript", "notes-cache", "index.ts"))
 }
 
 // TestNewServiceFindsTheRoot: in the schemas root, new service writes
@@ -305,7 +316,7 @@ func TestNewServiceRefuses(t *testing.T) {
 	_, err := runCoreCmd(t, "new", "service", "Notes DB", "--kind", "DB")
 	require.EqualError(t, err, `service name "Notes DB": want lower-case letters and digits in words joined by hyphens, such as shop-db`)
 	_, err = runCoreCmd(t, "new", "service", "notes-stack", "--kind", "Stack")
-	require.EqualError(t, err, "--kind Stack: want one of DB, API, General, Bucket, Site; superschematic stack init writes a Stack service over the tree's APIs")
+	require.EqualError(t, err, "--kind Stack: want one of DB, API, General, Bucket, Site, MemoryStore; superschematic stack init writes a Stack service over the tree's APIs")
 	_, err = runCoreCmd(t, "new", "service", "notes-db")
 	require.EqualError(t, err, `required flag(s) "kind" not set`)
 

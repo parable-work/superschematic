@@ -32,7 +32,7 @@ use crate::interfaces::{Implementations, TriageImplementation};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use superschematic_engine::derive::{DerivationAnswer, DerivationItem};
-use superschematic_http_runtime::postgres::Pool;
+use superschematic_http_runtime::{memorystore::MemoryStore, postgres::Pool};
 
 /// What the implementation of triage-rs-api is built from. The server's
 /// entrypoint fills it from the connections and clients the server shares
@@ -45,6 +45,12 @@ pub struct Deps {
     pub config: EnvConfig,
     /// A pool of connections to triage-db, the API's database.
     pub db: Pool,
+    /// triage-cache, a memory store the API lists (D75): channels and keys
+    /// every replica shares and may lose, which its generated definitions
+    /// name. While it is disabled or unreachable, every call is unavailable
+    /// at once, and the implementation takes its fallback path; a subscribe
+    /// while it is unreachable is held until it reconnects.
+    pub triage_cache: Arc<dyn MemoryStore>,
     /// The engine of triage-db, the API's engine database (D58), which the
     /// entrypoint opens in the background, so it starts while the database
     /// is not up yet: `engine.wait().await` returns it once it opens, and

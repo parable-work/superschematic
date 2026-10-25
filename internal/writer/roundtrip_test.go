@@ -542,6 +542,12 @@ func TestTSWriterEmitsMultiPinVersionedDecorator(t *testing.T) {
 // service directory and loads it back through the full reader pipeline.
 func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 	t.Helper()
+	return writeAndReloadWith(t, schema, target)
+}
+
+// writeAndReloadWith is writeAndReload with loader options for the reload.
+func writeAndReloadWith(t *testing.T, schema *ir.Schema, target Format, opts ...loader.Option) *ir.Schema {
+	t.Helper()
 	dir := t.TempDir()
 	if _, err := WriteService(schema, target, dir); err != nil {
 		t.Fatalf("WriteService(%s): %v", target, err)
@@ -553,7 +559,7 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 	if target == FormatTS {
 		writeTSProject(t, dir, cfgSchema)
 	}
-	reloaded, err := loader.LoadService(dir)
+	reloaded, err := loader.LoadService(dir, opts...)
 	if err != nil {
 		dumpService(t, dir)
 		t.Fatalf("reloading %s output: %v", target, err)
@@ -565,10 +571,11 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 // their schema kinds, for the generated service configs (the verification
 // pass requires every imported service to be a declared dependency).
 var fixtureDependencyKinds = map[string]ir.SchemaKind{
-	"fixture-db":         ir.SchemaKindDB,
-	"fixture-queue-db":   ir.SchemaKindDB,
-	"fixture-derived-db": ir.SchemaKindDB,
-	"web-db":             ir.SchemaKindDB,
+	"fixture-db":           ir.SchemaKindDB,
+	"fixture-queue-db":     ir.SchemaKindDB,
+	"fixture-derived-db":   ir.SchemaKindDB,
+	"web-db":               ir.SchemaKindDB,
+	"fixture-cache-common": ir.SchemaKindGeneral,
 }
 
 // writeServiceConfig writes the minimal data-form service config, declaring
@@ -616,7 +623,7 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 	}
 
 	paths := make(map[string][]string)
-	for _, name := range []string{"api", "db", "schema", "schema-config"} {
+	for _, name := range []string{"api", "db", "memory-store", "schema", "schema-config"} {
 		paths["@superschematic/"+name] = []string{filepath.ToSlash(filepath.Join(packagesDir, name, "src", "index.ts"))}
 	}
 	// superscalar is a dependency, not a packages/ member: it resolves to the

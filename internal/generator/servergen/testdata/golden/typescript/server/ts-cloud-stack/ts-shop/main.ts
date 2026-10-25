@@ -20,12 +20,13 @@
 //   - ts-shop: @schemas/ts-shop-implementation, at typescript/ts-shop
 
 import { Hono } from 'hono';
-import { createLogger, serviceCredentialFor, type Database, type Service } from '@superschematic/http-runtime';
+import { createLogger, serviceCredentialFor, type Database, type Service, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection, memoryStoreRateLimitStore } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { startTelemetry, type Telemetry } from '@superschematic/http-runtime/telemetry';
 import { connectPostgres, ping } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
+import { openRedisMemoryStore } from '@superschematic/http-runtime/redis';
 import * as tsShopApi from '@schemas/ts-shop-api';
 import * as tsShopImpl from '@schemas/ts-shop-implementation';
 import * as tsPricingSdk from '@schemas/ts-pricing-sdk';
@@ -90,6 +91,13 @@ async function main(): Promise<void> {
   // the emulator its connection names (D54).
   const tsMediaBucket = openBucket(tsShopConfig.TS_MEDIA_BUCKET);
 
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+  const tsCacheStore = await openMemoryStore('ts-cache', 'TS_CACHE_MEMORY_STORE', tsShopConfig.TS_CACHE_MEMORY_STORE);
+  const memoryStores: readonly MemoryStore[] = [tsCacheStore];
+
   const app = new Hono();
   // With trace export on, each request but the probes is a server span.
   app.use(telemetry.middleware());
@@ -119,6 +127,7 @@ async function main(): Promise<void> {
     db: tsDbPool,
     tsPricing: tsPricingClient,
     tsMedia: tsMediaBucket,
+    tsCache: tsCacheStore,
     logger: logger.child({ api: 'ts-shop' }),
   };
   const tsShopImplementations = await construct('ts-shop', 'implementation', () => tsShopImpl.create(tsShopDeps));
@@ -126,7 +135,7 @@ async function main(): Promise<void> {
   // The handlers of its @manualRouteRegistration operations, which its
   // router mounts behind each one's auth gate (D51).
   const tsShopManualRoutes = await construct('ts-shop', 'manual routes', () => tsShopImpl.createManualRoutes(tsShopDeps));
-  app.route('/', tsShopApi.buildRouter(tsShopImplementations, { authenticate: tsShopAuthenticate, manualRoutes: tsShopManualRoutes }));
+  app.route('/', tsShopApi.buildRouter(tsShopImplementations, { authenticate: tsShopAuthenticate, manualRoutes: tsShopManualRoutes, rateLimit: { store: memoryStoreRateLimitStore(tsCacheStore, 'ts-shop') } }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 
@@ -152,6 +161,8 @@ async function main(): Promise<void> {
     logger.info('shutting down', { signal });
     // The spans still buffered are flushed once the requests are done.
     drain(server, pools)
+      // The memory stores close once the requests are done.
+      .finally(() => Promise.allSettled(memoryStores.map(store => store.close())))
       .finally(() => telemetry.shutdown())
       .then(
         () => {
@@ -194,6 +205,27 @@ async function construct<T>(api: string, what: string, build: () => T | Promise<
     return await build();
   } catch (error) {
     throw new Error(`${what} of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the server runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
   }
 }
 
