@@ -587,3 +587,31 @@ func assertNoPart(t *testing.T, reader *sdkmetric.ManualReader, part string) {
 		}
 	}
 }
+
+type compactID [2]byte
+
+func (c compactID) MarshalJSON() ([]byte, error) { return json.Marshal(fmt.Sprintf("c%x", c[:])) }
+
+type email string
+
+type region string
+
+type count int64
+
+// TestParts: each format's wire string; a string-format scalar is its
+// JSON string, as the API's wire carries it.
+func TestParts(t *testing.T) {
+	for got, want := range map[string]string{
+		StringPart("a label"):                "a label",
+		StringPart(email("ada@example.com")): "ada@example.com",
+		StringPart(compactID{1, 2}):          "c0102",
+		IntegerPart(count(-42)):              "-42",
+		IntegerPart(int32(7)):                "7",
+		BooleanPart(true):                    "true",
+		EnumPart(region("north")):            "north",
+	} {
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}

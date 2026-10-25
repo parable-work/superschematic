@@ -1,6 +1,7 @@
 package memorystore
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -38,15 +39,24 @@ func Prefix(store, member string) (string, error) {
 }
 
 // StringPart is the wire string of a part whose format is string: a
-// string, or a scalar whose wire form is one. A value with a String
-// method, such as a UUID, is its canonical string; any other is its
-// string value.
+// string, or a scalar whose wire form is one, written as its JSON string
+// holds it. superscalar's Identity.UUID, say, is its compact base62 form,
+// as the API's JSON carries it, so a name built from a value read off the
+// wire in any language is the same name.
 func StringPart[T any](v T) string {
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.String {
+		if _, ok := any(v).(json.Marshaler); !ok {
+			return rv.String()
+		}
+	}
+	if data, err := json.Marshal(v); err == nil {
+		var s string
+		if json.Unmarshal(data, &s) == nil {
+			return s
+		}
+	}
 	if s, ok := any(v).(fmt.Stringer); ok {
 		return s.String()
-	}
-	if rv := reflect.ValueOf(v); rv.Kind() == reflect.String {
-		return rv.String()
 	}
 	return fmt.Sprint(v)
 }
