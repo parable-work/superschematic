@@ -1,7 +1,8 @@
 # The memory store rs-stock lists and counts its rate limits in (D75),
 # which its Rust server, job and worker each open once, on Redis through
-# the HTTP runtime's memorystore-redis feature. The local environment turns
-# it off, so each opens it disabled.
+# the HTTP runtime's memorystore-redis feature. rs-stack's Local runs it on
+# the local target's Valkey; its Offline turns it off, so each opens it
+# disabled there.
 name: rs-cache
 kind: MemoryStore
 outputs: {}
