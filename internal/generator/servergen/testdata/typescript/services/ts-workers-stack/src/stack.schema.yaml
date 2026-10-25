@@ -22,6 +22,8 @@ types:
       settings:
         - of: { service: { name: ts-pricing, kind: API } }
           platform: fake.bundle
+        # A bundle reaches no memory store, so Edge turns ts-pricing's off;
+        # Local runs it (D75).
         - of: { service: { name: ts-cache, kind: MemoryStore } }
           enabled: false
   Local:
@@ -29,6 +31,3 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
-      settings:
-        - of: { service: { name: ts-cache, kind: MemoryStore } }
-          enabled: false

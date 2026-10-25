@@ -39,8 +39,9 @@ const (
 	// server rs-stock, on rs-db, its authDb, with the bucket rs-media
 	// (D54), calls rs-pricing's Rust server, which admits only calling
 	// services; rs-orders' Go server calls rs-stock, whose reservations
-	// only it may make; and the site rs-web calls rs-stock. Its one
-	// environment is local. Beside it, rs-merged-stack's declared Rust
+	// only it may make; and the site rs-web calls rs-stock. Both its
+	// environments are local: Local runs the memory store rs-cache, and
+	// Offline turns it off (D75). Beside it, rs-merged-stack's declared Rust
 	// server Warehouse serves rs-catalog and rs-pricing, and rs-catalog's
 	// calls of rs-pricing stay within it (docs/stack-model.md, section
 	// 9.9).
