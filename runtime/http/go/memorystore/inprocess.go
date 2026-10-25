@@ -89,8 +89,9 @@ func (s *InProcess) Name() string { return s.name }
 func (s *InProcess) Available() bool { return !s.closed.Load() && s.available.Load() }
 
 // SetAvailable takes the store down or brings it back. A store that is
-// down refuses every call with ErrUnavailable and delivers no message;
-// its keys stay, as a server's do through a network failure.
+// down refuses every call but Subscribe with ErrUnavailable and delivers
+// no message; its keys and its subscriptions stay, as a server's keys and
+// a Redis store's subscriptions do through a network failure.
 func (s *InProcess) SetAvailable(up bool) { s.available.Store(up) }
 
 // SetClock sets the clock a key's expiry is measured against.
@@ -132,7 +133,8 @@ func (s *InProcess) Publish(ctx context.Context, ref Ref, data []byte) error {
 	return nil
 }
 
-// Subscribe adds h as a handler of the channel ref names.
+// Subscribe adds h as a handler of the channel ref names, also while the
+// store is down.
 func (s *InProcess) Subscribe(_ context.Context, ref Ref, h func(context.Context, []byte)) (Subscription, error) {
 	if err := CheckRef(ref); err != nil {
 		return nil, err
@@ -140,7 +142,9 @@ func (s *InProcess) Subscribe(_ context.Context, ref Ref, h func(context.Context
 	if h == nil {
 		return nil, fmt.Errorf("memorystore: subscribe to %s with no handler", ref.Declaration)
 	}
-	if !s.Available() {
+	// A store that is down holds the subscription, as one on Redis does
+	// until it reconnects; only a closed one refuses it.
+	if s.closed.Load() {
 		return nil, ErrUnavailable
 	}
 	full := FullName(s.name, ref)

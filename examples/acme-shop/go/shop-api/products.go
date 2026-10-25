@@ -80,12 +80,14 @@ func (p *Products) ListProducts(ctx context.Context, inStock bool) ([]types.Prod
 // two still wakes it, and reads the product again on each wake-up, which
 // the replica that records the image publishes after its commit (D75). It
 // rereads it every 10 seconds too, since a wake-up can be lost, and every
-// second while the store is unavailable, as it would without one.
+// second while the store is unavailable, as it would without one: a store
+// that is down holds the subscription until it reconnects, so the waiter
+// asks the store each time it waits.
 func (p *Products) WaitForProductImage(ctx context.Context, id types.IdentityUUID, waitSeconds int64) (*types.ProductView, error) {
 	wait := min(max(time.Duration(waitSeconds)*time.Second, 0), maxImageWait)
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
-	poll := unheardImagePoll
+	subscribed := false
 	woke := make(chan struct{}, 1)
 	if changed, err := shopcache.ProductChanged.For(id); err == nil {
 		sub, err := changed.Subscribe(ctx, p.Cache, func(context.Context, memorystore.Signal) {
@@ -96,13 +98,17 @@ func (p *Products) WaitForProductImage(ctx context.Context, id types.IdentityUUI
 		})
 		if err == nil {
 			defer sub.Close()
-			poll = slowImagePoll
+			subscribed = true
 		}
 	}
 	for {
 		view, err := p.GetProduct(ctx, id)
 		if err != nil || view.ImageObject != "" {
 			return view, err
+		}
+		poll := unheardImagePoll
+		if subscribed && p.Cache.Available() {
+			poll = slowImagePoll
 		}
 		select {
 		case <-woke:

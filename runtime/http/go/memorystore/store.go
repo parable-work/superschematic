@@ -10,7 +10,9 @@
 //
 // The code works without the store. A Disabled store, and a store that is
 // closed or not connected, refuses every call at once with ErrUnavailable,
-// and the caller takes the path it had before the store existed. A process
+// and the caller takes the path it had before the store existed. The one
+// exception is Subscribe on a store that is not connected: it holds the
+// subscription, which the store makes when it reconnects. A process
 // opens each store once, with the implementation its provider needs: the
 // generated entrypoint's memorystores.go opens one on Redis, which only an
 // entrypoint whose APIs list a store links, so this package requires no
@@ -64,9 +66,10 @@ type Subscription interface {
 // Store is one memory store, opened once per process and shared by every
 // API that lists it. It is safe for concurrent use.
 //
-// Every call but Name, Available and Close returns ErrUnavailable, or an
-// error that wraps it, while the store is unavailable. A reply the server
-// refuses, such as an out-of-memory error, does not wrap it.
+// Every call but Name, Available, Subscribe and Close returns
+// ErrUnavailable, or an error that wraps it, while the store is
+// unavailable. A reply the server refuses, such as an out-of-memory
+// error, does not wrap it.
 type Store interface {
 	// Name is the store's prefix: the MemoryStore service's name, or
 	// `<store>@<member>` in a member of a parameterized environment.
@@ -86,6 +89,11 @@ type Store interface {
 	// the subscription is closed. The process holds one subscription per
 	// channel, which wakes every local handler. h runs on the store's
 	// delivery goroutine: it returns quickly and hands slow work on.
+	// While the store is not connected, Subscribe holds the subscription,
+	// at once, and the store subscribes when it reconnects, so a waiter
+	// that subscribed while it was down hears the wake-ups once it is up;
+	// it polls meanwhile, as it does for a message the store loses. A
+	// disabled or closed store refuses it with ErrUnavailable.
 	Subscribe(ctx context.Context, ref Ref, h func(context.Context, []byte)) (Subscription, error)
 
 	// Increment adds one to the counter ref names and returns the new

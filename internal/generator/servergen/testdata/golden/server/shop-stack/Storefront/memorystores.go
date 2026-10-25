@@ -10,8 +10,11 @@ package main
 // The code works without the store. Opening never fails for a server that
 // is down: the store pings once within a second, then pings every two
 // seconds while it is up and with a jittered backoff from 100ms to five
-// seconds while it is down, and every call returns
-// memorystore.ErrUnavailable at once while it is unavailable. An operation
+// seconds while it is down, and every call but Subscribe returns
+// memorystore.ErrUnavailable at once while it is unavailable. Subscribe
+// while the server is down holds the subscription, which go-redis
+// subscribes when the connection returns, as the TypeScript and Rust
+// runtimes do; it refuses only once the store is closed. An operation
 // has 500ms, and one retry covers a stale pooled connection. A field that
 // is unset, or whose connection the store cannot use (a CA that holds no
 // certificate, say), is a disabled store, which the server runs with
@@ -302,9 +305,6 @@ func (s *redisStore) Subscribe(ctx context.Context, ref memorystore.Ref, h func(
 	if h == nil {
 		return nil, fmt.Errorf("memory store %s: subscribe to %s with no handler", s.prefix, ref.Declaration)
 	}
-	if !s.Available() {
-		return nil, memorystore.ErrUnavailable
-	}
 	full := memorystore.FullName(s.prefix, ref)
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
@@ -319,6 +319,12 @@ func (s *redisStore) Subscribe(ctx context.Context, ref memorystore.Ref, h func(
 			go s.receive(s.pubsub)
 		}
 		opCtx, cancel := context.WithTimeout(ctx, s.tm.Op)
+		if !s.Available() {
+			// The store is down: go-redis records the channel, and the
+			// receive loop's reconnect subscribes it, so the call does not
+			// wait for a dial that fails.
+			cancel()
+		}
 		err := s.pubsub.Subscribe(opCtx, full)
 		cancel()
 		if err != nil {

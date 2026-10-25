@@ -223,7 +223,9 @@ func TestChannels(t *testing.T) {
 }
 
 // TestUnavailable: a store that is down, Disabled or closed refuses every
-// call at once with ErrUnavailable; Disabled records no metric.
+// call at once with ErrUnavailable, but a store that is down holds a
+// subscription, which hears the store's messages once it is up again;
+// Disabled records no metric.
 func TestUnavailable(t *testing.T) {
 	ctx := context.Background()
 	reader := sdkmetric.NewManualReader()
@@ -234,6 +236,8 @@ func TestUnavailable(t *testing.T) {
 	_ = closed.Close()
 	key := NewKey("views", mustName(t, "views", "p"), time.Minute)
 	ch := NewChannel[Signal]("stock-changed", mustName(t, "stock-changed", "p"))
+	heard := make(chan struct{}, 1)
+	var held Subscription
 	for name, s := range map[string]Store{"down": down, "disabled": Disabled("shop-cache"), "closed": closed} {
 		t.Run(name, func(t *testing.T) {
 			if s.Available() {
@@ -245,7 +249,15 @@ func TestUnavailable(t *testing.T) {
 			_, calls["Claim"] = key.Claim(ctx, s)
 			calls["Delete"] = key.Delete(ctx, s)
 			calls["Publish"] = ch.Publish(ctx, s, Signal{})
-			_, calls["Subscribe"] = ch.Subscribe(ctx, s, func(context.Context, Signal) {})
+			sub, err := ch.Subscribe(ctx, s, func(context.Context, Signal) { heard <- struct{}{} })
+			if name == "down" {
+				if err != nil {
+					t.Errorf("Subscribe while down = %v, want a held subscription", err)
+				}
+				held = sub
+			} else {
+				calls["Subscribe"] = err
+			}
 			for call, err := range calls {
 				if !errors.Is(err, ErrUnavailable) {
 					t.Errorf("%s = %v, want ErrUnavailable", call, err)
@@ -265,6 +277,18 @@ func TestUnavailable(t *testing.T) {
 	down.SetAvailable(true)
 	if _, err := key.Increment(ctx, down); err != nil {
 		t.Errorf("after SetAvailable(true): %v", err)
+	}
+	if held == nil {
+		return
+	}
+	defer held.Close()
+	if err := ch.Publish(ctx, down, Signal{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-heard:
+	case <-time.After(5 * time.Second):
+		t.Error("the subscription made while the store was down heard nothing once it was up")
 	}
 }
 

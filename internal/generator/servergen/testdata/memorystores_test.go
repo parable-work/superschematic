@@ -165,8 +165,8 @@ func TestMemoryStoreOnRedis(t *testing.T) {
 }
 
 // TestMemoryStoreReconnects: a store whose server goes away goes
-// unavailable and refuses at once, then comes back with its subscription,
-// which go-redis subscribes again.
+// unavailable and refuses at once, but holds a subscription made then;
+// it comes back with both subscriptions, which go-redis subscribes again.
 func TestMemoryStoreReconnects(t *testing.T) {
 	raw := testServerURL(t)
 	ctx := context.Background()
@@ -182,7 +182,7 @@ func TestMemoryStoreReconnects(t *testing.T) {
 	}
 	defer s.Close()
 	heard := make(chan string, 8)
-	sub, err := s.Subscribe(ctx, ref(t, "stock-changed", "p1"), func(_ context.Context, b []byte) { heard <- string(b) })
+	sub, err := s.Subscribe(ctx, ref(t, "stock-changed", "p1"), func(_ context.Context, b []byte) { heard <- "p1" + string(b) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,32 +194,47 @@ func TestMemoryStoreReconnects(t *testing.T) {
 	if _, err := s.Increment(ctx, ref(t, "views", "p1"), time.Minute); !errors.Is(err, memorystore.ErrUnavailable) || time.Since(start) > 50*time.Millisecond {
 		t.Errorf("Increment while down = %v in %s, want ErrUnavailable at once", err, time.Since(start))
 	}
+	// A subscription made while the server is down is held, at once, and
+	// subscribed when it returns, as the TypeScript and Rust runtimes hold
+	// one.
+	start = time.Now()
+	held, err := s.Subscribe(ctx, ref(t, "stock-changed", "p2"), func(_ context.Context, b []byte) { heard <- "p2" + string(b) })
+	if err != nil || time.Since(start) > 50*time.Millisecond {
+		t.Fatalf("Subscribe while down = %v in %s, want a held subscription at once", err, time.Since(start))
+	}
+	defer held.Close()
 	p.start()
 	waitFor(t, func() bool { return s.Available() })
-	// The subscriber reconnects on its own schedule: publish until the
-	// subscription hears one.
+	// The subscriber reconnects on its own schedule: publish until both
+	// subscriptions, the one made while the server was up and the one
+	// made while it was down, hear one.
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if err := s.Publish(ctx, ref(t, "stock-changed", "p1"), []byte(`{"n":1}`)); err != nil && !errors.Is(err, memorystore.ErrUnavailable) {
-			t.Fatal(err)
+	got := map[string]bool{}
+	for !got["p1"] || !got["p2"] {
+		for _, part := range []string{"p1", "p2"} {
+			if err := s.Publish(ctx, ref(t, "stock-changed", part), []byte(`{"n":1}`)); err != nil && !errors.Is(err, memorystore.ErrUnavailable) {
+				t.Fatal(err)
+			}
 		}
 		select {
-		case <-heard:
-			if logs.FilterMessage("the memory store is unavailable; it reconnects in the background").Len() == 0 || logs.FilterMessage("the memory store is connected").Len() == 0 {
-				t.Errorf("the state's changes were not logged: %v", logs.All())
-			}
-			checkNoSecret(t, logs, proxied)
-			return
+		case m := <-heard:
+			got[strings.TrimSuffix(m, `{"n":1}`)] = true
 		case <-time.After(100 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the subscription heard nothing in 10s after the server came back")
+			t.Fatalf("in 10s after the server came back the subscriptions heard %v", got)
 		}
 	}
+	if logs.FilterMessage("the memory store is unavailable; it reconnects in the background").Len() == 0 || logs.FilterMessage("the memory store is connected").Len() == 0 {
+		t.Errorf("the state's changes were not logged: %v", logs.All())
+	}
+	checkNoSecret(t, logs, proxied)
 }
 
 // TestMemoryStoreDownAtOpen: a store whose server is not there opens
-// within the ping's second, unavailable, and refuses every call at once.
+// within the ping's second, unavailable, and refuses every call at once
+// but Subscribe, which holds the subscription; once closed it refuses
+// that too.
 func TestMemoryStoreDownAtOpen(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -240,8 +255,17 @@ func TestMemoryStoreDownAtOpen(t *testing.T) {
 	if err := s.Publish(context.Background(), ref(t, "stock-changed", "p1"), []byte("{}")); !errors.Is(err, memorystore.ErrUnavailable) || time.Since(start) > 50*time.Millisecond {
 		t.Errorf("Publish = %v in %s", err, time.Since(start))
 	}
+	// Subscribe holds the subscription for when the server comes, at once.
+	start = time.Now()
+	sub, err := s.Subscribe(context.Background(), ref(t, "stock-changed", "p1"), func(context.Context, []byte) {})
+	if err != nil || time.Since(start) > 50*time.Millisecond {
+		t.Errorf("Subscribe = %v in %s, want a held subscription at once", err, time.Since(start))
+	} else {
+		_ = sub.Close()
+	}
+	_ = s.Close()
 	if _, err := s.Subscribe(context.Background(), ref(t, "stock-changed", "p1"), func(context.Context, []byte) {}); !errors.Is(err, memorystore.ErrUnavailable) {
-		t.Errorf("Subscribe = %v", err)
+		t.Errorf("Subscribe after Close = %v", err)
 	}
 }
 
