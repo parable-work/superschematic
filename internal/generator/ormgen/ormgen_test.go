@@ -77,6 +77,8 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
 		{"fixture-queue-db", []string{"repository_order.go", "queues.go", "queues_sqlite.go"}},
+		// The tables both ORMs are held to (D79).
+		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
@@ -428,7 +430,7 @@ func TestGenerateReferencedByAndAuditTimestampFilters(t *testing.T) {
 		"ReferencedByTenantUserTenant *ReferencedByFilter",
 		"probe := `SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id`",
 		"probe += ` AND tenant_user.deleted_at IS NULL`",
-		"conditions = append(conditions, `NOT EXISTS (`+probe+`)`)",
+		"conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))",
 		// createdAt/updatedAt are filterable; the rest of the audit set is not.
 		"CreatedAt *DateTimeFilter",
 		"UpdatedAt *DateTimeFilter",
@@ -1599,16 +1601,17 @@ func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository: %v", err)
 	}
-	// CreateOne binds the default as a value and CreateMany as a row's cell.
-	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs both.
-	for _, want := range []string{
-		`values = append(values, types.OrderStatus("pending"))`,
-		`values = append(values, types.OrderPriority("normal"))`,
-		`cell.value = types.OrderStatus("pending")`,
-		`cell.value = types.OrderPriority("normal")`,
+	// CreateOne and UpsertOne bind the default as a value, and CreateMany as
+	// a row's cell. TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go
+	// runs CreateOne and CreateMany.
+	for want, count := range map[string]int{
+		`values = append(values, types.OrderStatus("pending"))`:  2,
+		`values = append(values, types.OrderPriority("normal"))`: 2,
+		`cell.value = types.OrderStatus("pending")`:              1,
+		`cell.value = types.OrderPriority("normal")`:             1,
 	} {
-		if n := strings.Count(string(source), want); n != 1 {
-			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q, want 1", n, want)
+		if n := strings.Count(string(source), want); n != count {
+			t.Errorf("CreateOne, UpsertOne and CreateMany must each insert the default; found %d of %q, want %d", n, want, count)
 		}
 	}
 }

@@ -920,6 +920,175 @@ func (r *ShelfRepository) CreateOne(ctx context.Context, input *types.Shelf) (*t
 	return result, nil
 }
 
+// shelfUniqueKeys are the conflict targets of Shelf's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var shelfUniqueKeys = map[ShelfUniqueKey]struct{ conflict, keep string }{
+	ShelfUniqueById: {`(id)`, `id = EXCLUDED.id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is. A soft-deleted row that holds the key is
+// left as it is, and UpsertOne returns ErrNotFound.
+func (r *ShelfRepository) UpsertOne(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate) (*types.Shelf, error) {
+	key, ok := shelfUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Shelf has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &ShelfUpdate{}
+	}
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+	input.UpdatedBy = GetUserID(ctx)
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := shelfUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: label
+	fields = append(fields, `label`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Label)
+	// Required field: createdBy
+	fields = append(fields, `created_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.CreatedBy.ToUUID())
+	// Required field: updatedBy
+	fields = append(fields, `updated_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.UpdatedBy.ToUUID())
+	// Optional field: deletedAt - only add if set
+	{
+		if input.DeletedAt != nil {
+			fields = append(fields, `deleted_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.DeletedAt))
+		}
+	}
+	// Optional field: deletedBy - only add if set
+	{
+		if input.DeletedBy != nil {
+			fields = append(fields, `deleted_by`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.DeletedBy.ToUUID())
+		}
+	}
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Label != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`label = $%d`, paramNum))
+		values = append(values, *update.Label)
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+		values = append(values, time.Now())
+
+		// Set updated_by
+		if update.UpdatedBy != nil {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+			values = append(values, *update.UpdatedBy)
+		} else if HasUserID(ctx) {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+			values = append(values, GetUserID(ctx))
+		}
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO shelf (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE shelf.deleted_at IS NULL RETURNING "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Shelf{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&result.Label,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
+		&result.DeletedAt,
+
+		&result.DeletedBy,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Shelf records in a single statement
 func (r *ShelfRepository) CreateMany(ctx context.Context, inputs []*types.Shelf) ([]*types.Shelf, error) {
 	if len(inputs) == 0 {

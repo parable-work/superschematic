@@ -19,6 +19,7 @@ type OrderRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
+	UpsertOne(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
 	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -133,6 +134,10 @@ func (r *NoOpOrderRepository) CreateMany(_ context.Context, inputs []*types.Orde
 		return []*types.Order{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpOrderRepository) UpsertOne(_ context.Context, input *types.Order, _ OrderUniqueKey, _ *OrderUpdate) (*types.Order, error) {
+	return input, nil
 }
 
 func (r *NoOpOrderRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderUpdate) (*types.Order, error) {

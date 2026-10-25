@@ -1643,6 +1643,269 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 	return result, nil
 }
 
+// recipeCommitUniqueKeys are the conflict targets of RecipeCommit's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var recipeCommitUniqueKeys = map[RecipeCommitUniqueKey]struct{ conflict, keep string }{
+	RecipeCommitUniqueById:           {`(id)`, `id = EXCLUDED.id`},
+	RecipeCommitUniqueByRootSequence: {`(root_id, "sequence")`, `root_id = EXCLUDED.root_id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *RecipeCommitRepository) UpsertOne(ctx context.Context, input *types.RecipeCommit, on RecipeCommitUniqueKey, update *RecipeCommitUpdate) (*types.RecipeCommit, error) {
+	key, ok := recipeCommitUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipeCommit has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &RecipeCommitUpdate{}
+	}
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := recipeCommitUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Optional field: message - only add if set
+	{
+		if !reflect.ValueOf(input.Message).IsZero() {
+			fields = append(fields, `message`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.Message)
+		}
+	}
+	// Required field: schemaEpoch
+	fields = append(fields, `schema_epoch`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.SchemaEpoch)
+	// Required field: contentHash
+	fields = append(fields, `content_hash`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.ContentHash)
+	// Optional field: sequence - only add if set
+	{
+		if input.Sequence != nil {
+			fields = append(fields, `"sequence"`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.Sequence)
+		}
+	}
+	// Required field: createdBy
+	fields = append(fields, `created_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.CreatedBy.ToUUID())
+
+	// Handle relationship foreign key columns
+	// Relationship: root (FK: root_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := recipeCommitUUIDValue(input.Root.Id); ok && relID != zeroId {
+			fields = append(fields, "root_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: ref (FK: ref_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := recipeCommitUUIDValue(input.Ref.Id); ok && relID != zeroId {
+			fields = append(fields, "ref_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: parentCommit (FK: parent_commit_id)
+	{
+		var zeroId types.IdentityUUID
+		if input.ParentCommit != nil {
+			if relID, ok := recipeCommitUUIDValue(input.ParentCommit.Id); ok && relID != zeroId {
+				fields = append(fields, "parent_commit_id")
+				paramNum++
+				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+				values = append(values, relID.ToUUID())
+			}
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Message != nil && update.MessageSetNull {
+		return nil, fmt.Errorf("message cannot be updated with both value and null assignment")
+	}
+	if update.MessageSetNull {
+		setClauses = append(setClauses, `message = NULL`)
+	} else if update.Message != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`message = $%d`, paramNum))
+		values = append(values, *update.Message)
+	}
+	if update.SchemaEpoch != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`schema_epoch = $%d`, paramNum))
+		values = append(values, *update.SchemaEpoch)
+	}
+	if update.ContentHash != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`content_hash = $%d`, paramNum))
+		values = append(values, *update.ContentHash)
+	}
+	if update.Sequence != nil && update.SequenceSetNull {
+		return nil, fmt.Errorf("sequence cannot be updated with both value and null assignment")
+	}
+	if update.SequenceSetNull {
+		setClauses = append(setClauses, `"sequence" = NULL`)
+	} else if update.Sequence != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`"sequence" = $%d`, paramNum))
+		values = append(values, *update.Sequence)
+	}
+	// Handle relationship foreign key: root
+	if update.RootID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("root_id = $%d", paramNum))
+		values = append(values, update.RootID.ToUUID())
+	}
+	// Handle relationship foreign key: ref
+	if update.RefID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("ref_id = $%d", paramNum))
+		values = append(values, update.RefID.ToUUID())
+	}
+	// Handle relationship foreign key: parentCommit
+	if update.ParentCommitID != nil && update.ParentCommitIDSetNull {
+		return nil, fmt.Errorf("parent_commit_id cannot be updated with both value and null assignment")
+	}
+	if update.ParentCommitIDSetNull {
+		setClauses = append(setClauses, "parent_commit_id = NULL")
+	} else if update.ParentCommitID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("parent_commit_id = $%d", paramNum))
+		values = append(values, update.ParentCommitID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO recipe_commit (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.RecipeCommit{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempMessage sql.NullString
+	var tempSequence *types.GenericInt64
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRoot *types.IdentityUUID
+	var tempRelRef *types.IdentityUUID
+	var tempRelParentCommit *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelRoot,
+
+		&tempRelRef,
+
+		&tempRelParentCommit,
+
+		&tempMessage,
+
+		&result.SchemaEpoch,
+
+		&result.ContentHash,
+
+		&tempSequence,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if tempMessage.Valid {
+		result.Message = tempMessage.String
+	}
+	if tempSequence != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.Sequence = tempSequence
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRoot != nil {
+		result.Root.Id = recipeCommitUUIDPtr(*tempRelRoot)
+	}
+	if tempRelRef != nil {
+		result.Ref.Id = recipeCommitUUIDPtr(*tempRelRef)
+	}
+	if tempRelParentCommit != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.ParentCommit = &types.RecipeCommit{Id: recipeCommitUUIDPtr(*tempRelParentCommit)}
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple RecipeCommit records in a single statement
 func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types.RecipeCommit) ([]*types.RecipeCommit, error) {
 	if len(inputs) == 0 {

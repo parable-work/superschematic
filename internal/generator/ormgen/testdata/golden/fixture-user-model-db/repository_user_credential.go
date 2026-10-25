@@ -1033,6 +1033,178 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	return result, nil
 }
 
+// userCredentialUniqueKeys are the conflict targets of UserCredential's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var userCredentialUniqueKeys = map[UserCredentialUniqueKey]struct{ conflict, keep string }{
+	UserCredentialUniqueById:   {`(id)`, `id = EXCLUDED.id`},
+	UserCredentialUniqueByUser: {`(user_id)`, `user_id = EXCLUDED.user_id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *UserCredentialRepository) UpsertOne(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate) (*types.UserCredential, error) {
+	key, ok := userCredentialUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: UserCredential has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &UserCredentialUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := userCredentialUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: passwordHash
+	fields = append(fields, `password_hash`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.PasswordHash)
+	// Required field: passwordChangedAt
+	fields = append(fields, `password_changed_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, time.Time(input.PasswordChangedAt))
+	// Optional field: disabledAt - only add if set
+	{
+		if input.DisabledAt != nil {
+			fields = append(fields, `disabled_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.DisabledAt))
+		}
+	}
+
+	// Handle relationship foreign key columns
+	// Relationship: user (FK: user_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
+			fields = append(fields, "user_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.PasswordHash != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`password_hash = $%d`, paramNum))
+		values = append(values, *update.PasswordHash)
+	}
+	if update.PasswordChangedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`password_changed_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PasswordChangedAt))
+	}
+	if update.DisabledAt != nil && update.DisabledAtSetNull {
+		return nil, fmt.Errorf("disabled_at cannot be updated with both value and null assignment")
+	}
+	if update.DisabledAtSetNull {
+		setClauses = append(setClauses, `disabled_at = NULL`)
+	} else if update.DisabledAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.DisabledAt))
+	}
+	// Handle relationship foreign key: user
+	if update.UserID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("user_id = $%d", paramNum))
+		values = append(values, update.UserID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO user_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.UserCredential{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempDisabledAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelUser *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelUser,
+
+		&result.PasswordHash,
+
+		&result.PasswordChangedAt,
+
+		&tempDisabledAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if tempDisabledAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.DisabledAt = tempDisabledAt
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelUser != nil {
+		result.User.Id = userCredentialUUIDPtr(*tempRelUser)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple UserCredential records in a single statement
 func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error) {
 	if len(inputs) == 0 {

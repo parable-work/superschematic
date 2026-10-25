@@ -2122,6 +2122,380 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	return result, nil
 }
 
+// tastingUniqueKeys are the conflict targets of Tasting's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var tastingUniqueKeys = map[TastingUniqueKey]struct{ conflict, keep string }{
+	TastingUniqueById:           {`(id)`, `id = EXCLUDED.id`},
+	TastingUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *TastingRepository) UpsertOne(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate) (*types.Tasting, error) {
+	key, ok := tastingUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Tasting has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &TastingUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := tastingUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: taster
+	fields = append(fields, `taster`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Taster.ToUUID())
+	// Required field: salty
+	fields = append(fields, `salty`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Salty)
+	// Required field: score
+	fields = append(fields, `score`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Score)
+	// Required field: servings
+	fields = append(fields, `servings`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Servings)
+	// Required field: tastedOn
+	fields = append(fields, `tasted_on`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.TastedOn)
+	// Required field: tastedAt
+	fields = append(fields, `tasted_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, time.Time(input.TastedAt))
+	// Required field: servedAt
+	fields = append(fields, `served_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.ServedAt)
+	// Required field: rested
+	fields = append(fields, `rested`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.Rested))
+	// Required field: verdict
+	fields = append(fields, `verdict`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Verdict)
+	// Required field: remarks
+	fields = append(fields, `remarks`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueRemarks, err := marshalJSONFieldValue(input.Remarks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+	}
+	values = append(values, jsonValueRemarks)
+	// Required field: tags
+	fields = append(fields, `tags`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Tags)
+	// Required field: helpers
+	fields = append(fields, `helpers`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Helpers)
+	// Required field: bites
+	fields = append(fields, `bites`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueBites, err := marshalArrayOfArraysFieldValue(input.Bites)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+	}
+	values = append(values, jsonValueBites)
+	// Auto-generated field: entityKey - only add if set
+	{
+		if !reflect.ValueOf(input.EntityKey).IsZero() {
+			fields = append(fields, `entity_key`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.EntityKey.ToUUID())
+		}
+	}
+	// Required field: deletedOnRef
+	fields = append(fields, `deleted_on_ref`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.DeletedOnRef)
+
+	// Handle relationship foreign key columns
+	// Relationship: recipe (FK: recipe_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
+			fields = append(fields, "recipe_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: ref (FK: ref_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
+			fields = append(fields, "ref_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Taster != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`taster = $%d`, paramNum))
+		values = append(values, (*update.Taster).ToUUID())
+	}
+	if update.Salty != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`salty = $%d`, paramNum))
+		values = append(values, *update.Salty)
+	}
+	if update.Score != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`score = $%d`, paramNum))
+		values = append(values, *update.Score)
+	}
+	if update.Servings != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`servings = $%d`, paramNum))
+		values = append(values, *update.Servings)
+	}
+	if update.TastedOn != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tasted_on = $%d`, paramNum))
+		values = append(values, *update.TastedOn)
+	}
+	if update.TastedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tasted_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.TastedAt))
+	}
+	if update.ServedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`served_at = $%d`, paramNum))
+		values = append(values, *update.ServedAt)
+	}
+	if update.Rested != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`rested = $%d`, paramNum))
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.Rested))
+	}
+	if update.Verdict != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`verdict = $%d`, paramNum))
+		values = append(values, *update.Verdict)
+	}
+	if update.Remarks != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`remarks = $%d`, paramNum))
+		jsonValueRemarks, err := marshalJSONFieldValue(*update.Remarks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+		}
+		values = append(values, jsonValueRemarks)
+	}
+	if update.Tags != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tags = $%d`, paramNum))
+		values = append(values, *update.Tags)
+	}
+	if update.Helpers != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`helpers = $%d`, paramNum))
+		values = append(values, *update.Helpers)
+	}
+	if update.Bites != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`bites = $%d`, paramNum))
+		jsonValueBites, err := marshalArrayOfArraysFieldValue(*update.Bites)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+		}
+		values = append(values, jsonValueBites)
+	}
+	if update.EntityKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		values = append(values, (*update.EntityKey).ToUUID())
+	}
+	if update.DeletedOnRef != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`deleted_on_ref = $%d`, paramNum))
+		values = append(values, *update.DeletedOnRef)
+	}
+	// Handle relationship foreign key: recipe
+	if update.RecipeID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("recipe_id = $%d", paramNum))
+		values = append(values, update.RecipeID.ToUUID())
+	}
+	// Handle relationship foreign key: ref
+	if update.RefID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("ref_id = $%d", paramNum))
+		values = append(values, update.RefID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO tasting (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Tasting{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempTastedOn pgtype.Date
+	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
+	var tempBites []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRecipe *types.IdentityUUID
+	var tempRelRef *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelRecipe,
+
+		&result.Taster,
+
+		&result.Salty,
+
+		&result.Score,
+
+		&result.Servings,
+
+		&tempTastedOn,
+
+		&result.TastedAt,
+
+		&result.ServedAt,
+
+		(*time.Duration)(&result.Rested),
+
+		&result.Verdict,
+
+		&tempRemarks,
+
+		&tempTags,
+
+		&tempHelpers,
+
+		&tempBites,
+
+		&result.EntityKey,
+
+		&tempRelRef,
+
+		&result.DeletedOnRef,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if tempTastedOn.Valid {
+		result.TastedOn = types.TemporalDate(tempTastedOn.Time.Format("2006-01-02"))
+	}
+	if len(tempRemarks) > 0 {
+		if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
+		}
+	}
+	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+		return nil, fmt.Errorf("failed to decode field tags: %w", err)
+	}
+	if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+		return nil, fmt.Errorf("failed to decode field helpers: %w", err)
+	}
+	if len(tempBites) > 0 {
+		if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field bites: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRecipe != nil {
+		result.Recipe.Id = tastingUUIDPtr(*tempRelRecipe)
+	}
+	if tempRelRef != nil {
+		result.Ref.Id = tastingUUIDPtr(*tempRelRef)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Tasting records in a single statement
 func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tasting) ([]*types.Tasting, error) {
 	if len(inputs) == 0 {

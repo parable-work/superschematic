@@ -19,6 +19,7 @@ type BoardRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error)
 	CreateOne(ctx context.Context, input *types.Board) (*types.Board, error)
 	CreateMany(ctx context.Context, inputs []*types.Board) ([]*types.Board, error)
+	UpsertOne(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate) (*types.Board, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *BoardUpdate) (*types.Board, error)
 	UpdateMany(ctx context.Context, filter *BoardFilter, update *BoardUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -133,6 +134,10 @@ func (r *NoOpBoardRepository) CreateMany(_ context.Context, inputs []*types.Boar
 		return []*types.Board{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpBoardRepository) UpsertOne(_ context.Context, input *types.Board, _ BoardUniqueKey, _ *BoardUpdate) (*types.Board, error) {
+	return input, nil
 }
 
 func (r *NoOpBoardRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *BoardUpdate) (*types.Board, error) {

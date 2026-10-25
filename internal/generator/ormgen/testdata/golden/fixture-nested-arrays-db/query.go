@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -300,6 +319,15 @@ func ParseBoardSort(text string) (BoardSort, error) {
 	}
 	return BoardSort{}, fmt.Errorf("orm: Board sorts by id, not %q", text)
 }
+
+// BoardUniqueKey names a unique key of Board that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type BoardUniqueKey string
+
+const (
+	BoardUniqueById BoardUniqueKey = "id"
+)
 
 // BoardPageKey is the position of a Board row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's

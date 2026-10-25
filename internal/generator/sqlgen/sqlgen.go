@@ -313,7 +313,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				continue
 			}
 
-			parentTableName := codegen.ToSnakeCase(typeDef.Name)
+			parentTableName := sqlutil.TableName(typeDef)
 			fkColumnName := parentTableName + "_id"
 
 			columnExists := false
@@ -537,7 +537,7 @@ func convertTypeToTable(
 	scalarMapping map[string]string,
 	compositeDefaults map[string]*ir.CompositeDefaultDef,
 ) (Table, error) {
-	tableName := codegen.ToSnakeCase(typeDef.Name)
+	tableName := sqlutil.TableName(typeDef)
 	table := Table{
 		Name:         tableName,
 		QuotedName:   sqlutil.QuoteIdentifier(tableName),
@@ -588,7 +588,7 @@ func convertTypeToTable(
 		}
 
 		// Regular column.
-		columnName := codegen.ToSnakeCase(field.Name)
+		columnName := sqlutil.ColumnName(field)
 		irType := field.TypeRef.Name
 		column := Column{
 			Name:       columnName,
@@ -656,7 +656,7 @@ func convertTypeToTable(
 
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
-			refTableName := codegen.ToSnakeCase(field.Relation.Type)
+			refTableName := sqlutil.TableNameOf(schema, field.Relation.Type)
 			onDelete := "CASCADE"
 			if field.Relation.OnDelete != "" {
 				onDelete = field.Relation.OnDelete
@@ -893,8 +893,8 @@ func keyFieldType(typeDef *ir.TypeDef, scalarMapping map[string]string) string {
 // referencing another table type.
 func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[string]string) (Column, ForeignKey) {
 	typeName := field.TypeRef.Name
-	columnName := codegen.ToSnakeCase(field.Name) + "_id"
-	refTableName := codegen.ToSnakeCase(typeName)
+	columnName := sqlutil.ForeignKeyColumn(field)
+	refTableName := sqlutil.TableNameOf(schema, typeName)
 
 	column := Column{
 		Name:       columnName,
@@ -922,8 +922,8 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 
 // buildJoinTable generates a join table for a many-to-many relationship.
 func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName string, schema *ir.Schema, scalarMapping map[string]string) JoinTable {
-	parentTableName := codegen.ToSnakeCase(parentTypeName)
-	targetTableName := codegen.ToSnakeCase(targetTypeName)
+	parentTableName := sqlutil.TableNameOf(schema, parentTypeName)
+	targetTableName := sqlutil.TableNameOf(schema, targetTypeName)
 	joinTableName := parentTableName + "_" + targetTableName
 
 	return JoinTable{

@@ -751,6 +751,134 @@ func (r *RoleRepository) CreateOne(ctx context.Context, input *types.Role) (*typ
 	return result, nil
 }
 
+// roleUniqueKeys are the conflict targets of Role's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var roleUniqueKeys = map[RoleUniqueKey]struct{ conflict, keep string }{
+	RoleUniqueById:   {`(id)`, `id = EXCLUDED.id`},
+	RoleUniqueByName: {`("name")`, `"name" = EXCLUDED."name"`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *RoleRepository) UpsertOne(ctx context.Context, input *types.Role, on RoleUniqueKey, update *RoleUpdate) (*types.Role, error) {
+	key, ok := roleUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Role has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &RoleUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := roleUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: name
+	fields = append(fields, `"name"`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Name)
+	// Required field: permissions
+	fields = append(fields, `permissions`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Permissions)
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Name != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`"name" = $%d`, paramNum))
+		values = append(values, *update.Name)
+	}
+	if update.Permissions != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`permissions = $%d`, paramNum))
+		values = append(values, *update.Permissions)
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO role (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "name", "permissions"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Role{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempPermissions []*string
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&result.Name,
+
+		&tempPermissions,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if err := copyListElements("permissions", tempPermissions, &result.Permissions); err != nil {
+		return nil, fmt.Errorf("failed to decode field permissions: %w", err)
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Role records in a single statement
 func (r *RoleRepository) CreateMany(ctx context.Context, inputs []*types.Role) ([]*types.Role, error) {
 	if len(inputs) == 0 {

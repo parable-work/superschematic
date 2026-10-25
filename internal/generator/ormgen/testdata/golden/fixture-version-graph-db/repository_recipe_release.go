@@ -1528,6 +1528,185 @@ func (r *RecipeReleaseRepository) CreateOne(ctx context.Context, input *types.Re
 	return result, nil
 }
 
+// recipeReleaseUniqueKeys are the conflict targets of RecipeRelease's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var recipeReleaseUniqueKeys = map[RecipeReleaseUniqueKey]struct{ conflict, keep string }{
+	RecipeReleaseUniqueById:   {`(id)`, `id = EXCLUDED.id`},
+	RecipeReleaseUniqueByRoot: {`(root_id)`, `root_id = EXCLUDED.root_id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *RecipeReleaseRepository) UpsertOne(ctx context.Context, input *types.RecipeRelease, on RecipeReleaseUniqueKey, update *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
+	key, ok := recipeReleaseUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipeRelease has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &RecipeReleaseUpdate{}
+	}
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+	input.UpdatedBy = GetUserID(ctx)
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := recipeReleaseUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: createdBy
+	fields = append(fields, `created_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.CreatedBy.ToUUID())
+	// Required field: updatedBy
+	fields = append(fields, `updated_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.UpdatedBy.ToUUID())
+
+	// Handle relationship foreign key columns
+	// Relationship: root (FK: root_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := recipeReleaseUUIDValue(input.Root.Id); ok && relID != zeroId {
+			fields = append(fields, "root_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: commit (FK: commit_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := recipeReleaseUUIDValue(input.Commit.Id); ok && relID != zeroId {
+			fields = append(fields, "commit_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	// Handle relationship foreign key: root
+	if update.RootID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("root_id = $%d", paramNum))
+		values = append(values, update.RootID.ToUUID())
+	}
+	// Handle relationship foreign key: commit
+	if update.CommitID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("commit_id = $%d", paramNum))
+		values = append(values, update.CommitID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+		values = append(values, time.Now())
+
+		// Set updated_by
+		if update.UpdatedBy != nil {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+			values = append(values, *update.UpdatedBy)
+		} else if HasUserID(ctx) {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+			values = append(values, GetUserID(ctx))
+		}
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO recipe_release (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "root_id", "commit_id", "created_at", "created_by", "updated_at", "updated_by", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.RecipeRelease{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRoot *types.IdentityUUID
+	var tempRelCommit *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelRoot,
+
+		&tempRelCommit,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRoot != nil {
+		result.Root.Id = recipeReleaseUUIDPtr(*tempRelRoot)
+	}
+	if tempRelCommit != nil {
+		result.Commit.Id = recipeReleaseUUIDPtr(*tempRelCommit)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple RecipeRelease records in a single statement
 func (r *RecipeReleaseRepository) CreateMany(ctx context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error) {
 	if len(inputs) == 0 {

@@ -1676,6 +1676,230 @@ func (r *IngredientRepository) CreateOne(ctx context.Context, input *types.Ingre
 	return result, nil
 }
 
+// ingredientUniqueKeys are the conflict targets of Ingredient's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var ingredientUniqueKeys = map[IngredientUniqueKey]struct{ conflict, keep string }{
+	IngredientUniqueById:           {`(id)`, `id = EXCLUDED.id`},
+	IngredientUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *IngredientRepository) UpsertOne(ctx context.Context, input *types.Ingredient, on IngredientUniqueKey, update *IngredientUpdate) (*types.Ingredient, error) {
+	key, ok := ingredientUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Ingredient has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &IngredientUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := ingredientUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: stepKey
+	fields = append(fields, `step_key`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.StepKey.ToUUID())
+	// Required field: quantity
+	fields = append(fields, `quantity`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Quantity)
+	// Required field: substitutes
+	fields = append(fields, `substitutes`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueSubstitutes, err := marshalJSONFieldValue(input.Substitutes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field substitutes: %w", err)
+	}
+	values = append(values, jsonValueSubstitutes)
+	// Auto-generated field: entityKey - only add if set
+	{
+		if !reflect.ValueOf(input.EntityKey).IsZero() {
+			fields = append(fields, `entity_key`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.EntityKey.ToUUID())
+		}
+	}
+	// Required field: deletedOnRef
+	fields = append(fields, `deleted_on_ref`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.DeletedOnRef)
+
+	// Handle relationship foreign key columns
+	// Relationship: recipe (FK: recipe_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := ingredientUUIDValue(input.Recipe.Id); ok && relID != zeroId {
+			fields = append(fields, "recipe_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: ref (FK: ref_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := ingredientUUIDValue(input.Ref.Id); ok && relID != zeroId {
+			fields = append(fields, "ref_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.StepKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`step_key = $%d`, paramNum))
+		values = append(values, (*update.StepKey).ToUUID())
+	}
+	if update.Quantity != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`quantity = $%d`, paramNum))
+		values = append(values, *update.Quantity)
+	}
+	if update.Substitutes != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`substitutes = $%d`, paramNum))
+		jsonValueSubstitutes, err := marshalJSONFieldValue(*update.Substitutes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field substitutes: %w", err)
+		}
+		values = append(values, jsonValueSubstitutes)
+	}
+	if update.EntityKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		values = append(values, (*update.EntityKey).ToUUID())
+	}
+	if update.DeletedOnRef != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`deleted_on_ref = $%d`, paramNum))
+		values = append(values, *update.DeletedOnRef)
+	}
+	// Handle relationship foreign key: recipe
+	if update.RecipeID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("recipe_id = $%d", paramNum))
+		values = append(values, update.RecipeID.ToUUID())
+	}
+	// Handle relationship foreign key: ref
+	if update.RefID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("ref_id = $%d", paramNum))
+		values = append(values, update.RefID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO ingredient (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "recipe_id", "step_key", "quantity", "substitutes", "entity_key", "ref_id", "deleted_on_ref", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Ingredient{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempSubstitutes []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRecipe *types.IdentityUUID
+	var tempRelRef *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelRecipe,
+
+		&result.StepKey,
+
+		&result.Quantity,
+
+		&tempSubstitutes,
+
+		&result.EntityKey,
+
+		&tempRelRef,
+
+		&result.DeletedOnRef,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if len(tempSubstitutes) > 0 {
+		if err := unmarshalGenericJSONFieldValue(tempSubstitutes, &result.Substitutes); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field substitutes: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRecipe != nil {
+		result.Recipe.Id = ingredientUUIDPtr(*tempRelRecipe)
+	}
+	if tempRelRef != nil {
+		result.Ref.Id = ingredientUUIDPtr(*tempRelRef)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Ingredient records in a single statement
 func (r *IngredientRepository) CreateMany(ctx context.Context, inputs []*types.Ingredient) ([]*types.Ingredient, error) {
 	if len(inputs) == 0 {
