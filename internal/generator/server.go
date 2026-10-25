@@ -1553,6 +1553,18 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	for _, call := range o.Deps.Calls {
 		modules = append(modules, servergen.Module{Path: call.Module, Dir: SDKDir(out, LangGo, call.Service), Direct: true})
 	}
+	for _, m := range o.Deps.MemoryStores {
+		// The implementation names the store's channels and keys with its
+		// Go definitions, which reach the types modules of its payloads
+		// and enums (D75).
+		if m.Definitions == "" {
+			continue
+		}
+		modules = append(modules, servergen.Module{Path: m.Definitions, Dir: TypesDir(out, LangGo, m.Service)})
+		for _, t := range m.Modules {
+			modules = append(modules, servergen.Module{Path: t, Dir: TypesDir(out, LangGo, path.Base(t))})
+		}
+	}
 	modules = append(modules,
 		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),
 		runtimeModule(n.SchemaRuntimeGoModule, paths.SchemaRuntimeGo, false),

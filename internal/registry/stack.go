@@ -255,7 +255,8 @@ type ConnectorSpec struct {
 
 	// From and To name the platforms at the two ends. From is a server, a
 	// job or a worker platform; To is a database platform for sql, a
-	// server platform for http and a bucket platform for bucket (D54). A
+	// server platform for http, a bucket platform for bucket (D54) and a
+	// memoryStore platform for memoryStore (D75). A
 	// job's edges are its API's (D52), and so are a worker's (D53), so a
 	// target that places jobs or workers registers a connector from its
 	// job or worker platform for each edge its servers take. A site edge
@@ -713,6 +714,10 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
 			return fmt.Errorf("registry: bucket platform %q declares server languages or SQL dialects; a bucket runs no code and hosts no schema (D54)", spec.Name)
 		}
+	case ir.DeployableMemoryStore:
+		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
+			return fmt.Errorf("registry: memoryStore platform %q declares server languages or SQL dialects; a memory store runs no code and hosts no schema (D75)", spec.Name)
+		}
 	default:
 		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s)", spec.Name, spec.Kind, deployableKindList())
 	}
@@ -794,7 +799,7 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 		return fmt.Errorf("registry: connector %q is already registered", spec.Name)
 	}
 	if !spec.Edge.Valid() {
-		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket)
+		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket, ir.EdgeMemoryStore)
 	}
 	switch {
 	case spec.Generic && (spec.From != "" || spec.To != ""):
@@ -1044,6 +1049,9 @@ func (r *Registry) checkStackReferences() error {
 		}
 		if spec.Edge == ir.EdgeBucket {
 			toKind = ir.DeployableBucket
+		}
+		if spec.Edge == ir.EdgeMemoryStore {
+			toKind = ir.DeployableMemoryStore
 		}
 		for _, end := range []struct {
 			role, platform string

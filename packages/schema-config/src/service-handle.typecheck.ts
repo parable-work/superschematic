@@ -119,6 +119,40 @@ export const refusedBucketCall = defineConfig({
   outputs: {}
 });
 
+// A MemoryStore service's sentinel, and the APIs that list it (D75).
+const ShopCache = service({ name: "shop-cache", kind: SchemaKind.MemoryStore });
+const memoryStoreHandle: ServiceHandle<"MemoryStore"> = ShopCache;
+
+export const memoryStore = defineConfig({
+  name: "shop-cache",
+  kind: SchemaKind.MemoryStore,
+  outputs: { types: { go: { enabled: true } } }
+});
+
+export const acceptedMemoryStores = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  memoryStores: [ShopCache],
+  rateLimitStore: ShopCache,
+  outputs: {}
+});
+
+export const refusedApiMemoryStore = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error memoryStores takes MemoryStore handles, and ShopMedia is a Bucket handle
+  memoryStores: [ShopMedia],
+  outputs: {}
+});
+
+export const refusedRateLimitStore = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error rateLimitStore takes a MemoryStore handle, and ShopApi is an API handle
+  rateLimitStore: ShopApi,
+  outputs: {}
+});
+
 // @ts-expect-error a handle with no config type does not stand for one with
 const untypedForTyped: ServiceHandle<"API", ShopApiConfig> = handWrittenApi;
 
@@ -138,6 +172,7 @@ export const checked = {
   ordersAsApi,
   untypedJobs,
   bucketHandle,
+  memoryStoreHandle,
   fulfilmentAsApi,
   untypedWorkers,
   supportAsApi,

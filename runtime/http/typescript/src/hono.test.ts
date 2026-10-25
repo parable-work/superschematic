@@ -537,7 +537,7 @@ describe('@rateLimit', () => {
     now += 30_000;
     expect((await app.request('/api/limited')).status).toBe(200);
     expect((await app.request('/api/limited')).status).toBe(429);
-    expect(new Set(keys)).toEqual(new Set(['limited:everyone']));
+    expect(new Set(keys)).toEqual(new Set(['probe.limited:everyone']));
   });
 
   test('a mount override of 0 disables the schema limit', async () => {

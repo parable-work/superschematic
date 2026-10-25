@@ -308,8 +308,9 @@ user's cache, and the Go builds take CGO_LDFLAGS pointing at them, after
 any set; superschematic env prints the same for a go build by hand. Dev stays in the foreground until Ctrl-C, then
 stops the servers and the containers, which keep their data for the next
 run: the databases, and the buckets' objects, as the SQLite files stay.
---remove-data removes the containers and their data, and the SQLite
-files, instead.
+A memory store's container keeps no data: its Valkey saves nothing to
+disk, so every run starts it empty. --remove-data removes the containers
+and their data, and the SQLite files, instead.
 
 Each checkout of the repository runs the environment in containers of its
 own, named for a hash of its state directory, on ports shifted by it, so
@@ -343,7 +344,7 @@ Examples:
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
-	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them")
+	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way)")
 	cmd.Flags().BoolVar(&flags.buildSites, "build-sites", false, "build each site once and serve its files, a site with a dev server (site.dev) too, as a deploy does, in place of running its dev server")
 	// The flag's name before the storage emulator's container joined
 	// Postgres's (D54): it removes both.

@@ -119,6 +119,14 @@ fn open_bucket(
 {{ rustLetCall .Var "open_bucket" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
+{{- if .MemoryStores }}
+
+    // One memory store per MemoryStore service (D75), disabled while its
+    // field is unset or its connection refused.
+{{- range .MemoryStores }}
+{{ .OpenLet }}
+{{- end }}
+{{- end }}
 
     // {{ $api.Service }}: its {{ .Kind }}s, built from its Deps.
     let {{ $api.Deps }} = {{ $api.Alias }}::Deps {
@@ -136,6 +144,9 @@ fn open_bucket(
 {{- end }}
 {{- range $api.Buckets }}
         {{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
+{{- range $api.MemoryStores }}
+        {{ .Field }}: Arc::clone(&{{ .Store.Var }}),
 {{- end }}
         span: logging::api_span({{ rustString $api.Service }}),
     };

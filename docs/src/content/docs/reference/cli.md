@@ -48,7 +48,7 @@ writes its boilerplate by hand (D71). Without a directory, it writes
 | `superschematic.toml` | `go_module_root` and `npm_scope`, and a [`[paths]`](/superschematic/reference/naming/#paths) table pointing the generated packages' path dependencies at a superschematic checkout, relative to the parent of the schemas root; `build_context` too when the checkout holds the project |
 | `tsconfig.base.json` | `strict`, `experimentalDecorators` and the options acme-shop's has, with `paths` mapping `@superschematic/*` and `superscalar` to the checkout's sources and `<npm_scope>/*` to `./services/*/src/index.ts` |
 | `.gitignore` | the output root's contents, but for the lockfiles of its Bun and Cargo workspaces: `!/dist/`, `/dist/*`, `!/dist/bun.lock`, `!/dist/Cargo.lock` (D51) |
-| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsite) adds each service |
+| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsitememorystore) adds each service |
 
 Nothing of superschematic is published yet, so the schema files compile
 against a checkout that `make setup` has prepared: `--superschematic`
@@ -74,7 +74,7 @@ superschematic init ./schemas --go-module-root example.com/acme --npm-scope @acm
 | `--npm-scope` | `@<project>` | the npm scope of the generated packages and of the services' own |
 | `--superschematic` | the checkout that holds the schemas root | the superschematic checkout the schema files and generated packages build against |
 
-## `new service <name> --kind DB|API|General|Bucket|Site`
+## `new service <name> --kind DB|API|General|Bucket|Site|MemoryStore`
 
 Write a service into a schemas root and build it once (D71). The name is
 lower-case words joined by hyphens, such as `shop-db`; `--kind` takes the
@@ -88,7 +88,7 @@ It writes `<schemas-root>/services/<name>/`:
 | `package.json` | `{ "name": "<npm_scope>/<name>", "private": true }`, the package other services import |
 | `tsconfig.json` | extends `../../tsconfig.base.json`; includes `schema.config.ts` and `src/**/*.ts` |
 | `src/index.ts` | re-exports the starter's declarations and `./service.generated` |
-| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General |
+| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General, a channel `ItemChanged` and a claim `ItemNoticeSent` (600 seconds) for a MemoryStore |
 
 | Kind | `outputs` |
 | --- | --- |
@@ -97,10 +97,12 @@ It writes `<schemas-root>/services/<name>/`:
 | `General` | Go and TypeScript types |
 | `Bucket` | `{}` |
 | `Site` | none |
+| `MemoryStore` | Go and TypeScript `types`, its definitions in each ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
 
 A Bucket and a Site declare nothing in schema files, so they get no
 starter schema: an API lists a bucket in its `buckets`, and a site's
-config lists the APIs its browser code calls in `calls`.
+config lists the APIs its browser code calls in `calls`. An API lists a
+MemoryStore in its `memoryStores`.
 
 Last, it builds the service as [`build`](#build-service-dir) does, into
 `<schemas-root>/dist`, which writes `src/service.generated.ts`, the
@@ -119,7 +121,7 @@ superschematic new service shop-api --kind API --root ./schemas
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket` or `Site` |
+| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket`, `Site` or `MemoryStore` |
 | `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
 | `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
 
@@ -136,7 +138,8 @@ under the output root. Like a build it writes each service's sentinel,
 when it is missing or stale.
 
 Given a service directory, it checks that service and every service it
-depends on (`dependencies`, `authDb`, `calls` and `buckets`), as `build
+depends on (`dependencies`, `authDb`, `calls`, `buckets` and
+`memoryStores`), as `build
 --with-deps` would build them; given a services root, or a schemas root
 holding `services/`, every service under it. Without an argument it
 checks the working directory when it is a service, else
@@ -849,7 +852,12 @@ design is section 8.3 of
    so each checkout of the repository runs containers of its own, and
    keeps them from run to run. A container of the environment that an
    older superschematic named without a checkout is left as it is, with
-   its data: dev prints the `docker rm` that removes it.
+   its data: dev prints the `docker rm` that removes it. A stack with a
+   bucket also gets a fake-gcs-server container, and one with a memory
+   store a Valkey container,
+   `superschematic-<stack>-<environment>-<checkout>-memorystore`, with no
+   persistence, which every store of the environment shares
+   ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)).
 4. Migrate each database to its schema's model: a plan from the model the
    database recorded, applied with `superschematic-migrate`, expand and
    contract back to back. The runner must be on `PATH`, or named by
@@ -901,8 +909,10 @@ design is section 8.3 of
 Dev stays in the foreground until Ctrl-C or until a server, a worker or a
 site's dev server exits, then stops the sites, the servers and the workers, callers first,
 and the containers, which keep their data for the next run: the
-databases, and the buckets' objects. `--remove-data` removes the
-checkout's containers and their data instead, and no other checkout's.
+databases, and the buckets' objects. The memory store's container keeps
+none: its keys go when it stops. `--remove-data` removes the
+checkout's containers and their data instead, and no other checkout's,
+the memory store's container among them.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -932,12 +942,13 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
+| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way); `--remove-database` is its earlier name |
 | `--build-sites` | false | build each site once and serve its files, a site with a dev server too, as a deploy does, in place of running its dev server |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its
-values, Postgres's and the storage emulator's, and a server's port with
+values, Postgres's, the storage emulator's and the memory store's
+(`memoryStoreImage`, `memoryStorePort`), and a server's port with
 its settings; a port it leaves out comes from a hash of the stack, the
 environment and the server, shifted by the checkout, so it stays the same
 from run to run and two checkouts run the environment side by side. A

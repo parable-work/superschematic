@@ -83,6 +83,11 @@ type Service struct {
 	// services its server's and jobs' code use (D54).
 	Buckets []ir.ServiceRef
 
+	// MemoryStores are the MemoryStore services an API service uses: the
+	// handles in its `memoryStores`, with its `rateLimitStore` (D75), as
+	// ir.Schema.MemoryStores holds them.
+	MemoryStores []ir.ServiceRef
+
 	// Language is an API service's `outputs.api.language`
 	// (registry.APILanguageGo, ...). Empty means Go.
 	Language string

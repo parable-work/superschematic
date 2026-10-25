@@ -43,7 +43,7 @@ func Resolve(reg *registry.Registry, in Input) (*ir.ResolvedEnvironment, error) 
 // each declared server and the default server of every API service the
 // stack reaches and no declared server serves (section 3.2), sorted by
 // name. Each has its Name, Declared, Services sorted by name, Calls,
-// Buckets and Language; the rest is the environment's to resolve. in.Environment is
+// Buckets, MemoryStores and Language; the rest is the environment's to resolve. in.Environment is
 // not read. The error is an *Errors with every failure found among the
 // checks that decide the servers.
 func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
@@ -58,6 +58,7 @@ func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.defaultDeployables()
 	r.resolveCalls()
 	r.resolveBuckets()
+	r.resolveMemoryStores()
 	var servers []*ir.ResolvedDeployable
 	for _, name := range sortedKeys(r.deployables) {
 		res := r.deployables[name].res
@@ -76,7 +77,7 @@ func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
 
 // Jobs returns the jobs of in.Stack, which no environment changes: a job
 // per `@job` of every API service the stack reaches (D52), sorted by name.
-// Each has its Name, Services (its API), Calls and Buckets (its API's),
+// Each has its Name, Services (its API), Calls, Buckets and MemoryStores (its API's),
 // Language and Job's API and Name; the rest is the environment's to
 // resolve.
 // in.Environment is not read. The error is an *Errors with every failure
@@ -93,6 +94,7 @@ func Jobs(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.defaultDeployables()
 	r.resolveCalls()
 	r.resolveBuckets()
+	r.resolveMemoryStores()
 	var jobs []*ir.ResolvedDeployable
 	for _, name := range sortedKeys(r.deployables) {
 		res := r.deployables[name].res
@@ -119,6 +121,7 @@ func newResolver(reg *registry.Registry, in Input) *resolver {
 		deployables: map[string]*deployable{},
 		byService:   map[string]string{},
 		byJob:       map[string]string{},
+		disabled:    map[string]*ir.DisabledDeployable{},
 		edges:       map[string]*edge{},
 		errs:        &Errors{Stack: in.Stack.Name, Environment: in.Environment},
 	}
@@ -151,6 +154,10 @@ type resolver struct {
 	byDeriver map[string]string
 	byApp     map[string]string
 	edges     map[string]*edge
+	// disabled are the deployables the environment's settings turn off,
+	// by name: memory stores with `enabled: false` (D75), which
+	// disableDeployables takes out of deployables.
+	disabled map[string]*ir.DisabledDeployable
 
 	// produced are the resources producers returned, in order.
 	produced []produced
@@ -245,11 +252,13 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.defaultApps()
 	r.defaultRunners()
 	r.applySettings()
+	r.disableDeployables()
 	r.place()
 	r.expose()
 	r.dropUnplaced()
 	r.resolveCalls()
 	r.resolveBuckets()
+	r.resolveMemoryStores()
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
@@ -448,8 +457,8 @@ func kindList(kinds []ir.SchemaKind) string {
 
 // collectMembers finds the services the stack reaches: its entry points,
 // the services its declared deployables name, and everything those reach
-// through `authDb`, DB dependencies, `calls` and `buckets` (section 4.1,
-// D54).
+// through `authDb`, DB dependencies, `calls`, `buckets` and
+// `memoryStores` (section 4.1, D54, D75).
 func (r *resolver) collectMembers() {
 	var queue []string
 	add := func(name string) {
@@ -519,6 +528,11 @@ func (r *resolver) collectMembers() {
 				add(ref.Name)
 			}
 		}
+		for _, ref := range svc.MemoryStores {
+			if r.checkRef(fmt.Sprintf("service %s memoryStores", svc.Name), ref, ir.SchemaKindMemoryStore) {
+				add(ref.Name)
+			}
+		}
 	}
 }
 
@@ -582,8 +596,9 @@ func (r *resolver) declareDeployables() {
 
 // defaultDeployables gives each member API service no declared server
 // serves a server of its own, each member DB service no declared database
-// hosts a database of its own (section 3.2), and each member Bucket
-// service a bucket of its own (D54). Then each job of a
+// hosts a database of its own (section 3.2), each member Bucket service a
+// bucket of its own (D54), and each member MemoryStore service a memory
+// store of its own (D75). Then each job of a
 // member API service is a job of its own, named after its API and its
 // class (ir.JobDeployableName, D52).
 func (r *resolver) defaultDeployables() {
@@ -603,6 +618,8 @@ func (r *resolver) defaultDeployables() {
 			kind = ir.DeployableSite
 		case ir.SchemaKindBucket:
 			kind = ir.DeployableBucket
+		case ir.SchemaKindMemoryStore:
+			kind = ir.DeployableMemoryStore
 		default:
 			continue
 		}
@@ -702,7 +719,7 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 		}
 		return r.deployables[name], true
 	case ref.Service != nil:
-		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI, ir.SchemaKindDB, ir.SchemaKindSite, ir.SchemaKindBucket) {
+		if !r.checkRef(where, *ref.Service, ir.SchemaKindAPI, ir.SchemaKindDB, ir.SchemaKindSite, ir.SchemaKindBucket, ir.SchemaKindMemoryStore) {
 			return nil, false
 		}
 		name, ok := r.byService[ref.Service.Name]
@@ -761,7 +778,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyAppSettings(where, env.Name, d, entry) || r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
+			if r.applyAppSettings(where, env.Name, d, entry) || r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) || r.applyMemoryStoreSettings(where, env.Name, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
@@ -912,6 +929,12 @@ func (r *resolver) place() {
 				}
 			}
 			if platformName == "" {
+				off := ""
+				if res.Kind == ir.DeployableMemoryStore {
+					// A store the environment turns off needs no platform
+					// (D75).
+					off = fmt.Sprintf("; to run without it, turn it off in this environment with `settings: [{ of: %s, enabled: false }]`, and every workload opens it disabled", tsHandle(name))
+				}
 				if why := r.target.Unplaced[res.Kind]; why != "" {
 					if res.Kind == ir.DeployableApp && d.settings.enabled != nil && !*d.settings.enabled {
 						// An app turned off runs nothing here, so a target
@@ -919,7 +942,11 @@ func (r *resolver) place() {
 						r.unplaced = append(r.unplaced, name)
 						continue
 					}
-					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s", res.Kind, name, r.target.Name, res.Kind, why)
+					r.fail(CodeUnrealizable, "%s %s: target %s places no %s: %s%s", res.Kind, name, r.target.Name, res.Kind, why, off)
+					continue
+				}
+				if off != "" {
+					r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a memory store; place it with a settings platform%s", res.Kind, name, r.target.Name, off)
 					continue
 				}
 				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for %s %s; place it with a settings platform", res.Kind, name, r.target.Name, article(res.Kind), res.Kind)
@@ -1297,6 +1324,9 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 	for _, id := range sortedKeys(r.edges) {
 		out.Edges = append(out.Edges, r.edges[id].res)
 	}
+	for _, name := range sortedKeys(r.disabled) {
+		out.Disabled = append(out.Disabled, r.disabled[name])
+	}
 	out.Secrets = r.secrets()
 	return out
 }
@@ -1326,6 +1356,7 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	c.Services = slices.Clone(d.Services)
 	c.Calls = slices.Clone(d.Calls)
 	c.Buckets = slices.Clone(d.Buckets)
+	c.MemoryStores = slices.Clone(d.MemoryStores)
 	if d.Settings != nil {
 		c.Settings = deepCopy(d.Settings).(map[string]any)
 	}

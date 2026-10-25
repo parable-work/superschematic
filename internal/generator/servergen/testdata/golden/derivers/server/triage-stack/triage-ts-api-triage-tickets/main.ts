@@ -22,11 +22,12 @@
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/triage-ts-api-implementation, at typescript/triage-ts-api
 
-import { createLogger, type Database, type Logger } from '@superschematic/http-runtime';
+import { createLogger, type Database, type Logger, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { connectPostgres } from '@superschematic/http-runtime/postgres';
 import { workerConcurrency } from '@superschematic/http-runtime/worker';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import type { Pool } from 'pg';
+import { openRedisMemoryStore } from '@superschematic/http-runtime/redis';
 import { inProcess, runDeriver, type DerivationAnswer, type DerivationItem } from '@superschematic/engine';
 import { openEngineInBackground, type AsyncEngine, type EngineBackground, type EngineOptions, type Principal } from '@superschematic/engine/server';
 import * as triageTsApiApi from '@schemas/triage-ts-api-api';
@@ -58,10 +59,18 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[], engin
   const triageDbEngine = await openEngine('triage-db', 'TRIAGE_DB_DATABASE', triageTsApiConfig.TRIAGE_DB_DATABASE, triageDbEngineDocument, 'permission');
   engines.push(triageDbEngine);
 
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+  const triageCacheStore = await openMemoryStore('triage-cache', 'TRIAGE_CACHE_MEMORY_STORE', triageTsApiConfig.TRIAGE_CACHE_MEMORY_STORE);
+  pools.push({ end: () => triageCacheStore.close() });
+
   // triage-ts-api: its derivers, built from its Deps.
   const triageTsApiDeps: triageTsApiApi.Deps = {
     config: triageTsApiConfig,
     db: triageDbPool,
+    triageCache: triageCacheStore,
     engine: triageDbEngine.background,
     logger: logger.child({ api: 'triage-ts-api' }),
   };
@@ -167,6 +176,27 @@ async function construct<T>(api: string, what: string, build: () => T | Promise<
     return await build();
   } catch (error) {
     throw new Error(`${what} of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the deriver runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
   }
 }
 

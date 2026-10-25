@@ -263,6 +263,13 @@
         "kind": {
           "$ref": "#/definitions/SchemaKindName"
         },
+        "memoryStores": {
+          "description": "The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.",
+          "items": {
+            "$ref": "#/definitions/ServiceDependencyRef"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
         },
@@ -272,6 +279,10 @@
         },
         "public": {
           "type": "boolean"
+        },
+        "rateLimitStore": {
+          "$ref": "#/definitions/ServiceDependencyRef",
+          "description": "The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it."
         },
         "site": {
           "$ref": "#/definitions/SiteConfig",
@@ -285,14 +296,15 @@
       "type": "object"
     },
     "SchemaKind": {
-      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.",
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore service is a Redis or Valkey server the replicas of a stack share, which holds no fact (D75): its schema declares each channel and key it carries (`@superschematic/memory-store`), and APIs list it in their `memoryStores`.",
       "enum": [
         "DB",
         "API",
         "General",
         "Stack",
         "Site",
-        "Bucket"
+        "Bucket",
+        "MemoryStore"
       ],
       "type": "string"
     },
@@ -352,7 +364,7 @@
     },
     "ServiceDependencyRef": {
       "additionalProperties": false,
-      "description": "A service reference in the JSON/YAML config forms, in dependencies, calls and buckets. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
+      "description": "A service reference in the JSON/YAML config forms, in dependencies, calls, buckets, memoryStores and rateLimitStore. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
       "properties": {
         "kind": {
           "$ref": "#/definitions/SchemaKindName"

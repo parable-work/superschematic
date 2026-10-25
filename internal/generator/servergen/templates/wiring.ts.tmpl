@@ -20,11 +20,61 @@ APIs.
 {{- range .Buckets }}
     {{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
+{{- range .MemoryStores }}
+    {{ .Field }}: {{ .Store.Var }},
+{{- end }}
 {{- if .Engine }}
     engine: {{ .Engine.Var }}.background,
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- end }}
+
+{{- define "ts-memory-stores" }}
+{{- if .MemoryStores }}
+
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+{{- range .MemoryStores }}
+  const {{ .Var }} = await openMemoryStore({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "ts-workers-memory-stores" }}
+{{- if .MemoryStores }}
+
+  // One memory store per store, disabled: a Worker reaches no memory store,
+  // so every call takes its fallback path (D75).
+{{- range .MemoryStores }}
+  const {{ .Var }} = disabledMemoryStore({{ tsQuote .Service }});
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "ts-open-memory-store" -}}
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the {{ .Kind }} runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
+  }
+}
 {{- end }}
 
 {{- define "ts-configure" -}}
@@ -218,6 +268,10 @@ function {{ .Constructor }}(endpoint: Service, fetch: Telemetry['fetch']): {{ .M
 {{- range .Buckets }}
   const {{ .Var }} = openBucket({{ .From }});
 {{- end }}
+{{- end }}
+{{- template "ts-memory-stores" . }}
+{{- range .MemoryStores }}
+  pools.push({ end: () => {{ .Var }}.close() });
 {{- end }}
 {{- end }}
 

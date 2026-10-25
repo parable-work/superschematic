@@ -568,6 +568,7 @@ one line each.
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
 | `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
+| `<store>_memory_store` | `Option<stackconfig::MemoryStore>` | each memory store it lists in `memoryStores` (D75); `None` when the field is unset, a disabled store |
 | `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService`; `values-schema.json` lists its variables, which a deployment outside a stack sets |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
@@ -585,6 +586,8 @@ pub struct Deps {
     pub shop_api: schemas_shop_api_sdk::ShopApiSdk,
     // runtime::bucket::Bucket per buckets entry, here of shop-media
     pub shop_media: Arc<dyn Bucket>,
+    // runtime::memorystore::MemoryStore per memoryStores entry, here of shop-cache
+    pub shop_cache: Arc<dyn MemoryStore>,
     pub span: tracing::Span,
 }
 
@@ -608,7 +611,12 @@ deletes and lists objects and signs URLs for them
 ([Buckets](/superschematic/guides/buckets/)); the server, job or worker
 opens it on GCS, or on the emulator `stack dev` runs, with the runtime's
 `gcs` feature, which the entrypoint's crate turns on and the API crate
-does not. The crate turns on the
+does not. A memory store is the runtime's `memorystore::MemoryStore`,
+whose channels and keys the store's definitions crate builds
+([Memory stores](/superschematic/guides/memory-stores/)); the entrypoint
+opens it on Redis or Valkey with the runtime's `memorystore-redis`
+feature, which only an entrypoint whose APIs list a store turns on, or
+disabled when its field is unset. The crate turns on the
 runtime's `postgres` feature for a
 database, `identity-postgres` beside the user model, so the identity
 store runs over `Deps.db` (`runtime::identity::PostgresPool`), and

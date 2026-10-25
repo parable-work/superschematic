@@ -4,7 +4,8 @@
 # holds one setting in its @envVars type, serves the session routes, lets
 # anyone list its stock and export a level through a handler of its own
 # (@manualRouteRegistration, D51), lets staff with stock.write set a
-# level, and lets only rs-orders' server reserve stock. rs-orders calls it
+# level, and lets only rs-orders' server reserve stock. It lists the memory
+# store rs-cache and counts its rate limits there (D75). rs-orders calls it
 # through its Go SDK, and the site rs-web from the browser. Its job
 # PlaceRestockOrders enqueues StockLow, a queue of rs-db, which its worker
 # ReorderStock handles (D65); its server, job and worker each open
@@ -18,6 +19,9 @@ calls:
   - { name: rs-pricing, kind: API }
 buckets:
   - { name: rs-media, kind: Bucket }
+memoryStores:
+  - { name: rs-cache, kind: MemoryStore }
+rateLimitStore: { name: rs-cache, kind: MemoryStore }
 outputs:
   types:
     go: { enabled: true }

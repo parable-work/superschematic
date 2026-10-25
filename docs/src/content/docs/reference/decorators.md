@@ -8,8 +8,8 @@ sidebar:
 A schema file imports decorators and type wrappers from the core authoring
 packages. The package decides which kinds of schema may use them:
 `@superschematic/schema` everywhere, `@superschematic/db` in DB schemas,
-`@superschematic/api` in API schemas and `@superschematic/stack` in Stack
-schemas. An extension adds its own from its own package. This page lists the ones these docs cover; the others join it
+`@superschematic/api` in API schemas, `@superschematic/stack` in Stack
+schemas and `@superschematic/memory-store` in MemoryStore schemas. An extension adds its own from its own package. This page lists the ones these docs cover; the others join it
 as their support lands in every generator.
 
 ## Types and fields: `@superschematic/schema`
@@ -88,7 +88,7 @@ as their support lands in every generator.
 
 | Name | What it does | Covered in |
 | --- | --- | --- |
-| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs`; a Stack service's `outputs.ci` asks for its generated CI | [How it works](/superschematic/start/how-it-works/), [Stacks](/superschematic/guides/stacks/#generated-ci) |
+| `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies`, `calls` and `outputs`; an API's `buckets`, the Bucket handles it keeps objects in, `memoryStores`, the MemoryStore handles its replicas share, and `rateLimitStore`, the one MemoryStore handle its `@rateLimit` routes count in, which lists it too; a MemoryStore's `outputs.types`, the languages of its definitions; a Stack service's `outputs.ci` asks for its generated CI | [How it works](/superschematic/start/how-it-works/), [Buckets](/superschematic/guides/buckets/#declare-a-bucket), [Memory stores](/superschematic/guides/memory-stores/#list-it-in-an-api), [Stacks](/superschematic/guides/stacks/#generated-ci) |
 | `service({ name, kind })` | a handle to another service, for `authDb`, `dependencies` and `calls`, and for a decorator argument that names a service, such as the `from` of `@requireService` and `@allowService`; its type carries the kind (`ServiceHandle<"API">`). Each service's build writes its handle to `src/service.generated.ts`, which a config or a schema file imports from the service's package; an API's also carries its `@envVars` class and the names of its `@job` and `@worker` classes | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
 | `@envVars` | on a class of a General or API schema: its fields are the service's environment variables, with a generated loader and `values-schema.json`. On an API, it is the config of the API's server, and a stack's `env` binds its fields | [Modeling types](/superschematic/guides/modeling-types/#environment-variables), [Stacks](/superschematic/guides/stacks/#wire-the-services) |
 
@@ -107,5 +107,21 @@ class of its schema carries one of these decorators and no fields.
 | `@stack({ deploy, expose })` | class | the stack's entry points, API and DB handles: every service they reach through `authDb`, DB dependencies and `calls` joins the stack. `expose` names what is reachable from outside, an API's handle, an `@server` class, or an app beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`. One class per schema | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
 | `@server({ serves })` | class | one server for the APIs listed, in place of their default servers | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
 | `@database({ hosts })` | class | one database for the DB schemas listed, in place of their default databases | [Stacks](/superschematic/guides/stacks/#declare-a-stack) |
-| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`local: { postgresImage, postgresPort, storageImage, storagePort }`, `gcp: { project, region, production }`), the domain and its DNS platform, and settings per deployable, each `of` a handle, a Bucket's among them, or an `@server` or `@database` class, with platform settings (a local server's `port`, a Cloud Run server's `minInstances`) and `env` values that are literals or `{ parameter }`. A job's element names it beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and changes its `schedule`, `timeZone` or `enabled`; a worker's, `{ of: ShopOrders, worker: "FulfilOrders" }`, its `instances`, `concurrency` or `enabled`; an engine's runner's, `{ of: ShopDb, runner: true }`, its `enabled`; an app's, `{ of: ShopStock, app: "Backoffice" }`, its `enabled` and its platform's settings. A class that extends another `@environment` class inherits its values | [Stacks](/superschematic/guides/stacks/#environments) |
+| `@environment({ target, domain, dns, settings, parameters })` | class | an environment: the target, its values under the target's name (`local: { postgresImage, postgresPort, storageImage, storagePort, memoryStoreImage, memoryStorePort }`, `gcp: { project, region, production }`), the domain and its DNS platform, and settings per deployable, each `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, with platform settings (a local server's `port`, a Cloud Run server's `minInstances`) and `env` values that are literals or `{ parameter }`. A job's element names it beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and changes its `schedule`, `timeZone` or `enabled`; a worker's, `{ of: ShopOrders, worker: "FulfilOrders" }`, its `instances`, `concurrency` or `enabled`; an engine's runner's, `{ of: ShopDb, runner: true }`, its `enabled`; an app's, `{ of: ShopStock, app: "Backoffice" }`, its `enabled` and its platform's settings; a memory store's, `{ of: ShopCache, enabled: false }`, whether it runs. A class that extends another `@environment` class inherits its values | [Stacks](/superschematic/guides/stacks/#environments) |
 | `Targets` | interface | the targets `target` may name, each with its values and a settings type per deployable kind, which `@environment` checks the values, each settings element and its `env` against. It lists the core's `local` (`LocalTarget`); a target's package, or your stack, augments it with another, such as `gcp` | [Stacks](/superschematic/guides/stacks/#type-a-targets-values) |
+
+## Memory stores: `@superschematic/memory-store`
+
+A MemoryStore schema declares each channel and key its store carries,
+and nothing else (D75). The class is a declaration, not a type: no type
+library emits it. Its fields, in order, are the parts of the
+declaration's name, each a required string, integer, boolean, enum, or
+superscalar scalar whose wire form is a string or an integer. A
+declaration's name is its class's in kebab case unless `name` sets it,
+one segment of lowercase letters, digits, `.`, `_` and `-`; `rate-limit`
+is the core's.
+
+| Name | On | What it does | Covered in |
+| --- | --- | --- | --- |
+| `@channel({ payload?, name? })` | abstract class | a channel: a wake-up or a sample every replica can lose. `payload` is the object type of each message, from a dependency of the store's schema and never `@strictJSON`; without it the channel is a signal, whose name is the whole message. A channel takes no TTL | [Memory stores](/superschematic/guides/memory-stores/#declare-a-store) |
+| `@key({ use, ttlSeconds \| maxTtlSeconds, name? })` | abstract class | a key, which always expires: `use` is `"counter"`, which counts, or `"claim"`, which lets one caller do a piece of work once. It sets exactly one of `ttlSeconds`, its TTL from the write that creates it, and `maxTtlSeconds`, the longest TTL a call gives it; both are 1 to 604800 seconds | [Memory stores](/superschematic/guides/memory-stores/#declare-a-store) |

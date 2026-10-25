@@ -93,7 +93,7 @@ func Resolve(c registry.GenerateContext, st *ir.Stack, services []stack.Service)
 // Services loads the facts of every service st reaches, as resolution
 // collects them: its entry points and the services its declared
 // deployables serve and host, and from each API service its authDb, its
-// DB dependencies, its calls and its buckets. Each is loaded with
+// DB dependencies, its calls, its buckets and its memory stores. Each is loaded with
 // c.LoadDependency, its
 // outputs come from c.Options.LoadDependencyConfig, and Service reads the
 // facts from the two. A handle to a service of the wrong kind is loaded
@@ -146,6 +146,7 @@ func Services(c registry.GenerateContext, st *ir.Stack) ([]stack.Service, error)
 		}
 		reach(svc.Calls...)
 		reach(svc.Buckets...)
+		reach(svc.MemoryStores...)
 	}
 	return services, nil
 }

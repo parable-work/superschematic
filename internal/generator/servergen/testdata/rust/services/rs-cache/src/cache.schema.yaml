@@ -1,0 +1,9 @@
+memoryStoreDeclarations:
+  - name: level-changed
+    symbol: LevelChanged
+    kind: channel
+    doc: A stock level changed; a waiter reads it again.
+    parts:
+      - name: sku
+        type: { name: string }
+        format: string

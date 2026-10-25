@@ -157,7 +157,7 @@ func runInit(cmd *cobra.Command, flags *initFlags, schemasRoot string) error {
 		rootFlag = " --root " + displayPath(schemasRoot)
 	}
 	b.WriteString("\nNext, add a service:\n")
-	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site%s\n", rootFlag)
+	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site|MemoryStore%s\n", rootFlag)
 	_, _ = io.WriteString(out, b.String())
 	return nil
 }
