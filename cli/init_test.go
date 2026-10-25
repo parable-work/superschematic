@@ -244,7 +244,7 @@ func TestNewServiceEachKind(t *testing.T) {
 		{
 			name: "notes-cache", kind: "memorystore",
 			files:  []string{"src/notes-cache.schema.ts"},
-			config: []string{"kind: SchemaKind.MemoryStore,", "outputs: {}"},
+			config: []string{"kind: SchemaKind.MemoryStore,", "[TargetLanguage.Go]: { enabled: true }", "[TargetLanguage.TypeScript]: { enabled: true }"},
 			index:  "export { ItemChanged, ItemNoticeSent } from \"./notes-cache.schema\";\nexport * from \"./service.generated\";\n",
 		},
 	} {
@@ -281,9 +281,14 @@ func TestNewServiceEachKind(t *testing.T) {
 	config = strings.Replace(config, "  kind: SchemaKind.API,\n", "  kind: SchemaKind.API,\n  authDb: NotesDb,\n  buckets: [NotesMedia],\n  memoryStores: [NotesCache],\n", 1)
 	require.NoError(t, os.WriteFile(apiConfig, []byte(config), 0o644))
 
-	out, err := runCoreCmd(t, "build-all", services, "--out", t.TempDir())
+	dist := t.TempDir()
+	out, err := runCoreCmd(t, "build-all", services, "--out", dist)
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "All 6 schema services built successfully")
+	// The memory store's starter lists Go and TypeScript types, so its
+	// first build writes its definitions in both.
+	assert.FileExists(t, filepath.Join(dist, "types", "go", "notes-cache", "definitions.go"))
+	assert.FileExists(t, filepath.Join(dist, "types", "typescript", "notes-cache", "index.ts"))
 }
 
 // TestNewServiceFindsTheRoot: in the schemas root, new service writes

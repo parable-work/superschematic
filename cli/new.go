@@ -286,7 +286,9 @@ const newServiceTSConfig = `{
 `
 
 // newServiceConfig is the service's schema.config.ts. Its outputs load:
-// a DB has Go types, and each server and SDK language has its types.
+// a DB has Go types, each server and SDK language has its types, and a
+// MemoryStore has its definitions in Go and TypeScript, as a DB lists
+// both (D71).
 func newServiceConfig(name string, kind ir.SchemaKind, names naming.Naming) []byte {
 	config := names.Specifier("@superschematic/schema-config")
 	types := `    types: {
@@ -320,8 +322,9 @@ func newServiceConfig(name string, kind ir.SchemaKind, names naming.Naming) []by
 	case ir.SchemaKindSite:
 		comment = "// A static site: its config is all it has. calls lists the APIs its\n// browser code calls, and site its build."
 	case ir.SchemaKindMemoryStore:
-		comment = "// A memory store that the replicas of a stack share: its schema declares\n// each channel and key it carries, and it never holds a fact. outputs.types\n// names the languages its definitions are written in. An API that uses it\n// lists it in its memoryStores."
-		body = "  outputs: {}"
+		language = true
+		comment = "// A memory store that the replicas of a stack share: its schema declares\n// each channel and key it carries, and it never holds a fact. outputs.types\n// names the languages its definitions are written in, one for each server\n// language of the APIs that list it in their memoryStores."
+		body = "  outputs: {\n" + types + "\n  }"
 	}
 	imports := "defineConfig, SchemaKind"
 	if language {
