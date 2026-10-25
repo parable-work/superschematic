@@ -59,6 +59,7 @@ pub fn engine_migrations(
             Migration::new(10, "unique fields and indexes", unique_indexes),
             step(11, "namespaces a create makes", SQLITE_11, POSTGRES_11),
             step(12, "event log retention", SQLITE_12, POSTGRES_12),
+            step(13, "beside events", SQLITE_13, POSTGRES_13),
         ],
     )
 }
@@ -593,4 +594,77 @@ $$;
 DROP TRIGGER engine_events_no_delete ON engine_events;
 CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
 FOR EACH ROW EXECUTE FUNCTION engine_events_no_delete();
+";
+
+// A beside operation's event (D77) is an instance's and has no sequence.
+// As migrations 4 and 7 did, SQLite copies the log, cursors and all, into
+// a table whose CHECKs admit one; its AUTOINCREMENT carries on from where
+// the old table's stood, so a cursor retention pruned is never drawn
+// again. Every index and trigger is made again, and an index by instance
+// and cursor reads one instance's events in log order, beside events
+// among them.
+const SQLITE_13: &str = "
+CREATE TABLE engine_events_next (
+  cursor         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind           TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish', 'define')),
+  namespace      TEXT    NOT NULL,
+  schema         TEXT    NOT NULL,
+  instance_id    TEXT,
+  seq            INTEGER CHECK (seq >= 1),
+  version        INTEGER CHECK (version >= 1),
+  actor          TEXT    NOT NULL,
+  at             INTEGER NOT NULL,
+  change         TEXT    CHECK (change IS NULL OR json_valid(change)),
+  cause_behavior TEXT,
+  cause_event    INTEGER,
+  cause_schedule TEXT,
+  depth          INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
+  service        TEXT,
+  value_refs     TEXT    CHECK (value_refs IS NULL OR json_valid(value_refs)),
+  CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
+  CHECK (instance_id IS NOT NULL OR seq IS NULL),
+  CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation'),
+  CHECK ((kind = 'define') = (version IS NULL))
+) STRICT;
+
+INSERT INTO engine_events_next
+  (cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth, service, value_refs)
+SELECT cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth, service, value_refs
+FROM engine_events ORDER BY cursor;
+
+INSERT INTO sqlite_sequence (name, seq)
+SELECT 'engine_events_next', 0 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'engine_events_next');
+UPDATE sqlite_sequence SET seq = MAX(seq,
+  COALESCE((SELECT old.seq FROM sqlite_sequence AS old WHERE old.name = 'engine_events'), 0),
+  COALESCE((SELECT MAX(floor) FROM engine_log_floors), 0))
+WHERE name = 'engine_events_next';
+
+DROP TABLE engine_events;
+ALTER TABLE engine_events_next RENAME TO engine_events;
+
+CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, instance_id, seq)
+  WHERE instance_id IS NOT NULL;
+CREATE INDEX engine_events_instance_cursor ON engine_events (namespace, schema, instance_id, cursor)
+  WHERE instance_id IS NOT NULL;
+CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
+CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
+
+CREATE TRIGGER engine_events_no_update BEFORE UPDATE ON engine_events
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
+WHEN OLD.cursor > COALESCE((SELECT floor FROM engine_log_floors WHERE namespace = OLD.namespace), 0)
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+";
+
+// Postgres replaces the named CHECK in place; its identity is the table's
+// own, which the change leaves where it was.
+const POSTGRES_13: &str = "
+ALTER TABLE engine_events
+  DROP CONSTRAINT engine_events_instance_seq,
+  ADD CONSTRAINT engine_events_instance_seq CHECK (instance_id IS NOT NULL OR seq IS NULL),
+  ADD CONSTRAINT engine_events_beside_seq CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation');
+
+CREATE INDEX engine_events_instance_cursor ON engine_events (namespace, schema, instance_id, cursor)
+  WHERE instance_id IS NOT NULL;
 ";

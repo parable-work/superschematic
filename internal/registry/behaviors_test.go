@@ -114,6 +114,31 @@ func TestRegisterBehaviorVolatileField(t *testing.T) {
 	}
 }
 
+// An instance operation that writes may say it is beside the instance,
+// and with "log": false that it appends no event; a behavior with one
+// declares every field volatile (D77).
+func TestRegisterBehaviorBesideOperations(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Chat", map[string]any{
+		"fields": []any{map[string]any{"name": "messages", "volatile": true}},
+		"operations": []any{
+			operation("post", map[string]any{"writes": true, "beside": true}),
+			operation("markRead", map[string]any{"writes": true, "beside": true, "log": false}),
+			operation("rename", map[string]any{"writes": true, "log": true}),
+		},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	chat, _ := reg.Behavior("acme.Chat")
+	got := make([][2]bool, len(chat.Operations))
+	for i, op := range chat.Operations {
+		got[i] = [2]bool{op.Beside, op.Logged()}
+	}
+	if want := [][2]bool{{true, true}, {true, false}, {false, true}}; !slices.Equal(got, want) {
+		t.Fatalf("acme.Chat operations beside and logged = %v, want %v", got, want)
+	}
+}
+
 // A declaration may give the schema of the precondition a caller sends
 // for the behavior, held to a paramsSchema's rule, and the codes its
 // vetoes carry, each lowercase snake case and listed once, beside the
@@ -230,6 +255,12 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"resultSchema": map[string]any{"required": "stars"}})}}), "behavior acme.Rating operation rate resultSchema: "},
 		{"scope", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "type"})}}), `behavior acme.Rating operation rate scope "type" is not "instance" or "schema"`},
 		{"scope case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "Schema"})}}), `behavior acme.Rating operation rate scope "Schema" is not "instance" or "schema"`},
+		{"beside reads", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true})}}), `behavior acme.Chat operation post is beside the instance and does not write: a beside operation declares "writes": true`},
+		{"beside on the schema", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true, "writes": true, "scope": "schema"})}}), `behavior acme.Chat operation post is beside the instance and has scope "schema": a beside operation runs on an instance`},
+		{"beside field not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "count", "volatile": true}, map[string]any{"name": "last"}}, "operations": []any{operation("post", map[string]any{"beside": true, "writes": true})}}), `behavior acme.Chat field last is not volatile, and operation post is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves`},
+		{"unlogged not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "log": false})}}), `behavior acme.Chat operation mark sets "log": false and is not beside the instance: only a beside operation appends no event`},
+		{"beside not a boolean", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": "yes"})}}), "behavior declaration of extension acme: "},
+		{"log not a boolean", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true, "writes": true, "log": "no"})}}), "behavior declaration of extension acme: "},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())

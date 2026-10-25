@@ -1470,6 +1470,7 @@ fn event_of(value: &Value) -> EngineEvent {
         schema: value["schema"].as_str().unwrap_or_default().to_owned(),
         instance_id: value["instanceId"].as_str().map(str::to_owned),
         seq: value["seq"].as_i64(),
+        beside: value["beside"] == true,
         version: value["version"].as_i64(),
         actor: value["actor"].as_str().unwrap_or_default().to_owned(),
         service: None,

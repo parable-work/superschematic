@@ -16,7 +16,7 @@ use superschematic_engine_storage::{
 };
 use support::targets;
 
-const NAMES: [&str; 12] = [
+const NAMES: [&str; 13] = [
     "schema versions",
     "instances and the event log",
     "publish events by namespace",
@@ -29,6 +29,7 @@ const NAMES: [&str; 12] = [
     "unique fields and indexes",
     "namespaces a create makes",
     "event log retention",
+    "beside events",
 ];
 
 const TABLES: [&str; 13] = [
@@ -48,10 +49,11 @@ const TABLES: [&str; 13] = [
 ];
 
 // The indexes and triggers of engine_events the engine relies on.
-// Migration 7 rebuilds the table on SQLite, which drops its indexes and
-// triggers.
-const EVENT_LOG_OBJECTS: [&str; 6] = [
+// Migrations 7 and 13 rebuild the table on SQLite, which drops its
+// indexes and triggers.
+const EVENT_LOG_OBJECTS: [&str; 7] = [
     "index engine_events_instance",
+    "index engine_events_instance_cursor",
     "index engine_events_namespace",
     "index engine_events_publish",
     "index engine_events_schema",
@@ -118,7 +120,7 @@ fn from_an_empty_database() {
             })
         };
         let result = db.migrate(&counted, 7).unwrap();
-        assert_eq!(result.applied, (1..=12).collect::<Vec<_>>());
+        assert_eq!(result.applied, (1..=13).collect::<Vec<_>>());
         assert_eq!(
             calls.load(Ordering::SeqCst),
             1,
@@ -149,7 +151,8 @@ fn from_an_empty_database() {
 
 // check_event_log writes events and holds the log to its rules: append
 // only, but for what retention prunes at or before a namespace's floor; a
-// define has no instance and no version, and only a define lacks one.
+// define has no instance and no version, and only a define lacks one; an
+// instance's event has a sequence, but a beside operation's (D77).
 fn check_event_log(db: &Db, dialect: Dialect) {
     let insert = "INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     write(db, |tx| {
@@ -186,6 +189,19 @@ fn check_event_log(db: &Db, dialect: Dialect) {
         tx.run(
             insert,
             params!["operation", "other", "Order", "o1", 1, 1, "alice", 4],
+        )?;
+        tx.run(
+            insert,
+            params![
+                "operation",
+                "other",
+                "Order",
+                "o1",
+                None::<i64>,
+                1,
+                "alice",
+                5
+            ],
         )
     })
     .unwrap();
@@ -241,6 +257,26 @@ fn check_event_log(db: &Db, dialect: Dialect) {
             1
         ],
         params!["created", "default", "Order", "o9", 1, 1, "mallory", 1],
+        params![
+            "update",
+            "default",
+            "Order",
+            "o9",
+            None::<i64>,
+            1,
+            "mallory",
+            1
+        ],
+        params![
+            "publish",
+            "default",
+            "Order",
+            None::<String>,
+            1,
+            1,
+            "mallory",
+            1
+        ],
     ] {
         let error = refused(insert, row);
         assert!(error.contains(check), "{row:?}: {error}");
@@ -289,7 +325,51 @@ fn migration_10_that_fails_leaves_the_database_at_version_9() {
         let ledger = db.applied_migrations(ENGINE_OWNER).unwrap();
         assert_eq!(ledger.len(), 9);
         assert!(!tables(&db).contains(&"engine_half_built".to_owned()));
-        assert_eq!(db.migrate(&engine(), 3).unwrap().applied, [10, 11, 12]);
+        assert_eq!(db.migrate(&engine(), 3).unwrap().applied, [10, 11, 12, 13]);
+    }
+}
+
+#[test]
+fn migration_13_draws_no_cursor_retention_pruned() {
+    // Retention pruned the last events of the log at version 12; the
+    // rebuilt log of migration 13 draws past them, as the old one would.
+    for target in targets("migration_13_draws_no_cursor") {
+        let db = target.open();
+        db.migrate(&slice(&engine(), 12), 1).unwrap();
+        let insert = "INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING cursor";
+        let append = |tx: &Tx<'_>, seq: i64| -> Result<i64, Error> {
+            tx.get(
+                insert,
+                params![
+                    "create",
+                    "default",
+                    "Order",
+                    format!("o{seq}"),
+                    1,
+                    1,
+                    "alice",
+                    seq
+                ],
+            )?
+            .expect("a cursor")
+            .i64("cursor")
+        };
+        let last = write(&db, |tx| {
+            let mut last = 0;
+            for seq in 1..=3 {
+                last = append(tx, seq)?;
+            }
+            tx.run(
+                "INSERT INTO engine_log_floors (namespace, floor) VALUES (?, ?)",
+                params!["default", last],
+            )?;
+            tx.run("DELETE FROM engine_events WHERE namespace = 'default'", &[])?;
+            Ok(last)
+        })
+        .unwrap();
+        assert_eq!(db.migrate(&engine(), 2).unwrap().applied, [13]);
+        let next = write(&db, |tx| append(tx, 4)).unwrap();
+        assert!(next > last, "{next} after {last}");
     }
 }
 
@@ -301,7 +381,7 @@ fn a_database_newer_than_the_build_is_refused() {
         later
             .migrations
             .push(superschematic_engine_storage::Migration::new(
-                13,
+                14,
                 "from a later build",
                 |_| Ok(()),
             ));
@@ -326,7 +406,7 @@ fn from_each_earlier_version() {
             let applied = db.migrate(&engine(), 2).unwrap().applied;
             assert_eq!(
                 applied,
-                ((from as u32 + 1)..=12).collect::<Vec<_>>(),
+                ((from as u32 + 1)..=13).collect::<Vec<_>>(),
                 "from {from}"
             );
             assert_eq!(event_log_objects(&db), EVENT_LOG_OBJECTS, "from {from}");
@@ -477,6 +557,12 @@ fn seed(tx: &Tx<'_>, version: usize) -> Result<(), Error> {
         tx.run(
             "INSERT INTO engine_namespaces (name, created_at, created_by) VALUES (?, ?, ?)",
             params!["shop", 800, "alice"],
+        )?;
+    }
+    if version >= 12 {
+        tx.run(
+            "UPDATE engine_schemas SET published_cursor = 1 WHERE name = 'Order'",
+            &[],
         )?;
     }
     Ok(())
@@ -688,9 +774,11 @@ fn sqlite_makes_the_tables_the_typescript_engine_made() {
         Ok(())
     })
     .unwrap();
+    // The TypeScript engine stopped at migration 12; migration 13 is the
+    // Rust engine's own.
     let ours = support::Target::sqlite();
     let ours_db = ours.open();
-    ours_db.migrate(&engine(), 1).unwrap();
+    ours_db.migrate(&slice(&engine(), 12), 1).unwrap();
     let schema = |db: &Db| {
         rows(
             db,

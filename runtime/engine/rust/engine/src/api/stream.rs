@@ -101,6 +101,7 @@ struct Read {
     kinds: Option<Vec<String>>,
     behaviors: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    beside: Option<bool>,
 }
 
 impl Read {
@@ -114,6 +115,7 @@ impl Read {
             kinds: self.kinds.clone(),
             behaviors: self.behaviors.clone(),
             exclude: self.exclude.clone(),
+            beside: self.beside,
         }
     }
 }
@@ -196,6 +198,7 @@ pub fn start(
         kinds: read.kinds.clone(),
         behaviors: read.behaviors.clone(),
         exclude: read.exclude.clone(),
+        beside: read.beside,
     };
     let after = read.after.unwrap_or(EventsAfter::Cursor(0));
     let first = engine

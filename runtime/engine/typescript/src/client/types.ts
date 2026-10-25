@@ -122,8 +122,10 @@ export interface EngineEvent {
   schema: string;
   /** Null for a publish and a define. */
   instanceId: string | null;
-  /** Null for a publish and a define. */
+  /** Null for a publish, a define and a beside operation's event. */
   seq: number | null;
+  /** True for a beside operation's event (D77), whose change is `{ behavior, operation, params, result }`; absent otherwise. */
+  beside?: true;
   /** Null for a define. */
   version: number | null;
   actor: string;
@@ -334,6 +336,10 @@ export interface BehaviorOperationDocument {
   description?: string;
   scope: 'instance' | 'schema';
   writes: boolean;
+  /** True for an operation beside the instance (D77). */
+  beside?: true;
+  /** False for a beside operation that appends no event. */
+  log?: false;
   paramsSchema: JSONSchema;
   resultSchema: JSONSchema;
   [policyKey: string]: unknown;

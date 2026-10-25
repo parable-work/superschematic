@@ -173,6 +173,9 @@ pub(crate) struct Execution<'t, 'db> {
     deleted: RefCell<Option<Vec<Row>>>,
     /// False for a read and a read-only operation: nothing may write.
     writable: bool,
+    // What a beside operation's handler was refused, which refuses its
+    // call when it returns.
+    beside_refusal: RefCell<Option<String>>,
 }
 
 impl<'t, 'db> Execution<'t, 'db> {
@@ -202,6 +205,7 @@ impl<'t, 'db> Execution<'t, 'db> {
             attribution: RefCell::new(Map::new()),
             deleted: RefCell::new(None),
             writable,
+            beside_refusal: RefCell::new(None),
         }
     }
 
@@ -279,39 +283,52 @@ impl<'t, 'db> Execution<'t, 'db> {
         writes: bool,
         preconditions: Option<&Preconditions>,
     ) -> Result<()> {
-        for (index, bound) in self.behaviors().iter().enumerate() {
-            if !bound.behavior.hooks.guard {
-                continue;
-            }
-            let precondition = preconditions.and_then(|entries| {
-                entries
-                    .iter()
-                    .find(|(name, _)| *name == bound.behavior.name)
-                    .map(|(_, entry)| entry)
-            });
-            let asked = match precondition {
-                Some(entry) => request.with_precondition(Some(entry)),
-                None => request.clone(),
-            };
-            let ctx = self.ctx(index, Mode::View { columns: None });
-            let answer = bound
-                .behavior
-                .implementation
-                .guard(&ctx, &bound.config, &asked)
-                .unwrap_or(Ok(None))?;
-            if let Some(veto) = veto_of(&bound.behavior, "a guard", answer)? {
-                return Err(Error::veto(
-                    &bound.behavior.name,
-                    request.action(),
-                    &self.schema,
-                    &self.id,
-                    veto,
-                ));
-            }
+        for index in 0..self.behaviors().len() {
+            self.guard_of(index, request, preconditions)?;
         }
         if writes {
             self.reach
                 .guard_references(&self.schema, &self.id, request)?;
+        }
+        Ok(())
+    }
+
+    /// Asks one behavior's guard, with its own entry of the preconditions:
+    /// a beside operation's behavior is the only one asked (D77).
+    fn guard_of(
+        &self,
+        index: usize,
+        request: &GuardRequest<'_>,
+        preconditions: Option<&Preconditions>,
+    ) -> Result<()> {
+        let bound = &self.behaviors()[index];
+        if !bound.behavior.hooks.guard {
+            return Ok(());
+        }
+        let precondition = preconditions.and_then(|entries| {
+            entries
+                .iter()
+                .find(|(name, _)| *name == bound.behavior.name)
+                .map(|(_, entry)| entry)
+        });
+        let asked = match precondition {
+            Some(entry) => request.with_precondition(Some(entry)),
+            None => request.clone(),
+        };
+        let ctx = self.ctx(index, Mode::View { columns: None });
+        let answer = bound
+            .behavior
+            .implementation
+            .guard(&ctx, &bound.config, &asked)
+            .unwrap_or(Ok(None))?;
+        if let Some(veto) = veto_of(&bound.behavior, "a guard", answer)? {
+            return Err(Error::veto(
+                &bound.behavior.name,
+                request.action(),
+                &self.schema,
+                &self.id,
+                veto,
+            ));
         }
         Ok(())
     }
@@ -467,6 +484,13 @@ impl<'t, 'db> Execution<'t, 'db> {
     /// [`Execution::invoke`], saying also whether the handler said it
     /// changed nothing (`unchanged()`), which the engine has held to the
     /// rows the call wrote: none.
+    ///
+    /// A beside operation (D77) asks only its own behavior's guard, and no
+    /// behavior that refers to the instance: it changes nothing another
+    /// guard protects. Its handler that reaches past its behavior's own
+    /// storage (update(), a writing operation that is not beside, a
+    /// create, a reference) is refused, and so is the call, even when the
+    /// handler goes on past the refusal.
     pub fn operate(
         &self,
         bound: &BoundBehavior,
@@ -488,16 +512,17 @@ impl<'t, 'db> Execution<'t, 'db> {
                     caller,
                     precondition: None,
                 };
-                self.guard(
-                    &request,
-                    operation.writes,
-                    if caller.is_none() { preconditions } else { None },
-                )?;
                 let index = self
                     .runtime
                     .composition
                     .position(behavior)
                     .ok_or_else(|| Error::internal("an operation's behavior is not on the type"))?;
+                let preconditions = if caller.is_none() { preconditions } else { None };
+                if operation.beside {
+                    self.guard_of(index, &request, preconditions)?;
+                } else {
+                    self.guard(&request, operation.writes, preconditions)?;
+                }
                 let said = Cell::new(false);
                 let before = if operation.writes {
                     self.reach.tx.changes()
@@ -509,6 +534,7 @@ impl<'t, 'db> Execution<'t, 'db> {
                     Mode::Operation {
                         writable: operation.writes && self.writable,
                         said: &said,
+                        beside: operation.beside.then_some(operation.name.as_str()),
                     },
                 );
                 let result = declared_vetoes(
@@ -523,8 +549,11 @@ impl<'t, 'db> Execution<'t, 'db> {
                                 operation.name
                             )))
                         }),
-                )?;
-                let checked = check_result(&bound.behavior, operation, result)?;
+                );
+                if let Some(refusal) = self.beside_refusal.borrow_mut().take() {
+                    return Err(Error::behavior(behavior, refusal));
+                }
+                let checked = check_result(&bound.behavior, operation, result?)?;
                 if said.get() && operation.writes && self.reach.tx.changes() != before {
                     return Err(Error::behavior(
                         behavior,
@@ -643,11 +672,13 @@ impl<'t, 'db> Execution<'t, 'db> {
 
     // call runs another behavior's operation on this instance for a
     // context of `from`: its parameters, every guard, its handler, in a
-    // savepoint when it may write.
+    // savepoint when it may write. From a beside operation, one that
+    // writes must be beside too.
     fn call(
         &self,
         from: &RegisteredBehavior,
         writable: bool,
+        beside: Option<&str>,
         behavior: &str,
         name: &str,
         params: &Value,
@@ -687,6 +718,15 @@ impl<'t, 'db> Execution<'t, 'db> {
             return Err(Error::behavior(
                 &from.name,
                 format!("a read-only operation cannot call {behavior}.{name}, which writes"),
+            ));
+        }
+        if let Some(beside) = beside.filter(|_| operation.writes && !operation.beside) {
+            return Err(self.refuse_beside(
+                &from.name,
+                beside,
+                &format!(
+                    "it cannot call {behavior}.{name}, which writes and is not beside the instance"
+                ),
             ));
         }
         let checked = check_params(&bound.behavior, operation, params)?;
@@ -840,6 +880,19 @@ impl<'t, 'db> Execution<'t, 'db> {
     }
 }
 
+impl Execution<'_, '_> {
+    // refuse_beside records why the handler of a beside operation was
+    // refused, which refuses its call when the handler returns, and
+    // returns the refusal for the handler.
+    fn refuse_beside(&self, behavior: &str, operation: &str, reason: &str) -> Error {
+        let refusal = format!("operation {operation} is beside the instance: {reason}");
+        self.beside_refusal
+            .borrow_mut()
+            .get_or_insert_with(|| refusal.clone());
+        Error::behavior(behavior, refusal)
+    }
+}
+
 // checked_attribution holds an update()'s attribution to its shape: an
 // object of entries by a top-level field the patch names, each with only
 // a confidence from 0 to 1 and a source of at most 200 characters. It
@@ -920,10 +973,11 @@ enum Mode<'e> {
     /// initialize's, afterChange's, and a read-only operation's (not
     /// writable).
     Instance { writable: bool },
-    /// An operation handler's.
+    /// An operation handler's; `beside` names a beside operation (D77).
     Operation {
         writable: bool,
         said: &'e Cell<bool>,
+        beside: Option<&'e str>,
     },
     /// A schema-level operation's.
     Schema { writes: bool },
@@ -1080,6 +1134,25 @@ impl Ctx<'_, '_, '_> {
         Ok(())
     }
 
+    // beside names the operation when this is a beside operation's
+    // handler (D77).
+    fn beside(&self) -> Option<&str> {
+        match self.mode {
+            Mode::Operation { beside, .. } => beside,
+            _ => None,
+        }
+    }
+
+    // reach_beside refuses what a beside operation's handler reaches past
+    // its behavior's own tables and columns for, and lets every other
+    // moment's through.
+    fn reach_beside(&self, reason: &str) -> Result<()> {
+        match self.beside() {
+            Some(operation) => Err(self.exec.refuse_beside(self.name(), operation, reason)),
+            None => Ok(()),
+        }
+    }
+
     fn values_holder<'h>(&'h self, key: &'h str) -> ValueHolder<'h> {
         ValueHolder {
             namespace: &self.exec.reach.chain.namespace,
@@ -1164,6 +1237,18 @@ impl Core for Ctx<'_, '_, '_> {
         params: &Value,
         preconditions: Option<&Value>,
     ) -> Result<Value> {
+        if self.beside().is_some() {
+            let found = self.exec.reach.find_operation(
+                schema,
+                operation,
+                super::declaration::OperationScope::Instance,
+            )?;
+            if found.spec().writes && !found.spec().beside {
+                self.reach_beside(&format!(
+                    "it cannot invoke {operation} of {schema}, which writes and is not beside the instance"
+                ))?;
+            }
+        }
         self.exec.reach.invoke(
             self.name(),
             schema,
@@ -1176,6 +1261,18 @@ impl Core for Ctx<'_, '_, '_> {
     }
 
     fn invoke_schema(&self, schema: &str, operation: &str, params: &Value) -> Result<Value> {
+        if self.beside().is_some() {
+            let found = self.exec.reach.find_operation(
+                schema,
+                operation,
+                super::declaration::OperationScope::Schema,
+            )?;
+            if found.spec().writes {
+                self.reach_beside(&format!(
+                    "it cannot invoke {operation} of {schema}, a schema-level operation that writes"
+                ))?;
+            }
+        }
         self.exec
             .reach
             .invoke_schema(self.name(), schema, operation, params, self.invoke_writes())
@@ -1188,6 +1285,9 @@ impl Core for Ctx<'_, '_, '_> {
         id: Option<&str>,
         behaviors: Option<&Value>,
     ) -> Result<InstanceRecord> {
+        self.reach_beside(&format!(
+            "it cannot create an instance of {schema}; it writes only its behavior's own tables and columns"
+        ))?;
         self.exec
             .reach
             .chain
@@ -1387,12 +1487,18 @@ impl Core for Ctx<'_, '_, '_> {
         hears: Option<Hears>,
     ) -> Result<()> {
         self.reference_writing("add")?;
+        self.reach_beside(
+            "it cannot add a reference; it writes only its behavior's own tables and columns",
+        )?;
         let target = reference(self.name(), schema, id, key, hears)?;
         self.exec.reach.add_reference(&self.source(), &target)
     }
 
     fn references_remove(&self, schema: &str, id: &str, key: &str) -> Result<bool> {
         self.reference_writing("remove")?;
+        self.reach_beside(
+            "it cannot remove a reference; it writes only its behavior's own tables and columns",
+        )?;
         let target = reference(self.name(), schema, id, key, None)?;
         ReferenceTable::remove(
             self.exec.reach.tx,
@@ -1430,6 +1536,7 @@ impl Core for Ctx<'_, '_, '_> {
             Mode::Instance { .. } | Mode::Operation { .. } => self.exec.call(
                 &self.bound().behavior,
                 self.writable(),
+                self.beside(),
                 behavior,
                 operation,
                 params,
@@ -1443,6 +1550,9 @@ impl Core for Ctx<'_, '_, '_> {
         patch: &Value,
         attribution: Option<&Value>,
     ) -> Result<Arc<Map<String, Value>>> {
+        self.reach_beside(
+            "it cannot update the instance (update()); it writes only its behavior's own tables and columns",
+        )?;
         self.exec
             .update(&self.bound().behavior, self.writable(), patch, attribution)
     }

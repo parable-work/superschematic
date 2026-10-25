@@ -235,6 +235,10 @@ export interface BehaviorOperationDocument {
   /** What it runs on: an instance, or the schema as a whole. */
   scope: OperationScope;
   writes: boolean;
+  /** True for an operation beside the instance (D77); absent otherwise. */
+  beside?: true;
+  /** False for a beside operation that appends no event; absent otherwise. */
+  log?: false;
   /** The invocation policy, its declaration's or the policy's default, under the policy's key (after writes, as the describe document has it). */
   [policyKey: string]: unknown;
   /** Its parameters: an object schema with `additionalProperties: false`. */

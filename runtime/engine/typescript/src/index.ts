@@ -89,7 +89,7 @@ export { BRANCHES_RELEASE, LINKS_TARGETS, REVISIONS_REVISION, WORKFLOW_STATUS, b
 export type { BehaviorFields, InstanceFields } from './types/fields.js';
 
 export { EVENT_KINDS } from './types/events.js';
-export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, EventWatcher, OperationChange, ReadEventsOptions } from './types/events.js';
+export type { BesideChange, DefineChange, EngineEvent, EventCause, EventKind, EventPage, EventWatcher, OperationChange, ReadEventsOptions } from './types/events.js';
 // Event log retention (runtime/engine/README.md, "Retention").
 export { DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS, MAX_RETENTION_BATCH_SIZE } from './types/events.js';
 export type { RetentionOptions } from './types/events.js';
