@@ -39,6 +39,10 @@ type crate struct {
 	// page's caller from the session the JSON API signed in, and forwards
 	// the API crate's store features.
 	Identity bool
+	// Apps are the parts structs of the API's apps (D78), api::apps::<App>Parts,
+	// each of which <service>_with_parts sets the crate up from; none when
+	// the API declares no app, or its crate no apps module (no Deps).
+	Apps []string
 	// Operations are the operations with an in-process call an end user's
 	// page makes, every one with a call but a @requireService one;
 	// ServiceCalls those a service caller calls (operations::as_service),
@@ -441,6 +445,11 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 		HasAuth:       api.HasAuth,
 		Identity:      api.Identity != nil,
 		noCalls:       map[*ir.FieldDef]string{},
+	}
+	if api.HasApps() {
+		for _, app := range api.Apps {
+			out.Apps = append(out.Apps, app.Parts)
+		}
 	}
 	schemas, err := schemasOf(c)
 	if err != nil {
