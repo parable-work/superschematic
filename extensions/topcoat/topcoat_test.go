@@ -500,7 +500,10 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // calling the operation, a room's notes rows within its row; and the
 // app's choices render a select. A note's unbounded text is a textarea by
 // its multiline hint. Enter in each form presses its default button, the
-// hidden one ahead of every row button (enterHelper). Its AccountKey,
+// hidden one ahead of every row button (enterHelper). An amount in a
+// literal currency is a decimal control, read as minor units, refusing a
+// third decimal for GBP and any for JPY; one in a currency field is a
+// whole number with a hint (D44, amended). Its AccountKey,
 // whose fields are a secret one and a @uiHidden one, is an empty record
 // that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
@@ -559,7 +562,10 @@ func TestEveryInputHasAForm(t *testing.T) {
 // viewsAppTest: pages render an order's detail and a table of orders, each
 // kind of field as its rules say, values escaped, an enum's member by its
 // title, the type's @display naming the detail, captioning the table and
-// choosing its columns, and a comment thread that nests itself.
+// choosing its columns, and a comment thread that nests itself. An
+// invoice's amounts show in their currency (D44, amended): GBP, JPY, BHD,
+// XAU, a negative amount, grouping, and a currency field read per row;
+// money_text formats each currency's minor units.
 func TestViewsRenderRecords(t *testing.T) {
 	cargoTestCrate(t, viewsService, viewsAppTest)
 }
@@ -620,6 +626,65 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 	comment, _, _ = strings.Cut(comment, "#[component]")
 	if !strings.Contains(comment, ".boxed()") {
 		t.Error("comment_detail, whose record nests itself, does not box its view")
+	}
+}
+
+// TestMoneyShapesTheComponents builds fixture-views-api: an amount whose
+// field names its currency (D44, amended) is money_text's in each
+// component, a literal code as a string and a currency field read from the
+// same record, bound before the view moves a field; a line's amount takes
+// its type's one Finance.Currency field; the crate depends on the scalar
+// crate for the minor units; and the build log says why the invoice's
+// refund, between two currency fields, shows as a number. A crate whose
+// components show no money writes no money_text, and says nothing.
+func TestMoneyShapesTheComponents(t *testing.T) {
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildWithNaming(t, registry.DefaultNaming(), viewsService, root, rustOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	dir := topcoat.Dir(root, viewsService)
+	data, err := os.ReadFile(filepath.Join(dir, "src", "views.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := string(data)
+	for _, want := range []string{
+		"pub fn money_text(amount: i64, currency: &str) -> String {",
+		`<dd><data value=(record.total.to_string())>(money_text(record.total, "GBP"))</data></dd>`,
+		"    let billed_in_code = record.billed_in.clone();\n",
+		"                    let billed_in_code = row.billed_in.clone();\n",
+		"(money_text(item, billed_in_code.as_deref().unwrap_or_default()))",
+		"    let currency_code = record.currency.clone();\n",
+		"(money_text(row.amount, &currency_code))",
+		"(number_of(&choices, \"refund\", value))",
+	} {
+		if !strings.Contains(views, want) {
+			t.Errorf("views.rs lacks %s", want)
+		}
+	}
+	manifest, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "\nsuperscalar = { path = ") {
+		t.Errorf("Cargo.toml has no scalar crate:\n%s", manifest)
+	}
+	const refund = "  - topcoat: Invoice.refund shows as a number: it is Finance.Money, and its type has 2 Finance.Currency fields (billedIn, settledIn): @display({ currency: { field } }) names one\n"
+	if got := log.String(); !strings.Contains(got, refund) || strings.Contains(got, "InvoiceLine.amount") || strings.Count(got, "shows as a number") != 1 {
+		t.Errorf("build log:\n%s\nwant once:\n%s", got, refund)
+	}
+
+	root = testpaths.TempDir(t)
+	log.Reset()
+	if _, err := buildWithNaming(t, registry.DefaultNaming(), "fixture-api", root, rustOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, "fixture-api"), "src", "views.rs")); err != nil || strings.Contains(string(data), "money_text") {
+		t.Errorf("fixture-api's views.rs writes money_text (%v)", err)
+	}
+	if strings.Contains(log.String(), "money") || strings.Contains(log.String(), "shows as a number") {
+		t.Errorf("build log of a crate without money:\n%s", log.String())
 	}
 }
 
@@ -2010,6 +2075,7 @@ async fn a_valid_nested_post_books_with_the_inputs_json() {
             "currency": "GBP",
             "preferences": {"quiet": true},
             "labels": {"vip": "yes"},
+            "deposit": 2500,
         })
     );
 
@@ -2108,6 +2174,68 @@ async fn row_buttons_add_and_remove_rows_within_the_lists_bounds() {
     let (status, _, html, calls) = book_with(&one).await;
     assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
     assert!(control(&html, "rooms[0].roomId").contains(&format!(r#"value="{GARDEN}""#)), "{html}");
+}
+
+/// An amount in a literal currency is a decimal control labeled with its
+/// code, patterned by its decimals and filled with its default as a
+/// decimal; one in a currency field stays a whole number of minor units,
+/// its hint naming the field. A post reads the decimal as minor units, and
+/// refuses one with more decimals than its currency has at its control,
+/// as sent.
+#[tokio::test]
+async fn an_amount_in_a_literal_currency_is_a_decimal() {
+    let (status, _, html) = get("/book").await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    for want in [
+        r#"<label for="booking-input-deposit">Deposit (GBP)</label><input id="booking-input-deposit" name="deposit" type="text" inputmode="decimal" pattern="(\d+(\.\d{0,2})?|\.\d{1,2})" value="25.00""#,
+        // JPY has no decimals, and a Generic.Int64 may be negative.
+        r#"<label for="booking-input-tip">Tip (JPY)</label><input id="booking-input-tip" name="tip" type="text" inputmode="decimal" pattern="-?\d+""#,
+        r#"<label for="booking-input-extra-charge">Extra charge</label><p class="field-hint" id="booking-input-extra-charge-hint">In minor units of Currency</p><input id="booking-input-extra-charge" name="extraCharge" type="number" step="1" min="0""#,
+    ] {
+        assert!(html.contains(want), "missing {want} in {html}");
+    }
+
+    let (status, _, html, calls) = book_with(&booking_with(&[("deposit", "12.5"), ("tip", "300"), ("extraCharge", "450")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    let json = serde_json::to_value(&calls[0]).unwrap();
+    assert_eq!((&json["deposit"], &json["tip"], &json["extraCharge"]), (&json!(1250), &json!(300), &json!(450)), "{json}");
+    let (status, _, html, calls) = book_with(&booking_with(&[("deposit", ".05"), ("tip", "-20")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    let json = serde_json::to_value(&calls[0]).unwrap();
+    assert_eq!((&json["deposit"], &json["tip"]), (&json!(5), &json!(-20)), "{json}");
+
+    for (deposit, tip, deposit_error, tip_error) in [
+        ("4.505", "1.5", "must have at most 2 decimal places", "must be a whole amount"),
+        ("four", "99999999999999999999", "must be an amount", "is too large an amount"),
+    ] {
+        let (status, _, html, calls) = book_with(&booking_with(&[("deposit", deposit), ("tip", tip)])).await;
+        assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+        let control_of = |name| control(&html, name).to_owned();
+        let (deposit_control, tip_control) = (control_of("deposit"), control_of("tip"));
+        assert!(deposit_control.contains(deposit_error) && deposit_control.contains(&format!(r#"value="{deposit}""#)), "{deposit_control}");
+        assert!(tip_control.contains(tip_error), "{tip_control}");
+    }
+    // A sign the deposit's bounds refuse, Finance.Money's at least 0, is
+    // refused by the input's rules.
+    let (status, _, html, calls) = book_with(&booking_with(&[("deposit", "-1.00")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+    assert!(control(&html, "deposit").contains(r#"aria-invalid="true""#), "{html}");
+}
+
+/// An amount as its decimal control holds it, and an item's amount as a
+/// page's form is filled with it.
+#[test]
+fn decimal_text_writes_an_amount_as_a_control_holds_it() {
+    use schemas_fixture_forms_api_topcoat::forms::{decimal_pattern, decimal_text, held_decimal};
+    assert_eq!(decimal_text(2500, "GBP"), "25.00");
+    assert_eq!(decimal_text(-450, "GBP"), "-4.50");
+    assert_eq!(decimal_text(5, "BHD"), "0.005");
+    assert_eq!(decimal_text(1234, "JPY"), "1234");
+    assert_eq!(decimal_text(12, "XAU"), "12");
+    assert_eq!(held_decimal(&json!(450), "GBP").as_deref(), Some("4.50"));
+    assert_eq!(held_decimal(&json!("450"), "GBP"), None);
+    assert_eq!(decimal_pattern("BHD", true), r"-?(\d+(\.\d{0,3})?|\.\d{1,3})");
+    assert_eq!(decimal_pattern("XAU", false), r"\d+");
 }
 
 #[tokio::test]
@@ -2437,9 +2565,10 @@ fn a_record_whose_fields_are_all_left_out_is_empty() {
 
 // viewsAppTest is tests/app.rs of fixture-views-api's Topcoat crate.
 const viewsAppTest = `use schemas_fixture_views_api_topcoat::choices::Choices;
-use schemas_fixture_views_api_topcoat::records::{CommentRecord, OrderViewRecord};
+use schemas_fixture_views_api_topcoat::records::{CommentRecord, InvoiceRecord, OrderViewRecord};
 use schemas_fixture_views_api_topcoat::views::{
-    comment_detail, date_text, date_time_text, order_status_label, order_view_detail, order_view_table, time_text,
+    comment_detail, date_text, date_time_text, invoice_detail, invoice_table, money_text, order_status_label, order_view_detail, order_view_table,
+    time_text,
 };
 use serde_json::json;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
@@ -2478,6 +2607,38 @@ fn bare_order() -> OrderViewRecord {
 fn thread() -> CommentRecord {
     let reply = |text: &str, replies| CommentRecord { text: text.to_string(), replies };
     reply("First", vec![reply("Second", vec![reply("Third", vec![])])])
+}
+
+// An invoice as the API sends it: amounts in GBP, JPY, BHD and XAU, a
+// list in the invoice's own currency field, lines each in its own, one in
+// a code that is none, and a refund that names no currency.
+fn invoice(billed_in: Option<&str>) -> InvoiceRecord {
+    InvoiceRecord::from_wire(&json!({
+        "number": "INV-1",
+        "total": 1234567890,
+        "deposit": 4500,
+        "fee": -5,
+        "gold": 12,
+        "adjustments": [-1250, 99],
+        "billedIn": billed_in,
+        "settledIn": "GBP",
+        "refund": 300,
+        "lines": [
+            {"item": "anvil", "amount": 199999, "currency": "GBP"},
+            {"item": "rope", "amount": 1500, "currency": "JPY"},
+            {"item": "oil", "amount": 5, "currency": "XYZ"}
+        ]
+    }))
+}
+
+#[page("/invoice")]
+async fn show_invoice() -> topcoat::Result<impl View> {
+    Ok(view! { invoice_detail(record: invoice(Some("EUR"))) })
+}
+
+#[page("/invoices")]
+async fn show_invoices() -> topcoat::Result<impl View> {
+    Ok(view! { invoice_table(rows: vec![invoice(Some("EUR")), invoice(None)]) })
 }
 
 #[page("/order")]
@@ -2547,6 +2708,8 @@ async fn render(uri: &str) -> String {
         .page(show_order_with_choices)
         .page(show_orders_with_choices)
         .page(show_order_at_an_offset)
+        .page(show_invoice)
+        .page(show_invoices)
         .build();
     let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -2561,6 +2724,52 @@ fn assert_has(html: &str, wants: &[&str]) {
     for want in wants {
         assert!(html.contains(want), "missing {want} in {html}");
     }
+}
+
+/// An amount is its code and its value over its currency's minor units,
+/// grouped in threes; a code ISO 4217 gives none shows the whole number,
+/// and a currency that is no code the amount as a number.
+#[test]
+fn money_text_writes_an_amount_in_its_currency() {
+    assert_eq!(money_text(123456, "GBP"), "GBP 1,234.56");
+    assert_eq!(money_text(5, "GBP"), "GBP 0.05");
+    assert_eq!(money_text(0, "GBP"), "GBP 0.00");
+    assert_eq!(money_text(-450, "GBP"), "GBP -4.50");
+    assert_eq!(money_text(1234567, "JPY"), "JPY 1,234,567");
+    assert_eq!(money_text(-5, "BHD"), "BHD -0.005");
+    assert_eq!(money_text(12, "CLF"), "CLF 0.0012");
+    assert_eq!(money_text(1234, "XAU"), "XAU 1,234");
+    assert_eq!(money_text(i64::MIN, "GBP"), "GBP -92,233,720,368,547,758.08");
+    assert_eq!(money_text(450, "gbp"), "450");
+    assert_eq!(money_text(450, ""), "450");
+}
+
+#[tokio::test]
+async fn an_amount_shows_in_its_currency() {
+    let html = render("/invoice").await;
+    assert_has(&html, &[
+        r#"<div data-field="total"><dt>Total</dt><dd><data value="1234567890">GBP 12,345,678.90</data></dd></div>"#,
+        r#"<div data-field="deposit"><dt>Deposit</dt><dd><data value="4500">JPY 4,500</data></dd></div>"#,
+        r#"<div data-field="fee"><dt>Fee</dt><dd><data value="-5">BHD -0.005</data></dd></div>"#,
+        r#"<div data-field="gold"><dt>Gold</dt><dd><data value="12">XAU 12</data></dd></div>"#,
+        // A list in the invoice's currency field.
+        r#"<ul class="ss-list"><li><data value="-1250">EUR -12.50</data></li><li><data value="99">EUR 0.99</data></li></ul>"#,
+        // Each line in its own currency, its type's one Finance.Currency
+        // field; a code that is none shows the number.
+        r#"<td data-field="amount"><data value="199999">GBP 1,999.99</data></td>"#,
+        r#"<td data-field="amount"><data value="1500">JPY 1,500</data></td>"#,
+        r#"<td data-field="amount"><data value="5">5</data></td>"#,
+        // Between two currency fields, the refund names none.
+        r#"<div data-field="refund"><dt>Refund</dt><dd>300</dd></div>"#,
+    ]);
+    // Each row reads its own currency field: an absent one shows the
+    // amounts as numbers.
+    let html = render("/invoices").await;
+    assert_has(&html, &[
+        r#"<td data-field="total"><data value="1234567890">GBP 12,345,678.90</data></td>"#,
+        r#"<td data-field="adjustments"><ul class="ss-list"><li><data value="-1250">EUR -12.50</data></li><li><data value="99">EUR 0.99</data></li></ul></td>"#,
+        r#"<td data-field="adjustments"><ul class="ss-list"><li><data value="-1250">-1250</data></li><li><data value="99">99</data></li></ul></td>"#,
+    ]);
 }
 
 #[tokio::test]
