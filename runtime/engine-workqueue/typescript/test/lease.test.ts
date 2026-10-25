@@ -18,6 +18,7 @@ import {
   EngineError,
   IncompatibleChangeError,
   OperationParamsError,
+  PreconditionsError,
   SchemaDocumentError,
   type Engine,
   type EngineOptions,
@@ -529,8 +530,14 @@ for (const driver of drivers) {
       assert.deepEqual([update.behavior, update.action, update.vetoCode, update.vetoDetails], ['Lease', 'update', 'token_stale', { token: 1, current: 3 }]);
       assert.equal(update.reason, 'token 1 is stale: the lease is at token 3');
       assert.equal(veto(() => invoke(engine, worker, 'transition', { to: 'done' }, 'j1', 1)).vetoCode, 'token_stale');
-      // A post is beside the instance: Lease's guard, which reads the token, is not asked.
-      assert.equal((invoke(engine, worker, 'post', { body: 'Done, I think.' }, 'j1', 1) as { id: number }).id, 1);
+      // A post is beside the instance: Lease's guard, which reads the token, is not asked, so a token
+      // presented for it would fence nothing and is refused; a post that presents none is the holder's.
+      const fencedPost = thrown(() => invoke(engine, worker, 'post', { body: 'Done, I think.' }, 'j1', 1), PreconditionsError);
+      assert.deepEqual(
+        fencedPost.issues.map((issue) => issue.path),
+        ['/Lease']
+      );
+      assert.equal((invoke(engine, worker, 'post', { body: 'Done, I think.' }) as { id: number }).id, 1);
       assert.equal(veto(() => engine.instances.delete(worker, 'Job', 'j1', fenced(1))).vetoCode, 'token_stale');
       // Whoever calls: an operator with overridePermission who presents a stale token is refused too.
       assert.equal(veto(() => engine.instances.update(operator, 'Job', 'j1', { title: 'Stale' }, fenced(2))).vetoCode, 'token_stale');
