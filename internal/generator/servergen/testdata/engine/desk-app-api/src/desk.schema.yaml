@@ -1,0 +1,28 @@
+name: desk-app-api
+kind: API
+types:
+  Summary:
+    name: Summary
+    role: APIView
+    fields:
+      - name: desk
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: DeskQueries
+    operations:
+      - name: summary
+        typeRef: { name: Summary }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: summary
+        serviceCallers: { mode: allow }
+# The app, which builds the API's Deps, identity service, service
+# authenticator and implementations as its server does, waits for desk-db's
+# engine to open, and hands them to its program's serve.
+apps:
+  - name: Backoffice

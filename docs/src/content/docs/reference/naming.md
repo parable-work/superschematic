@@ -753,6 +753,23 @@ directory that holds a `Cargo.toml`. It names the crate
 `<rust_crate_prefix><service>-implementation`, a name you may change, and
 depends on the API crate and the HTTP runtime by path.
 
+### `implementation_paths.rust_app`
+
+Default: `apps/{app}`
+
+The crate of an app of a Rust API (D78), the program a stack runs for an
+`@app` class: `{app}` is the class's name in kebab case, and `{service}`,
+when the template holds it, the API's name. The template must hold
+`{app}`, since each app has a crate of its own. The crate is a library
+that exports `pub async fn serve(parts: <api crate>::apps::<App>Parts) ->
+std::io::Result<()>`. A stack's build writes it once when it is missing,
+a `Cargo.toml` naming it `<rust_crate_prefix><api>-<app>-app` and a
+`src/lib.rs` whose `serve` answers every request with 501, and refuses
+one whose `src/lib.rs` declares no `serve`. Each build copies it into
+the output root's `impl/`, its path dependencies re-based there, and the
+app's entrypoint depends on that copy
+([Apps](/superschematic/guides/stacks/#apps)).
+
 ### `implementation_paths.site`
 
 Default: `web/{service}`

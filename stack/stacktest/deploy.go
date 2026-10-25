@@ -260,7 +260,7 @@ func (privilegelessMigrations) GrantsNoPrivileges() {}
 // FakeBuilder is an image builder that builds nothing: it records each
 // build in the provisioner's call log, keeps the entries of each context
 // it was handed, and returns the image the fake platform's repository
-// names (the server in kebab case) at the context's digest.
+// names (ImageRepository) at the context's digest.
 type FakeBuilder struct {
 	log *FakeProvisioner
 
@@ -273,7 +273,7 @@ type FakeBuilder struct {
 
 var _ registry.ImageBuilder = (*FakeBuilder)(nil)
 
-// Build records the build and returns `<server in kebab case>@<context
+// Build records the build and returns `<ImageRepository>@<context
 // digest>`.
 func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (string, error) {
 	if err := req.Check(); err != nil {
@@ -295,7 +295,7 @@ func (b *FakeBuilder) Build(_ context.Context, req registry.BuildRequest) (strin
 	}
 	b.contexts[req.Deployable] = entries
 	b.mu.Unlock()
-	return kebab(req.Deployable) + "@" + req.ContextDigest, nil
+	return ImageRepository(req.Deployable) + "@" + req.ContextDigest, nil
 }
 
 // Context returns the entries of the context the last build of server was

@@ -81,7 +81,7 @@ func TestDeployBuildsAWorkersImage(t *testing.T) {
 		t.Fatalf("the deploy built %v, not the worker", builds(f.calls(0)))
 	}
 	pool := f.ext.Provisioner.Rendered().Resources.Resource(stacktest.FulfilOrdersWorker + ".pool")
-	if got, image := pool.Properties["image"], m.Images[stacktest.FulfilOrdersWorker]; got != image || !strings.HasPrefix(image, stacktest.FulfilOrdersWorker+"@sha256:") {
+	if got, image := pool.Properties["image"], m.Images[stacktest.FulfilOrdersWorker]; got != image || !strings.HasPrefix(image, stacktest.ImageRepository(stacktest.FulfilOrdersWorker)+"@sha256:") {
 		t.Errorf("the worker's pool renders image %v, and the manifest records %s", got, image)
 	}
 }
@@ -115,7 +115,7 @@ func TestDeployBuildsImages(t *testing.T) {
 		t.Fatalf("the first deploy ran:\n%s\nwant the three builds before the render", strings.Join(calls, "\n"))
 	}
 	job := f.ext.Provisioner.Rendered().Resources.Resource(stacktest.ShipOrdersJob + ".job")
-	if got, image := job.Properties["image"], m.Images[stacktest.ShipOrdersJob]; got != image || !strings.HasPrefix(image, stacktest.ShipOrdersJob+"@sha256:") {
+	if got, image := job.Properties["image"], m.Images[stacktest.ShipOrdersJob]; got != image || !strings.HasPrefix(image, stacktest.ImageRepository(stacktest.ShipOrdersJob)+"@sha256:") {
 		t.Errorf("the job renders image %v, and the manifest records %s", got, image)
 	}
 	if got := f.ext.Builder.Context("shop-api"); !slices.Equal(got, []string{
@@ -127,7 +127,7 @@ func TestDeployBuildsImages(t *testing.T) {
 		t.Errorf("shop-api's context holds %q", got)
 	}
 	built := m.Images["shop-api"]
-	if !strings.HasPrefix(built, "shop-api@sha256:") || m.Contexts["shop-api"] != strings.TrimPrefix(built, "shop-api@") {
+	if !strings.HasPrefix(built, stacktest.ImageRepository("shop-api")+"@sha256:") || m.Contexts["shop-api"] != strings.TrimPrefix(built, stacktest.ImageRepository("shop-api")+"@") {
 		t.Errorf("manifest: image %s, context %s", built, m.Contexts["shop-api"])
 	}
 	service := f.ext.Provisioner.Rendered().Resources.Resource("shop-api.service")
@@ -147,7 +147,7 @@ func TestDeployBuildsImages(t *testing.T) {
 	if !maps(m2.Images, m.Images) || !maps(m2.Contexts, m.Contexts) {
 		t.Errorf("images %v, contexts %v; want the first deploy's", m2.Images, m2.Contexts)
 	}
-	if !strings.Contains(f.log.String(), "is the one shop-api@sha256:") {
+	if !strings.Contains(f.log.String(), "is the one "+stacktest.ImageRepository("shop-api")+"@sha256:") {
 		t.Errorf("the log does not say shop-api kept its image:\n%s", f.log)
 	}
 
@@ -155,7 +155,7 @@ func TestDeployBuildsImages(t *testing.T) {
 	// given an image, which replaces its build and its context.
 	touch(t, src, "shop-api", "package impl // changed\n")
 	n = len(f.ext.Provisioner.Calls())
-	o.Images = map[string]string{"Orders": "orders@" + digest(7)}
+	o.Images = map[string]string{"Orders": image("Orders", 7)}
 	m3, err := stackdeploy.Deploy(ctx, o)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestDeployBuildsImages(t *testing.T) {
 	if b := builds(f.calls(n)); !slices.Equal(b, want[1:2]) {
 		t.Errorf("built %v, want shop-api alone", b)
 	}
-	if m3.Images["shop-api"] == built || m3.Images["Orders"] != "orders@"+digest(7) {
+	if m3.Images["shop-api"] == built || m3.Images["Orders"] != image("Orders", 7) {
 		t.Errorf("images %v", m3.Images)
 	}
 	if _, ok := m3.Contexts["Orders"]; ok {
@@ -274,7 +274,7 @@ func TestBuild(t *testing.T) {
 	if !slices.Equal(r.Built, []string{"Orders", "shop-api", stacktest.ShipOrdersJob}) || len(r.Unchanged) > 0 || len(r.Images) != 3 {
 		t.Fatalf("first build: %+v", r)
 	}
-	if flags := r.ImageFlags(); len(flags) != 3 || !strings.HasPrefix(flags[0], "Orders=orders@sha256:") || !strings.HasPrefix(flags[2], stacktest.ShipOrdersJob+"="+stacktest.ShipOrdersJob+"@sha256:") {
+	if flags := r.ImageFlags(); len(flags) != 3 || !strings.HasPrefix(flags[0], "Orders="+stacktest.ImageRepository("Orders")+"@sha256:") || !strings.HasPrefix(flags[2], stacktest.ShipOrdersJob+"="+stacktest.ImageRepository(stacktest.ShipOrdersJob)+"@sha256:") {
 		t.Errorf("image flags %q", flags)
 	}
 	if _, err := f.ext.State.ReadManifest(ctx, registry.Run{Environment: env}); !errors.Is(err, registry.ErrNoManifest) {

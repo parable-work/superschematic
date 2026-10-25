@@ -29,11 +29,11 @@ export interface Targets {
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
  * port of the environment's Postgres container, of its storage emulator
- * (D54) and of its memory stores' Valkey container (D75), a server's and a
- * site's settings its port, and a database, a job, a worker, a bucket, an
- * engine's runner (D58), a deriver (D74) and a memory store (D75) take no
- * settings. A port left out is derived from
- * the stack, the environment and the deployable.
+ * (D54) and of its memory stores' Valkey container (D75), a server's, an
+ * app's (D78) and a site's settings its port, and a database, a job, a
+ * worker, a bucket, an engine's runner (D58), a deriver (D74) and a memory
+ * store (D75) take no settings. A port left out is derived from the
+ * stack, the environment and the deployable.
  */
 export interface LocalTarget {
   values: {
@@ -59,13 +59,14 @@ export interface LocalTarget {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   deriver: {};
   memoryStore: {};
+  app: { port?: number };
 }
 
 /** A target's name: a key of `Targets`. */
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "memoryStore";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "memoryStore" | "app";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -264,6 +265,35 @@ type DeriverElementOf<T, Of> =
         SettingsOf<T, "deriver">
     : never;
 
+/**
+ * Whether an app runs in an environment (D78). An app that is off is in
+ * the environment, with its edges, and its target runs nothing for it.
+ */
+export type AppRun = {
+  /** Turns the app on or off. */
+  readonly enabled?: boolean;
+};
+
+/**
+ * What an app's settings element is: its API's handle in `of` and the
+ * app's class name in `app`, which the handle's apps type, whether it
+ * runs, the target's app settings, and an env of the API's config, over
+ * what the API's server is given.
+ */
+type AppElementOf<T, Of> =
+  Of extends ServiceHandle<"API", infer C, string, string, string, infer A>
+    ? { readonly of: Of; readonly app: A; readonly platform?: string; readonly env?: EnvOf<C> } & AppRun &
+        SettingsOf<T, "app">
+    : never;
+
+/**
+ * An app the stack exposes (D78): its API's handle in `of` and the app's
+ * class name in `app`, which the handle's apps type.
+ */
+export type ExposedApp<H> = H extends ServiceHandle<"API", unknown, string, string, string, infer A>
+  ? { readonly of: H; readonly app: A }
+  : never;
+
 /** Every key of W, or of any member when W is a union. */
 type KeysOf<W> = W extends unknown ? keyof W : never;
 
@@ -275,8 +305,9 @@ type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<un
 
 /**
  * One settings element checked: its `of` picks the settings type, a `job`,
- * a `worker` or a `deriver` beside an API's handle makes it the element of
- * that job, worker or deriver, and `runner: true` beside a DB's handle that of the engine's
+ * a `worker`, a `deriver` or an `app` beside an API's handle makes it the
+ * element of that job, worker, deriver or app, and `runner: true` beside a
+ * DB's handle that of the engine's
  * runner of the database; its env is the config's fields, and a key none
  * takes is refused. An element that names a platform, which may be another
  * target's, takes any settings key; the loader checks it against that
@@ -290,9 +321,11 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
           ? WorkerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
           : E extends { readonly deriver: unknown }
             ? DeriverElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-            : E extends { readonly runner: unknown }
-              ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-              : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+            : E extends { readonly app: unknown }
+              ? AppElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+              : E extends { readonly runner: unknown }
+                ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
+                : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
@@ -306,7 +339,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver` or `runner: true` beside a handle for a job, a worker, a deriver or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver`, `app` or `runner: true` beside a handle for a job, a worker, a deriver, an app or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
@@ -317,11 +350,16 @@ const noop: ClassDecorator = () => {};
 /**
  * Declares the stack: its entry points and what is reachable from outside.
  * A site (a Site service's handle) is always exposed, named in `expose` or
- * not, and each API it calls must be exposed (D55).
+ * not, and each API it calls must be exposed (D55). An app is exposed
+ * beside its API's handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
  */
-export function stack(_options: {
+export function stack<const X extends readonly unknown[] = readonly []>(_options: {
   readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
-  readonly expose?: readonly (ServiceHandle<"API" | "Site"> | DeployableClass)[];
+  readonly expose?: X & {
+    readonly [I in keyof X]: X[I] extends { readonly app: unknown; readonly of: infer H }
+      ? ExposedApp<H>
+      : ServiceHandle<"API" | "Site"> | DeployableClass;
+  };
 }): ClassDecorator {
   return noop;
 }

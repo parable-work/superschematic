@@ -147,7 +147,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:          Target,
 		Extension:     Name,
 		Platforms:     platforms,
-		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers, ir.DeployableDeriver: noDerivers},
+		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers, ir.DeployableDeriver: noDerivers, ir.DeployableApp: noApps},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNS,
 		Provisioner:   Provisioner,
@@ -178,6 +178,11 @@ const noWorkers = "a queue worker claims its queue's messages from Postgres or a
 // says when it refuses one.
 const noDerivers = "a deriver fills Derived fields in a loop that lasts as long as its process, over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; " +
 	"run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target"
+
+// noApps is why the target places no app (D78), which resolution says
+// when it refuses one.
+const noApps = "an app is the project's own Rust program, which serves HTTP until it is stopped, and cloudflare runs TypeScript Workers only; " +
+	"run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target"
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension

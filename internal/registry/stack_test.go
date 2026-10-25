@@ -90,21 +90,21 @@ func TestRegisterPlatformRejects(t *testing.T) {
 	t.Run("database with an identity config", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server or an app platform does") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
 	t.Run("database that runs no identity runtime", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.NoIdentity = "it serves no API"
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform serves an API over the user model") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server or an app platform serves an API over the user model") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
 	t.Run("database with an artifact", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.Artifact = ir.ArtifactBundle
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker, runner or deriver platform builds one") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker, runner, deriver or app platform builds one") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})

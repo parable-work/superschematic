@@ -143,8 +143,12 @@ type ResolvedDeployable struct {
 	// every other kind (D74).
 	Deriver *ResolvedDeriver `json:"deriver,omitempty"`
 
-	// Exposed is true for a server reachable from outside the environment,
-	// and for every site.
+	// App is the app an API declares and whether it runs; nil for every
+	// other kind (D78).
+	App *ResolvedApp `json:"app,omitempty"`
+
+	// Exposed is true for a server or an app reachable from outside the
+	// environment, and for every site.
 	Exposed bool `json:"exposed,omitempty"`
 
 	// Settings are the platform settings, the parent environment's merged
@@ -321,6 +325,26 @@ type DisabledDeployable struct {
 	// From names the environment of the chain whose settings turned it
 	// off.
 	From string `json:"from"`
+}
+
+// ResolvedApp is an app's run in one environment (D78): the API that
+// declares it, its `@app` class, the extensions its build needs, and
+// whether it runs.
+type ResolvedApp struct {
+	// API is the API service that declares the app; Name is its `@app`
+	// class's name.
+	API  string `json:"api"`
+	Name string `json:"name"`
+
+	// Extensions name the extensions the app's build needs, as the
+	// decorator names them. A binary that links none of them refuses to
+	// build the app, and resolves it as usual.
+	Extensions []string `json:"extensions,omitempty"`
+
+	// Enabled is false when the environment's settings turn the app off:
+	// it is in the environment, with its edges, and its target runs
+	// nothing for it.
+	Enabled bool `json:"enabled"`
 }
 
 // UnmarshalJSON decodes a deployable and turns the references in its name

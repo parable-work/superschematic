@@ -79,6 +79,10 @@ type Document struct {
 	// declarations are left out; the load adds them.
 	MemoryStoreDeclarations []*ir.MemoryStoreDeclaration `json:"memoryStoreDeclarations,omitempty" yaml:"memoryStoreDeclarations,omitempty"`
 
+	// Apps lists an API service's apps in declaration order: ir.Schema.Apps,
+	// which the TypeScript form declares with @app on a class (D78).
+	Apps []*ir.App `json:"apps,omitempty" yaml:"apps,omitempty"`
+
 	// Documents holds sidecar documents keyed by document name, copied into
 	// [ir.Schema.Documents] in canonical JSON (see [ir.CanonicalJSON]).
 	Documents map[string]json.RawMessage `json:"documents,omitempty" yaml:"documents,omitempty"`
@@ -106,7 +110,7 @@ var singleDefKinds = map[string]bool{
 // TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
 	"imports", "references", "scalars", "types", "enums", "unions",
-	"operationSets", "jobs", "workers", "derivers", "memoryStoreDeclarations", "documents", "extensions",
+	"operationSets", "jobs", "workers", "derivers", "memoryStoreDeclarations", "apps", "documents", "extensions",
 }
 
 // form identifies which on-disk shape a payload uses.

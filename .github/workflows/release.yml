@@ -22,17 +22,20 @@ name: release
 # the dist profile, LTO and stripped (scripts/release-engine-addon.sh,
 # which loads it and opens an engine on it first). build produces, per runner, the superschematic CLI for its
 # os/arch: the installed binary, cmd/superschematic, which links the core and
-# the official extensions (docs/stack-model.md, section 13). It links the
-# superscalar archive its platform's tarball holds, and every tarball's
-# digest (internal/release), which the Dockerfiles and workflows it generates
-# pin; each runner records the commit it built from.
+# the official extensions (docs/stack-model.md, section 13), and beside it
+# superschematic-topcoat, extensions/topcoat's command, which links the
+# Topcoat extension too and builds a stack whose app needs it (D78). Each
+# links the superscalar archive its platform's tarball holds, and every
+# tarball's digest (internal/release), which the Dockerfiles and workflows
+# it generates pin; each runner records the commit it built from.
 # Each runner also builds the identity runner, superschematic-identity, from
 # runtime/http/go: it reads scalars through superscalar's Go binding, so it
 # needs cgo as the CLI does, and links the same archive.
 # build-migrate cross-compiles the migration runner, superschematic-migrate,
 # for the same four os/arch pairs on one runner, since it needs no cgo, and
 # records the commit too. assemble refuses a set whose binaries and archives
-# disagree on that commit, writes SHA256SUMS, packs the npm tarballs beside
+# disagree on that commit, writes SHA256SUMS over every tarball, the two
+# CLIs' among them, packs the npm tarballs beside
 # the four addon packages, seventeen in all, @superschematic/engine naming the
 # addon packages as optional dependencies at the release's version, and
 # builds the PyPI sdist and wheel.
@@ -295,10 +298,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           # The installed binary's module requires the core's dependencies
-          # and the extensions'; the identity runner's module, the HTTP
-          # runtime's and the drivers.
+          # and the extensions'; superschematic-topcoat's, those and
+          # Topcoat's; the identity runner's module, the HTTP runtime's and
+          # the drivers.
           cache-dependency-path: |
             cmd/superschematic/go.sum
+            extensions/topcoat/go.sum
             runtime/http/go/go.sum
 
       - name: Download the static archives
@@ -308,7 +313,13 @@ jobs:
           path: archives
           merge-multiple: true
 
-      - name: Build the CLI
+      - name: Build the CLIs
+        # superschematic, the installed binary, and superschematic-topcoat,
+        # the installed binary with the Topcoat extension linked too (D44,
+        # amended; D78), which a generated workflow installs for a stack
+        # whose app needs it as it installs superschematic (D47, amended).
+        # Both are built the same way, against the same archives, with the
+        # same digests linked in, and packed the same way.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -318,37 +329,54 @@ jobs:
           NAME: ${{ matrix.name }}
         run: |
           set -euo pipefail
-          # Every platform's archives tarball, by digest, which the CLI
-          # pins in the Dockerfiles and workflows it generates.
+          # Every platform's archives tarball, by digest, which the CLIs
+          # pin in the Dockerfiles and workflows they generate.
           digests=""
           for platform in linux-x64 linux-arm64 darwin-arm64 darwin-x64; do
             tarball="archives/superschematic-archives_${VERSION}_${platform}.tar.gz"
             digests="${digests:+$digests,}$platform=$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
           done
-          # The CLI links the superscalar archive its own platform's tarball
-          # holds, the one a server it generates downloads.
+          # The CLIs link the superscalar archive their own platform's
+          # tarball holds, the one a server they generate downloads.
           tar -xzf "archives/superschematic-archives_${VERSION}_${NAME}.tar.gz" -C archives
           export CGO_LDFLAGS="-L$GITHUB_WORKSPACE/archives/superschematic-archives_${VERSION}_${NAME}/lib"
-          out="dist/superschematic_${VERSION}_${NAME}"
-          mkdir -p "$out"
-          # The Makefile's GO_BUILD_FLAGS plus stripping: no checkout paths
-          # and no VCS stamp in the binary. BUILD_COMMIT below names the
-          # commit instead. cmd/superschematic is a module of its own, so the
-          # build runs in it; its replace lines reach the core and the
-          # extensions in this checkout.
           digests_flag="-X github.com/parable-work/superschematic/internal/release.archiveDigests=$digests"
-          (cd cmd/superschematic && go build -trimpath -buildvcs=false -ldflags "-s -w $digests_flag" \
-            -o "$GITHUB_WORKSPACE/$out/superschematic" .)
-          "$out/superschematic" --help >/dev/null
-          if ! go version -m "$out/superschematic" | grep -qF -- "$digests_flag"; then
-            echo "$out/superschematic was not linked with the archives' digests" >&2
-            exit 1
-          fi
-          cp LICENSE README.md "$out/"
-          # The commit every binary must agree on; assemble refuses a set
-          # built from more than one.
-          printf '%s\n' "$GITHUB_SHA" > "$out/BUILD_COMMIT"
-          tar -C dist -czf "dist/superschematic_${VERSION}_${NAME}.tar.gz" "superschematic_${VERSION}_${NAME}"
+          # build_cli <binary> <module> <package> <readme> builds one CLI
+          # with the Makefile's GO_BUILD_FLAGS plus stripping: no checkout
+          # paths and no VCS stamp in the binary. BUILD_COMMIT names the
+          # commit instead. Each CLI's module is a module of its own, so
+          # the build runs in it; its replace lines reach the core and the
+          # extensions in this checkout. The binary must run, report the
+          # release's version and hold the digests.
+          build_cli() {
+            local bin="$1" module="$2" package="$3" readme="$4"
+            local out="dist/${bin}_${VERSION}_${NAME}"
+            mkdir -p "$out"
+            (cd "$module" && go build -trimpath -buildvcs=false -ldflags "-s -w $digests_flag" \
+              -o "$GITHUB_WORKSPACE/$out/$bin" "$package")
+            "$out/$bin" --help >/dev/null
+            local got
+            got="$("$out/$bin" --version)"
+            if [ "$got" != "$bin version $VERSION" ]; then
+              echo "the $NAME $bin reports \"$got\", not $bin version $VERSION" >&2
+              exit 1
+            fi
+            # -X leaves no trace when it names no variable, and go version
+            # -m records no -ldflags under -trimpath, so the check reads
+            # the digests from the binary itself.
+            if ! grep -qaF -- "$digests" "$out/$bin"; then
+              echo "$out/$bin was not linked with the archives' digests" >&2
+              exit 1
+            fi
+            cp LICENSE "$out/"
+            cp "$readme" "$out/README.md"
+            # The commit every binary must agree on; assemble refuses a
+            # set built from more than one.
+            printf '%s\n' "$GITHUB_SHA" > "$out/BUILD_COMMIT"
+            tar -C dist -czf "dist/${bin}_${VERSION}_${NAME}.tar.gz" "${bin}_${VERSION}_${NAME}"
+          }
+          build_cli superschematic cmd/superschematic . README.md
+          build_cli superschematic-topcoat extensions/topcoat ./cmd/superschematic-topcoat extensions/topcoat/README.md
           ls -l dist
 
       - name: Build the identity runner
@@ -365,7 +393,7 @@ jobs:
           NAME: ${{ matrix.name }}
         run: |
           set -euo pipefail
-          # The superscalar archive the CLI's step unpacked, its platform's.
+          # The superscalar archive the CLIs' step unpacked, its platform's.
           export CGO_LDFLAGS="-L$GITHUB_WORKSPACE/archives/superschematic-archives_${VERSION}_${NAME}/lib"
           out="dist/superschematic-identity_${VERSION}_${NAME}"
           mkdir -p "$out"
@@ -547,9 +575,9 @@ jobs:
           mkdir -p release-assets
           mv builds/*.tar.gz release-assets/
           cd release-assets
-          # Four tarballs each of the CLI, the identity runner, the
-          # migration runner and the archives.
-          for bin in superschematic superschematic-identity superschematic-migrate superschematic-archives; do
+          # Four tarballs each of the CLI, superschematic-topcoat, the
+          # identity runner, the migration runner and the archives.
+          for bin in superschematic superschematic-topcoat superschematic-identity superschematic-migrate superschematic-archives; do
             count="$(ls "${bin}_${VERSION}"_*.tar.gz | wc -l)"
             if [ "$count" -ne 4 ]; then
               echo "expected 4 $bin tarballs, found $count" >&2
@@ -689,7 +717,7 @@ jobs:
           {
             echo "## Artifacts"
             echo
-            echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
+            echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the CLI with the Topcoat extension linked too \`superschematic-topcoat_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
             echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's and the engine's, under \`lib/\`, and the engine's C ABI header under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
             echo "\`@superschematic/engine\` installs the engine's prebuilt Node-API addon from \`@superschematic/engine-<target>\`, one npm package per platform: darwin-arm64, darwin-x64, linux-x64-gnu and linux-arm64-gnu."
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."

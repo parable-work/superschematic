@@ -56,6 +56,9 @@ const ShopFulfilment = service<"API", ShopApiConfig, never, "FulfilOrders">({ na
 // An API with @deriver classes and no @job or @worker class, whose
 // derivers the sentinel writes as the fifth type argument (D74).
 const ShopSupport = service<"API", ShopApiConfig, never, never, "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });
+// An API with @app classes and no @job, @worker or @deriver class, whose
+// apps the sentinel writes as the sixth type argument (D78).
+const ShopStock = service<"API", ShopApiConfig, never, never, never, "Backoffice">({ name: "shop-stock", kind: SchemaKind.API });
 
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
@@ -535,3 +538,44 @@ export abstract class EnvOnRunner {}
   settings: [{ of: ShopDb, runner: true, memory: "1Gi" }],
 })
 export abstract class LocalRunnerMemory {}
+
+// An app is exposed beside its API's handle, which types its name (D78).
+@stack({ deploy: [ShopStock], expose: [ShopApi, { of: ShopStock, app: "Backoffice" }] })
+export abstract class ShopWithApp {}
+
+// @ts-expect-error an app the API does not declare
+@stack({ deploy: [ShopStock], expose: [{ of: ShopStock, app: "Kiosk" }] })
+export abstract class UnknownExposedApp {}
+
+// An app's element names its API's handle and the app's class; it turns
+// the app on or off, takes the target's app settings and an env of its
+// API's config (D78).
+@environment({
+  target: "local",
+  settings: [
+    { of: ShopStock, app: "Backoffice", enabled: false, port: 3000, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, app: "Anything" },
+  ],
+})
+export abstract class AppSettings {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an app the API does not declare
+  settings: [{ of: ShopStock, app: "Kiosk" }],
+})
+export abstract class UnknownApp {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error instances are a worker's or a deriver's setting, not an app's
+  settings: [{ of: ShopStock, app: "Backoffice", instances: 2 }],
+})
+export abstract class InstancesOnApp {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an app belongs to an API, not a database
+  settings: [{ of: ShopDb, app: "Backoffice" }],
+})
+export abstract class AppOfDb {}

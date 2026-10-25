@@ -140,3 +140,34 @@ export abstract class Dev {}
 		t.Errorf("StackOf environments = %v, want %v", names, want)
 	}
 }
+
+// TestStackReadsAnApp: an app is exposed, and set in an environment's
+// settings, beside its API's handle (D78).
+func TestStackReadsAnApp(t *testing.T) {
+	dir := environmentOrderService(t, map[string]string{
+		"src/stack.schema.ts": `import { ShopApi } from "@schemas/shop-api";
+import { ShopOrders } from "@schemas/shop-orders";
+import { environment, stack } from "@superschematic/stack";
+
+@stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi, { of: ShopOrders, app: "Backoffice" }] })
+export abstract class Shop {}
+
+@environment({ target: "local", settings: [{ of: ShopOrders, app: "Backoffice", enabled: false }] })
+export abstract class Dev {}
+`,
+	})
+	schema, _, err := LoadService(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	st := ir.StackOf(schema)
+	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
+	if want := (ir.DeployableRef{Service: &orders, App: "Backoffice"}); len(st.Expose) != 2 || !reflect.DeepEqual(st.Expose[1], want) {
+		t.Errorf("expose = %+v, want shop-orders' Backoffice second", st.Expose)
+	}
+	off := false
+	want := &ir.DeployableSettings{Of: ir.DeployableRef{Service: &orders, App: "Backoffice"}, Enabled: &off}
+	if env := st.Environment("Dev"); env == nil || len(env.Settings) != 1 || !reflect.DeepEqual(env.Settings[0], want) {
+		t.Errorf("Dev settings = %+v, want Backoffice off", env)
+	}
+}

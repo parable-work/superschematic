@@ -226,6 +226,10 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		doc := first()
 		doc.Derivers = append(doc.Derivers, schema.Derivers...)
 	}
+	if len(schema.Apps) > 0 {
+		doc := first()
+		doc.Apps = append(doc.Apps, schema.Apps...)
+	}
 	if len(unattributed) > 0 {
 		doc := first()
 		doc.MemoryStoreDeclarations = append(doc.MemoryStoreDeclarations, unattributed...)

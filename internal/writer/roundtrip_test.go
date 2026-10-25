@@ -57,6 +57,9 @@ var corpus = []roundtripFixture{
 	// An API's @deriver classes (D74), which every form writes as the
 	// schema's derivers, each naming the engine types it imports.
 	{name: "fixture-derived-api", dir: tsFixtures + "/fixture-derived-api", native: FormatTS},
+	// An API's @app classes (D78), which every form writes as the schema's
+	// apps, each with the extensions it names.
+	{name: "fixture-app-api", dir: tsFixtures + "/fixture-app-api", native: FormatTS},
 	// Operation @mcp, @icon and @docs replay keys in the data forms.
 	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both

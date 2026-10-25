@@ -270,7 +270,7 @@ func TestMemoryStoreRefusals(t *testing.T) {
 		}, stack.CodeKindMismatch, "holds a handle to shop-cache of kind Bucket, but shop-cache is a MemoryStore service"},
 		{"an exposed store", func(s *ir.Stack, _ []stack.Service) {
 			s.Expose = append(s.Expose, cache)
-		}, stack.CodeExposeNotServer, "exposes shop-cache, a memoryStore; only a server or a site is exposed"},
+		}, stack.CodeExposeNotServer, "exposes shop-cache, a memoryStore; only a server, a site or an app is exposed"},
 		{"env on a store", func(s *ir.Stack, _ []stack.Service) {
 			s.Environment("Staging").Settings = append(s.Environment("Staging").Settings, &ir.DeployableSettings{Of: cache, Env: map[string]ir.EnvValue{"LOG_LEVEL": {Value: "debug"}}})
 		}, stack.CodeUnknownEnvKey, "sets env LOG_LEVEL on memoryStore shop-cache, which has no config"},

@@ -234,6 +234,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkWorkers(schema, r)
 	checkDerivers(schema, r)
 	checkMemoryStore(schema, in, r)
+	checkApps(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)

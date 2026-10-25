@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "App": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "ArgumentDef": {
       "additionalProperties": false,
       "properties": {
@@ -3281,6 +3304,10 @@
     "DeployableRef": {
       "additionalProperties": false,
       "properties": {
+        "app": {
+          "default": "",
+          "type": "string"
+        },
         "deployable": {
           "default": "",
           "type": "string"
@@ -3435,6 +3462,13 @@
     "Document": {
       "additionalProperties": false,
       "properties": {
+        "apps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/App"
+          },
+          "type": "array"
+        },
         "comment": {
           "default": "",
           "type": "string"

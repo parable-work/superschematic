@@ -237,10 +237,13 @@ type (
 	// target's CI seam (CIIdentities) gives each environment a CIIdentity
 	// per CIRole, a provisioner's spec lists the CLITools a CI job
 	// installs, and the request names the release's CIArchive for each
-	// platform, which a job that compiles a Go server links.
+	// platform, which a job that compiles a Go server links, and the
+	// CIApps of the services root's other stacks, whose extensions the
+	// workflow's binary links (D78).
 	CIRendererSpec = registry.CIRendererSpec
 	CIRequest      = registry.CIRequest
 	CIArchive      = registry.CIArchive
+	CIApp          = registry.CIApp
 	CIStack        = registry.CIStack
 	CISite         = registry.CISite
 	CIEnvironment  = registry.CIEnvironment

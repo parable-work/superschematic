@@ -17,6 +17,7 @@ declare module "@superschematic/stack" {
       runner: {};
       deriver: {};
       memoryStore: { nodeType?: string };
+      app: { minInstances?: number; public?: boolean };
     };
   }
 }

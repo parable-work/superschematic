@@ -193,7 +193,7 @@ func TestDeriverRefusals(t *testing.T) {
 		s, services := deriverShop()
 		s.Expose = append(s.Expose, triage)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-triage-tickets, a deriver; only a server or a site is exposed")
+		mustFail(t, errs, stack.CodeExposeNotServer, "exposes shop-orders-triage-tickets, a deriver; only a server, a site or an app is exposed")
 	})
 	t.Run("a deriver named like a worker", func(t *testing.T) {
 		s, services := deriverShop()

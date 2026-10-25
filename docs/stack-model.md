@@ -77,6 +77,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
+| app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
 that declares it (section 8.8). A second target, and the generic
@@ -98,6 +99,10 @@ deployable is declared only to change that:
 
 A declared deployable only groups. It declares no needs: a server's edges
 are the union of its APIs' edges, so grouping APIs never restates one.
+
+Each `@app` of an API service is one app too, named `<api>-<app>` as a
+job is (D78). An app is never declared in the stack: the API declares it,
+and the stack exposes it or turns it off.
 
 ### 3.3 Edges
 
@@ -129,6 +134,11 @@ of an API that a declared server serves with the API it calls still
 calls over HTTP, with a credential, since it runs in a process of its
 own. A worker takes its API's edges the same way (D53); its sql edge is
 also how it claims its queue, which lives in that database.
+
+An app takes its API's edges the same way (D78), and is a caller of its
+own in a callee's callers field, as a job is. Nothing calls an app over an
+edge: people reach it at its address, so an app that people use is
+exposed.
 
 `calls` is the one wiring fact between APIs a person writes, because no
 schema says that one API's implementation calls another API. It sits in
@@ -752,6 +762,11 @@ The order comes from the graph:
 6. exposure.
 
 The provisioner applies in that order (section 6.5).
+
+An app rolls out in step 3, in the wave after each server of its API as
+well as after its callees (D78). It opens its API's engine only once the
+server has deployed the engine document the app was built with, so in
+that order its first attempt finds the document live.
 
 ### 5.4 Parameterized environments
 
@@ -2984,6 +2999,52 @@ job `OrderRestocks`, which the test runs with `stack run`, orders it
 (D65).
 
 Trace export is section 8.11's (D67).
+
+#### Apps (D78)
+
+An app is the project's own HTTP program over a Rust API: its routes are
+the project's, and it runs beside the API's servers as a deployable of
+its own. It is declared on an empty class of the API, as a job is:
+
+```ts
+import { app } from "@superschematic/api";
+
+// The back office staff run the warehouse from.
+@app({ extensions: ["topcoat"] })
+export abstract class Backoffice {}
+```
+
+- **The program.** A library crate the project writes at the naming
+  file's `[implementation_paths] rust_app`, `apps/{app}` by default,
+  which exports `pub async fn serve(parts: <api crate>::apps::<App>Parts)
+  -> std::io::Result<()>`. The parts hold the API's `deps`, its
+  `implementations`, the `engine` of an engine database, open, and
+  `addr`, every interface at `PORT` (8080 when unset). `serve` binds
+  `parts.addr` and serves until the process should exit. The build
+  scaffolds a missing crate once, whose `serve` answers every request
+  with 501 Not Implemented.
+- **The entrypoint.** `server/<stack>/<app>/`: its `main` builds `Deps`
+  and the implementations as the server's wiring does, waits for the
+  engine, and calls `serve`. The engine opens without deploying: it
+  waits until the live version of each schema has the hash of the
+  document the app was built with, which the API's server deploys (D58,
+  amended). The Dockerfile is the server's, and its context also takes
+  every crate the app's crate reaches by path.
+- **The deployable.** `<api>-<app>` in kebab case, on a Rust API; a Go
+  or TypeScript API's app is refused until they follow. Its edges, its
+  config, its callers field and its identity are its API's. `expose`
+  names it beside its API's handle, `{ of: ShopStock, app: "Backoffice"
+  }`, and an element takes `{ of, app, enabled }` with the platform's
+  settings. An app turned off runs nothing and needs no image.
+- **Extensions.** `extensions` names what the app's build needs. A
+  binary that does not link one resolves, plans and inits the stack, and
+  refuses every command that builds it: `build-all`, `stack dev`, `stack
+  build`, and `stack deploy` and `stack prepare` unless `--no-build`.
+- **Targets.** `local` runs a process with a port, ready once it accepts
+  a TCP connection. gcp runs a Cloud Run service, `gcp.cloudrunapp`,
+  with TCP startup and liveness probes; an app not exposed is
+  internal-only and reachable by no one. cloudflare refuses an app the
+  environment runs.
 
 ### 8.7 Jobs
 
@@ -5273,12 +5334,16 @@ rather than whichever release is the current LTS.
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from
 its repository's release page, checked against the release's
-`SHA256SUMS`. A binary built from a checkout is no release, so its
+`SHA256SUMS` and by the version the binary reports (`--version`). When
+an app of any stack of the services root needs the `topcoat` extension
+(D78), every job installs and runs the release's `superschematic-topcoat`
+the same way, since every job builds the whole root (D47, amended). A
+binary built from a checkout is no release, so its
 workflow's install step fails and says to generate again with a released
 binary. Every action is pinned by commit, and the file holds no
 timestamp. The build cache keys the workflow on the stack's inputs, which
-hold its config, and on the binary, which names the release, so it needs
-no key of its own. Only servers whose build context changed
+hold its config, on the binary, which names the release, and on the
+root's other stacks, whose apps choose the binary. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
 
@@ -5500,6 +5565,11 @@ the stack targets replaced them.
    runs outside the stack: the Topcoat app's listen address, the Rust
    server's (port 0, which it prints), and the in-process base URL of the
    TypeScript storefront's tests.
+   Later, D78 made an app a deployable of the stack (section 8.6), and
+   acme-shop's `Backoffice`, a Topcoat app over `shop-stock`, runs inside
+   it under `superschematic-topcoat stack dev`, its port from the
+   environment; the Topcoat app over `shop-orders`, whose server is Go in
+   the stack, still runs under `cargo run`.
 2. **Model, resolver and seams.** The Stack kind, environments,
    `environment.json`, the registry specs, and levels 1 to 3 in CI.
    Done when a test extension adds a platform and a provisioner with no
@@ -5740,6 +5810,7 @@ declare module "@superschematic/stack" {
 
 There is no `worker` key: resolution refuses the kind on this target,
 saying why and where a worker runs (`TargetSpec.Unplaced`, section 18.15).
+Nor is there an `app` key, for the same reason (D78).
 
 ### 18.2 Realization
 
@@ -6618,6 +6689,11 @@ runtime tests run fixture bundles under the `workerd` binary.
   (`TargetSpec.Unplaced`, D64, amended). `cloudflare.d1` also refuses a
   worker of a queue on it (`NoQueueClaims`, D53, amended). A Worker or a
   Cron job enqueues on D1 with `enqueueStatement` in its batch.
+- Apps (D78). An app is the project's own Rust program, which serves
+  until it is stopped: resolution refuses an app the environment runs,
+  saying that gcp's `gcp.cloudrunapp` or `stack dev` runs one
+  (`TargetSpec.Unplaced`), and leaves out an app the environment turns
+  off.
 - A collector header from a secret for trace export, as on gcp.
 - Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
 - An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and

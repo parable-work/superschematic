@@ -17,6 +17,17 @@
 {{- else if .Background }}
 //! The {{ .Kind }} opens each engine in the background, retrying until its database
 //! answers, for its API's Deps; it deploys nothing, which the servers do.
+{{- else if .App }}
+//! The app opens the engine in the background, retrying until its database
+//! answers, and deploys nothing, which the API's server does: the engine
+//! opens once the live version of each schema of the database's engine
+//! document has the hash of the one this app was built with, and until
+//! then each attempt logs the schemas that differ. So an app image from
+//! another build than the server's never publishes its own document; it
+//! waits for a server that deploys it. Its main waits for the engine to
+//! open before it calls the app's `serve`, whose parts hold it (D78). It
+//! mounts none of the engine's routes: the app's program serves what it
+//! serves of the engine.
 {{- else }}
 //! The server opens each engine in the background, retrying until its
 //! database answers, so it starts while the database is not up yet, as its
@@ -132,6 +143,8 @@ impl Document {
 /// as each new connection's password.
 {{- if .Runner }} Once it opens, it starts the engine's
 /// runner, acting as RUNNER.
+{{- else if .App }} It opens once the live versions are
+/// the document's, which the API's server deploys.
 {{- else if not .Background }} Once it opens, it deploys the document
 /// before it reports the engine ready.
 {{- end }} Each attempt that fails is logged
@@ -197,6 +210,9 @@ pub fn open(
         .setup(move |engine| start_runner(service, engine));
 {{- else if .Background }}
         });
+{{- else if .App }}
+        })
+        .setup(move |engine| deployed(service, engine, &document));
 {{- else }}
         })
         .setup(move |engine| deploy(service, engine, &document));
@@ -210,6 +226,23 @@ fn start_runner(service: &str, engine: &Arc<Engine>) -> Result<(), BoxError> {
     engine.runner().start()?;
     tracing::info!(engine = service, "runner started");
     Ok(())
+}
+{{- else if .App }}
+
+/// Refuses the engine until the live version of each of the document's
+/// schemas has its hash: the app deploys nothing (D78), so it waits for
+/// its API's server, which deploys the document, and an app built from
+/// another document than the live one never serves over it.
+fn deployed(service: &str, engine: &Arc<Engine>, document: &Document) -> Result<(), BoxError> {
+    let undeployed = engine.undeployed(&document.schemas, Some(&document.namespace))?;
+    if undeployed.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the live version of {} in the engine of {service} is not the one this app was built with; the API's server deploys it",
+        undeployed.join(", ")
+    )
+    .into())
 }
 {{- else if not .Background }}
 

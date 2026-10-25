@@ -186,6 +186,11 @@ type Schema struct {
 	// does not hold it.
 	Derivers []*Deriver `json:"derivers,omitempty" yaml:"derivers,omitempty"`
 
+	// Apps lists the apps an API service declares with `@app`, in
+	// declaration order (D78). An app's class is no type, so Types does not
+	// hold it.
+	Apps []*App `json:"apps,omitempty" yaml:"apps,omitempty"`
+
 	// Documents holds the loaded sidecar documents keyed by document name
 	// (the registered DocumentSpec.Name), each in canonical JSON (see
 	// [CanonicalJSON]). The registering extension owns the codec; typed

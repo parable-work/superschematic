@@ -112,6 +112,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_memorystore.go, D75).
 	specs = append(specs, memoryStoreDecorators()...)
 
+	// An API service's apps, the project's own HTTP programs over its Deps
+	// (core_apps.go, D78).
+	specs = append(specs, appDecorator())
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })
