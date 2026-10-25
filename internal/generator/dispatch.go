@@ -1780,6 +1780,10 @@ func (r run) generateTypeScriptSDK() error {
 		}
 		sdkOutput.CookieSessions = authDB != nil && authDB.UserTable() != nil
 	}
+	// A browser's SDK may load superscalar on its first call (D82).
+	if sdkOutput != nil {
+		sdkOutput.LazyValidation = r.Outputs.SDKLazyValidation()
+	}
 
 	dir := SDKDir(r.Options.OutputRoot, "typescript", r.Config.Name)
 	if err := r.measure("output.sdk-typescript.write", func() error {

@@ -312,11 +312,12 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 }
 
 // siteConfig reads a Site config's `site` object: `build`, `output` and
-// `fallback`, each a string (D55).
+// `fallback`, each a string (D55), and `dev`, the dev server stack dev
+// runs, an object of a `command` string and a `port` number (D82).
 func siteConfig(raw any, at *astNode) (*ir.SiteConfig, *SchemaError) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
-		return nil, errorAtNode(at, "defineConfig site must be an object of build, output and fallback")
+		return nil, errorAtNode(at, "defineConfig site must be an object of build, output, fallback and dev")
 	}
 	site := &ir.SiteConfig{}
 	for _, key := range []string{"build", "output", "fallback"} {
@@ -337,12 +338,48 @@ func siteConfig(raw any, at *astNode) (*ir.SiteConfig, *SchemaError) {
 			site.Fallback = text
 		}
 	}
+	if raw, set := obj["dev"]; set {
+		dev, err := siteDevConfig(raw, at)
+		if err != nil {
+			return nil, err
+		}
+		site.Dev = dev
+	}
 	for key := range obj {
-		if key != "build" && key != "output" && key != "fallback" {
-			return nil, errorAtNode(at, "defineConfig site has no key %s; it takes build, output and fallback", key)
+		if key != "build" && key != "output" && key != "fallback" && key != "dev" {
+			return nil, errorAtNode(at, "defineConfig site has no key %s; it takes build, output, fallback and dev", key)
 		}
 	}
 	return site, nil
+}
+
+// siteDevConfig reads a Site config's `site.dev` object: its `command`, a
+// string, and its `port`, a whole number (D82).
+func siteDevConfig(raw any, at *astNode) (*ir.SiteDevConfig, *SchemaError) {
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil, errorAtNode(at, "defineConfig site.dev must be an object of command and port")
+	}
+	dev := &ir.SiteDevConfig{}
+	for key, value := range obj {
+		switch key {
+		case "command":
+			text, ok := value.(string)
+			if !ok {
+				return nil, errorAtNode(at, "defineConfig site.dev.command must be a string")
+			}
+			dev.Command = text
+		case "port":
+			port, ok := value.(float64)
+			if !ok || port != float64(int(port)) {
+				return nil, errorAtNode(at, "defineConfig site.dev.port must be a whole number")
+			}
+			dev.Port = int(port)
+		default:
+			return nil, errorAtNode(at, "defineConfig site.dev has no key %s; it takes command and port", key)
+		}
+	}
+	return dev, nil
 }
 
 // handleList reads a config key that holds a list of service handles.

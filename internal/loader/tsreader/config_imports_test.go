@@ -130,3 +130,43 @@ export default defineConfig({ name: "probe", kind: SchemaKind.API, calls: [NotBu
 		t.Errorf("identity = %+v, want name probe, kind API and nothing else", cfg)
 	}
 }
+
+// TestReadSiteDevConfig: a Site config's site.dev names its dev server's
+// command and port (D82); each is optional, and a member it does not take,
+// a command that is not a string or a port that is not a whole number is
+// refused.
+func TestReadSiteDevConfig(t *testing.T) {
+	for _, tc := range []struct {
+		site string
+		want *ir.SiteDevConfig
+		err  string
+	}{
+		{`{ dev: { command: "vite", port: 5173 } }`, &ir.SiteDevConfig{Command: "vite", Port: 5173}, ""},
+		{`{ build: "build", dev: {} }`, &ir.SiteDevConfig{}, ""},
+		{`{ build: "build" }`, nil, ""},
+		{`{ dev: { script: "dev" } }`, nil, "defineConfig site.dev has no key script; it takes command and port"},
+		{`{ dev: { command: 1 } }`, nil, "defineConfig site.dev.command must be a string"},
+		{`{ dev: { port: 51.5 } }`, nil, "defineConfig site.dev.port must be a whole number"},
+		{`{ dev: "vite" }`, nil, "defineConfig site.dev must be an object of command and port"},
+		{`{ dev: { command: "vite --port 3000" } }`, nil, `site.dev.command "vite --port 3000" is no script name`},
+	} {
+		t.Run(tc.site, func(t *testing.T) {
+			dir := configService(t, `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe-web", kind: SchemaKind.Site, site: `+tc.site+` });
+`)
+			cfg, err := ReadServiceConfig(dir, nil)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("ReadServiceConfig error = %v, want it to contain %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReadServiceConfig: %v", err)
+			}
+			if got := cfg.Site.Dev; (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("site.dev = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

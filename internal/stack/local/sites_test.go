@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/stack"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -132,4 +133,57 @@ func TestSiteHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+// devShop is SiteShop with shop-web's dev server set (D82), on port when
+// it is not zero.
+func devShop(port int) []stack.Service {
+	services := stacktest.SiteShop()
+	for i := range services {
+		if services[i].Name == "shop-web" {
+			site := *services[i].Site
+			site.Dev = &ir.SiteDevConfig{Command: "dev", Port: port}
+			services[i].Site = &site
+		}
+	}
+	return services
+}
+
+// TestADevSiteLowersItsDevServer: a site with a dev server (D82) keeps its
+// node, its port and its config as a built site's, and the node holds the
+// dev server's command and a port of its own: the config's, or one derived
+// from the site's name, which differs from the site's own. A dev port that
+// meets another listener's is refused by local-distinct-ports.
+func TestADevSiteLowersItsDevServer(t *testing.T) {
+	reg := assemble(t)
+	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev", SchemasRoot: checkoutRoot}
+	for _, port := range []int{0, 5173} {
+		dev := resolve(t, reg, stacktest.WithSite(shop()), devShop(port), "Dev")
+		site := dev.Deployable("shop-web")
+		var node *ir.Resource
+		for _, res := range dev.Resources.Resources {
+			if res.ID == "shop-web.site" {
+				node = res
+			}
+		}
+		if node == nil {
+			t.Fatal("shop-web has no node")
+		}
+		want := local.SiteDevPort(env, *site)
+		if port != 0 && want != port {
+			t.Fatalf("SiteDevPort = %d, want the config's %d", want, port)
+		}
+		if want == local.ServerPort(env, *site) {
+			t.Fatalf("the dev server's port %d is the site's own", want)
+		}
+		if !equalJSON(t, node.Properties["dev"], map[string]any{"command": "dev", "port": want}) {
+			t.Fatalf("port %d: the node's dev = %v, want the command dev on %d", port, node.Properties["dev"], want)
+		}
+		if site.Site.Dev == nil || site.Site.Dev.Command != "dev" {
+			t.Fatalf("the resolved site's dev = %+v", site.Site.Dev)
+		}
+	}
+	s := stacktest.WithSite(shop())
+	wantFailure(t, resolveErr(t, s, devShop(local.ServerPort(env, *resolve(t, reg, stacktest.WithSite(shop()), stacktest.SiteShop(), "Dev").Deployable("shop-api"))), "Dev"),
+		stack.CodePolicy, "server shop-api and the dev server of site shop-web listen on one port")
 }
