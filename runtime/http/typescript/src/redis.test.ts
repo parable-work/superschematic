@@ -15,6 +15,12 @@ that requires a password, its CA's PEM file at
 SUPERSCHEMATIC_TEST_MEMORY_STORE_CA, and its password at
 SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD, which the test changes and
 restores. A fake metadata server gives the access tokens.
+SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN is a rediss:// URL of a server
+that requires no password and whose certificate an intermediate CA signs,
+which a root signs; the server sends its own certificate alone, and
+SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA is the intermediate's PEM
+file, which the store trusts as an anchor, as gcp's managed server CA is
+given.
 */
 
 /** Why url may not be a test's server, or undefined: a loopback host, and a database other than 0. */
@@ -45,6 +51,8 @@ const PLAIN = testStore('SUPERSCHEMATIC_TEST_MEMORY_STORE');
 const TLS = testStore('SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS');
 const TLS_CA = process.env.SUPERSCHEMATIC_TEST_MEMORY_STORE_CA;
 const TLS_PASSWORD = process.env.SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD;
+const CHAIN = testStore('SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN');
+const CHAIN_CA = process.env.SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA;
 
 /** Short timings, so a test of an outage takes a second or two. */
 const FAST: Partial<RedisMemoryStoreTimings> = { healthIntervalMs: 100, minBackoffMs: 20, maxBackoffMs: 200 };
@@ -340,10 +348,24 @@ describe.skipIf(!(TLS && TLS_CA && TLS_PASSWORD))('over TLS with IAM tokens (SUP
       metadata.stop(true);
     }
   });
+});
 
-  test('a server the CA does not sign never becomes available', async () => {
-    const otherCa = readFileSync(TLS_CA!.replace(/ca\.pem$/u, 'server.pem'), 'utf8');
-    const store = await openRedisMemoryStore({ store: 'shop-cache', url, ca: otherCa, auth: 'iam' }, { timings: FAST, tokenSource: async () => ({ token: password, expiresAt: Date.now() + 3_600_000 }) });
+describe.skipIf(!(CHAIN && CHAIN_CA))('a CA that is an intermediate (SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN)', () => {
+  test('the store trusts it as an anchor', async () => {
+    const ca = readFileSync(CHAIN_CA!, 'utf8');
+    const store = await openRedisMemoryStore({ store: 'shop-cache', url: CHAIN!, ca, auth: 'none' }, { timings: FAST });
+    try {
+      expect(store.available()).toBe(true);
+      const ref = { declaration: 'views', name: `views:${unique()}` };
+      expect(await store.increment(ref, 60_000)).toBe(1);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test.skipIf(!TLS)('a server it does not sign never becomes available', async () => {
+    const ca = readFileSync(CHAIN_CA!, 'utf8');
+    const store = await openRedisMemoryStore({ store: 'shop-cache', url: TLS!, ca, auth: 'none' }, { timings: FAST });
     try {
       await Bun.sleep(500);
       expect(store.available()).toBe(false);

@@ -460,7 +460,9 @@ within a second, then reconnects with jittered backoff from 100 ms to 5 s
 while a health ping every 2 s keeps `available` true to the connection.
 A call takes at most 500 ms with one retry, the client sends no `CLIENT`
 command and asks for no maintenance notifications, `rediss://` verifies
-the server against the connection's CA over TLS 1.2 or later, and with
+the server against the connection's CA over TLS 1.2 or later, trusting
+the CA as an anchor even when it is an intermediate (gcp gives the first
+certificate of Memorystore's managed server CA chain), and with
 `auth: iam` each new connection authenticates as `default` with an access
 token from the metadata server (`GCE_METADATA_HOST` overrides its host).
 The store has one subscriber connection, refuses a message over 64 KiB
@@ -469,7 +471,9 @@ runs against the server `SUPERSCHEMATIC_TEST_MEMORY_STORE` names, a
 loopback `redis://` URL whose database is not 0, and the TLS and IAM cases
 against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS`, its CA file
 `SUPERSCHEMATIC_TEST_MEMORY_STORE_CA` and its password
-`SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD`. The runtime records no
+`SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD`, and the intermediate CA case
+against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN` and the intermediate's
+PEM file `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA`. The runtime records no
 OpenTelemetry metrics, so the store records none.
 
 ## On Cloudflare Workers

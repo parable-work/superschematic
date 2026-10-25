@@ -60,6 +60,7 @@ export {
   checkMessage,
   checkTtl,
   disabledMemoryStore,
+  integerPart,
   jsonCodec,
   memoryStoreName,
   memoryStorePrefix,

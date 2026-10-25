@@ -14,7 +14,8 @@ nothing while offline). A call takes at most 500 ms, and one retry covers a
 stale connection. The client sends no CLIENT command (no name, no
 SETINFO) and asks for no maintenance notifications, which a managed
 server refuses. A rediss:// connection verifies the server against the
-connection's CA, over TLS 1.2 or later. With auth iam, each new connection
+connection's CA, over TLS 1.2 or later, taking the CA as a trust anchor
+even when it is an intermediate rather than a root. With auth iam, each new connection
 authenticates as user default with an OAuth access token of the
 workload's service account, which the metadata server gives
 ($GCE_METADATA_HOST overrides its host) and which is fetched again before
@@ -231,7 +232,11 @@ class RedisMemoryStore implements MemoryStore {
           host,
           port,
           tls: true as const,
-          ...(c.ca !== undefined ? { ca: c.ca } : {}),
+          // The CA may be the first certificate of a managed server's CA
+          // chain rather than a self-signed root (gcp gives
+          // managedServerCas[0].caCerts[0].certificates[0]): it is trusted
+          // as an anchor, as Go's and rustls's verifiers trust it.
+          ...(c.ca !== undefined ? { ca: c.ca, allowPartialTrustChain: true } : {}),
           ...(isIP(host) === 0 ? { servername: host } : {}),
           minVersion: 'TLSv1.2' as const,
           connectTimeout: connectMs,

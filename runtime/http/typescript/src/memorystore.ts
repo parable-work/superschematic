@@ -166,6 +166,16 @@ export function memoryStorePrefix(store: string, member?: string): string {
   return `${store}@${member}`;
 }
 
+/**
+ * The wire string of an integer part: base 10. Throws MemoryStoreNameError
+ * for a number that is no safe integer.
+ */
+export function integerPart(value: number | bigint): string {
+  if (typeof value === 'bigint') return value.toString(10);
+  if (!Number.isSafeInteger(value)) throw new MemoryStoreNameError(`an integer part is ${value}, which is no safe integer`);
+  return String(value);
+}
+
 /** Throws RangeError for a TTL that is no whole number of milliseconds from 1 to MAX_TTL_MS. */
 export function checkTtl(ttlMs: number, maxMs = MAX_TTL_MS): void {
   if (!Number.isInteger(ttlMs) || ttlMs < 1 || ttlMs > maxMs) {
