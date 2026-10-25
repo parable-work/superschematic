@@ -10285,11 +10285,16 @@ Not built:
 - No live run on Google Cloud. The first one checks that Cloud Run
   reaches the Private Service Connect endpoint through the egress
   subnet; that `endpoints[0].connections[0]` is the primary's connection
-  with one replica or more; that `SHARED_CORE_NANO` takes cluster mode
+  with one replica or more, since a reader endpoint would answer every
+  write with READONLY, which the clients count as a failed call and not
+  as an outage; that `SHARED_CORE_NANO` takes cluster mode
   disabled with one replica, and `STANDARD_SMALL` two; that the IAM
   condition on the instance holds for this resource type, or else the
-  grant is an unconditioned project grant; that `deployer`'s roles are
-  enough; the length and order of the managed CA chain; and whether the
+  grant is an unconditioned project grant, and that the condition's
+  `resource.name` takes the project's id rather than its number; that
+  `deployer`'s roles are enough, and that Private Service Connect needs
+  no API beyond Memorystore's and Network Connectivity's (such as
+  `serviceconsumermanagement.googleapis.com`); the length and order of the managed CA chain; and whether the
   subscriber's long-lived connection must authenticate again before its
   access token expires.
 - Metrics. The TypeScript and Rust runtimes have no meter and record
