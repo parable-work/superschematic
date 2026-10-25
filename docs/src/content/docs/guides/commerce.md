@@ -581,7 +581,7 @@ admits by their permissions:
 - an `Inventory`'s page shows on hand, held, available and low, the
   receive, adjust and count forms, and the movements, newest first. A
   form sends the page's `expectedSeq`, so a second click is 409, not a
-  second delivery; <!-- verify: fix-eng -->
+  second delivery;
 - a `CollectionPoint`'s shows its time zone, its opening hours as a week,
   its closures and the bookings of a range of dates;
 - a `Checkout`'s shows its holds, each item's unit price and the total as
@@ -597,7 +597,7 @@ admits by their permissions:
 
 A type that refunds itself directly gets `refundPayment`'s form, whose
 idempotency key is made as the form renders, so a form sent twice
-refunds once. <!-- verify: fix-eng -->
+refunds once.
 
 acme's Topcoat app has this back office at `/console/engine`, and the
 shop's users and roles at `/console/users` and `/console/roles`. Its

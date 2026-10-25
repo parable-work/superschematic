@@ -850,12 +850,13 @@ Every page calls the engine in-process, as the page's caller, the one
 the `PageAuthenticator` establishes, so the engine's policy decides what
 each page shows and what each form may do. No page acts as the engine's
 system principal, so a signed-out caller is 401, with a link to sign in.
-A post another site sent is refused (403). <!-- verify: fix-eng --> The
+A post another site sent is refused (403). The
 pages read each type's describe document, so a type published after the
 build has its pages too. A list is paged as the console's lists are, by
 the engine's cursor, with its title and summary fields as columns. An
-instance's page shows its own fields, then a section per behavior, then
-the operations no section shows.
+instance's page shows its own fields, an amount as money in the
+currency its `@display` names, then a section per behavior, then the
+operations no section shows.
 
 An operation's form is built from its parameters' JSON Schema. A write
 sends the instance's `expectedSeq`, so a page read before another write
@@ -864,7 +865,7 @@ renders its result on the page. A refusal renders as the console's do: a
 parameter at its control (422), a behavior's veto as its code and
 message (409, `approvals_missing: Refund needs 2 sign-offs for approved,
 and has 1`), an operation the caller's policy refuses 403, and one the
-deployment hides from its tools 404. <!-- verify: fix-eng -->
+deployment hides from its tools 404.
 
 A behavior the crate knows has a panel:
 

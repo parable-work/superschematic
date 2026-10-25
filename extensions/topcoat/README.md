@@ -1659,16 +1659,19 @@ permissions).with_claims(claims)`), so the engine's policy decides what a
 page reads and does. No page acts as the system principal: no caller is
 401. The API's `@rateLimit` and `@timeout` do not apply. Every POST
 passes the console's own cross-origin check before the engine is
-called, trusting no other origin, so a post another site sent is 403
-`cross_origin` whatever the `PageAuthenticator` and the origin policy
-let through. <!-- verify: fix-eng --> What a page reads renders on the
+called, trusting no other origin, not even the identity config's
+`trustedOrigins`, so a post another site sent is 403 `cross_origin`
+whatever the `PageAuthenticator` and the origin policy let through. What a page reads renders on the
 server; no procedure hands it to the browser.
 
 A page reads the type's describe document. Its `display` names the type
 and gives a list's columns: the title field, linked, else the id, then
 the summary fields, own or qualified (`Stock.available`). A list pages by
 the engine's cursor, with `back` and a size form of 10, 50 and 200 as
-the console's lists have ([A paged list](#a-paged-list)). The nav and
+the console's lists have ([A paged list](#a-paged-list)). An instance's
+own amount shows as money ([Money](#money)) in the currency its field's
+`@display` names, else its type's one `Finance.Currency` field's, which
+the page reads from the type's live schema document. The nav and
 the index gain Engine when the caller may read a type, and the trail
 names an instance by its title field, else its noun and id.
 
@@ -1681,7 +1684,7 @@ page was read. An operation is offered as the engine's tool manifest
 offers it to the caller: one the type lacks, or the deployment hides
 (`outputs.engine.tools.hidden`), is 404, one the policy refuses is 403
 with the engine's reason, and one the engine hides from MCP alone, for
-a handle MCP would refuse, is offered. <!-- verify: fix-eng -->
+a handle MCP would refuse, is offered.
 
 | The engine refuses | The page answers |
 | --- | --- |
@@ -1708,7 +1711,9 @@ offered has a form once.
   move whose permission the caller lacks left out.
 - **Approvals**: each gate's sign-offs against its count, who signed, and
   the caller's sign-off or withdrawal, when their permissions cover the
-  gate's and the gate does not exclude its creator.
+  gate's and the gate does not exclude its creator. Entering the gated
+  state consumes its sign-offs, so a gate the instance entered or passed
+  says so: "Met: it entered Approved with its 2 sign-offs."
 - **Branches**: the refs, primary first (`?ref=`), a ref's commits 50 at
   a time (`?skip=`), a diff of two of them (`?from=&to=`, at most 200
   rows), the release log, and the writes as `engine_pages::operation_form`
@@ -1716,7 +1721,7 @@ offered has a form once.
   rebase, revert, merge and discard. A tagged commit's release is a
   button in its row.
 - **Stock**: on hand, held, available and low, the receive, adjust and
-  count forms, each with the page's `expectedSeq` <!-- verify: fix-eng -->,
+  count forms, each with the page's `expectedSeq`,
   and the movements 20 at a time (`?movements=`).
 - **Calendar**: the time zone, the capacity, the hours as a week, the
   closures, and the bookings between `bookingsFrom` and `bookingsTo` (UTC,
@@ -1729,7 +1734,7 @@ offered has a form once.
   instance links to what it refunds; an instance another type refunds
   through Approvals links to that type; any other holds `refundPayment`'s
   form, in minor units, whose idempotency key is made as the form
-  renders. <!-- verify: fix-eng -->
+  renders.
 
 `pages.engine: false` (`pages_engine = false`) turns the engine pages
 off. The build log says why a crate whose pages and engine are on has
