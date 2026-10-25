@@ -28,6 +28,7 @@
 //! is semantic HTML with `ss-` classes and ships no styles.
 
 use std::fmt::Write as _;
+use crate::api::runtime;
 use crate::api::types;
 use crate::choices::Choices;
 use crate::forms::{FormErrors, NotesListNotesArgsForm, Refusal, notes_list_notes_args_fields};
@@ -129,17 +130,18 @@ impl Settings {
     }
 
     /// The settings the app put in its context, or the defaults.
-    fn of(cx: &Cx) -> Self {
+    pub fn of(cx: &Cx) -> Self {
         try_app_context::<Settings>(cx).cloned().unwrap_or_default()
     }
 
-    fn site_title(&self) -> String {
+    /// The site's title: the app's, else the service's name in words.
+    pub fn site_title(&self) -> String {
         self.title.clone().unwrap_or_else(|| TITLE.to_owned())
     }
 
     /// The sign-in page with `next`, the page to come back to; none when the
     /// app gave no sign-in page.
-    fn sign_in_href(&self, next: &str) -> Option<String> {
+    pub fn sign_in_href(&self, next: &str) -> Option<String> {
         let url = self.sign_in.as_deref()?;
         let join = if url.contains('?') { '&' } else { '?' };
         Some(format!("{url}{join}next={}", encode(next)))
@@ -153,14 +155,14 @@ fn choices_of(cx: &Cx, resource: &str) -> Choices {
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
-fn current(cx: &Cx) -> String {
+pub fn current(cx: &Cx) -> String {
     let uri = uri(cx);
     uri.path_and_query().map_or_else(|| uri.path().to_owned(), |path| path.as_str().to_owned())
 }
 
 /// Percent-encodes each byte of `value` but a letter, a digit and `-._~`,
 /// for a path's segment or a query's value.
-fn encode(value: &str) -> String {
+pub fn encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
@@ -174,7 +176,7 @@ fn encode(value: &str) -> String {
 
 /// A path's percent-encoded segment as text, for a label and a route's
 /// value.
-fn decode(segment: &str) -> String {
+pub fn decode(segment: &str) -> String {
     let bytes = segment.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
@@ -196,6 +198,155 @@ fn decode(segment: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A list's query for one of its pages (D60): `pairs`, the filter's and
+/// the limit, then `cursor` and `back` when given, each name and value
+/// percent-encoded, which leaves a cursor and `back` as they are.
+pub fn pager_query(pairs: &[(String, String)], cursor: Option<&str>, back: Option<&str>) -> String {
+    let paging = [("cursor", cursor), ("back", back)].into_iter().filter_map(|(name, value)| Some((name, value?)));
+    let mut query = String::new();
+    for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(paging) {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(&encode(name));
+        query.push('=');
+        query.push_str(&encode(value));
+    }
+    query
+}
+
+/// A list's page: its path, then its query unless that is empty.
+pub fn pager_href(base: &str, query: &str) -> String {
+    if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
+}
+
+/// The most characters `back` holds (D44, amended): the cursors of the
+/// pages before a paged list's page, oldest first, from the second page on.
+const MAX_BACK: usize = 4096;
+
+/// The pages before a paged list's page, as its query's `back` says (D44,
+/// amended): the cursors of those after the first, oldest first, and
+/// whether earlier ones were dropped (`~`), which leaves the page before the
+/// oldest unknown. The first page has no cursor and is never among them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Back {
+    dropped: bool,
+    cursors: Vec<String>,
+}
+
+impl Back {
+    /// `back` as `query` holds it, its first value, read as a form reads a
+    /// query: absent or empty is no history. With a cursor sent, a value that
+    /// breaks the rule reads as `~`, the page before unknown; without one,
+    /// any value is ignored. It is never a refusal.
+    pub fn read(query: &str, cursor_sent: bool) -> Back {
+        if !cursor_sent {
+            return Back::default();
+        }
+        let sent = Form::<Vec<(String, String)>>::from_bytes(query.as_bytes())
+            .ok()
+            .and_then(|Form(pairs)| pairs.into_iter().find(|(name, _)| name == "back"))
+            .map(|(_, value)| value)
+            .unwrap_or_default();
+        if sent.is_empty() {
+            return Back::default();
+        }
+        Back::parse(&sent).unwrap_or(Back { dropped: true, cursors: Vec::new() })
+    }
+
+    /// `back` held to its rule: at most `MAX_BACK` characters, its entries
+    /// joined by `.`, the first a cursor or `~`, every other a cursor.
+    fn parse(text: &str) -> Option<Back> {
+        if text.len() > MAX_BACK {
+            return None;
+        }
+        let mut entries = text.split('.').peekable();
+        let dropped = entries.next_if_eq(&"~").is_some();
+        let cursors = entries.map(|entry| is_cursor(entry).then(|| entry.to_owned())).collect::<Option<Vec<_>>>()?;
+        Some(Back { dropped, cursors })
+    }
+
+    /// The `back` of the next page: this one with `cursor`, the current
+    /// page's, after it, the oldest dropped, `~` first, until it fits in
+    /// `MAX_BACK`.
+    pub fn push(&self, cursor: &str) -> String {
+        let mut cursors: Vec<&str> = self.cursors.iter().map(String::as_str).chain([cursor]).collect();
+        let mut dropped = self.dropped;
+        let mut text = back_text(dropped, &cursors);
+        while text.len() > MAX_BACK && cursors.len() > 1 {
+            cursors.remove(0);
+            dropped = true;
+            text = back_text(dropped, &cursors);
+        }
+        text
+    }
+
+    /// The page before: its cursor, none for the first page, and its own
+    /// `back`; none when it is unknown, `~` with no cursor after it.
+    pub fn pop(&self) -> Option<(Option<String>, Option<String>)> {
+        match self.cursors.split_last() {
+            Some((last, rest)) => {
+                let earlier: Vec<&str> = rest.iter().map(String::as_str).collect();
+                let back = (self.dropped || !earlier.is_empty()).then(|| back_text(self.dropped, &earlier));
+                Some((Some(last.clone()), back))
+            }
+            None if self.dropped => None,
+            None => Some((None, None)),
+        }
+    }
+}
+
+/// `back` as a query holds it: `~` when cursors were dropped, then the
+/// cursors, oldest first, joined by `.`.
+fn back_text(dropped: bool, cursors: &[&str]) -> String {
+    dropped.then_some("~").into_iter().chain(cursors.iter().copied()).collect::<Vec<_>>().join(".")
+}
+
+/// A cursor by D60's rule, as the route reads one: 1 to 1024 characters of
+/// the unpadded base64url alphabet.
+fn is_cursor(text: &str) -> bool {
+    runtime::page::Cursor::parse(text).is_ok()
+}
+
+/// The links of a paged list (D60, D44 amended), after its table, each
+/// `base` with its query: the first page's while the page is a later one,
+/// the page before's while it is known, and the next page's while one
+/// follows; then, for more than one size, a GET form of `sizes` that holds
+/// `hidden`, the filter's pairs, and starts again at the first page.
+/// Nothing when none applies: a list has no page's number, which a cursor
+/// cannot give.
+#[component]
+pub async fn pager(base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        if first.is_some() || prev.is_some() || next.is_some() || !sizes.is_empty() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first {
+                    <a rel="first" href=(pager_href(&base, &first))>"First page"</a>
+                }
+                if let Some(earlier) = prev {
+                    <a rel="prev" href=(pager_href(&base, &earlier))>"Previous page"</a>
+                }
+                if let Some(later) = next {
+                    <a rel="next" href=(pager_href(&base, &later))>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size">
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
+                }
+            </nav>
+        }
+    })
 }
 
 /// The refusal of a page whose route holds a value its argument does not
@@ -226,7 +377,7 @@ fn alone(refusal: &Refusal, route: &[&str]) -> bool {
 
 /// What a refusal says: its form's messages, then each control's after its
 /// name.
-fn messages(refusal: &Refusal) -> Vec<String> {
+pub fn messages(refusal: &Refusal) -> Vec<String> {
     let mut out = refusal.errors.form.clone();
     for (name, list) in &refusal.errors.fields {
         out.extend(list.iter().map(|message| format!("{name}: {message}")));
@@ -238,7 +389,7 @@ fn messages(refusal: &Refusal) -> Vec<String> {
 /// caller who is not signed in (401) a link to the app's sign-in page that
 /// comes back to `next`.
 #[component]
-async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
+pub async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
     let status = refusal.status;
     let sign_in = if status == StatusCode::UNAUTHORIZED { Settings::of(cx).sign_in_href(&next) } else { None };
     let messages = messages(&refusal);
@@ -257,7 +408,7 @@ async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Re
 }
 
 /// The heading of a refusal by its status.
-fn heading(status: StatusCode) -> &'static str {
+pub fn heading(status: StatusCode) -> &'static str {
     match status.as_u16() {
         401 => "Sign in to see this page",
         403 => "Not allowed",
@@ -295,6 +446,35 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
         Ok(_) => links.push(link),
         Err(status) => *signed_out |= status == StatusCode::UNAUTHORIZED,
     }
+}
+
+/// A link the console's own pages add to the nav and the index, after the
+/// resources' lists: the engine's types (`engine_pages::nav_link`), the
+/// account, users and roles (`identity_pages::nav_links`). A `post` link is
+/// a button that posts to `href`, as signing out does, which the index
+/// leaves out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavLink {
+    pub href: String,
+    pub label: String,
+    pub post: bool,
+}
+
+/// The console's own pages' links, in the nav and the index after the
+/// resources'. The request keeps them (`#[memoize]`), so the nav and the
+/// index ask once.
+#[memoize]
+async fn console_links(cx: &Cx) -> Vec<NavLink> {
+    let mut links = Vec::new();
+    links.extend(crate::engine_pages::nav_link(cx).await);
+    links
+}
+
+/// The trail of a page of the console's own at `path`, after the index:
+/// each step's label and link, the last the page itself. None for a page
+/// that is not theirs, whose trail the resources' tree gives.
+async fn console_trail(cx: &Cx, path: &str) -> Option<Vec<(String, Option<String>)>> {
+    crate::engine_pages::trail(cx, path).await
 }
 
 /// A collection in the trail: its key, its words in a path, its labels,
@@ -430,17 +610,57 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
+    // The console's own pages' links, the current one marked as a
+    // resource's is; a post's button is never current.
+    let console: Vec<(String, String, bool, Option<&'static str>)> = console_links(cx)
+        .await
+        .iter()
+        .map(|link| {
+            let current = if link.post {
+                None
+            } else if path == link.href {
+                Some("page")
+            } else if at(&link.href) {
+                Some("true")
+            } else {
+                None
+            };
+            (link.href.clone(), link.label.clone(), link.post, current)
+        })
+        .collect();
     let crumbs = trail(&path, &title);
     let crumbs: Vec<(String, Option<String>, bool)> =
         crumbs.into_iter().map(|crumb| (crumb.label, crumb.href, crumb.current)).collect();
+    // A page of the console's own names its steps after the index.
+    let crumbs = match console_trail(cx, &path).await {
+        Some(steps) => {
+            let mut all = vec![(title.clone(), Some(PREFIX.to_owned()), false)];
+            all.extend(steps.into_iter().map(|(label, href)| (label, href, false)));
+            if let Some(last) = all.last_mut() {
+                last.1 = None;
+                last.2 = true;
+            }
+            all
+        }
+        None => crumbs,
+    };
     Ok(view! {
         <div class="ss-pages">
             <header class="ss-header"><a href=(PREFIX)>(title)</a></header>
-            if !nav.is_empty() {
+            if !nav.is_empty() || !console.is_empty() {
                 <nav class="ss-nav" aria-label="Resources">
                     <ul>
                         for (href, label, current) in nav {
                             <li><a href=(href) aria-current=(current)>(label)</a></li>
+                        }
+                        for (href, label, post, current) in console {
+                            <li>
+                                if post {
+                                    <form method="post" action=(href)><button type="submit">(label)</button></form>
+                                } else {
+                                    <a href=(href) aria-current=(current)>(label)</a>
+                                }
+                            </li>
                         }
                     </ul>
                 </nav>
@@ -470,14 +690,21 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     let settings = Settings::of(cx);
     let (links, signed_out) = listed(cx).await;
     let sign_in = if *signed_out { settings.sign_in_href(&current(cx)) } else { None };
+    // The console's own pages' links, after the resources': a post's button
+    // is the nav's alone.
+    let console: Vec<(String, String)> =
+        console_links(cx).await.iter().filter(|link| !link.post).map(|link| (link.href.clone(), link.label.clone())).collect();
     Ok(view! {
         <h1>(settings.site_title())</h1>
-        if links.is_empty() {
+        if links.is_empty() && console.is_empty() {
             <p class="ss-empty">"There is nothing here you may list."</p>
         } else {
             <ul class="ss-index">
                 for link in links {
                     <li><a href=(link.href)>(link.label)</a></li>
+                }
+                for (href, label) in console {
+                    <li><a href=(href)>(label)</a></li>
                 }
             </ul>
         }

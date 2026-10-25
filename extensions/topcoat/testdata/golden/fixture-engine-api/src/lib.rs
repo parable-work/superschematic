@@ -29,6 +29,9 @@
 //! `/console`, with a layout and a nav; the app's `.discover()`
 //! registers them, and `pages::Settings` in its app context names its
 //! sign-in page and its choices.
+//! `engine_pages` serves the engine's types under `/console/engine`, an
+//! instance's behaviors in `engine_panels`' panels, each page calling the
+//! engine in-process as its caller.
 //!
 //! The app names this crate (`use`s an item of it), so the linker keeps
 //! it.
@@ -42,6 +45,8 @@ pub mod records;
 mod wire;
 pub mod views;
 pub mod engine;
+pub mod engine_pages;
+pub mod engine_panels;
 
 /// The service's API crate: its `Implementations`, `Args` structs and
 /// `types`.

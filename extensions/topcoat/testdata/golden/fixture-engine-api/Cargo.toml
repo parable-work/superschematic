@@ -12,6 +12,8 @@ schemas-fixture-engine-api-api = { path = "../../api/fixture-engine-api" }
 async-trait = "0.1.89"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+# The blocking pool the engine's pages call the engine on.
+tokio = { version = "1.52.2", features = ["rt"] }
 topcoat = { version = "0.10", features = ["tower"] }
 # The engine of fixture-engine-db (D58), in-process on SQLite: its routes as an
 # axum router, the behaviors it runs, and the engine document of the
@@ -20,3 +22,5 @@ superschematic-engine = { path = "<repo>/runtime/engine/rust/engine", default-fe
 superschematic-engine-behaviors = { path = "<repo>/runtime/engine/rust/behaviors", default-features = false, features = ["sqlite"] }
 schemas-fixture-engine-db-types = { path = "../../types/rust/fixture-engine-db" }
 axum = { version = "0.8.9", default-features = false }
+# Each currency's minor units, by which views.rs formats an amount.
+superscalar = { path = "<repo>/third_party/superscalar/crates/core" }

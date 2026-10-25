@@ -327,9 +327,11 @@ func TestTheConsoleFixturesBuild(t *testing.T) {
 
 // TestTheConsolePagesConfig: outputs.topcoat.pages.engine and .identity,
 // and [extension.topcoat]'s pages_engine and pages_identity, take what
-// they declare and refuse anything else; the engine's and the identity
-// pages, which are not built yet, say so in the build log of a crate whose
-// pages are on, and not when their key turns them off.
+// they declare and refuse anything else; the identity pages, which are not
+// built yet, say so in the build log of a crate whose pages are on, and
+// neither the engine's nor the identity pages are asked for when their key
+// turns them off. TestTheConsolePagesTheEngine holds the engine pages'
+// build log.
 func TestTheConsolePagesConfig(t *testing.T) {
 	// logOf builds service with pages as its outputs.topcoat.pages, or
 	// with no outputs.topcoat for nil, under names, and gives its build log
@@ -351,12 +353,8 @@ func TestTheConsolePagesConfig(t *testing.T) {
 		built = err == nil
 		return log.String()
 	}
-	engine := "  - topcoat: no engine pages at /console/engine: the engine console is not built yet\n"
 	identity := "  - topcoat: no sign-in, account, users or roles pages under /console: the identity pages are not built yet\n"
 	names := registry.DefaultNaming()
-	if log := logOf(engineService, map[string]any{"enabled": true}, names); !strings.Contains(log, engine) {
-		t.Errorf("the engine pages, on by default, are not in the build log:\n%s", log)
-	}
 	if log := logOf(engineService, map[string]any{"enabled": true, "engine": false}, names); strings.Contains(log, "no engine pages") {
 		t.Errorf("pages.engine false still asks for the engine pages:\n%s", log)
 	}
