@@ -1,45 +1,1053 @@
 {
   "name": "Comments",
-  "description": "Comments on the instance, each a reply to another or not. A caller who may write the instance adds one; a caller who may read it lists them. Deleting the instance deletes its comments.",
+  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. Every operation is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "maxBodyLength": { "description": "The longest body a post or an edit may give, in code points; 40000 when absent.", "type": "integer", "minimum": 1, "maximum": 40000 },
+      "editWindowMs": {
+        "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+        "type": "integer",
+        "minimum": 1000
+      },
+      "blocks": {
+        "description": "The block kinds a post or an edit may give; every kind when absent, none when empty.",
+        "type": "array",
+        "uniqueItems": true,
+        "items": { "enum": ["ref", "action"] }
+      },
+      "moderatePermission": {
+        "description": "The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges.",
+        "type": "string",
+        "minLength": 1
+      },
+      "pinPermission": { "description": "The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may.", "type": "string", "minLength": 1 },
+      "resolvePermission": { "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.", "type": "string", "minLength": 1 }
+    }
+  },
   "fields": [
-    { "name": "commentCount", "description": "How many comments the instance has." }
+    { "name": "messages", "description": "How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.", "volatile": true },
+    { "name": "lastMessageAt", "description": "When the latest posted message was posted, in epoch milliseconds; absent while there is none.", "volatile": true },
+    { "name": "threads", "description": "The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.", "volatile": true }
   ],
   "operations": [
     {
-      "name": "comment",
-      "description": "Adds a comment to the instance, or a reply to one of its comments.",
+      "name": "post",
+      "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": ["body"],
         "properties": {
-          "body": { "description": "The comment's text.", "type": "string", "minLength": 1, "maxLength": 10000, "pattern": "\\S" },
-          "replyTo": { "description": "The id of the instance's comment this one replies to.", "type": "integer", "minimum": 1 }
+          "body": { "description": "The text, Markdown, at most the config's maxBodyLength code points.", "type": "string", "minLength": 1, "maxLength": 40000, "pattern": "\\S" },
+          "blocks": {
+            "description": "Structured parts beside the body, each of a kind the config allows.",
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "description": "A block, checked against its kind.",
+              "type": "object",
+              "required": ["kind"],
+              "oneOf": [
+                {
+                  "description": "Another instance of the namespace, which the poster must be able to read when the block is posted; a reader's own read decides whether it opens.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "schema", "id"],
+                  "properties": {
+                    "kind": { "const": "ref" },
+                    "schema": { "description": "The instance's schema.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+                    "id": { "description": "The instance's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+                  }
+                },
+                {
+                  "description": "A card for something the poster did, \"ran the tests\" say; an edit moves its status.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "title", "status"],
+                  "properties": {
+                    "kind": { "const": "action" },
+                    "title": { "description": "What was done.", "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+                    "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
+                    "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
+                  }
+                }
+              ]
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed.",
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\S+$" }
+          },
+          "thread": { "description": "The id of the top-level message to reply in; a top-level message when absent.", "type": "integer", "minimum": 1 },
+          "quotes": { "description": "The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread.", "type": "integer", "minimum": 1 },
+          "clientId": { "description": "The caller's key for the message, so a retry returns the message it posted.", "type": "string", "minLength": 1, "maxLength": 128 }
         }
       },
       "resultSchema": {
-        "description": "The comment.",
+        "description": "The message.",
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "body", "createdBy", "createdAt"],
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
         "properties": {
-          "id": { "description": "The comment's number on the instance: 1, 2, 3, ...", "type": "integer" },
-          "replyTo": { "description": "The id of the comment it replies to.", "type": "integer" },
-          "body": { "type": "string" },
-          "createdBy": { "description": "The subject of the caller who added it.", "type": "string" },
-          "createdAt": { "description": "When, in epoch milliseconds.", "type": "integer" }
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
         }
       },
-      "writes": true
+      "writes": true,
+      "beside": true
     },
     {
-      "name": "listComments",
-      "description": "Lists the instance's comments, oldest first, one page at a time.",
+      "name": "edit",
+      "description": "Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "body": { "description": "The text, Markdown, at most the config's maxBodyLength code points.", "type": "string", "minLength": 1, "maxLength": 40000, "pattern": "\\S" },
+          "blocks": {
+            "description": "The blocks, in place of the message's; it keeps them when absent.",
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "description": "A block, checked against its kind.",
+              "type": "object",
+              "required": ["kind"],
+              "oneOf": [
+                {
+                  "description": "Another instance of the namespace, which the poster must be able to read when the block is posted; a reader's own read decides whether it opens.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "schema", "id"],
+                  "properties": {
+                    "kind": { "const": "ref" },
+                    "schema": { "description": "The instance's schema.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+                    "id": { "description": "The instance's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+                  }
+                },
+                {
+                  "description": "A card for something the poster did, \"ran the tests\" say; an edit moves its status.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "title", "status"],
+                  "properties": {
+                    "kind": { "const": "action" },
+                    "title": { "description": "What was done.", "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+                    "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
+                    "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
+                  }
+                }
+              ]
+            }
+          },
+          "mentions": {
+            "description": "The mentions, in place of the message's; it keeps them when absent.",
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\S+$" }
+          }
+        }
+      },
+      "resultSchema": {
+        "description": "The message after the edit.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "deleteMessage",
+      "description": "Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The message, deleted.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "purge",
+      "description": "Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "What was removed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "purged"],
+        "properties": {
+          "message": { "description": "The id of the message purged.", "type": "integer" },
+          "purged": {
+            "description": "The ids of every message removed: the message, and for a top-level one its replies, in ascending order.",
+            "type": "array",
+            "items": { "type": "integer" }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "react",
+      "description": "Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "emoji"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "emoji": { "description": "The reaction: an emoji's name or the character itself, at most 32 code points.", "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^\\S+$" }
+        }
+      },
+      "resultSchema": {
+        "description": "The message after the reaction.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "unreact",
+      "description": "Removes the caller's reaction from a posted message.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "emoji"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "emoji": { "description": "The reaction: an emoji's name or the character itself, at most 32 code points.", "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^\\S+$" }
+        }
+      },
+      "resultSchema": {
+        "description": "The message after the reaction is removed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "pin",
+      "description": "Pins a posted message, top-level or a reply. Needs pinPermission when the config names one.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The message, pinned.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "unpin",
+      "description": "Unpins a pinned message. Needs pinPermission when the config names one.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The message, unpinned.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "resolve",
+      "description": "Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["thread"],
+        "properties": { "thread": { "description": "The id of the thread's top-level message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The top-level message, resolved.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "reopen",
+      "description": "Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["thread"],
+        "properties": { "thread": { "description": "The id of the thread's top-level message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The top-level message, open.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "listMessages",
+      "description": "Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "limit": { "description": "At most this many comments; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "thread": { "description": "The id of a top-level message: the page is its thread's replies, and the result carries the message as root.", "type": "integer", "minimum": 1 },
+          "around": { "description": "A message of the listing: the page holds it and the messages either side of it. At most one of around, before and after.", "type": "integer", "minimum": 1 },
+          "before": { "description": "The page is the latest messages with a lower id.", "type": "integer", "minimum": 1 },
+          "after": { "description": "The page is the earliest messages with a higher id.", "type": "integer", "minimum": 1 },
+          "limit": { "description": "At most this many messages; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 100 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "before", "after"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+              "properties": {
+                "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+                "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+                "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+                "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+                "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+                "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+                "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+                "blocks": {
+                  "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+                  "type": "array",
+                  "items": {
+                    "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": { "kind": { "enum": ["ref", "action"] } }
+                  }
+                },
+                "mentions": {
+                  "description": "The subjects the message names for someone to hear of it; none once deleted.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "reactions": {
+                  "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["count", "mine"],
+                    "properties": {
+                      "count": { "type": "integer" },
+                      "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+                    }
+                  }
+                },
+                "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+                "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+                "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+                "pinned": { "type": "boolean" },
+                "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+                "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+                "participants": {
+                  "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "resolved": {
+                  "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["by", "at"],
+                  "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+                }
+              }
+            }
+          },
+          "before": {
+            "description": "The id to pass as before for the page of older messages: the first item's, when the listing has an older message; null when it has none or the page is empty.",
+            "type": ["integer", "null"]
+          },
+          "after": {
+            "description": "The id to pass as after for the page of newer messages: the last item's, when the listing has a newer message; null when it has none or the page is empty.",
+            "type": ["integer", "null"]
+          },
+          "root": {
+            "description": "With thread, the thread's top-level message.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+            "properties": {
+              "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+              "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+              "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+              "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+              "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+              "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+              "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+              "blocks": {
+                "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+                "type": "array",
+                "items": {
+                  "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                  "type": "object",
+                  "required": ["kind"],
+                  "properties": { "kind": { "enum": ["ref", "action"] } }
+                }
+              },
+              "mentions": {
+                "description": "The subjects the message names for someone to hear of it; none once deleted.",
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "reactions": {
+                "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["count", "mine"],
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+                  }
+                }
+              },
+              "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+              "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+              "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+              "pinned": { "type": "boolean" },
+              "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+              "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+              "participants": {
+                "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "resolved": {
+                "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["by", "at"],
+                "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "getMessage",
+      "description": "Reads one message of the conversation, a deleted one included.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": { "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "description": "The message.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted it.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted it (D37).", "type": "string" },
+          "state": { "description": "posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text.", "enum": ["posted", "deleted"] },
+          "body": { "description": "The text, Markdown; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, in epoch milliseconds.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: when its thread's latest posted reply was posted; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+          }
+        }
+      }
+    },
+    {
+      "name": "listEdits",
+      "description": "Lists what a message held before each of its edits, oldest first, one page at a time.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "limit": { "description": "At most this many edits; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
           "cursor": { "description": "The next of the previous page.", "type": "string" }
         }
       },
@@ -53,13 +1061,58 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["id", "body", "createdBy", "createdAt"],
+              "required": ["edit", "body", "blocks", "mentions", "by", "at"],
               "properties": {
-                "id": { "type": "integer" },
-                "replyTo": { "type": "integer" },
-                "body": { "type": "string" },
-                "createdBy": { "type": "string" },
-                "createdAt": { "type": "integer" }
+                "edit": { "description": "The edit's number on the message: 1, 2, 3, ...", "type": "integer" },
+                "body": { "description": "The body before the edit.", "type": "string" },
+                "blocks": {
+                  "description": "The blocks before the edit.",
+                  "type": "array",
+                  "items": {
+                    "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": { "kind": { "enum": ["ref", "action"] } }
+                  }
+                },
+                "mentions": { "description": "The mentions before the edit.", "type": "array", "items": { "type": "string" } },
+                "by": { "description": "The subject of the caller who made the edit.", "type": "string" },
+                "at": { "description": "When, in epoch milliseconds.", "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "name": "listReactions",
+      "description": "Lists who reacted to a message with an emoji, in the order they reacted, one page at a time.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "emoji"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "emoji": { "description": "The reaction: an emoji's name or the character itself, at most 32 code points.", "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^\\S+$" },
+          "limit": { "description": "At most this many reactions; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["subject", "at"],
+              "properties": {
+                "subject": { "description": "The subject of the caller who reacted.", "type": "string" },
+                "at": { "description": "When, in epoch milliseconds.", "type": "integer" }
               }
             }
           },
@@ -67,5 +1120,30 @@
         }
       }
     }
+  ],
+  "vetoes": [
+    {
+      "code": "no_message",
+      "description": "The id a call names, as message, thread, quotes or around, is not a message of the conversation, or a purged one; or around names a message outside the listing. details: message."
+    },
+    { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, listMessages, resolve and reopen. details: message, thread, the reply's thread." },
+    { "code": "not_in_thread", "description": "post with quotes naming a message outside the thread it replies in. details: message, thread." },
+    { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve or reopen of a deleted message, or a post quoting one. details: message." },
+    {
+      "code": "not_author",
+      "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread). details: message, author."
+    },
+    { "code": "edit_window_passed", "description": "An edit by the message's author more than the config's editWindowMs after it was posted. details: message, createdAt, editWindowMs." },
+    { "code": "too_many_edits", "description": "An edit of a message that has been edited 500 times. details: message, max." },
+    { "code": "already_reacted", "description": "react with an emoji the caller has already given the message. details: message, emoji." },
+    { "code": "not_reacted", "description": "unreact of an emoji the caller has not given the message. details: message, emoji." },
+    { "code": "too_many_reactions", "description": "react with a 21st distinct emoji on a message. details: message, max." },
+    { "code": "already_pinned", "description": "pin of a pinned message. details: message." },
+    { "code": "not_pinned", "description": "unpin of a message that is not pinned. details: message." },
+    { "code": "already_resolved", "description": "resolve of a resolved thread. details: thread, by, at." },
+    { "code": "not_resolved", "description": "reopen of a thread that is not resolved. details: thread." },
+    { "code": "block_not_allowed", "description": "A block of a kind the config's blocks does not list. details: block, its index in blocks; kind; allowed." },
+    { "code": "ref_not_found", "description": "A ref block whose instance does not exist or the caller may not read, the same refusal for both. details: block, schema, id." },
+    { "code": "not_configured", "description": "purge on a type whose config names no moderatePermission. details: permission, \"moderatePermission\"." }
   ]
 }
