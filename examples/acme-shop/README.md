@@ -20,7 +20,7 @@ kind, decorators and auth provider.
 | `schemas/services/shop-stock` | API over `shop-db`'s `Inventory`, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` count a product's shelf and set the level it is low at, and book deliveries in, and only `shop-orders` tells it what a checkout sold (`@requireService`); a sale that leaves a product low enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` files one for each product the engine lists low (`Stock.low`) and orders the open ones (D65) |
 | `schemas/services/shop-cart` | API over `shop-db`'s engine, served in TypeScript, with a TypeScript SDK: a shopper's cart, which is a `Checkout` in `cart`, and the pickup slots each `CollectionPoint` has free (`findAvailability`); a shopper's support tickets, a `Ticket`; and its deriver `TriageTickets` (`@deriver`, D74), a deployable of its own that fills each ticket's derived fields. It is a service of its own because `storefront-stack` runs the storefront as a Cloudflare Worker, which cannot load the engine |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
-| `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
+| `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55), with a dev server `stack dev` runs (D82) |
 | `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-cart` and `shop-storefront`, on TypeScript servers Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and jobs and `shop-stock`'s Rust ones, `shop-db`'s engine runner, `shop-cart`'s deriver `TriageTickets`, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` and `SettlePayments` every minute and `OrderRestocks` only on demand |
 | `schemas/services/storefront-stack` | Stack: deploys `shop-storefront` alone, exposed: on Bun in `Dev`, on the `local` target, and in `Staging` as a Cloudflare Worker at workers.dev, on the `cloudflare` target with the docs' placeholder account (D64), whose build adds the Workers entrypoint `fetch.ts` and `bundle.ts` beside the server's `main.ts`; `src/cloudflare-target.ts` types the target's values and settings |
 | `schemas/services/shop-wishlist-db` | DB: a shopper's wishlist, one row per shopper and product with their note, built for SQLite first and Postgres, so the API over it gets D1's interface (D64) |
@@ -36,7 +36,7 @@ kind, decorators and auth provider.
 | `testdata/wishlist-v2` | the wishlist's second version, a schemas root of its own and an implementation: a quantity in place of the note ([The wishlist, on SQLite and on D1](#the-wishlist-on-sqlite-and-on-d1)) |
 | `scripts/workerd` | what `scripts/check.sh` runs the Workers bundles with under workerd: the storefront's, and the wishlist's with `d1-binding.js`, a stand-in for its d1 binding |
 | `typescript/clients` | a `shop-orders` client and type tests; like the implementation, a member of `schemas/dist`'s Bun workspace |
-| `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, bundled with `bun build`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
+| `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, bundled with `bun build`, and served by Bun's dev server under `stack dev`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its catalog, orders and reviews in memory, its checkouts and acmepay's webhook unserved (501), since only the stack's Go server sells through the engine, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
@@ -57,7 +57,10 @@ deadlines, `shop-orders`' worker `FulfilOrders`, which fulfils each order
 as it is placed, its jobs `ShipOrders` and `SettlePayments` every minute,
 `shop-stock`'s Rust worker `ReorderStock`, which files a restock request
 for each product a sale runs low, its Rust job `OrderRestocks`, and the
-site `shop-web`, built once and served on its own port with its config.
+site `shop-web`'s dev server, Bun's, which reloads the page as you edit
+`web/shop-web`, behind a proxy on the site's port that serves `shop-api`
+under `/api/shop-api` on the same origin (D82); `--build-sites` builds
+the site once and serves its files instead.
 It needs Docker, Go, Bun, cargo and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL, port and service credential, and Ctrl-C stops it. While it runs,
@@ -413,6 +416,9 @@ placed, its order written and the sale reported to `shop-stock` in one
 trace, a sale reported with the shopper's session alone refused 401, and
 a refund two members of staff sign off made by `SettlePayments` with
 `stack run`,
+signs a shopper in with a cookie session through `shop-web`'s origin,
+where the dev server's proxy serves `shop-api`, with no CORS set, and
+opens the page's hot-reload socket through it (D82),
 signs two shoppers in, each of whom lists and pages their own orders
 alone and gets 404 for the other's, while staff list everyone's,
 sees `shop-stock`'s Rust worker file the product's restock request and
@@ -421,7 +427,7 @@ and the job once more, into an output root of its own, where
 `shop-stock`'s server, worker and job build against that root's mirror of
 `rust-impl/shop-stock`, `shop-cart` and the storefront against their
 copies of `typescript/shop-cart` and `typescript/shop-storefront`, and
-`shop-web` in its copy of
+`shop-web`, which `--build-sites` builds, in its copy of
 `web/shop-web`, while the packages under `typescript/` and
 `web/` keep the links `schemas/dist`'s install made. The
 clients take the shopper's bearer token as their second argument, from a

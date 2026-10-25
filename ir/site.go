@@ -34,6 +34,28 @@ type SiteConfig struct {
 	// names no file: `index.html` for a single-page application, whose
 	// router reads the path. Empty serves 404 for such a path.
 	Fallback string `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+
+	// Dev is the site's dev server, which `stack dev` runs in place of
+	// building the site once, behind a proxy that serves the site and the
+	// APIs it calls on one origin (D82). Nil builds the site once, as a
+	// deploy does.
+	Dev *SiteDevConfig `json:"dev,omitempty" yaml:"dev,omitempty"`
+}
+
+// SiteDevConfig is how a site's dev server runs (D82): Vite, Bun's own,
+// or any server that serves the site's code and reloads it on an edit.
+type SiteDevConfig struct {
+	// Command is the script of the site's package.json, or a binary of its
+	// dependencies, that runs the dev server, run with `bun run` in the
+	// site's directory after the workspace's install. Empty is
+	// DefaultSiteDevCommand.
+	Command string `json:"command,omitempty" yaml:"command,omitempty"`
+
+	// Port is the port the dev server listens on, on loopback, for a
+	// command that picks its own. Zero is a port `stack dev` derives per
+	// checkout, as it derives a server's, which the command reads from
+	// PORT.
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
 }
 
 // The defaults of a SiteConfig.
@@ -43,7 +65,23 @@ const (
 
 	// DefaultSiteOutput is the directory a site's build writes.
 	DefaultSiteOutput = "dist"
+
+	// DefaultSiteDevCommand is the package.json script a site's dev server
+	// runs with.
+	DefaultSiteDevCommand = "dev"
 )
+
+// SiteDevAPIPrefix begins the path on a site's origin under which its dev
+// proxy serves each API the site calls (D82): /api/<service>/<route>
+// reaches <route> on the API's server, with the prefix and the service's
+// name taken off.
+const SiteDevAPIPrefix = "/api/"
+
+// SiteDevAPIPath returns the path on a site's origin where its dev proxy
+// serves the API service named service: SiteDevAPIPrefix and the name
+// (`/api/shop-api`), with no trailing slash, the base path the site's
+// config gives the API's SDK.
+func SiteDevAPIPath(service string) string { return SiteDevAPIPrefix + service }
 
 // SiteConfigPath is the path, on a site's origin, of the config the
 // deploy writes per environment and the site reads when it loads: each
@@ -135,15 +173,30 @@ func (c SiteConfig) WithDefaults() SiteConfig {
 	if c.Fallback != "" {
 		c.Fallback = path.Clean(strings.ReplaceAll(c.Fallback, `\`, "/"))
 	}
+	if c.Dev != nil {
+		dev := *c.Dev
+		if dev.Command == "" {
+			dev.Command = DefaultSiteDevCommand
+		}
+		c.Dev = &dev
+	}
 	return c
 }
 
-// Check refuses a build script that is no script name, an output
-// directory outside the site's directory or the directory itself, and a
-// fallback outside the output.
+// Check refuses a build script or a dev command that is no script name, a
+// dev port outside 1 to 65535, an output directory outside the site's
+// directory or the directory itself, and a fallback outside the output.
 func (c SiteConfig) Check() error {
-	if c.Build != "" && (strings.TrimSpace(c.Build) != c.Build || strings.ContainsAny(c.Build, " \t\n")) {
+	if c.Build != "" && !scriptName(c.Build) {
 		return fmt.Errorf("site.build %q is no script name: name a script of the site's package.json", c.Build)
+	}
+	if c.Dev != nil {
+		if c.Dev.Command != "" && !scriptName(c.Dev.Command) {
+			return fmt.Errorf("site.dev.command %q is no script name: name a script of the site's package.json, which holds the dev server's arguments", c.Dev.Command)
+		}
+		if c.Dev.Port < 0 || c.Dev.Port > 65535 {
+			return fmt.Errorf("site.dev.port %d is no port: give one from 1 to 65535, or leave it out for stack dev to pick one and hand it in PORT", c.Dev.Port)
+		}
 	}
 	if err := relativeInside("site.output", c.Output); err != nil {
 		return err
@@ -152,6 +205,12 @@ func (c SiteConfig) Check() error {
 		return fmt.Errorf("site.output %q is the site's directory itself; name the directory its build writes", c.Output)
 	}
 	return relativeInside("site.fallback", c.Fallback)
+}
+
+// scriptName reports whether s names a package.json script or a binary
+// `bun run` runs: no surrounding space and no space inside.
+func scriptName(s string) bool {
+	return strings.TrimSpace(s) == s && !strings.ContainsAny(s, " \t\n")
 }
 
 // relativeInside refuses a path that is absolute or leaves the directory
@@ -182,6 +241,11 @@ type ResolvedSite struct {
 	Build    string `json:"build"`
 	Output   string `json:"output"`
 	Fallback string `json:"fallback,omitempty"`
+
+	// Dev is the site's dev server with its command's default filled in,
+	// which the local target runs in place of the build (D82); nil without
+	// one. The other targets build the site.
+	Dev *SiteDevConfig `json:"dev,omitempty"`
 }
 
 // SiteDigestToken is what a site's platform writes, in a string property

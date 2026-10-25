@@ -1292,6 +1292,10 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	}
 	if d.Site != nil {
 		site := *d.Site
+		if site.Dev != nil {
+			dev := *site.Dev
+			site.Dev = &dev
+		}
 		c.Site = &site
 	}
 	if d.Worker != nil {

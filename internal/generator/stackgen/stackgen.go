@@ -227,9 +227,10 @@ func declaresUserModel(c registry.GenerateContext, schema *ir.Schema, public boo
 }
 
 // SiteOf reads what a Site service builds and where its code is (D55): its
-// config with every default filled in, and its package at the naming
-// file's [implementation_paths] site template, relative to the repository
-// root, where the provisioners and the deploy find it.
+// config with every default filled in, its dev server's among them (D82),
+// and its package at the naming file's [implementation_paths] site
+// template, relative to the repository root, where the provisioners and
+// the deploy find it.
 func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
 	cfg := ir.SiteConfig{}
 	if schema.Site != nil {
@@ -244,5 +245,6 @@ func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
 		Build:    cfg.Build,
 		Output:   cfg.Output,
 		Fallback: cfg.Fallback,
+		Dev:      cfg.Dev,
 	}, nil
 }

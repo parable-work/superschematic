@@ -286,6 +286,24 @@ export type SiteConfig = {
    * The file, relative to output, served for a path that names no file: "index.html" for a single-page application, whose router reads the path. Unset answers such a path 404.
    */
   readonly fallback?: string;
+  /**
+   * The site's dev server, which stack dev runs in place of building the site once, behind a proxy that serves the site and each API it calls on one origin (D82). A deploy builds the site whether it is set or not. Unset, stack dev builds the site once.
+   */
+  readonly dev?: SiteDevConfig;
+};
+
+/**
+ * How a site's dev server runs under stack dev (D82): Vite, Bun's own (bun ./index.html), or any server that serves the site's code and reloads it on an edit.
+ */
+export type SiteDevConfig = {
+  /**
+   * The script of the site's package.json, or a binary of its dependencies, that runs the dev server, which stack dev runs with bun run after the workspace's install. Arguments go in the script. Unset is "dev".
+   */
+  readonly command?: string;
+  /**
+   * The port the dev server listens on, on loopback, for a command that picks its own. Unset, stack dev picks a port per checkout and hands it to the command in PORT, which the script passes on: "vite --port $PORT --strictPort".
+   */
+  readonly port?: number;
 };
 
 export type SchemaConfig = {

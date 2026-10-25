@@ -273,6 +273,7 @@ type stackDevFlags struct {
 	out         string
 	namingPath  string
 	removeData  bool
+	buildSites  bool
 }
 
 func newStackDevCmd(a *app) *cobra.Command {
@@ -293,8 +294,14 @@ entrypoint module at
 config, callees first, each waited on until it answers /readyz. Each job is
 built from its entrypoint module the same way and runs on its schedule,
 never two runs of one job at once, until Ctrl-C; superschematic stack run
-runs one once, from another terminal. Every process's output is printed
-with its name in front. In a project whose naming file names no
+runs one once, from another terminal. Each site is built once with its
+build script and served from a file server of its own with its config; a
+site whose config names a dev server (site.dev) runs it instead, with its
+port in PORT, behind a proxy on the site's port that serves the dev server,
+WebSocket upgrades and all, and each API the site calls under
+/api/<service>, so the page, its hot reload and the APIs share one origin
+and a session cookie needs no CORS (D82); --build-sites builds those
+sites too. Every process's output is printed with its name in front. In a project whose naming file names no
 superscalar checkout ([paths] scalar_go), a release of superschematic
 first fetches the static archives it ships for this machine into the
 user's cache, and the Go builds take CGO_LDFLAGS pointing at them, after
@@ -337,6 +344,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
 	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them")
+	cmd.Flags().BoolVar(&flags.buildSites, "build-sites", false, "build each site once and serve its files, a site with a dev server (site.dev) too, as a deploy does, in place of running its dev server")
 	// The flag's name before the storage emulator's container joined
 	// Postgres's (D54): it removes both.
 	cmd.Flags().BoolVar(&flags.removeData, "remove-database", false, "")
@@ -425,6 +433,7 @@ func (p *stackProject) writeModels(env *ir.ResolvedEnvironment, dir string) erro
 // writes, the wait on its servers, and the removal of the containers.
 type (
 	outputSetter interface{ SetOutput(io.Writer) }
+	siteBuilder  interface{ SetBuildSites(bool) }
 	waiter       interface {
 		Wait(context.Context, registry.ProvisionRequest) error
 	}
@@ -465,6 +474,12 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	if s, ok := prov.(outputSetter); ok {
 		s.SetOutput(out)
 	}
+	devSites := !flags.buildSites
+	if s, ok := prov.(siteBuilder); ok {
+		s.SetBuildSites(flags.buildSites)
+	} else {
+		devSites = false
+	}
 	buildEnv, err := releaseBuildEnv(cmd.Context(), p.names, env, out)
 	if err != nil {
 		return err
@@ -498,7 +513,7 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 			return errors.Join(err, cleanup())
 		}
 	}
-	printLocalSummary(out, env, stateDir)
+	printLocalSummary(out, env, stateDir, devSites)
 
 	var runErr error
 	if w, ok := prov.(waiter); ok {
@@ -512,8 +527,9 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 
 // printLocalSummary prints where each server, site and database of a
 // running local environment is reached, when each job runs, and what each
-// worker handles.
-func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string) {
+// worker handles. With devSites, a site with a dev server says so, and
+// where its APIs are on its origin (D82).
+func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string, devSites bool) {
 	var lines []string
 	for _, d := range env.Deployables {
 		switch {
@@ -532,7 +548,12 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 		case d.Kind == ir.DeployableJob:
 			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
 		case d.Kind == ir.DeployableSite:
-			if address, ok := d.PublicAddress.(string); ok {
+			address, ok := d.PublicAddress.(string)
+			switch {
+			case !ok:
+			case devSites && d.Site != nil && d.Site.Dev != nil:
+				lines = append(lines, fmt.Sprintf("  site     %-24s %s, its dev server (bun run %s) and its APIs under %s<service>", d.Name, address, d.Site.Dev.Command, ir.SiteDevAPIPrefix))
+			default:
 				lines = append(lines, fmt.Sprintf("  site     %-24s %s", d.Name, address))
 			}
 		case d.Kind == ir.DeployableWorker && d.Worker != nil && d.Worker.Instances == 0:

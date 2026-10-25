@@ -117,6 +117,11 @@ type Provisioner struct {
 	// Clock is the time the jobs' schedules read; nil is the system's.
 	Clock Clock
 
+	// BuildSites builds each site once and serves its files, a site with
+	// a dev server too, in place of running the dev server (D82): stack
+	// dev --build-sites.
+	BuildSites bool
+
 	mu      sync.Mutex
 	console *console
 	running map[string][]*runningServer
@@ -150,6 +155,14 @@ func (p *Provisioner) SetOutput(w io.Writer) {
 	defer p.mu.Unlock()
 	p.Out = w
 	p.console = nil
+}
+
+// SetBuildSites sets BuildSites, for the command that runs the
+// provisioner registered with the target (D82).
+func (p *Provisioner) SetBuildSites(build bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.BuildSites = build
 }
 
 func (p *Provisioner) runner() Runner {
@@ -611,9 +624,9 @@ func (prog *Program) outputs() map[string]map[string]any {
 	return out
 }
 
-// Wait blocks until ctx is done, and returns nil, or until a server or a
-// worker (D53) of the environment exits, and returns an error that names
-// it. Meanwhile it runs
+// Wait blocks until ctx is done, and returns nil, or until a server, a
+// worker (D53) or a site's dev server (D82) of the environment exits, and
+// returns an error that names it. Meanwhile it runs
 // each job the rollout built on its schedule (jobs.go): a job's run that
 // ends, however it ends, never stops the environment. Before it returns,
 // it stops the runs going.
@@ -633,22 +646,37 @@ func (p *Provisioner) Wait(ctx context.Context, req registry.ProvisionRequest) e
 	}()
 	p.mu.Lock()
 	servers := slices.Clone(p.running[key(req.Environment)])
+	sites := slices.Clone(p.sites[key(req.Environment)])
 	p.mu.Unlock()
-	exited := make(chan *runningServer, len(servers))
-	for _, rs := range servers {
+	exited := make(chan error, len(servers)+len(sites))
+	watch := func(proc Process, describe func() error) {
 		go func() {
 			select {
-			case <-rs.proc.Done():
-				exited <- rs
+			case <-proc.Done():
+				exited <- describe()
 			case <-ctx.Done():
 			}
 		}()
 	}
+	for _, rs := range servers {
+		watch(rs.proc, func() error {
+			return fmt.Errorf("local: %s %s exited: %v", rs.server.what(), rs.server.Deployable, exitReason(rs.proc.Err()))
+		})
+	}
+	// A site's dev server is a process of the environment as a server is
+	// (D82).
+	for _, rs := range sites {
+		if rs.proc != nil {
+			watch(rs.proc, func() error {
+				return fmt.Errorf("local: site %s's dev server exited: %v", rs.site.Deployable, exitReason(rs.proc.Err()))
+			})
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return nil
-	case rs := <-exited:
-		return fmt.Errorf("local: %s %s exited: %v", rs.server.what(), rs.server.Deployable, exitReason(rs.proc.Err()))
+	case err := <-exited:
+		return err
 	}
 }
 

@@ -378,3 +378,27 @@ func TestEmbeddedDefinitionIsCurrent(t *testing.T) {
 		t.Error("embedded schema-config.schema.json is stale; run: cd packages/schema-config && bun run gen-json-schema")
 	}
 }
+
+// TestReadFileReadsASitesDevServer: the data forms carry a Site's dev
+// server as the TypeScript form does (D82), and the schema refuses a
+// member it does not take.
+func TestReadFileReadsASitesDevServer(t *testing.T) {
+	kinds := append(kindList{"Site"}, coreKinds...)
+	dir := writeConfig(t, "schema.config.yaml", `name: shop-web
+kind: Site
+site:
+  build: build
+  dev: { command: vite, port: 5173 }
+`)
+	cfg, err := ReadFile(dir, kinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if cfg.Site == nil || cfg.Site.Dev == nil || *cfg.Site.Dev != (ir.SiteDevConfig{Command: "vite", Port: 5173}) {
+		t.Fatalf("site = %+v", cfg.Site)
+	}
+	dir = writeConfig(t, "schema.config.json", `{"name": "shop-web", "kind": "Site", "site": {"dev": {"script": "dev"}}}`)
+	if _, err := ReadFile(dir, kinds); err == nil || !strings.Contains(err.Error(), "script") {
+		t.Fatalf("ReadFile of a dev server with a script: %v", err)
+	}
+}

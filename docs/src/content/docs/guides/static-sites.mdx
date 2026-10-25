@@ -27,7 +27,7 @@ and D55 in `docs/DECISIONS.md` records the decisions.
 | --- | --- |
 | the `Site` kind, its config and its sentinel; the typed browser config, with a client of each API's SDK, and the scaffold | |
 | the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
-| `stack dev`: each site built once and served with its config and its fallback | rebuilding a site while `stack dev` runs |
+| `stack dev`: each site built once and served with its config and its fallback, or its dev server run behind a proxy that serves the site and its APIs on one origin, hot reload and all | |
 | the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
 | the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback, and a year's caching for files whose names hold a hex hash of their content | a run against Google Cloud |
 | the cloudflare target: a Worker per site serving the build as static assets, the config and the fallback from a script the extension embeds, and the build's files kept in R2 by their digest | a run against Cloudflare; a year's caching for hashed names |
@@ -43,7 +43,7 @@ export default defineConfig({
   name: "shop-web",
   kind: SchemaKind.Site,
   calls: [ShopApi],
-  site: { build: "build", output: "dist", fallback: "index.html" },
+  site: { build: "build", output: "dist", fallback: "index.html", dev: { command: "dev" } },
 });
 ```
 
@@ -55,6 +55,11 @@ export default defineConfig({
 - **`site.fallback`** is the file, relative to the output, served for a
   path that names no file, so a single-page application's router reads
   the path. Without it such a path answers 404.
+- **`site.dev`** is the site's dev server, which `stack dev` runs in
+  place of the build ([Run it locally](#run-it-locally)): `command`, the
+  script of the site's `package.json`, or a binary of its dependencies,
+  `dev` unless set, and `port`, for a dev server that picks its own port.
+  A deploy builds the site whether `dev` is set or not.
 
 A Site schema declares nothing, and its config may leave `outputs` out.
 Its sentinel, `ShopWeb`, is what a stack deploys.
@@ -161,8 +166,60 @@ uncached, and every file with the Cache-Control it has on Google Cloud
   site     shop-web                 http://127.0.0.1:22638
 ```
 
-A site's `port` setting pins its port. To see a change, run `stack dev`
-again, or point your own dev server at the APIs it prints.
+A site's `port` setting pins its port.
+
+### With a dev server
+
+A site whose config names a dev server is not built. `stack dev` runs
+its dev server, which reloads the page as you edit it, and serves the
+site's port from a proxy in front of it:
+
+```ts
+site: { build: "build", output: "dist", fallback: "index.html", dev: { command: "dev" } }
+```
+
+```json
+"scripts": {
+  "build": "vite build",
+  "dev": "vite --port $PORT --strictPort"
+}
+```
+
+- **The dev server** is `bun run <command>` in the site's package, after
+  the workspace's install. Its environment is yours, with `PORT` the port
+  to listen on, `SUPERSCHEMATIC_SITE_URL` the site's origin, and
+  `<API>_URL` (`SHOP_API_URL`) each API's own loopback URL. `PORT` is
+  `site.dev.port` when set, for a dev server that picks its own port;
+  otherwise `stack dev` derives one per checkout, as it does a server's,
+  so pass it on, as `--port $PORT --strictPort` does for Vite. Bun's own
+  dev server takes it as `bun --port=$PORT ./index.html`, which the site
+  scaffold's `dev` script runs. `stack dev` waits until it answers on
+  `localhost`, prints its output with the site's name in front, and
+  stops when it exits, as when a server does.
+- **The proxy** serves the site's port, `http://127.0.0.1:<port>`, the
+  origin the summary prints:
+
+  | Path | What answers it |
+  | --- | --- |
+  | `/__superschematic/config.json` | the site's config, each API at `http://<host>/api/<service>` on the origin the page was opened on |
+  | `/api/<service>/<route>`, for each API the site calls | the API's server, at `<route>`: `/api/shop-api/api/products` is shop-api's `/api/products`. The query is kept, the browser's `Host` is passed on with `X-Forwarded-Prefix: /api/<service>`, and a redirect within the API's own routes gets the prefix back |
+  | every other path | the dev server, as it is, WebSocket upgrades among them, so its hot reload reaches the page |
+
+- **One origin.** The page, its hot reload and its APIs share the site's
+  origin, and `loadApis()` hands each SDK its API's path there. A cookie
+  session ([users and sessions](/superschematic/guides/users-and-sessions/#sign-in-from-an-sdk))
+  works as it does for an API on the page's own origin: the session
+  cookie, `SameSite=Lax`, travels with each call, and the identity
+  runtime's cross-origin check sees a same-origin request, so neither
+  `trustedOrigins` nor CORS needs setting.
+
+```
+  site     shop-web                 http://127.0.0.1:22638, its dev server (bun run dev) and its APIs under /api/<service>
+```
+
+`stack dev --build-sites` builds such a site once and serves its files
+instead, as a deploy does, with each API at its own address and CORS
+between them.
 
 ## Deploy it
 
