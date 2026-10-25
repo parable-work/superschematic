@@ -93,7 +93,8 @@ machine, and `stack deploy` applies one to Google Cloud
 
 The tutorial's code is `examples/acme-shop`, and the engine guide's is
 `examples/engine-notes`. CI builds and tests both in the release
-candidate run on `main` twice a day.
+candidate run on `main` twice a day. [Examples](/superschematic/start/examples/)
+lists every example project and the script that runs it.
 
 For what the generated code offers in one language, see the language
 pages: [Go](/superschematic/install/go/),

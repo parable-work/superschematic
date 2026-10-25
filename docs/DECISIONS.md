@@ -9952,3 +9952,22 @@ Status: built.
 Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
+
+## D76. The agent skill lives in this repository, beside the compiler it describes
+
+The skill a coding agent reads to build *with* superschematic was kept in
+a repository of its own, on the reasoning that this one is for building
+superschematic, not using it. The two change together: D71 and D72 added
+the commands the skill's loop runs, and a skill released apart from them
+names commands its reader's binary lacks, or misses ones it has (the
+separate copy never learned `check`). The README now presents
+superschematic as the compiler a coding agent writes schemas for, and
+points its reader at the skill.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The skill is `agent/skills/superschematic/SKILL.md`, in a Claude Code plugin rooted at `agent/` (`agent/.claude-plugin/plugin.json`), and the repository root's `.claude-plugin/marketplace.json` publishes it, so `/plugin marketplace add parable-work/superschematic` installs it. Any agent that reads Agent Skills can copy the directory instead. | A repository of its own, which releases apart from the commands it names. `.claude/skills/` in this repository, which every agent working on superschematic itself would load. |
+| A pull request that changes a command the skill names (`init`, `new service`, `check`, `build`, `catalog`, `stack`, `migrate plan`) changes `SKILL.md` with it. | A periodic sync, which leaves the skill behind between syncs. |
+| The skill still holds no reference tables; it points at `superschematic catalog`, which prints them from the binary's registry, extensions included. | Tables copied into the skill, which drift and do not know a project's extensions. |
+
+Status: built. `agent/README.md` says how to install and change it.
