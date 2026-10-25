@@ -22,13 +22,17 @@
 //!
 //! A stream opened with signals (D77) also sends each signal on an
 //! instance its namespace, schema, instance and behavior filters keep,
-//! whose schema its principal may read (asked once per schema), as one
-//! message `event: signal` with no `id:`, so `Last-Event-ID` and a
-//! reconnect's replay never see one. It holds up to 256 for a slow client,
+//! whose schema its principal may read (asked once per schema between two
+//! reads of the log, so a policy that stops letting it read a schema stops
+//! its signals by the next read), as one message `event: signal` with no
+//! `id:`, so `Last-Event-ID` and a reconnect's replay never see one. It holds up to 256 for a slow client,
 //! the oldest dropped first, and sends them once replay has caught up.
 //! Signals wake it (the notifier's wakes, not its epoch), and it reads the
 //! log again only when a commit moved the epoch since its last read, or a
-//! heartbeat went by, so a signal costs a waiting stream no read.
+//! heartbeat went by since its last read, so a signal costs a waiting
+//! stream no read, and signals sent more often than a heartbeat, which
+//! put its keepalive off, never put off a read: a stream with no listener
+//! still hears another process's commits within a heartbeat.
 //!
 //! The stream is pulled: it reads the next page only when the host has
 //! taken the previous one, so it holds at most one page for a slow client.
@@ -161,12 +165,17 @@ pub struct EventStream {
     /// Whether it reads at its next pull whatever the epoch says: after a
     /// heartbeat, so a stream with no listener still reads at each.
     read_due: bool,
+    /// When it last read the log. Caught up, it reads again once a
+    /// heartbeat has gone by since, whatever the epoch says, even while
+    /// signals keep putting its heartbeat off.
+    last_read: Instant,
     /// Its signals, when it was opened with them (D77).
     signals: Option<StreamSignals>,
 }
 
 // A stream's signals: the queue the engine fills, and whether its
-// principal may read each schema, asked once per schema.
+// principal may read each schema, asked once per schema and asked again
+// after each read of the log.
 struct StreamSignals {
     queue: Arc<SignalQueue>,
     readable: HashMap<String, bool>,
@@ -283,6 +292,7 @@ pub fn start_with(
         read_epoch,
         caught_up: false,
         read_due: false,
+        last_read: Instant::now(),
         signals,
     })
 }
@@ -350,13 +360,20 @@ impl EventStream {
             let wakes = notifier.wakes();
             let epoch = notifier.epoch();
             // Caught up, it reads again only for a commit since its last
-            // read, or after a heartbeat: a signal's wake reads nothing.
+            // read, after a heartbeat, or once a heartbeat has gone by
+            // since its last read: a signal's wake reads nothing.
             // The first page was read when the stream opened, at the epoch
             // start noted; any other is read now, at this one.
             let read_now = self.first.is_none();
             let page = match self.first.take() {
                 Some(page) => Some(page),
-                None if self.caught_up && !self.read_due && epoch == self.read_epoch => None,
+                None if self.caught_up
+                    && !self.read_due
+                    && epoch == self.read_epoch
+                    && self.last_read.elapsed() < self.heartbeat =>
+                {
+                    None
+                }
                 None => match engine.events().read(
                     &self.principal,
                     &self
@@ -375,6 +392,12 @@ impl EventStream {
                 if read_now {
                     self.read_epoch = epoch;
                     self.read_due = false;
+                    self.last_read = Instant::now();
+                    // The policy is asked again for the signals that
+                    // follow a read.
+                    if let Some(signals) = self.signals.as_mut() {
+                        signals.readable.clear();
+                    }
                 }
                 self.caught_up = !page.more;
                 self.cursor = page.next;
@@ -410,11 +433,12 @@ impl EventStream {
                 self.beat_at = None;
                 return Pull::Data(frames.into_bytes());
             }
-            // Caught up, with nothing to send: wait for a commit, a signal
-            // or a beat.
+            // Caught up, with nothing to send: wait for a commit, a signal,
+            // a beat, or the read a heartbeat since the last one is due.
             let now = Instant::now();
             let beat_at = *self.beat_at.get_or_insert(now + self.heartbeat);
-            let until = beat_at.min(deadline);
+            let read_at = self.last_read + self.heartbeat;
+            let until = beat_at.min(read_at).min(deadline);
             let moved = notifier.wait_wakes(wakes, until.saturating_duration_since(now)) > wakes;
             if moved {
                 // A commit woke it: read again, with a fresh heartbeat. A
@@ -440,13 +464,18 @@ impl EventStream {
                     b": keepalive\n\n".to_vec()
                 });
             }
+            if Instant::now() >= read_at && Instant::now() < deadline {
+                // A heartbeat since the last read, with the keepalive put
+                // off by signals: read again.
+                continue;
+            }
             return Pull::Pending;
         }
     }
 
     // signal_frames appends a message for each signal the stream holds
     // whose schema its principal may read, asking the policy once per
-    // schema.
+    // schema between two reads of the log.
     fn signal_frames(&mut self, engine: &Engine, frames: &mut String) {
         let Some(signals) = self.signals.as_mut() else {
             return;

@@ -1093,8 +1093,10 @@ engine.signals.send(bob, { schema: 'Ticket', instanceId: 't1', behavior: 'Commen
 - **Delivery.** A stream opened with signals ("The event stream" under
   "HTTP") receives each signal of its namespace that its `schema`,
   `instanceId` and `behavior` filters keep, on a schema its principal may
-  read: it asks the policy `read` once per schema it meets, and skips a
-  schema it may not read. `kind`, `exclude` and `beside` do not apply to
+  read: it asks the policy `read` once per schema it meets between two
+  reads of the log, so a policy that stops letting it read a schema
+  stops its signals by the next read (at most a heartbeat on), and skips
+  a schema it may not read. `kind`, `exclude` and `beside` do not apply to
   signals. Delivery is at most once and in no order with the events. A
   stream holds up to 256 for a slow client, the oldest dropped first,
   and sends what it holds once replay has caught up.
@@ -4786,7 +4788,9 @@ data: {"cursor":41}
   caught up, after `ready`, at most once and in no order with the events;
   `kind`, `exclude` and `beside` do not apply to them. A signal wakes the
   stream as a commit does, and the stream reads the log again only when a
-  commit came since its last read, or a heartbeat went by. Without
+  commit came since its last read, or a heartbeat went by since its last
+  read, so signals sent more often than a heartbeat, which put its
+  keepalive comment off, never put off its reads. Without
   `signals=1` a stream is as it was.
 
   ```
