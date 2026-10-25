@@ -12,9 +12,11 @@ edition = "2021"
 rust-version = "1.99.0"
 publish = false
 
-# The generated API crate, whose apps::{{ .App.Parts }} `serve` takes.
+# The generated API crate, whose apps::{{ .App.Parts }} `serve` takes, and
+# the runtime the scaffold's `serve` listens on.
 [dependencies]
 {{ .CrateName }} = { path = "{{ .APIPath }}" }
+tokio = { version = "1.52.2", features = ["io-util", "net", "rt"] }
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

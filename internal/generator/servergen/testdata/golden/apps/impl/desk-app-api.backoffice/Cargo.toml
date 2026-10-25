@@ -18,3 +18,4 @@ version = "0.1.0"
 
 [dependencies]
 schemas-desk-app-api-api = { path = "../../api/desk-app-api" }
+tokio = { version = "1.52.2", features = ["io-util", "net", "rt"] }

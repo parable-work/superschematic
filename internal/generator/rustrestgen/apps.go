@@ -104,7 +104,9 @@ type AppScaffold struct {
 // when no crate is there yet, reporting whether it wrote one: Cargo.toml,
 // which depends on the API crate at apiDir by its path relative to dir,
 // for the crate's editor and its own `cargo check`, and src/lib.rs, whose
-// serve fails, saying the app is not implemented. A stack's app builds
+// serve listens on the parts' address and answers every request with 501
+// Not Implemented, so the stack runs the app, ready, until the project
+// writes it. A stack's app builds
 // against the crate's mirror under its output root, whose Cargo.toml names
 // that root's API crate (D65, D78).
 func WriteAppScaffold(output *APIOutput, app, dir, apiDir string, names naming.Naming) (bool, error) {
