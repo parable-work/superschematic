@@ -82,6 +82,12 @@ opentelemetry_sdk = { version = "0.33.1", default-features = false, features = [
 opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace"], optional = true }
 opentelemetry-http = { version = "0.33.1", default-features = false, optional = true }
 tracing-opentelemetry = { version = "0.34.0", default-features = false, optional = true }
+# The memorystore-redis feature's client (D75): the redis crate's async
+# client on tokio, over TLS with rustls, without its default features, so
+# it sends no command a managed server refuses beyond what a connection
+# needs. rustls takes ring, already in the tree, as its crypto provider.
+redis = { version = "1.8.0", default-features = false, features = ["tokio-comp", "tokio-rustls-comp"], optional = true }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
@@ -120,6 +126,14 @@ sqlite = ["dep:rusqlite", "tokio/rt", "tokio-util/rt"]
 # Google library: the bucket module, the provider-neutral interface, needs
 # no feature.
 gcs = ["http-client", "dep:http-body"]
+# A memory store on Redis or Valkey (D75): RedisMemoryStore, the
+# MemoryStore a stack server, job or worker opens for each memory store its
+# APIs list, over the redis crate, with TLS 1.2 or later against the
+# connection's CA, and with `auth: iam` the workload's access token from the
+# metadata server, which the gcs feature's client asks for, as each new
+# connection's password. The memorystore module, the provider-neutral
+# interface and the in-process store, needs no feature.
+memorystore-redis = ["gcs", "dep:redis", "dep:rustls", "tokio/rt", "tokio/net"]
 # A stack server's log (D57): one JSON object per line on stdout, in the
 # TypeScript logger's shape, as a layer over tracing-subscriber's registry.
 logging = ["dep:tracing-subscriber"]
@@ -186,6 +200,12 @@ required-features = ["otel"]
 [[test]]
 name = "gcs"
 required-features = ["gcs"]
+
+# A memory store on the Valkey SUPERSCHEMATIC_TEST_MEMORY_STORE names, and
+# a fake metadata server for `auth: iam`.
+[[test]]
+name = "memorystore_redis"
+required-features = ["memorystore-redis"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

@@ -44,6 +44,8 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+#[cfg(feature = "memorystore-redis")]
+pub mod redis;
 #[cfg(test)]
 mod tests;
 
@@ -88,6 +90,9 @@ pub enum MemoryStoreError {
     /// The server refused the command with a reply, such as an
     /// out-of-memory refusal. The store stays available.
     Failed(String),
+    /// A connection the store cannot use: opening refuses it, and the
+    /// entrypoint runs the store disabled. The message holds no URL.
+    Config(String),
 }
 
 impl fmt::Display for MemoryStoreError {
@@ -102,6 +107,7 @@ impl fmt::Display for MemoryStoreError {
             ),
             Self::Encode(message) => write!(f, "memory store message: {message}"),
             Self::Failed(message) => write!(f, "memory store: {message}"),
+            Self::Config(message) => write!(f, "memory store connection: {message}"),
         }
     }
 }
