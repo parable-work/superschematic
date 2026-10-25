@@ -448,12 +448,12 @@ describe("the core's behaviors over HTTP", () => {
     assert.equal((await problem(call(app, 'POST', '/namespaces/default/schemas/documents/operations/search', { body: { query: 'walnut' } }), 404)).code, 'not_found');
   });
 
-  test('listComments is a read: a reader may call it, and it answers the ETag it read', async () => {
+  test('listMessages is a read: a reader may call it, and a post beside the instance leaves the ETag as it was', async () => {
     const { app } = withDocument();
-    const comment = await data(call(app, 'POST', `${DOCUMENT}/operations/comment`, { body: { body: 'First pass is up.' }, headers: { 'if-match': '"1"' } }));
-    assert.deepEqual([comment.data.id, comment.data.body, comment.etag], [1, 'First pass is up.', '"2"']);
-    const page = await data(call(app, 'POST', `${DOCUMENT}/operations/listComments`, { token: 'reader', body: { limit: 10 }, headers: { 'if-match': '"2"' } }));
-    assert.deepEqual([page.data.items.map((item: { body: string }) => item.body), page.data.next, page.etag], [['First pass is up.'], null, '"2"']);
-    assert.equal((await problem(call(app, 'POST', `${DOCUMENT}/operations/comment`, { token: 'reader', body: { body: 'Me too.' } }), 403)).code, 'forbidden');
+    const posted = await data(call(app, 'POST', `${DOCUMENT}/operations/post`, { body: { body: 'First pass is up.' }, headers: { 'if-match': '"1"' } }));
+    assert.deepEqual([posted.data.id, posted.data.body, posted.etag], [1, 'First pass is up.', '"1"']);
+    const page = await data(call(app, 'POST', `${DOCUMENT}/operations/listMessages`, { token: 'reader', body: { limit: 10 }, headers: { 'if-match': '"1"' } }));
+    assert.deepEqual([page.data.items.map((item: { body: string }) => item.body), page.data.before, page.data.after, page.etag], [['First pass is up.'], null, null, '"1"']);
+    assert.equal((await problem(call(app, 'POST', `${DOCUMENT}/operations/post`, { token: 'reader', body: { body: 'Me too.' } }), 403)).code, 'forbidden');
   });
 });

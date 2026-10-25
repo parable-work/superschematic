@@ -133,7 +133,10 @@ func TestEngineDocumentLoadsInTheEngine(t *testing.T) {
 			} `json:"deadlines"`
 		}
 		Comments struct {
-			CommentCount int `json:"commentCount"`
+			Messages int `json:"messages"`
+			Threads  *struct {
+				Open int `json:"open"`
+			} `json:"threads"`
 		}
 	}
 	raw, err := json.Marshal(ticket.Behaviors)
@@ -154,6 +157,8 @@ func TestEngineDocumentLoadsInTheEngine(t *testing.T) {
 	}
 	if _, ok := ticket.Behaviors["Comments"]; !ok {
 		t.Errorf("the ticket has no Comments: %v", ticket.Behaviors)
+	} else if behaviors.Comments.Messages != 0 || behaviors.Comments.Threads == nil || behaviors.Comments.Threads.Open != 0 {
+		t.Errorf("Comments = %+v, want an empty conversation", behaviors.Comments)
 	}
 
 	typesDir := TypesDir(root, LangTypeScript, engineFixture)

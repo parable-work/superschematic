@@ -85,7 +85,7 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
 		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
@@ -264,7 +264,10 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {"in review": "failure"}}`, "behavior Workflow config: "},
 		{comments, ``, ""},
 		{comments, `{}`, ""},
-		{comments, `{"maxLength": 10}`, "behavior Comments takes no config"},
+		{comments, `{"maxBodyLength": 2000, "editWindowMs": 900000, "blocks": ["ref"], "moderatePermission": "comments.moderate", "pinPermission": "comments.pin", "resolvePermission": "comments.resolve"}`, ""},
+		{comments, `{"maxLength": 10}`, "behavior Comments config: "},
+		{comments, `{"maxBodyLength": 40001}`, "behavior Comments config: "},
+		{comments, `{"blocks": ["code"]}`, "behavior Comments config: "},
 		{revisions, ``, ""},
 		{revisions, `{"review": {"permission": "documents.review"}}`, ""},
 		{revisions, `{"review": {}}`, "behavior Revisions config: "},
@@ -425,7 +428,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{lease, ``, ""},
 		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},
-			"exempt": ["Comments.comment", "acme.Rating.rate"], "acquirePermission": "jobs.work", "overridePermission": "jobs.admin", "directPermission": "jobs.direct"}`, ""},
+			"exempt": ["Revisions.propose", "acme.Rating.rate"], "acquirePermission": "jobs.work", "overridePermission": "jobs.admin", "directPermission": "jobs.direct"}`, ""},
 		{lease, `{"ttlMs": 999}`, "behavior Lease config: "},
 		{lease, `{"sweepMs": 500}`, "behavior Lease config: "},
 		{lease, `{"heartbeatMs": 0}`, "behavior Lease config: "},
@@ -435,10 +438,10 @@ func TestCoreBehaviors(t *testing.T) {
 		{lease, `{"onExpiry": {"transition": "queued", "from": []}}`, "behavior Lease config: "},
 		{lease, `{"onExpiry": {"transition": "queued", "from": ["running"], "release": true}}`, "behavior Lease config: "},
 		{lease, `{"maxExpiries": 0}`, "behavior Lease config: "},
-		{lease, `{"exempt": ["comment"]}`, "behavior Lease config: "},
-		{lease, `{"exempt": ["Comments.Comment"]}`, "behavior Lease config: "},
+		{lease, `{"exempt": ["propose"]}`, "behavior Lease config: "},
+		{lease, `{"exempt": ["Revisions.Propose"]}`, "behavior Lease config: "},
 		{lease, `{"overridePermission": ""}`, "behavior Lease config: "},
-		{lease, `{"fenceExemptOps": ["comment"]}`, "behavior Lease config: "},
+		{lease, `{"fenceExemptOps": ["propose"]}`, "behavior Lease config: "},
 		{lease, `{"directPermission": "jobs.direct", "directOn": [{"revised": {"link": "plan"}, "name": "rebase", "data": {"why": "moved"}}]}`, ""},
 		{lease, `{"directOn": []}`, "behavior Lease config: "},
 		{lease, `{"directOn": [{"revised": {"link": "plan"}}]}`, "behavior Lease config: "},

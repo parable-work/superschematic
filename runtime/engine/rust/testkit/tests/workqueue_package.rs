@@ -123,14 +123,15 @@ fn codes(guidance: &Value) -> Vec<String> {
 fn lease_gives_its_lengths_and_fences_every_write_but_the_exempt_ones() {
     for target in targets("workqueue_guidance_lease") {
         let engine = target.open_workqueue();
-        // Exempt operations pass, and requireToken asks every write for the
+        // Exempt operations pass, operations beside the instance are no
+        // write it fences (D77), and requireToken asks every write for the
         // token.
         publish(
             &engine,
             &jobs_document(json!([
                 {"name": "Workflow", "config": job_flow()},
                 {"name": "Comments"},
-                {"name": "Lease", "config": {"ttlMs": 120000, "heartbeatMs": 20000, "exempt": ["Comments.comment"], "requireToken": true}}
+                {"name": "Lease", "config": {"ttlMs": 120000, "heartbeatMs": 20000, "exempt": ["Workflow.transition"], "requireToken": true}}
             ])),
         );
         let summary = summary_of(&engine, "Job", "Lease");
@@ -141,19 +142,25 @@ fn lease_gives_its_lengths_and_fences_every_write_but_the_exempt_ones() {
             "{summary}"
         );
         assert!(
-            summary.contains("only its holder writes, but for Comments.comment;"),
+            summary.contains("only its holder writes, but for Workflow.transition;"),
             "{summary}"
         );
-        assert_eq!(
-            codes(&guidance_of(&engine, "Job", "comment")),
-            Vec::<String>::new()
-        );
-        let transition: Vec<String> = codes(&guidance_of(&engine, "Job", "transition"))
+        for operation in ["transition", "post", "react"] {
+            assert_eq!(
+                codes(&guidance_of(&engine, "Job", operation))
+                    .into_iter()
+                    .filter(|code| code.starts_with("Lease."))
+                    .collect::<Vec<_>>(),
+                Vec::<String>::new(),
+                "{operation}"
+            );
+        }
+        let update: Vec<String> = codes(&guidance_of(&engine, "Job", "update"))
             .into_iter()
             .filter(|code| code.starts_with("Lease."))
             .collect();
         assert_eq!(
-            transition,
+            update,
             [
                 "Lease.held_by_another",
                 "Lease.token_stale",
@@ -172,7 +179,7 @@ fn lease_gives_its_lengths_and_fences_every_write_but_the_exempt_ones() {
         // A create holds no lease, and a read is let through.
         assert!(!codes(&guidance_of(&engine, "Job", "create"))
             .contains(&"Lease.held_by_another".to_owned()));
-        assert!(!codes(&guidance_of(&engine, "Job", "listComments"))
+        assert!(!codes(&guidance_of(&engine, "Job", "listMessages"))
             .contains(&"Lease.held_by_another".to_owned()));
     }
 }

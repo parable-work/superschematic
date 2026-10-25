@@ -604,6 +604,10 @@ fn read_events(
     let kinds = list("kind")?;
     let behaviors = list("behavior")?;
     let exclude = list("exclude")?;
+    let beside = match query_param(query, "beside", Kind::Boolean, false)? {
+        Some(Param::Flag(beside)) => Some(beside),
+        _ => None,
+    };
     let resume = last_event_id_of(request)?;
     let after = match resume {
         Some(cursor) => Some(EventsAfter::Cursor(cursor)),
@@ -618,6 +622,7 @@ fn read_events(
         kinds,
         behaviors,
         exclude,
+        beside,
     };
     if !wants_event_stream(request.header("accept")) {
         let page = engine

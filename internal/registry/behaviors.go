@@ -163,6 +163,15 @@ type BehaviorOperation struct {
 	// default), one instance, which an engine's call names by id; or
 	// "schema", the schema as a whole, with no instance.
 	Scope string `json:"scope,omitempty"`
+	// Beside is true for an instance operation that writes beside the
+	// instance (D77): only its behavior's own tables and columns, so an
+	// engine moves no sequence of the instance, runs no other behavior's
+	// guard, and appends an operation event of no sequence. A behavior
+	// that declares one declares every field volatile.
+	Beside bool `json:"beside,omitempty"`
+	// Log, false, says a beside operation appends no event at all, for a
+	// write only its writer reads back. Absent, it appends one.
+	Log *bool `json:"log,omitempty"`
 	// InvocationPolicy is the MCP invocation policy of the operation's
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
@@ -413,6 +422,9 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema {
 			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema)
 		}
+		if err := checkBesideOperation(decl, op); err != nil {
+			return err
+		}
 		for _, s := range []struct {
 			key    string
 			schema json.RawMessage
@@ -430,6 +442,36 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 		}
 		if !closed {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
+		}
+	}
+	return nil
+}
+
+// Logged reports whether the operation appends an event when it writes:
+// every operation but a beside one that declares "log": false.
+func (op BehaviorOperation) Logged() bool {
+	return op.Log == nil || *op.Log
+}
+
+// checkBesideOperation holds a beside operation to its rule (D77): it
+// writes, on an instance, and its behavior's fields are all volatile, since
+// no event records their moves; only a beside operation appends no event.
+func checkBesideOperation(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if !op.Beside {
+		if !op.Logged() {
+			return fmt.Errorf("registry: behavior %s operation %s sets \"log\": false and is not beside the instance: only a beside operation appends no event", decl.Name, op.Name)
+		}
+		return nil
+	}
+	if !op.Writes {
+		return fmt.Errorf("registry: behavior %s operation %s is beside the instance and does not write: a beside operation declares \"writes\": true", decl.Name, op.Name)
+	}
+	if op.Scope == OperationScopeSchema {
+		return fmt.Errorf("registry: behavior %s operation %s is beside the instance and has scope %q: a beside operation runs on an instance", decl.Name, op.Name, OperationScopeSchema)
+	}
+	for _, field := range decl.Fields {
+		if !field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is not volatile, and operation %s is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves", decl.Name, field.Name, op.Name)
 		}
 	}
 	return nil

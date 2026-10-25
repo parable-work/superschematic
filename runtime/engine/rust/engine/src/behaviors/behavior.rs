@@ -387,6 +387,10 @@ pub struct DescribedTypeOperation {
     /// The behavior that adds it; `None` for the built-in ones.
     pub behavior: Option<String>,
     pub writes: bool,
+    /// Whether it runs beside the instance (D77): it moves no seq and asks
+    /// no other behavior's guard, so a guard that holds the instance's
+    /// writes does not hold it.
+    pub beside: bool,
     pub scope: super::declaration::OperationScope,
 }
 

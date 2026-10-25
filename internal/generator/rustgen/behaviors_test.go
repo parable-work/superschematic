@@ -56,7 +56,9 @@ const READ: &str = r#"` + behaviortypestest.TicketBehaviors + `"#;
 fn reads_and_writes_a_ticket_s_behaviors() {
     let behaviors: TicketBehaviors = serde_json::from_str(READ).expect("decode");
     assert_eq!(behaviors.workflow.status, TicketState::InProgress);
-    assert_eq!(behaviors.comments.comment_count, 2);
+    assert_eq!(behaviors.comments.messages, 2);
+    assert_eq!(behaviors.comments.threads.open, 1);
+    assert_eq!(behaviors.comments.last_message_at, Some(1790790800000));
     assert_eq!(behaviors.revisions.revision, Some(3));
     assert_eq!(behaviors.revisions.pending_proposals, None);
     assert_eq!(behaviors.links.targets.project.id, "launch");
