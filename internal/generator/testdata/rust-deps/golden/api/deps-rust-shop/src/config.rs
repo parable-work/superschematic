@@ -7,7 +7,7 @@
 
 use std::{env, error::Error, fmt};
 
-use crate::runtime::stackconfig::{self, Bucket, Cors, Database, Service};
+use crate::runtime::stackconfig::{self, Bucket, Cors, Database, MemoryStore, Service};
 use crate::runtime::{identity, ServiceAuthConfig};
 
 /// ShopConfig holds environment-backed runtime configuration.
@@ -79,6 +79,10 @@ pub struct EnvConfig {
     /// How the server reaches deps-media, a bucket the API lists. It is read
     /// from DEPS_MEDIA_BUCKET_*.
     pub deps_media_bucket: Bucket,
+    /// How the server reaches deps-cache, a memory store the API uses (D75). It
+    /// is read from DEPS_CACHE_MEMORY_STORE_*; None when none of them is set, a
+    /// disabled store.
+    pub deps_cache_memory_store: Option<MemoryStore>,
     /// What the server verifies a calling service's credential against: the
     /// API's callers field, for its service clauses. No issuers means no server
     /// calls the API. It is read from DEPS_RUST_SHOP_CALLERS_*.
@@ -115,6 +119,10 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
         &mut problems,
         stackconfig::load_bucket("DEPS_MEDIA_BUCKET").map_err(problems_of),
     );
+    let deps_cache_memory_store = keep(
+        &mut problems,
+        stackconfig::load_memory_store("DEPS_CACHE_MEMORY_STORE").map_err(problems_of),
+    );
     let deps_rust_shop_callers = keep(
         &mut problems,
         stackconfig::load_callers("DEPS_RUST_SHOP_CALLERS").map_err(problems_of),
@@ -129,6 +137,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
         deps_users_db_database,
         deps_rust_pricing_service,
         deps_media_bucket,
+        deps_cache_memory_store,
         deps_rust_shop_callers,
         deps_rust_shop_cors,
         deps_rust_shop_identity,
@@ -138,6 +147,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
             Some(deps_users_db_database),
             Some(deps_rust_pricing_service),
             Some(deps_media_bucket),
+            Some(deps_cache_memory_store),
             Some(deps_rust_shop_callers),
             Some(deps_rust_shop_cors),
             Some(deps_rust_shop_identity),
@@ -146,6 +156,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
             deps_users_db_database,
             deps_rust_pricing_service,
             deps_media_bucket,
+            deps_cache_memory_store,
             deps_rust_shop_callers,
             deps_rust_shop_cors,
             deps_rust_shop_identity,

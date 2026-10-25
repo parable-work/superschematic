@@ -110,6 +110,13 @@ var WorkersTelemetryPackages = map[string]string{
 const (
 	storagePackage = "@google-cloud/storage"
 	storageNodeVer = "8.3.0"
+
+	// redisClientPackage is the Redis client the HTTP runtime's ./redis
+	// entry opens a memory store with, which a package depends on only when
+	// an API it serves lists a store (D75), at redisClientVersion, the
+	// runtime's pin.
+	redisClientPackage = "@redis/client"
+	redisClientVersion = "5.12.1"
 )
 
 // TypeScriptImplementation is where an API's TypeScript implementation
@@ -294,6 +301,12 @@ type TypeScriptServer struct {
 	// it. With one, the package depends on GCS's Node client (D54).
 	Buckets []*TypeScriptBucket
 
+	// MemoryStores are the memory stores the entrypoint opens once, for
+	// every API that lists it (D75). With one, the package depends on the
+	// Redis client, which a Workers entry never imports: on Workers each
+	// store is disabled.
+	MemoryStores []*TypeScriptMemoryStore
+
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. With one, the package depends on
 	// the Cloud SQL Node connector; with none main.ts refuses a Cloud SQL
@@ -425,6 +438,11 @@ type TypeScriptAPI struct {
 	// Buckets are Deps' buckets (D54).
 	Buckets []TypeScriptBucketUse
 
+	// MemoryStores are Deps' memory stores, and RateLimitStore the one its
+	// @rateLimit routes count in, nil for none (D75).
+	MemoryStores   []TypeScriptMemoryStoreUse
+	RateLimitStore *TypeScriptMemoryStore
+
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
 	Secrets []string
@@ -459,6 +477,26 @@ type TypeScriptBucket struct {
 	Var     string
 
 	// From is the expression that reads the bucket's connection from the
+	// first listing API's config, and Field the config field it reads.
+	From  string
+	Field string
+}
+
+// TypeScriptMemoryStoreUse is a memory store in an API's Deps.
+type TypeScriptMemoryStoreUse struct {
+	Field string
+	Store *TypeScriptMemoryStore
+}
+
+// TypeScriptMemoryStore is a memory store the entrypoint opens once, for
+// every API that lists it (D75): from the first listing API's config
+// field, on Redis, or disabled when the field is unset or the connection
+// is refused.
+type TypeScriptMemoryStore struct {
+	Service string
+	Var     string
+
+	// From is the expression that reads the store's connection from the
 	// first listing API's config, and Field the config field it reads.
 	From  string
 	Field string
@@ -705,6 +743,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	databases := map[string]*TypeScriptDatabase{}
 	clients := map[string]*TypeScriptClient{}
 	buckets := map[string]*TypeScriptBucket{}
+	memoryStores := map[string]*TypeScriptMemoryStore{}
 	mounts := map[string]string{}
 	if in.Runner != nil {
 		if err := s.planTypeScriptRunner(in, taken); err != nil {
@@ -897,6 +936,27 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			}
 			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
 		}
+		for _, m := range o.Deps.MemoryStores {
+			h := memoryStores[m.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for memory store %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, m.Service)
+				}
+				h = &TypeScriptMemoryStore{
+					Service: m.Service,
+					Var:     taken.take(varStem(m.Service) + "Store"),
+					From:    api.Config + "." + key,
+					Field:   key,
+				}
+				memoryStores[m.Service] = h
+				s.MemoryStores = append(s.MemoryStores, h)
+			}
+			api.MemoryStores = append(api.MemoryStores, TypeScriptMemoryStoreUse{Field: m.Field, Store: h})
+			if m.Service == o.Deps.RateLimitStore && !background {
+				api.RateLimitStore = h
+			}
+		}
 		s.APIs = append(s.APIs, api)
 	}
 	if lite := s.SQLiteDatabases(); len(s.Engines) > 0 && len(lite) > 0 {
@@ -989,6 +1049,11 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	if a.ManualRoutes != "" {
 		out = append(out, "manualRoutes: "+a.ManualRoutes)
 	}
+	if a.RateLimitStore != nil {
+		// Its @rateLimit routes count in the store, and in process while
+		// the store is unavailable (D75).
+		out = append(out, fmt.Sprintf("rateLimit: { store: memoryStoreRateLimitStore(%s, %s) }", a.RateLimitStore.Var, tsQuote(a.Service)))
+	}
 	return out
 }
 
@@ -1049,6 +1114,12 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if len(s.Engines) > 0 {
 		out = append(out, "type Logger")
+	}
+	if len(s.MemoryStores) > 0 {
+		out = append(out, "disabledMemoryStore", "type MemoryStore", "type MemoryStoreConnection")
+	}
+	if slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.RateLimitStore != nil }) {
+		out = append(out, "memoryStoreRateLimitStore")
 	}
 	return out
 }
@@ -1225,6 +1296,9 @@ func (s *TypeScriptServer) planPackage() {
 	}
 	if len(s.Buckets) > 0 {
 		deps[storagePackage] = storageNodeVer
+	}
+	if len(s.MemoryStores) > 0 {
+		deps[redisClientPackage] = redisClientVersion
 	}
 	sorted := func(m map[string]string) []NpmDependency {
 		out := make([]NpmDependency, 0, len(m))

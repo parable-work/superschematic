@@ -1,0 +1,9 @@
+memoryStoreDeclarations:
+  - name: ticket-triaged
+    symbol: TicketTriaged
+    kind: channel
+    doc: A ticket's derived fields were filled; a waiter reads it again.
+    parts:
+      - name: ticketId
+        type: { name: string }
+        format: string

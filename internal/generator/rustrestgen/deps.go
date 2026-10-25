@@ -44,6 +44,13 @@ type DepsInfo struct {
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 
+	// MemoryStores are the API's memoryStores entries, its rateLimitStore
+	// among them, in order (D75), and RateLimitStore the service of its
+	// rateLimitStore, "" without one: the store its server's entrypoint
+	// counts its @rateLimit routes in.
+	MemoryStores   []DepsMemoryStore
+	RateLimitStore string
+
 	// DatabaseTypesCrate is the Rust types crate of Database when the API
 	// declares a worker (D65): it declares the queues' messages, which the
 	// Workers trait takes, and holds their descriptors in src/queues.rs,
@@ -129,6 +136,18 @@ type DepsBucket struct {
 	Service string
 
 	// Field is the Deps field that holds the bucket.
+	Field string
+}
+
+// DepsMemoryStore is a memory store in Deps (D75): an Arc of the HTTP
+// runtime's memorystore::MemoryStore, which the entrypoint opens once, on
+// Redis through the runtime's memorystore-redis feature, or disabled while
+// the store's field is unset.
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps field that holds the store.
 	Field string
 }
 
@@ -336,6 +355,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[b.Field] = b.Service
 	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("rustrestgen: %s lists memory store %s, which would be Deps.%s, the field of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
+	}
 	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
@@ -347,7 +372,8 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 }
 
 // DepsField is the Deps field of the client of the API service named
-// service, or of the bucket of the Bucket service named service: its name
+// service, of the bucket of the Bucket service named service, or of the
+// store of the MemoryStore service named service: its name
 // in snake_case (shop-api is shop_api).
 func DepsField(service string) string {
 	return rustutil.ToSnakeCase(service)
@@ -411,6 +437,9 @@ func (o *APIOutput) DepsUses() []string {
 	var runtime []string
 	if o.Deps != nil && len(o.Deps.Buckets) > 0 {
 		runtime = append(runtime, "bucket::Bucket")
+	}
+	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
+		runtime = append(runtime, "memorystore::MemoryStore")
 	}
 	if o.Deps != nil && o.Deps.Database != "" {
 		runtime = append(runtime, "postgres::Pool")

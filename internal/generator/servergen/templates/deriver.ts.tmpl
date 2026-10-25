@@ -36,6 +36,9 @@ import type { Pool } from 'pg';
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
+{{- if .MemoryStores }}
+import { openRedisMemoryStore } from '{{ .Naming.HTTPRuntimeNpmPackage }}/redis';
+{{- end }}
 import { inProcess, runDeriver, type DerivationAnswer, type DerivationItem } from '{{ .Naming.EngineNpmPackage }}';
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 import * as {{ $api.Module }} from '{{ $api.Package }}';
@@ -118,6 +121,10 @@ function answer(
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .MemoryStores }}
+
+{{ template "ts-open-memory-store" . }}
+{{- end }}
 {{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}

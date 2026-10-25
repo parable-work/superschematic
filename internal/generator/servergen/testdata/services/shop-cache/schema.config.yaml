@@ -1,0 +1,9 @@
+# The memory store shop-orders lists and counts its rate limits in (D75).
+# Storefront opens it once for shop-orders, and shop-orders' job and worker
+# each open it in their own process. Its Go definitions name a signal and
+# a claim.
+name: shop-cache
+kind: MemoryStore
+outputs:
+  types:
+    go: { enabled: true }

@@ -10184,30 +10184,129 @@ This entry adds that store. Three rules hold throughout.
 | An environment can run without a store: `settings: [{ of: ShopCache, enabled: false }]` creates nothing and leaves the field unset, so every workload opens a disabled store and takes its fallback paths. A platform that cannot realize a store refuses it unless the environment turns it off (D64, amended). The cloudflare target has no store platform, so it refuses a stack that places a store there with it on. | Deploying the store as disabled wherever a target has no platform for it, which turns a missing piece of infrastructure into a quiet change of behavior. A KV namespace or a Durable Object on cloudflare, whose counts and claims are not the store's (KV has no atomic increment), and which is a platform of its own to design. |
 | The engine does not use the store. Its runner and sweepers keep the database's polls and locks. | Waking the runner through a channel now. The engine runs on SQLite and on D1 too, where no store is, and its guarantees come from its database; an amendment can add a wake-up beside the poll once a store is built. |
 
-Status: proposed. Nothing is built.
+Status: built, as amended below. Nothing has run on Google Cloud.
+- **The core.** The `MemoryStore` kind and its sentinel, `@channel` and
+  `@key` in `@superschematic/memory-store`, and `new service --kind
+  MemoryStore` (`internal/registry/core_memorystore.go`, `cli/new.go`).
+  The IR is `ir/memorystore.go`: `MemoryStoreDeclaration` and its parts,
+  each with the `Format` the loader fills (`string`, `integer`,
+  `boolean` or `enum`), the segment rule, `MemoryStoreName`, and the
+  reserved `rate-limit` counter the core adds to every store
+  (`service`, `operation`, `window`, `client`, `maxTtlSeconds` 86405).
+  An API's config takes `memoryStores` and `rateLimitStore`, which the
+  IR records as `Schema.MemoryStores`, the rate limit's store among
+  them, and `Schema.RateLimitStore`. The verification pass
+  (`internal/loader/verify/memorystore.go`) holds the rules above, and a
+  MemoryStore builds before each API that lists it.
+- **The stack.** The `memoryStore` deployable and edge,
+  `ir.MemoryStoreConnection` and its contract (`ir/derived_value.go`),
+  `[derived_fields] memory_store`, the settings element with `enabled`,
+  and `enabled: false`, which takes the store out of the environment and
+  lists it under `environment.json`'s `disabled`
+  (`internal/stack/memorystores.go`). A target registers a memoryStore
+  platform and a connector from each workload platform; one with none
+  refuses a store that is on, naming `enabled: false`.
+- **The readers and the vectors.** Go's `stackconfig.LoadMemoryStore`,
+  TypeScript's `loadMemoryStore` and Rust's
+  `stackconfig::load_memory_store`, held by `stackconfig_parity.json`'s
+  `memoryStore` vectors; `runtime/http/testdata/memorystore_parity.json`
+  holds the names and the rate limit, written by `ir`'s
+  `TestWriteMemoryStoreParityVectors`.
+- **The definitions.** `internal/generator/memorystoregen` writes each
+  store's Go module, TypeScript package and Rust crate under
+  `types/<language>/<store>`, and `memorystore/<store>/inventory.json`.
+- **The runtimes.** Go's `runtime/http/go/memorystore` (no Redis client:
+  servergen writes the go-redis store into `memorystores.go` beside an
+  entrypoint whose APIs list a store); TypeScript's `memorystore.ts` in
+  the main entry, Workers-safe, and `./redis` over `@redis/client`;
+  Rust's `memorystore` module, and the `memorystore-redis` feature over
+  the `redis` crate. Each has `Disabled`, an in-process store, the typed
+  `Channel` and `Key`, and the shared rate limit: Go's
+  `RateLimiter`, which the middleware runs before httprate's in-process
+  limiter, TypeScript's `MemoryStoreRateLimitStore` and Rust's
+  `RateLimits::with_store`.
+- **Deps and the entrypoints.** apigen, tsrestgen and rustrestgen give
+  `Deps` a store per listed store, and each Go, TypeScript and Rust
+  server, job and worker entrypoint, and each TypeScript and Rust deriver's, opens each store once,
+  hands it to every API that lists it and closes it on shutdown. A
+  TypeScript Worker holds a disabled store and imports no Redis client.
+- **Local.** `local.valkey`: one Valkey container per environment and
+  checkout, with no persistence, on ports from 26000, with
+  `memoryStoreImage` and `memoryStorePort`, and its connectors from every
+  workload (`internal/stack/local`).
+- **gcp.** `gcp.memorystore` and its four connectors, the network's
+  subnet and service connection policy, the policy rule
+  `memory-stores-tls-and-iam`, bootstrap's APIs and `deployer`'s roles,
+  and `stack init`'s types for `nodeType` and `replicas`
+  (`extensions/gcp/memorystore.go`, `network.go`, `bootstrap.go`).
+- **acme-shop.** `shop-cache` declares `ProductChanged` and
+  `ImageUploadSigning`. `shop-api` lists it and names it its
+  `rateLimitStore`: `waitForProductImage` waits on the channel,
+  `createProductImageUpload` claims the product's upload and publishes
+  after its commit, and `getProduct`'s limit, 120 a minute, counts in
+  the store.
 
-The build is three pull requests:
-1. The core, Go and the local target: the `MemoryStore` kind, its
-   sentinel and `superschematic new service --kind MemoryStore`; the
-   decorators in a `@superschematic/memory-store` package; the
-   verification rules; `memoryStores` and `rateLimitStore` on an API's
-   config; the deployable, the edge and `ir.MemoryStoreConnection`; the
-   Go runtime, its definitions generator and the inventory; the rate
-   limit's shared counter through httprate's `LimitCounter`; `stack dev`'s
-   Valkey container; `enabled: false`; and acme-shop, where `shop-api`
-   lists a store, counts its rate limits there, and wakes a waiter on
-   another replica.
-2. The TypeScript and Rust runtimes and generators, held to the Go ones
-   by the shared vectors, and the rate limit's shared store in each.
-3. The `gcp.memorystore` platform, its connector and network nodes, the
-   bootstrap roles and a policy rule that refuses a store without
-   transit encryption; then a live run.
+The tests that hold it:
+- the kind, the loader and the config: `internal/registry/core_memorystore_test.go`,
+  `internal/loader/memorystore_test.go`, the schema config's
+  `TestMemoryStoresAndTheMemoryStoreKind`, `internal/writer/memorystore_test.go`'s
+  round trip, buildplan's `TestMemoryStoresOrderTheBuild` and
+  `ir/memorystore_test.go`;
+- the stack: `internal/stack/memorystores_test.go` and its goldens
+  `internal/stack/testdata/golden/memorystore/`;
+- the definitions: memorystoregen's goldens and inventory golden,
+  `TestGoDefinitionsRunOnTheInProcessStore`,
+  `TestTypeScriptDefinitionsCompileAndRun` and `TestRustDefinitionsBuild`;
+- the runtimes: each passes both vector files; Go's
+  `runtime/http/go/memorystore` tests and the middleware's
+  `TestRateLimitWithStore` and `TestRateLimitWithStoreIsNotSerialized`;
+  TypeScript's `memorystore.test.ts` and
+  `redis.test.ts`; Rust's `memorystore` tests and
+  `tests/memorystore_redis.rs`;
+- the Redis stores against Valkey, a server that refuses `CLIENT`, a
+  server that is down and comes back, and TLS with `auth: iam` against a
+  fake metadata server: servergen's `TestMemoryStoresOnRedis`, the
+  TypeScript `redis.test.ts` and the Rust `memorystore_redis.rs`, each
+  where `SUPERSCHEMATIC_TEST_MEMORY_STORE` or Docker gives a server;
+  `TestTypeScriptMemoryStoreWiring` and the servergen goldens for the
+  entrypoints;
+- the targets: `internal/stack/local/memorystore_test.go`, which runs the
+  container under Docker; `extensions/gcp/memorystore_test.go`, the
+  pulumi renders of the gcp shop with its store
+  (`gcp-shop-staging`, `-production`, `-preview`), and `stack init`'s
+  typed settings; `extensions/cloudflare/memorystore_test.go`'s refusal
+  and its deploy with the store off;
+- acme-shop: `TestStackDevRunsTheShop` wakes a waiter through the channel,
+  sees an upload that another replica's claim holds refused 409, and
+  sees counts other replicas add to `getProduct`'s limit refuse it 429,
+  writing to the Valkey container directly as another replica would.
 
-To check on the first live run: that Cloud Run reaches the Private
-Service Connect endpoint through the environment's egress, that a
-`SHARED_CORE_NANO` node accepts cluster mode disabled with one replica,
-and whether a long-lived connection, such as the subscriber's, must
-authenticate again before its access token expires.
+Not built:
+- No live run on Google Cloud. The first one checks that Cloud Run
+  reaches the Private Service Connect endpoint through the egress
+  subnet; that `endpoints[0].connections[0]` is the primary's connection
+  with one replica or more, since a reader endpoint would answer every
+  write with READONLY, which the clients count as a failed call and not
+  as an outage; that `SHARED_CORE_NANO` takes cluster mode
+  disabled with one replica, and `STANDARD_SMALL` two; that the IAM
+  condition on the instance holds for this resource type, or else the
+  grant is an unconditioned project grant, and that the condition's
+  `resource.name` takes the project's id rather than its number; that
+  `deployer`'s roles are enough, and that Private Service Connect needs
+  no API beyond Memorystore's and Network Connectivity's (such as
+  `serviceconsumermanagement.googleapis.com`); the length and order of the managed CA chain; and whether the
+  subscriber's long-lived connection must authenticate again before its
+  access token expires.
+- Metrics. The TypeScript and Rust runtimes have no meter and record
+  none; Rust logs a decode failure at debug. Go records the metrics this
+  entry names through OpenTelemetry's global meter, which
+  `telemetry.Start` does not export yet.
+- The scaffolded implementations do not depend on the definitions
+  package; an implementation adds it by hand, as acme-shop's does.
+- A store on cloudflare.
+
+A project bootstrapped before this needs `stack bootstrap` again for
+`deployer`'s new roles.
 
 The rule is reversible until the first release.
 
@@ -10742,6 +10841,42 @@ acme's `check.sh` builds every service, `storefront-stack`'s cloudflare
 environments among them, with `superschematic-topcoat`, and
 `python3 scripts/bump_version.py check` passes. The rule is reversible
 until the first release.
+
+### D75, amended: the field is a variable per member, the rate limit keeps httprate's rule, a part is its wire string, and a claim reads its own token back
+
+Building D75 showed where the entry's words and the code had to part.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The memory store field is one variable per member of `ir.MemoryStoreConnection`, as every derived field is (`ir.DerivedVariables`): `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL`, `_CA`, `_AUTH` and `_MEMBER`. None set is a disabled store. A reader refuses a URL that holds a user or a password. | One JSON value in one variable, which no other derived field is, and whose members a platform could not each set from an output reference, such as the CA on gcp. |
+| A field that is set and malformed fails the config's load, as every refused field does, and the workload does not start. Only a connection the Redis client refuses when it opens, such as a CA that holds no certificate, runs the workload with a disabled store, after one log line. | Running disabled whenever the field is malformed, which turns a broken deploy into a quiet change of behavior, the outcome D75 refuses for a target with no platform. |
+| The shared rate limit is httprate's own rule, which the Go runtime's in-process limiter already applies: a request is allowed when `round(estimate) + 1 <= limit`, rounding half away from zero, and then increments the current window's counter with a TTL of two windows and five seconds; it is refused with `Retry-After` the window's length in whole seconds. The TypeScript and Rust limiters, and the vectors, hold the same. Go's route with a store runs the runtime's own limiter, not an httprate `LimitCounter`: httprate holds one lock per route across its counter's calls, which would put every request's round trips to the store in a line. The limiter reads both windows in one `MGET`, holds no lock, and leaves a request to httprate's in-process limiter while the store is unavailable or a call fails. | `estimate < limit`, with `Retry-After` the rest of the window, which D75 wrote: a Go route would then answer differently from httprate's own limiter, so its answers would change whenever its store went away. |
+| The `operation` part of a rate-limit key is the operation's kebab namespace and its name, `product.getProduct` or `order-item.addItem`, as apigen names it: Go's `RateLimitOperation()`, TypeScript's `operationSpecs` and Rust's `OperationInfo` already carry it, so no runtime needs more. `TestRateLimitOperationIsTheGoServers` in tsrestgen and rustrestgen holds the three to one spelling, and the key vectors use it. | The operation set's class and method, `ProductQueries.getProduct`, which the vectors first wrote and no runtime has at a route. |
+| A part's string is its wire string: the string its value takes in the API's JSON. A string part is itself, so an `Identity.UUID` is its compact base62 form; an integer is base 10, a boolean `true` or `false`, an enum its wire value. A name built from a value read off the wire in any language is the same name. | A UUID's canonical lowercase hex form, which the contract first named: a TypeScript or Rust caller that holds the wire string would convert it first, and one that forgot would key another name. |
+| A claim is `SET <name> <token> PX <ttl> NX GET`, with a random token per call: it is the caller's when no value was there, or when the value read back is its own token, which happens when the client retries a call whose first reply was lost. `GET` beside `NX` needs Valkey or Redis 7.0 or later, which every target runs. | `SET <name> 1 PX <ttl> NX`, whose retry finds the key its own first try set and answers false, so the call that made the claim reports it lost. |
+| A subscribe made while the store is down is held, in every language: it returns at once, dials nothing, and subscribes when the store reconnects, as the client's own reconnect does for a subscription already open. Only a disabled or closed store refuses it. Every other call still fails at once. | Refusing it with `ErrUnavailable`, under which a waiter that subscribes at start-up during an outage never hears a wake-up once the store is back. |
+| On gcp, a member of a parameterized environment is named as the target suffixes its other names: each parameter's name and value, `pr123`, joined by `-` under two parameters. Its names start `<store>@pr123:`. | The parameter's value alone, `123`, which reads unlike the member's other names (`shop-api-pr123`). |
+
+Status: built with D75 (`ir/derived_value.go`, `ir/memorystore.go`, the
+runtimes' `memorystore` modules, servergen's `memorystores.go.tmpl`,
+`extensions/gcp/memorystore.go`). The rule is reversible until the first
+release.
+
+### D75, amended: on gcp the connection role is a conditioned project grant, the endpoints take a subnet of their own, the field's CA is its chain's first certificate, and TypeScript connects with @redis/client
+
+D75 granted the role on the instance and left the endpoints' addresses,
+the CA's form and the TypeScript client open.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The connector grants the workload's account `roles/memorystore.dbConnectionUser` on the project, with an IAM condition that holds it to the edge's instance: `resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/<project>/locations/<region>/instances/<name>"`. `deployer`'s `resourcemanager.projectIamAdmin` already sets such a grant, as it does a Cloud SQL edge's. | A grant on the instance, which D75 wrote: pulumi-gcp has no IAM resource for a Memorystore instance, which has no IAM policy of its own. An unconditioned project grant, which reaches every store of the project. |
+| The service connection policy (`gcp-memorystore`) takes the endpoints' addresses from a subnet of its own, `<stack>-memorystore`, `10.8.16.0/24`, one per network and region, which every store of the environment and its members share. | The Direct VPC egress subnet, whose addresses Cloud Run's instances take. |
+| The field's CA is one PEM, the first certificate of the instance's first managed server CA chain (`managedServerCas[0].caCerts[0].certificates[0]`): the CA that issues the server's certificate. Go and rustls trust it as an anchor though it may be an intermediate; the TypeScript store passes `allowPartialTrustChain` with it, which Bun 1.4.2 honours. | The whole chain joined into one member, which the resource graph cannot write, since no value of it joins a list. |
+| The TypeScript store's client is `@redis/client` (node-redis) 5.12.1, from the runtime's `./redis` entry, an optional peer a server installs only when its APIs list a store. It takes a password per connection, so each new connection sends a fresh access token, and it subscribes again on reconnect. | Bun's `RedisClient`, which D75 leaned toward: it takes the password only in its URL and reuses it on every reconnect, so it cannot send the fresh IAM token each connection needs. |
+
+Status: built with D75; none of it has run on Google Cloud (D75's
+Status lists the first live run's checks). The rule is reversible until
+the first release.
 
 ## D79. TypeScript repositories run the Go ORM's statements, which sqlutil writes once, over a Postgres value codec
 
