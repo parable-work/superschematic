@@ -40,7 +40,9 @@ customer's. They show the shop's amounts as money, `GBP 39.98`
 
 The extension is a Go module of its own, `extensions/topcoat`. The
 installed `superschematic` binary does not link it, since Topcoat is
-before 1.0; `superschematic-topcoat` is the core with it linked:
+before 1.0; `superschematic-topcoat` is the installed binary with it
+linked beside the official extensions, so it builds and deploys
+everything `superschematic` does: {/* verify: b4 */}
 
 ```bash
 cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
@@ -1053,6 +1055,87 @@ SQLite or in Postgres; the step fails on its first order. Delete a
 made before it with `superschematic stack dev --remove-data` once, which
 removes its containers and their data as it stops, after the failed
 migration too, then run `stack dev` again.
+
+## Run the app in a stack
+
+The app above keeps its shop outside any stack, in memory or in a SQLite
+file. A Topcoat app can instead run in a [stack](/superschematic/guides/stacks/#apps)
+beside its API's server, over the stack's database, with the API's
+identity and its engine on Postgres: an app the API declares (D78).
+Declare it on an empty class of the API, naming the extension its build
+needs:
+
+```ts
+import { app } from "@superschematic/api";
+
+@app({ extensions: ["topcoat"] })
+export abstract class Backoffice {}
+```
+
+The API must be Rust, and its build must link the extension: run the
+stack's commands with `superschematic-topcoat`. The core binary still
+plans and inits the stack, and refuses to build it, saying to run
+`superschematic-topcoat`.
+
+The app's program is a library crate at the naming file's
+[`[implementation_paths] rust_app`](/superschematic/reference/naming/#implementation_pathsrust_app),
+`apps/{app}` by default, with `{app}` the class in kebab case. It
+exports one function, which the app's generated entrypoint calls once the
+API's `Deps`, its implementations and its engine are ready:
+
+```rust
+pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>
+```
+
+`<App>Parts`, which the API crate's `apps` module declares, holds the
+API's `deps`, its `implementations`, with the authenticator its router
+takes, the `engine` of its engine database, open on the stack's database,
+and `addr`, every interface at `PORT`, 8080 when it is unset. The first
+build that finds no crate there writes one, whose `serve` listens on
+`parts.addr` and answers every request with 501 Not Implemented and
+`app Backoffice of shop-stock does not serve yet: write its serve`. The
+stack runs it, ready, until you write yours. The crate is yours from then
+on, and the build never writes it again.
+
+The Topcoat crate of an API that declares an app has one more setup
+method, `<service>_with_parts(parts)`. It sets the crate up from the
+parts as `<service>` would from them: the implementations, the engine
+the entrypoint opened, in place of `engine::open` on a SQLite file, and,
+for an API on the identity runtime, `IdentityPageAuthenticator::of` over
+the implementations. An API whose users are its own passes its
+`PageAuthenticator` after the parts. It mounts the JSON API at `/api` and
+the engine at `/engine`, as `<service>` does.
+{/* verify: b4 */}
+
+`serve` binds `parts.addr` itself and hands the listener to
+`topcoat::serve`. Never call `topcoat::start` there: it binds `HOST` and
+`PORT`, `127.0.0.1:3000` by default, so on Cloud Run the app would listen
+on the container's loopback and never pass its startup probe. acme's
+`Backoffice`, an app of `shop-stock`, is three lines:
+
+<Snippet file="apps/backoffice/src/lib.rs" symbol="serve" />
+
+{/* verify: b4 */}
+
+Its crate depends on the API crate and the Topcoat crate by path, under
+the output root (`../../schemas/dist/topcoat/shop-stock`), and on
+`topcoat` and `tokio`. Each build copies the crate into the output
+root's `impl/`, its path dependencies re-based there, and the app's image
+takes in every crate it reaches by path. Its pages are under `/stock`,
+since `[extension.topcoat] pages_prefix` gives each listed service a path
+of its own:
+
+<Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_live" />
+
+{/* verify: b4 */}
+
+The image carries no Topcoat asset bundle yet, so the lists are GET forms
+that load the page again rather than live lists. On gcp the app's Cloud
+Run service is internal-only unless the stack exposes it, which `stack
+init` does for every app; on `local` it is a process at its port.
+`go/stack_dev_test.go` runs acme's stack with `superschematic-topcoat`,
+signs a member of staff in to `Backoffice` and receives stock through the
+engine console, `/stock/engine/Inventory/{id}`. {/* verify: b4 */}
 
 ## Test the app
 

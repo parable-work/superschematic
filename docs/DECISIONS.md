@@ -10275,3 +10275,114 @@ uses, as structs with no behaviors, and refuses a missing type and an
 engine type. `go test ./internal/generator/...` moves no golden, and
 fixture-engine-db's `Document` drops the field that held its kind's
 type. The rule is reversible until the first release.
+
+## D78. An app is a deployable an API declares: the project's own HTTP program over the API's parts, run beside its servers
+
+A Topcoat app (D44) runs the project's pages beside an API's
+implementations in one process. Every deployable a stack knew was a
+generated program: a server, a job, a worker, a runner or a deriver
+(D74). So acme's app ran only under `cargo run`, outside the stack, on
+SQLite, and its engine console never saw a checkout that `stack dev`
+took. The app needs what the API's server builds: `Deps`, the
+implementations, identity and the engine on the stack's database. Its
+routes are the project's.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API service declares an app with `@app` on a class of its schema, as `@job` declares a job (D52). The class's name is the app's, and the class holds no fields. `extensions` names the extensions the app's build needs: `@app({ extensions: ["topcoat"] })`. An app runs on a Rust API. A Go or TypeScript API's app is refused: `app Backoffice of shop-orders: shop-orders is a GO API, and an app runs on a Rust API; Go and TypeScript follow; write the API in Rust`. | A Topcoat kind in the core, which D44 keeps out; the app as a `server` variant, which would move the API under `/api` for every caller, since the Topcoat crate mounts it there; a Site-like kind that runs the project's binary, which would restate the wiring of `Deps` |
+| A binary that does not link an app's extension still resolves, plans and inits the stack, so `stack init` and `TestStackInitOverAcmeShop` keep the core binary. It refuses the whole stack in every command that builds: the stack's build (`build-all` and `stack dev`), `stack build`, and `stack deploy` and `stack prepare` unless `--no-build`, a deploy with `--prepared` included, since it still builds images. `--no-build` builds nothing and is not refused. The message is `app Backoffice of shop-stock needs the topcoat extension, which this superschematic binary does not link; run superschematic-topcoat`. | Refusing at resolve, which would break `stack init` and plans for a binary that never builds the app; skipping only the app's entrypoint, which leaves `stack deploy` to ship whatever the previous build wrote |
+| Each app of an API in the stack is a deployable of kind `app`, named after its API and its class as a job is (`shop-stock-backoffice`). It runs code and rolls out. Its edges are its API's, and it is a caller of its own in a callee's callers field, as a job is. It binds its API's config, with its API's server's env inherited, its API's callers field, which has no issuers since nothing calls an app, and its API's identity field. It binds no CORS field. `expose` lists it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`. A settings element names it the same way and takes `enabled`, `platform`, `env` and the platform's settings. `schedule`, `timeZone`, `onDeploy`, `instances`, `maxInstances` and `concurrency` are refused on it. | Edges of its own, which would restate its API's |
+| The app's program is a library crate the project writes, at `[implementation_paths] rust_app`: by default `apps/{app}` from the repository root, `{app}` being the class in kebab case, with `{service}` allowed. It exports `pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>`. `rustrestgen` writes `apps.rs` in the API crate. `<App>Parts` holds the API's `deps`, its `implementations` (with its authenticator and service authenticator, as `build_router` takes them), the `engine` once it is open, for an engine database, and `addr`, which is every interface at `PORT`, or 8080 when `PORT` is unset. The build scaffolds a missing crate once. The scaffold's `serve` listens on `parts.addr` and answers every request with 501 Not Implemented and `app <App> of <api> does not serve yet: write its serve`, so `stack dev` and a rollout run it, ready, before the project writes it. The build refuses a crate whose `src/lib.rs` declares no `serve`. | Apps in the API's implementation crate, which would compile the app's framework into the API's server; a generated `main` that knows Topcoat; a scaffold whose `serve` fails, which stops `stack dev` for every deployable and fails a rollout |
+| The entrypoint is `<output-root>/server/<stack>/<app>/`. Its `main` builds `Deps` and the implementations as the server's `wiring.rs` does, waits for the engine to open, then calls `serve` once. It exits 0 when `serve` returns `Ok` and 1 on an error, and shuts the engine down after. It installs no signal handler: `serve` chooses its own. Each build copies the app's crate into the output root's mirror, `<out>/impl/<api>.<app>/`, which the entrypoint depends on. The entrypoint uses the server's Dockerfile, and its image context also takes in, whole, every crate the app's crate reaches by path, then theirs in turn: the Topcoat crate under `<out>/topcoat/<api>`, the crates beside it, and the project's own. A crate outside the repository root makes the build write no Dockerfile, with the reason. The Topcoat crate is a member of the output root's Cargo workspace, not excluded from it. | A subcommand of the server's image, which ties the app's rollout to the server's; the server's include list alone, which leaves the Topcoat crate out of the context, so the image build fails where `stack dev`, which builds from the tree, passes |
+| The app deploys no engine document. Its engine opens once every schema of the database's engine document has a live version with the hash of the one the app was built with, which its API's server deploys (D58, amended below). Until then it retries, a second apart and doubling to thirty, logs `engine not open` with `the live version of <schemas> in the engine of <db> is not the one this app was built with; the API's server deploys it`, and does not listen. So a stale app image fails its startup probe rather than republish an old document. | Deploying the document as a server does, which lets an image from an older build publish its document again on each cold start, so the live version flips between the server's and the app's; waiting for any live version, which lets a stale app serve over a newer document |
+| An app rolls out in the wave after each server of its API, as well as after its callees, so its first attempt normally finds its document live. An app the environment turns off runs no image: a deploy, a build and a prepare neither need, build nor pin one, and the manifest keeps the image it last ran, for when it is turned on again. `--image` for it is refused (`--image names app <name>, which environment <env> turns off, so it runs no image; turn it on in the environment's settings, or leave its image out`), and so is `stack build --deployable` (`environment <env> turns app <name> off, so it runs no image to build; turn it on in the environment's settings`). | Building and pinning an image for an app that is off, which no resource holds on gcp, so every deploy failed at pinning |
+| `stack dev` runs the app as a process, built with cargo as a Rust server is, with `PORT` its `port` setting or a hashed port. It is ready once a TCP connection to its port succeeds, a dial alone, and never a GET of `/readyz`; `stack run`'s check of a running environment dials it the same way (`local: environment <env> is not running: app <name> does not listen at <url>`). gcp runs it as a Cloud Run service, `gcp.cloudrunapp`, with its own account, its API's Cloud SQL and egress, a TCP startup probe and a TCP liveness probe on its port, and public ingress when exposed. An app that is not exposed is internal-only with the invoker check on, and nothing grants `run.invoker`, so no one reaches it: expose an app that people use. An app turned off on gcp is its account, grants and secrets, with no service and no address. | HTTP probes, which the project's program would have to answer, since it owns every route; a local readiness that listens on the port to test it, which can take the port from the app as it binds |
+| cloudflare refuses an app the environment runs, through `TargetSpec.Unplaced`: `app shop-stock-backoffice: target cloudflare places no app: an app is the project's own Rust program, which serves HTTP until it is stopped, and cloudflare runs TypeScript Workers only; run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target`. An app turned off there is left out of the environment. | Cloudflare Containers, a platform D64 does not have; placing the app with another provider than its environment's, which mixed deploys will settle; refusing an app that is off, which would make every cloudflare environment of a stack unresolvable once one API declares an app |
+| `stack init` exposes every app of an API it deploys, as `{ of: <Api>, app: "<Class>" }` after the services, with `--expose` too, and its summary says `An app is always exposed: Backoffice of notes-api.` | Leaving it unexposed, where no one reaches it |
+| The Topcoat crate of an API that declares an app gains `RouterBuilder<Service>Ext::<service>_with_parts(parts)`, which sets the crate up from the parts as `<service>` would from them: the implementations, the engine the entrypoint opened on the stack's database, and, for an API on the identity runtime, `IdentityPageAuthenticator::of(&parts.implementations)`. An app's `serve` binds `parts.addr` with tokio's `TcpListener` and calls `topcoat::serve(listener, router)`, never `topcoat::start`, which binds `HOST` and `PORT`, by default `127.0.0.1:3000`, so on Cloud Run it would listen on the container's loopback. The image carries no Topcoat asset bundle yet, so a live list is a GET form. <!-- verify: b4 --> | `topcoat::start`, which passes under `stack dev`, whose readiness dials loopback, and fails every gcp revision; bundling Topcoat's runtime in the image, which needs Topcoat's CLI in the build |
+
+Status: built. Tests:
+- `internal/stack/apps_test.go` holds the kind, its edges, waves,
+  settings, exposure, callers and identity fields, and its refusals: an
+  unknown app, a schedule, instances, an app and a job in one element, a
+  Go and a TypeScript API, a name clash, an extension named twice, a
+  target with no app platform and one that places none
+  (`TestAppTurnedOffWhereNoAppIsPlaced` leaves an app turned off out).
+  `TestCheckAppExtensions` holds the build's refusal, and
+  `cli`'s `TestStackCommandsRefuseAnAppsMissingExtension` the commands'.
+- `internal/registry`'s `TestAppDecorator` and the loaders'
+  `TestAppsRefusedInIR`, `TestAppsAreNoTypes` and `TestStackReadsAnApp`
+  hold the declaration.
+- `servergen`'s `TestAppEntrypointGolden` holds the entrypoint, its
+  engine's wait, the parts and the scaffold. `TestAppEntrypointCompiles`
+  runs `cargo clippy -- -D warnings` over the output root, with an app
+  crate that depends on a Topcoat-shaped crate under `<out>/topcoat`,
+  and `TestAppImageContextHoldsItsCrates` the image's context.
+- The local target's `TestAppProcess`, `TestAppTurnedOff`,
+  `TestApplyRunsAnApp` and `TestRunJobWithAnApp`, gcp's
+  `TestAppPlatform`, `TestAppExposed` and `TestAppTurnedOff`, and
+  cloudflare's `TestWorkersRefusals/an_app` hold the process, the Cloud
+  Run service and the refusal.
+- `internal/stackdeploy`'s `TestDeployPinsAnAppsImage` and
+  `TestDeployOfAnAppTurnedOff` hold the image and the manifest. The
+  fake target's image repository is now `images.fake.test/<name>`, which
+  no other property equals, so a pin that finds no resource fails there
+  too.
+- `stackinit`'s `TestTheSchemaExposesEveryApp` and `cli`'s
+  `TestStackInitExposesEveryApp` hold the exposure.
+- `extensions/topcoat`'s `TestTheCrateServesAStackApp` builds the crate
+  over a fixture app's parts. <!-- verify: b4 -->
+
+acme: <!-- verify: b4 -->
+- shop-stock declares `Backoffice`, a Topcoat app over shop-stock's
+  crate at `apps/backoffice`, with its pages at `/stock` and the engine
+  console over shop-db at `/stock/engine`. `pages_prefix` becomes
+  `{ "shop-orders" = "/console", "shop-stock" = "/stock" }`, and
+  shop-stack exposes the app.
+- `TestStackDevRunsTheShop`, run through `superschematic-topcoat`, signs
+  a member of staff in to it and receives stock through
+  `/stock/engine/Inventory/{id}`.
+- `TestStackInitOverAcmeShop` inits the stack with the core binary and
+  places the app on gcp.
+
+Left: Go and TypeScript apps, the Topcoat asset bundle in the image, an
+app on Cloudflare, and a readiness deeper than a TCP connection. The rule
+is reversible until the first release.
+
+### D58, amended: an app's engine opens on the document its API's server deployed, and deploys none
+
+A server's setup deploys its database's engine document when the engine
+opens, and a job, a worker, a runner and a deriver deploy nothing. An
+app (D78, above) runs from an image of its own, which a deploy can keep
+while it takes a newer one for the API's server. Deploying from the app
+would publish whatever document the app was built with, an older one
+included, on each cold start.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Engine::undeployed(documents, namespace)` lists the names of the documents whose live version is missing or has another hash than the given document's. It reads as the system principal and writes nothing. It is in the Rust engine alone: no C ABI or TypeScript surface changed. | Comparing hashes in the generated code, which cannot compute them: the hash is the sha256 of the document's canonical JSON, which only the engine writes |
+| An app's `src/engine.rs` opens the engine in the background as a server's does, and its setup is `deployed`, not `deploy`: an attempt fails while `undeployed` names any schema of the engine document, in its namespace, so the background retries and logs it. The app's `main` waits for the engine before it calls `serve`. | Opening the engine with no check, which lets an app of another build serve over a document it does not know |
+
+Status: built. `deploy::tests::undeployed_names_the_documents_whose_live_version_has_another_hash`
+deploys a document, then a newer one, and sees each named while it is
+not the live version. `servergen`'s app goldens hold `engine.rs` and
+`main.rs`. The rule is reversible until the first release.
+
+### D47, amended: a stack whose app needs an extension runs the binary that links it in every CI job
+
+<!-- verify: b4 -->
+
+The release ships the core `superschematic` alone, which refuses to build
+a stack whose app names an extension it does not link (D78, above). A
+workflow that installed it would fail on every run, in its prepare job
+and in a deploy with `--prepared`, which builds images too.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A stack whose apps name one extension, `topcoat`, runs `superschematic-topcoat` in every job: the build, `stack prepare` and every stack command. Each job downloads the release's `superschematic`, checks it against `SHA256SUMS`, reads the commit its `BUILD_COMMIT` names, fetches that commit by its hash, and builds `extensions/topcoat`'s command against the release's static archives with their digests linked in, as the release builds `superschematic`. It runs no project code. | Releasing `superschematic-topcoat`, which would put a framework before 1.0 in every release; installing it in the prepare job alone, which leaves the deploy's image builds refused |
+| The renderer refuses an extension whose binary superschematic's repository does not hold, and apps that name two extensions between them, since no one `superschematic-<extension>` links two: the workflow's build would refuse them on every run. | Writing a workflow that fails on its first run |
+| `superschematic-topcoat` links the official extensions beside Topcoat, from the same list `cmd/superschematic` links (`cmd/superschematic/official`), so a stack that also deploys to cloudflare or gcp builds with it. | A Topcoat binary of the core alone, which knows neither the gcp nor the cloudflare target, so a tree with a stack on either fails its build-all |
+
+Status: built. `cigen`'s `TestAnAppsExtensionBuildsTheBinaryThatLinksIt`
+and `TestAppsWhoseExtensionsNoBinaryLinksAreRefused` hold the workflow
+and the refusals. The rule is reversible until the first release.

@@ -765,7 +765,8 @@ walks through it.
    that has a `tsconfig.json` also has one, `tsconfig.json` extending
    that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
    `@stack` deploys every API and every Site service and exposes as step 2
-   decided, with `Dev` on the local target and the cloud environment, and
+   decided, and every app of an API it deploys, `{ of: <Api>, app:
+   "<Class>" }`, since no one reaches an app it does not expose (D78), with `Dev` on the local target and the cloud environment, and
    the cloud target's values and settings types read from the JSON Schemas
    it registers: `src/gcp-target.ts` for a gcp environment,
    `src/cloudflare-target.ts` for a cloudflare one (D64).
@@ -1067,6 +1068,14 @@ target only when it links the target's extension and the provisioner's
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
 `prepare` reaches no target and takes its own flags.
+
+A stack with an app whose `@app` names an extension the binary does not
+link (D78) is refused by `prepare`, `build` and `deploy`, a deploy with
+`--prepared` included, since each builds images: `app Backoffice of
+shop-stock needs the topcoat extension, which this superschematic binary
+does not link; run superschematic-topcoat`. `prepare` and `deploy` with
+`--no-build` build nothing and are not refused. `plan` and the rest read
+the app as usual.
 
 Each of the others takes these flags:
 
