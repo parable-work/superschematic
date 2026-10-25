@@ -1701,6 +1701,7 @@ fn event_of(value: &Value) -> EngineEvent {
             .and_then(Value::as_str)
             .map(str::to_owned),
         seq: value.get("seq").and_then(Value::as_i64),
+        beside: value.get("beside") == Some(&Value::Bool(true)),
         version: value.get("version").and_then(Value::as_i64),
         actor: text("actor"),
         service: value

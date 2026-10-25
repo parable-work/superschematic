@@ -31,8 +31,17 @@ export interface EngineEvent {
   schema: string;
   /** Null for a publish and a define. */
   instanceId: string | null;
-  /** The instance's sequence, 1 for its first event; null for a publish and a define. */
+  /**
+   * The instance's sequence, 1 for its first event; null for a publish, a
+   * define and a beside operation's event.
+   */
   seq: number | null;
+  /**
+   * True for a beside operation's event (D77): an operation event of an
+   * instance with no sequence, whose change is a BesideChange and which
+   * replay skips. Absent otherwise.
+   */
+  beside?: true;
   /** The schema version the change was made with, or the one a publish made live; null for a define, whose draft has none. */
   version: number | null;
   /** The subject of the principal that made the change. */
@@ -82,6 +91,21 @@ export interface OperationChange {
   attribution?: Record<string, { behavior: string; confidence?: number; source?: string }>;
 }
 
+/**
+ * The change of a beside operation's event (D77): what was called and what
+ * it returned, in place of a patch, since it changes nothing a read of the
+ * instance returns.
+ */
+export interface BesideChange {
+  /** The behavior whose operation the caller called. */
+  behavior: string;
+  operation: string;
+  /** The parameters, as its guard and handler got them. */
+  params: Record<string, unknown>;
+  /** The operation's result. */
+  result: unknown;
+}
+
 /** The change of a define event: the draft's hash, not its document, which the draft route serves. */
 export interface DefineChange {
   /** The SHA-256 of the draft's canonical JSON, hex, as its record's hash. */
@@ -110,6 +134,11 @@ export interface ReadEventsOptions {
   behaviors?: readonly string[];
   /** No operation events of operations by these names (`heartbeat`). */
   exclude?: readonly string[];
+  /**
+   * `false` drops beside operations' events (D77), for a consumer that
+   * rebuilds instances; `true` keeps only them. Absent, both.
+   */
+  beside?: boolean;
 }
 
 /** One page of the log. */
