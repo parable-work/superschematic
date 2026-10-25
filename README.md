@@ -149,7 +149,9 @@ targets without forking the core. See
 superschematic is pre-release, so you build it from a checkout. You need
 Go, Rust, Bun, Node and a C compiler; [`tools.env`](tools.env) has the
 exact versions and [Prerequisites](docs/src/content/docs/start/prerequisites.md)
-says what each is for.
+says what each is for. A TypeScript project needs no Rust: `make cli`
+builds the CLI over superscalar's archive, downloaded prebuilt where
+`cargo` is missing ([Without Rust](CONTRIBUTING.md#without-rust)).
 
 ```sh
 git clone https://github.com/parable-work/superschematic

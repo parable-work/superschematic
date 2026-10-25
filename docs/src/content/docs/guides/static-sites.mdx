@@ -110,6 +110,36 @@ Without `'wasm-unsafe-eval'` the import of the SDK throws, naming the
 policy. superschematic serves no Content-Security-Policy of its own, in
 `stack dev` or on a target; set one where you set your other headers.
 
+### Load superscalar on the first call
+
+An API whose config sets `lazyValidation` on its TypeScript SDK keeps
+superscalar out of a page's first load:
+
+```ts
+sdk: { [TargetLanguage.TypeScript]: { enabled: true, lazyValidation: true } }
+```
+
+Each namespace of the SDK then imports its types package's types alone,
+and loads the package's validators and parsers, and superscalar's browser
+build with them, with a dynamic `import()` that its first call awaits. The
+checks and the parsing are the same; they run once the import resolves. A
+bundler that splits code, as Vite does and `bun build --splitting` does,
+puts them and the WebAssembly module in a chunk of its own, which the
+browser fetches on the first call:
+
+| A React page on Vite, calling one API | Its entry chunk | The chunk the first call loads |
+| --- | --- | --- |
+| without `lazyValidation` | 3,227 kB, 1,108 kB gzipped | |
+| with `lazyValidation` | 241 kB, 75 kB gzipped | 3,024 kB, 1,041 kB gzipped |
+
+The page renders before the module is fetched or compiled, and a page
+that makes no call never loads it. The policy still needs
+`'wasm-unsafe-eval'` for the first call, which rejects without it. A page
+keeps the module out of its entry chunk only if its own code imports the
+types package's values from its `/types` entry, enums and all, as
+`import { SessionTransport } from "@acme/shop-api-types/types"` does, since
+the package's root imports superscalar.
+
 ## Deploy it in a stack
 
 Name the site in `deploy`. It is exposed whether `expose` names it or
