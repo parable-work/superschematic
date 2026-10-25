@@ -10878,6 +10878,102 @@ Status: built with D75; none of it has run on Google Cloud (D75's
 Status lists the first live run's checks). The rule is reversible until
 the first release.
 
+## D82. A TypeScript project's local loop: a site's dev server behind one origin, superscalar on the SDK's first call, and the Rust build products prebuilt
+
+A TypeScript project hit three walls on the way to a fast local loop.
+`stack dev` built a site once (D55), so an edit needed another `stack
+dev`, or a dev server of the project's own on another origin, where the
+session cookie, `SameSite=Lax`, needed `trustedOrigins` and CORS set by
+hand through `<API>_IDENTITY`. The browser SDK carried superscalar's
+WebAssembly module inlined in the page's first script, 2.9 MB, or 1 MB
+gzipped, compiled before the page ran. And a checkout could not build the
+CLI without the Rust toolchain, wasm-pack and the wasm32 target, though
+the CLI links one Rust archive and a TypeScript project builds no Rust.
+
+This entry adds:
+- `site.dev` on a Site's config: the dev server `stack dev` runs in place
+  of the build, behind a proxy that serves the site and the APIs it calls
+  on one origin;
+- `stack dev --build-sites`, which builds such a site as a deploy does;
+- `outputs.sdk.typescript.lazyValidation`, which loads the SDK's
+  validators, and superscalar with them, on its first call;
+- prebuilt Rust build products for the pinned commits, which
+  `scripts/superscalar-dep.sh` and `scripts/versiongraph-archive.sh` stage
+  where cargo is missing, a workflow that publishes them, and `make cli`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `site.dev` is `{ command, port }` in the Site's config: `command` a script of the site's `package.json`, or a binary of its dependencies, which `bun run` runs, `dev` unless set, with no spaces, as `site.build` is; `port` the port it listens on, for a dev server that picks its own. `stack dev` hands it `PORT`, the port or one derived per checkout as a server's is, and the deploy ignores `dev` | a `command` with arguments, which a shell would have to split; the port as a stack setting beside the site's own `port`, though it is a property of how the code serves; a dev server on every target |
+| `stack dev` serves the site's port from a reverse proxy in the provisioner, on one origin with the APIs the site calls, and the dev server on a port of its own behind it | a Vite proxy config the build writes, which ties the generator to one dev server and its config format; the APIs' own origins, which keep the cookie session behind `trustedOrigins` and CORS, the problem this entry removes |
+| The proxy maps `/api/<service>/<route>` to `<route>` on the API's server, for each API the site calls, the prefix taken off and the query kept: shop-api's `/api/products` is `/api/shop-api/api/products`. A path under `/api/` that names no such API goes to the dev server. It passes the browser's `Host` on, with `X-Forwarded-Host`, `-Proto` and `X-Forwarded-Prefix`, and puts the prefix back on a redirect within the API's routes | a reserved prefix such as `/__superschematic/api/<service>`, which no app path meets but which reads poorly where a person debugs; an API's routes unprefixed on the site's origin, where two APIs' routes and the app's own paths collide |
+| The proxy serves the site's config with each API at `http://<Host>/api/<service>`, the origin the page was opened on, so `loadApis()` hands each SDK a same-origin base URL whether the browser opened `127.0.0.1` or `localhost` | a fixed `127.0.0.1` origin, under which a page opened on `localhost` calls another origin and loses its cookie; a relative base URL, which code that parses it as a URL would refuse |
+| The identity runtime's cross-origin check sees the browser's `Sec-Fetch-Site: same-origin`, and without it compares `Origin` with the `Host` the proxy passes on, so a cookie login through the proxy passes with no trusted origin | rewriting `Host` to the API's, under which a request without `Sec-Fetch-Site` fails the check; adding the site's origin to the API's `trustedOrigins` in `stack dev` alone, which would hide a deploy's missing config |
+| The proxy passes WebSocket upgrades, and streams each answer as it is written, through Go's `httputil.ReverseProxy` with `FlushInterval: -1`, so Vite's and Bun's hot reload, and an API's server-sent stream, work through it; it reaches the dev server at `localhost`, which a dev server that listens on `localhost` binds to IPv6 alone as often as to IPv4 | a proxy that buffers, which holds a stream back; dialing `127.0.0.1`, which misses Bun's and Vite's default listener on `::1` |
+| The dev server is a process of the environment: its output is printed with the site's name in front, `stack dev` waits until it answers HTTP on its port, and its exit stops the environment, as a server's does | a process left to fail silently, which leaves a proxy answering 502 |
+| A site built in `stack dev`, without `dev` or with `--build-sites`, keeps D55's file server and each API's own address, as a deploy serves it | the proxy for every site, which would stop `stack dev` exercising the CORS a deploy relies on |
+| The browser SDK's lighter path is `lazyValidation`: each namespace imports its types package's types alone and loads the package's validators and parsers with a dynamic `import()` its first call awaits. The checks and the parsing do not change; a bundler that splits code puts them and superscalar's WebAssembly module in a chunk the first call fetches. A React page on Vite: 3,227 kB (1,108 kB gzipped) in its entry chunk without it, 241 kB (75 kB gzipped) with it, and 3,024 kB (1,041 kB gzipped) on the first call | an option to skip the checks for a trusted front end, whose responses still need superscalar to parse a date-time field, so dropping it means a second parser of every type graph, unions and dependency types among them, in JavaScript; a JavaScript build of the common scalars, a second implementation of the Rust core outside superscalar, which the parity tests could not hold to it; lazy loading inside superscalar, whose API is synchronous and whose repository this one does not change |
+| `lazyValidation` is an option of the TypeScript SDK, off unless set, refused on another language's SDK | lazy loading in every SDK, which changes every generated namespace and gains a server nothing |
+| The prebuilt Rust build products are two families, each keyed by a digest of its inputs: superscalar's Go binding with its static archive and its TypeScript binding with the napi addon and the browser and workerd builds, by `superscalar.pin` and `tools.env`'s Rust and wasm-pack; and the version-graph core's static archive and wasm32 module, by its sources, as git lists them, and Rust | one key for both, which republishes superscalar's for every change to the version graph; the engine's archive and addon too, which no TypeScript project without engine types needs (left) |
+| This repository's `prebuilt-deps` workflow builds each family missing a prerelease on the four release runners, links the core CLI over the archive, and attaches the tarballs and a `manifest.json` of their SHA-256s to the prerelease `prebuilt-<family>-<key>` | superscalar's own release, which this repository does not drive; a CI cache, which a checkout outside CI cannot read |
+| `prebuilt.pin` pins each family's key and its manifest's digest; a fetch refuses a manifest that is not the pinned one or is for another key, a tarball whose digest or size the manifest does not list, and a tarball path outside its directory, a link or a device. A maintainer writes the pin with `scripts/prebuilt_deps.py pin` after the workflow publishes | trusting the release's own checksums, which guard against a broken download and not against a changed release; a pin the workflow commits, which the organization's settings do not allow yet |
+| `scripts/superscalar-dep.sh --prebuilt` and `scripts/versiongraph-archive.sh --prebuilt` stage the prebuilt files where a build leaves them, and a run with no cargo on `PATH` does so unasked, as the version-graph package's wasm build does. `make cli` builds `bin/superschematic`, which links superscalar's archive alone, and the migration runner | a separate install script; `make build` without Rust, which builds every Go module and so every archive |
+| The scripts' logic is `scripts/prebuilt_deps.py`, Python 3.9 and its standard library, which `scripts/test_prebuilt_deps.py` tests in CI's scrub job | bash, as the other scripts are, where a manifest's JSON and a safe tar extraction need Python anyway |
+
+Two answers differ from the request this entry answers:
+- It named the dev command `vite`. The command is the package's `dev`
+  script unless set, which holds the arguments (`vite --port $PORT
+  --strictPort`), and the site scaffold's package gets one on Bun's own
+  dev server.
+- It offered skipping client-side checks for a trusted front end. That
+  front end still parses each date-time field it receives through
+  superscalar, so skipping the checks removes nothing from the bundle
+  without a second parser; loading lazily keeps the module out of the
+  first load with no second implementation.
+
+Status: built.
+- **The dev server and the proxy:**
+  - `internal/stack/local/siteproxy_test.go` holds the proxy: the config
+    on the page's origin, the dev server's pages with the browser's
+    `Host`, each API under its prefix, a cookie login through it that the
+    standard library's cross-origin check passes while the same login to
+    the API's own port is refused, a redirect, a stream, an unknown
+    service's path and a 502; and a WebSocket upgrade's bytes both ways.
+  - `internal/stack/local/sites_dev_test.go` runs Bun's dev server as
+    `stack dev` does, with `PORT` and the URLs in its environment, and
+    through the proxy reads its page, the config and the API, opens its
+    hot-reload socket, and receives the hot update an edit of the page's
+    script makes. A dev server that exits stops the environment, and one
+    that never answers is refused.
+  - `internal/stack/local/sites_test.go` holds the lowering and the
+    distinct-ports refusal; the loader's tests hold `site.dev`'s forms.
+  - `TestStackDevRunsTheShop` runs acme-shop's `shop-web` on Bun's dev
+    server behind the proxy, opens its hot-reload socket, signs a shopper
+    in with a cookie session there with no CORS set, and builds the site
+    again with `--build-sites` into another output root.
+  - Checked by hand: a React page on Vite under `stack dev`, in a browser,
+    signs in with a cookie session through the proxy, and an edit of its
+    component hot-reloads it in place, its state kept.
+- **`lazyValidation`:** `internal/generator/sdkgen`'s
+  `TestWriteLazySDKGolden` and `TestGeneratedSDKCompiles` hold the
+  namespaces and type-check them, and
+  `internal/generator/servergen`'s
+  `TestALazySDKKeepsSuperscalarOutOfTheSitesFirstLoad` bundles a site
+  with `bun build --splitting` and finds the module in a chunk the entry
+  does not hold, which runs.
+- **Prebuilt:** `scripts/test_prebuilt_deps.py` packs, publishes,
+  fetches and stages both families, and refuses a changed tarball, a
+  changed manifest, a key the pin does not name and a path that leaves
+  its directory. By hand, a fresh clone with Go, Bun, Node and Docker and
+  no cargo or rustup on `PATH` staged locally packed artifacts through a
+  `file://` URL, ran `make cli`, built the HTTP runtime and the
+  version-graph package, and ran `stack dev` for a new TypeScript project
+  with a React site.
+
+Left: the engine's archive and Node-API addon prebuilt, for a TypeScript
+project whose types compose behaviors; the first publish and its pin,
+which a maintainer runs once this merges; a proxy for a site served by a
+deploy, which serves each API on its own origin.
+
 ## D81. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
 
 The DDL a DB service's build writes left out much of what its schema

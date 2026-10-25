@@ -961,12 +961,24 @@ func siteAddress(ctx registry.PlatformContext) any {
 // siteID is the ID of a site's node.
 func siteID(deployable string) string { return deployable + ".site" }
 
+// SiteDevPort returns the port a site's dev server listens on (D82): its
+// config's port, or one derived as a server's is, from the stack, the
+// environment, the site's name and the checkout.
+func SiteDevPort(env registry.StackEnvironment, d ir.ResolvedDeployable) int {
+	if d.Site != nil && d.Site.Dev != nil && d.Site.Dev.Port != 0 {
+		return d.Site.Dev.Port
+	}
+	return hashPort(serverPortBase, checkoutOf(env), env.Stack, env.Name, d.Name, "dev")
+}
+
 // lowerSite lowers a site to its node (D55): its package, relative to the
 // output root, the script that builds it and the directory the build
 // writes, its single-page fallback, the port its file server listens on,
 // and its config, each API it calls with the loopback URL its site edge
 // derives. The provisioner builds it once and serves it until the
-// environment stops.
+// environment stops. A site with a dev server (D82) holds its command and
+// the port it listens on too: the provisioner runs it in place of the
+// build, and serves the site's port from a proxy in front of it.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
@@ -991,6 +1003,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
+	}
+	if dev := d.Site.Dev; dev != nil {
+		command := dev.Command
+		if command == "" {
+			command = ir.DefaultSiteDevCommand
+		}
+		props["dev"] = map[string]any{"command": command, "port": SiteDevPort(ctx.Environment, d)}
 	}
 	return registry.Lowered{Resources: []*ir.Resource{{
 		ID:         siteID(d.Name),
@@ -1111,6 +1130,11 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 			if port, ok := intValue(res.Properties["port"]); ok {
 				owners[port] = append(owners[port], "site "+strings.Join(res.Owners, ", "))
 			}
+			if dev, _ := res.Properties["dev"].(map[string]any); dev != nil {
+				if port, ok := intValue(dev["port"]); ok {
+					owners[port] = append(owners[port], "the dev server of site "+strings.Join(res.Owners, ", "))
+				}
+			}
 		case TypeContainer:
 			name, _ := res.Properties["name"].(string)
 			if name == "" {
@@ -1133,7 +1157,7 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	var out []string
 	for _, port := range ports {
 		if names := slices.Compact(owners[port]); len(names) > 1 {
-			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's or a site's port setting or the environment's postgresPort, storagePort or memoryStorePort value", strings.Join(names, " and "), port))
+			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's or a site's port setting, a site's site.dev.port, or the environment's postgresPort, storagePort or memoryStorePort value", strings.Join(names, " and "), port))
 		}
 	}
 	return out

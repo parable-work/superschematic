@@ -898,10 +898,16 @@ design is section 8.3 of
    the site's config at `/__superschematic/config.json`, each API it calls
    at its loopback URL, and its fallback for a path that names no file.
    The summary prints each site's URL. A rebuilt site needs another `stack
-   dev`.
+   dev`. A site whose config names a dev server (`site.dev`) runs it
+   instead, unless `--build-sites`: `bun run <command>` in its package,
+   with `PORT` its port, behind a proxy on the site's port that serves the
+   dev server, WebSocket upgrades among its requests, and each API the site
+   calls under `/api/<service>`, so the page, its hot reload and its APIs
+   share one origin and a cookie session needs no CORS (D82;
+   [static sites](/superschematic/guides/static-sites/#with-a-dev-server)).
 
-Dev stays in the foreground until Ctrl-C or until a server or a worker
-exits, then stops the sites, the servers and the workers, callers first,
+Dev stays in the foreground until Ctrl-C or until a server, a worker or a
+site's dev server exits, then stops the sites, the servers and the workers, callers first,
 and the containers, which keep their data for the next run: the
 databases, and the buckets' objects. The memory store's container keeps
 none: its keys go when it stops. `--remove-data` removes the
@@ -937,6 +943,7 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
 | `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way); `--remove-database` is its earlier name |
+| `--build-sites` | false | build each site once and serve its files, a site with a dev server too, as a deploy does, in place of running its dev server |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its
