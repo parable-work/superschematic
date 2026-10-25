@@ -33,8 +33,12 @@ export type NoteBehaviors = {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many comments the instance has. */
-    readonly commentCount: number;
+    /** How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted. */
+    readonly messages: number;
+    /** When the latest posted message was posted, in epoch milliseconds; absent while there is none. */
+    readonly lastMessageAt?: number;
+    /** The posted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    readonly threads: { open: number; resolved: number };
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */
@@ -57,6 +61,70 @@ export type NotePatch = {
 /** A state of a Note's Workflow. */
 export type NoteState = 'draft' | 'review' | 'published' | 'archived';
 
+/** A block of a message of a Note's Comments: a structured part beside its body, of a kind Comments declares. */
+export type NoteCommentBlock = {
+  /** The instance's id. */
+  id: string;
+  kind: 'ref';
+  /** The instance's schema. */
+  schema: string;
+} | {
+  /** What a client shows with it, at most 8192 bytes as compact JSON. */
+  data?: JSONObject;
+  kind: 'action';
+  /** Where it stands. */
+  status: 'running' | 'succeeded' | 'failed';
+  /** What was done. */
+  title: string;
+};
+
+/** A message of a Note's Comments, as every operation that returns one gives it. */
+export type NoteCommentMessage = {
+  /** The subject of the caller who posted it. */
+  author: string;
+  /** The structured parts a client renders beside the body, as posted or last edited; none once deleted. */
+  blocks: NoteCommentBlock[];
+  /** The text, Markdown; empty once deleted. */
+  body: string;
+  /** When it was posted, in epoch milliseconds. */
+  createdAt: number;
+  /** When it was last edited, in epoch milliseconds; absent when it never was, or once deleted. */
+  editedAt?: number;
+  /** How many times it was edited; listEdits reads the text before each. 0 once deleted. */
+  edits: number;
+  /** The message's number on the instance: 1, 2, 3, ...; never reused. */
+  id: number;
+  /** On a top-level message: when its thread's latest posted reply was posted; absent while it has none. */
+  lastReplyAt?: number;
+  /** The subjects the message names for someone to hear of it; none once deleted. */
+  mentions: string[];
+  /** On a top-level message: the subjects that have a posted message in its thread, the top-level one included, the latest to post first, at most 10. */
+  participants?: string[];
+  pinned: boolean;
+  /** The id of the message of the thread the reply quotes. */
+  quotes?: number;
+  /** The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted. */
+  reactions: { [key: string]: {
+    count: number;
+    /** Whether the caller reacted with the emoji. */
+    mine: boolean;
+  } };
+  /** On a top-level message: how many posted replies its thread has. */
+  replies?: number;
+  /** On a top-level message whose thread is resolved: who resolved it and when. */
+  resolved?: {
+    /** In epoch milliseconds. */
+    at: number;
+    by: string;
+  };
+  /** posted, or deleted: a deleted message keeps its place, its author and its replies, and holds no text. */
+  state: 'posted' | 'deleted';
+  /** For a reply, the id of the top-level message whose thread it is in; absent on a top-level message. */
+  thread?: number;
+  /** The deployable of the service whose call posted it (D37). */
+  via?: string;
+};
+
 /** The parameters of Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
 export type NoteTransitionParams = {
   /** The state to move to. */
@@ -71,43 +139,204 @@ export type NoteTransitionResult = {
   to: NoteState;
 };
 
-/** The parameters of Comments' comment: Adds a comment to the instance, or a reply to one of its comments. */
-export type NoteCommentParams = {
-  /** The comment's text. */
+/** The parameters of Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing. */
+export type NotePostParams = {
+  /** Structured parts beside the body, each of a kind the config allows. */
+  blocks?: NoteCommentBlock[];
+  /** The text, Markdown, at most the config's maxBodyLength code points. */
   body: string;
-  /** The id of the instance's comment this one replies to. */
-  replyTo?: number;
+  /** The caller's key for the message, so a retry returns the message it posted. */
+  clientId?: string;
+  /** The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed. */
+  mentions?: string[];
+  /** The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread. */
+  quotes?: number;
+  /** The id of the top-level message to reply in; a top-level message when absent. */
+  thread?: number;
 };
 
-/** The comment. */
-export type NoteCommentResult = {
-  body: string;
-  /** When, in epoch milliseconds. */
-  createdAt: number;
-  /** The subject of the caller who added it. */
-  createdBy: string;
-  /** The comment's number on the instance: 1, 2, 3, ... */
-  id: number;
-  /** The id of the comment it replies to. */
-  replyTo?: number;
+/** The message. */
+export type NotePostResult = NoteCommentMessage;
+
+/** The parameters of Comments' edit: Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
+export type NoteEditParams = {
+  /** The blocks, in place of the message's; it keeps them when absent. */
+  blocks?: NoteCommentBlock[];
+  /** The text, Markdown, at most the config's maxBodyLength code points. */
+  body?: string;
+  /** The mentions, in place of the message's; it keeps them when absent. */
+  mentions?: string[];
+  /** The id of the message. */
+  message: number;
 };
 
-/** The parameters of Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
-export type NoteListCommentsParams = {
+/** The message after the edit. */
+export type NoteEditResult = NoteCommentMessage;
+
+/** The parameters of Comments' deleteMessage: Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+export type NoteDeleteMessageParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, deleted. */
+export type NoteDeleteMessageResult = NoteCommentMessage;
+
+/** The parameters of Comments' purge: Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them. */
+export type NotePurgeParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** What was removed. */
+export type NotePurgeResult = {
+  /** The id of the message purged. */
+  message: number;
+  /** The ids of every message removed: the message, and for a top-level one its replies, in ascending order. */
+  purged: number[];
+};
+
+/** The parameters of Comments' react: Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji. */
+export type NoteReactParams = {
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message after the reaction. */
+export type NoteReactResult = NoteCommentMessage;
+
+/** The parameters of Comments' unreact: Removes the caller's reaction from a posted message. */
+export type NoteUnreactParams = {
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message after the reaction is removed. */
+export type NoteUnreactResult = NoteCommentMessage;
+
+/** The parameters of Comments' pin: Pins a posted message, top-level or a reply. Needs pinPermission when the config names one. */
+export type NotePinParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, pinned. */
+export type NotePinResult = NoteCommentMessage;
+
+/** The parameters of Comments' unpin: Unpins a pinned message. Needs pinPermission when the config names one. */
+export type NoteUnpinParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, unpinned. */
+export type NoteUnpinResult = NoteCommentMessage;
+
+/** The parameters of Comments' resolve: Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+export type NoteResolveParams = {
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** The top-level message, resolved. */
+export type NoteResolveResult = NoteCommentMessage;
+
+/** The parameters of Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
+export type NoteReopenParams = {
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** The top-level message, open. */
+export type NoteReopenResult = NoteCommentMessage;
+
+/** The parameters of Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+export type NoteListMessagesParams = {
+  /** The page is the earliest messages with a higher id. */
+  after?: number;
+  /** A message of the listing: the page holds it and the messages either side of it. At most one of around, before and after. */
+  around?: number;
+  /** The page is the latest messages with a lower id. */
+  before?: number;
+  /** At most this many messages; 50 when absent. */
+  limit?: number;
+  /** The id of a top-level message: the page is its thread's replies, and the result carries the message as root. */
+  thread?: number;
+};
+
+/** What Comments' listMessages returns. */
+export type NoteListMessagesResult = {
+  /** The id to pass as after for the page of newer messages: the last item's, when the listing has a newer message; null when it has none or the page is empty. */
+  after: number | null;
+  /** The id to pass as before for the page of older messages: the first item's, when the listing has an older message; null when it has none or the page is empty. */
+  before: number | null;
+  items: NoteCommentMessage[];
+  /** With thread, the thread's top-level message. */
+  root?: NoteCommentMessage;
+};
+
+/** The parameters of Comments' getMessage: Reads one message of the conversation, a deleted one included. */
+export type NoteGetMessageParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message. */
+export type NoteGetMessageResult = NoteCommentMessage;
+
+/** The parameters of Comments' listEdits: Lists what a message held before each of its edits, oldest first, one page at a time. */
+export type NoteListEditsParams = {
   /** The next of the previous page. */
   cursor?: string;
-  /** At most this many comments; 50 when absent. */
+  /** At most this many edits; 50 when absent. */
   limit?: number;
+  /** The id of the message. */
+  message: number;
 };
 
-/** What Comments' listComments returns. */
-export type NoteListCommentsResult = {
+/** What Comments' listEdits returns. */
+export type NoteListEditsResult = {
   items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** The blocks before the edit. */
+    blocks: NoteCommentBlock[];
+    /** The body before the edit. */
     body: string;
-    createdAt: number;
-    createdBy: string;
-    id: number;
-    replyTo?: number;
+    /** The subject of the caller who made the edit. */
+    by: string;
+    /** The edit's number on the message: 1, 2, 3, ... */
+    edit: number;
+    /** The mentions before the edit. */
+    mentions: string[];
+  }>;
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
+/** The parameters of Comments' listReactions: Lists who reacted to a message with an emoji, in the order they reacted, one page at a time. */
+export type NoteListReactionsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** At most this many reactions; 50 when absent. */
+  limit?: number;
+  /** The id of the message. */
+  message: number;
+};
+
+/** What Comments' listReactions returns. */
+export type NoteListReactionsResult = {
+  items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** The subject of the caller who reacted. */
+    subject: string;
   }>;
   /** The cursor of the next page; null after the last. */
   next: string | null;
@@ -277,8 +506,20 @@ export type NoteListProposalsResult = {
 /** Each operation a Note's behaviors add: its scope, parameters and result. */
 export type NoteOperations = {
   transition: { scope: 'instance'; params: NoteTransitionParams; result: NoteTransitionResult };
-  comment: { scope: 'instance'; params: NoteCommentParams; result: NoteCommentResult };
-  listComments: { scope: 'instance'; params: NoteListCommentsParams; result: NoteListCommentsResult };
+  post: { scope: 'instance'; params: NotePostParams; result: NotePostResult };
+  edit: { scope: 'instance'; params: NoteEditParams; result: NoteEditResult };
+  deleteMessage: { scope: 'instance'; params: NoteDeleteMessageParams; result: NoteDeleteMessageResult };
+  purge: { scope: 'instance'; params: NotePurgeParams; result: NotePurgeResult };
+  react: { scope: 'instance'; params: NoteReactParams; result: NoteReactResult };
+  unreact: { scope: 'instance'; params: NoteUnreactParams; result: NoteUnreactResult };
+  pin: { scope: 'instance'; params: NotePinParams; result: NotePinResult };
+  unpin: { scope: 'instance'; params: NoteUnpinParams; result: NoteUnpinResult };
+  resolve: { scope: 'instance'; params: NoteResolveParams; result: NoteResolveResult };
+  reopen: { scope: 'instance'; params: NoteReopenParams; result: NoteReopenResult };
+  listMessages: { scope: 'instance'; params: NoteListMessagesParams; result: NoteListMessagesResult };
+  getMessage: { scope: 'instance'; params: NoteGetMessageParams; result: NoteGetMessageResult };
+  listEdits: { scope: 'instance'; params: NoteListEditsParams; result: NoteListEditsResult };
+  listReactions: { scope: 'instance'; params: NoteListReactionsParams; result: NoteListReactionsResult };
   listRevisions: { scope: 'instance'; params: NoteListRevisionsParams; result: NoteListRevisionsResult };
   getRevision: { scope: 'instance'; params: NoteGetRevisionParams; result: NoteGetRevisionResult };
   propose: { scope: 'instance'; params: NoteProposeParams; result: NoteProposeResult };
@@ -288,12 +529,12 @@ export type NoteOperations = {
 };
 
 /** The name of an operation on one Note. */
-export type NoteInstanceOperation = 'transition' | 'comment' | 'listComments' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals';
+export type NoteInstanceOperation = 'transition' | 'post' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals';
 
 /** The codes the vetoes of a Note's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type NoteVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
-  Comments: never;
+  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_configured';
   Revisions: 'no_review' | 'not_pending';
 };
 
@@ -324,10 +565,34 @@ export interface NotesClient {
   operate<K extends NoteInstanceOperation>(id: string, operation: K, params: NoteOperations[K]['params'], options?: NoteWriteOptions): Promise<OperationOutcome<NoteOperations[K]['result']>>;
   /** Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
   transition(id: string, params: NoteTransitionParams, options?: NoteWriteOptions): Promise<NoteTransitionResult>;
-  /** Comments' comment: Adds a comment to the instance, or a reply to one of its comments. */
-  comment(id: string, params: NoteCommentParams, options?: NoteWriteOptions): Promise<NoteCommentResult>;
-  /** Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
-  listComments(id: string, params?: NoteListCommentsParams, options?: NoteWriteOptions): Promise<NoteListCommentsResult>;
+  /** Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted returns that message and posts nothing. */
+  post(id: string, params: NotePostParams, options?: NoteWriteOptions): Promise<NotePostResult>;
+  /** Comments' edit: Replaces a posted message's body, blocks or mentions, keeping what it held before for listEdits. Its author may, within the config's editWindowMs of posting when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read. */
+  edit(id: string, params: NoteEditParams, options?: NoteWriteOptions): Promise<NoteEditResult>;
+  /** Comments' deleteMessage: Deletes a message: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+  deleteMessage(id: string, params: NoteDeleteMessageParams, options?: NoteWriteOptions): Promise<NoteDeleteMessageResult>;
+  /** Comments' purge: Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them. */
+  purge(id: string, params: NotePurgeParams, options?: NoteWriteOptions): Promise<NotePurgeResult>;
+  /** Comments' react: Adds the caller's reaction to a posted message. A message holds at most 20 distinct emoji. */
+  react(id: string, params: NoteReactParams, options?: NoteWriteOptions): Promise<NoteReactResult>;
+  /** Comments' unreact: Removes the caller's reaction from a posted message. */
+  unreact(id: string, params: NoteUnreactParams, options?: NoteWriteOptions): Promise<NoteUnreactResult>;
+  /** Comments' pin: Pins a posted message, top-level or a reply. Needs pinPermission when the config names one. */
+  pin(id: string, params: NotePinParams, options?: NoteWriteOptions): Promise<NotePinResult>;
+  /** Comments' unpin: Unpins a pinned message. Needs pinPermission when the config names one. */
+  unpin(id: string, params: NoteUnpinParams, options?: NoteWriteOptions): Promise<NoteUnpinResult>;
+  /** Comments' resolve: Resolves the thread of a posted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+  resolve(id: string, params: NoteResolveParams, options?: NoteWriteOptions): Promise<NoteResolveResult>;
+  /** Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
+  reopen(id: string, params: NoteReopenParams, options?: NoteWriteOptions): Promise<NoteReopenResult>;
+  /** Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, deleted ones included, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+  listMessages(id: string, params?: NoteListMessagesParams, options?: NoteWriteOptions): Promise<NoteListMessagesResult>;
+  /** Comments' getMessage: Reads one message of the conversation, a deleted one included. */
+  getMessage(id: string, params: NoteGetMessageParams, options?: NoteWriteOptions): Promise<NoteGetMessageResult>;
+  /** Comments' listEdits: Lists what a message held before each of its edits, oldest first, one page at a time. */
+  listEdits(id: string, params: NoteListEditsParams, options?: NoteWriteOptions): Promise<NoteListEditsResult>;
+  /** Comments' listReactions: Lists who reacted to a message with an emoji, in the order they reacted, one page at a time. */
+  listReactions(id: string, params: NoteListReactionsParams, options?: NoteWriteOptions): Promise<NoteListReactionsResult>;
   /** Revisions' listRevisions: Lists the instance's revisions, oldest first, one page at a time. */
   listRevisions(id: string, params?: NoteListRevisionsParams, options?: NoteWriteOptions): Promise<NoteListRevisionsResult>;
   /** Revisions' getRevision: Reads one of the instance's revisions by its number: the own fields as that change left them. A number the instance has not reached is not_found. */
@@ -366,11 +631,47 @@ export function notesClient(client: EngineClient): NotesClient {
     transition(id, params, options) {
       return client.instances.invoke<NoteTransitionResult>('notes', id, 'transition', params, options);
     },
-    comment(id, params, options) {
-      return client.instances.invoke<NoteCommentResult>('notes', id, 'comment', params, options);
+    post(id, params, options) {
+      return client.instances.invoke<NotePostResult>('notes', id, 'post', params, options);
     },
-    listComments(id, params, options) {
-      return client.instances.invoke<NoteListCommentsResult>('notes', id, 'listComments', params ?? {}, options);
+    edit(id, params, options) {
+      return client.instances.invoke<NoteEditResult>('notes', id, 'edit', params, options);
+    },
+    deleteMessage(id, params, options) {
+      return client.instances.invoke<NoteDeleteMessageResult>('notes', id, 'deleteMessage', params, options);
+    },
+    purge(id, params, options) {
+      return client.instances.invoke<NotePurgeResult>('notes', id, 'purge', params, options);
+    },
+    react(id, params, options) {
+      return client.instances.invoke<NoteReactResult>('notes', id, 'react', params, options);
+    },
+    unreact(id, params, options) {
+      return client.instances.invoke<NoteUnreactResult>('notes', id, 'unreact', params, options);
+    },
+    pin(id, params, options) {
+      return client.instances.invoke<NotePinResult>('notes', id, 'pin', params, options);
+    },
+    unpin(id, params, options) {
+      return client.instances.invoke<NoteUnpinResult>('notes', id, 'unpin', params, options);
+    },
+    resolve(id, params, options) {
+      return client.instances.invoke<NoteResolveResult>('notes', id, 'resolve', params, options);
+    },
+    reopen(id, params, options) {
+      return client.instances.invoke<NoteReopenResult>('notes', id, 'reopen', params, options);
+    },
+    listMessages(id, params, options) {
+      return client.instances.invoke<NoteListMessagesResult>('notes', id, 'listMessages', params ?? {}, options);
+    },
+    getMessage(id, params, options) {
+      return client.instances.invoke<NoteGetMessageResult>('notes', id, 'getMessage', params, options);
+    },
+    listEdits(id, params, options) {
+      return client.instances.invoke<NoteListEditsResult>('notes', id, 'listEdits', params, options);
+    },
+    listReactions(id, params, options) {
+      return client.instances.invoke<NoteListReactionsResult>('notes', id, 'listReactions', params, options);
     },
     listRevisions(id, params, options) {
       return client.instances.invoke<NoteListRevisionsResult>('notes', id, 'listRevisions', params ?? {}, options);

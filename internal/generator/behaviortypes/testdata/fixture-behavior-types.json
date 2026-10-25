@@ -681,9 +681,49 @@
         "doc": "TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.",
         "members": [
           {
-            "json": "commentCount",
-            "name": "CommentCount",
-            "doc": "How many comments the instance has.",
+            "json": "messages",
+            "name": "Messages",
+            "doc": "How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "lastMessageAt",
+            "name": "LastMessageAt",
+            "doc": "When the latest posted message was posted, in epoch milliseconds; absent while there is none.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "threads",
+            "name": "Threads",
+            "doc": "The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.",
+            "shape": {
+              "kind": "struct",
+              "ref": "TicketCommentsThreads"
+            },
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "TicketCommentsThreads",
+        "doc": "TicketCommentsThreads types TicketComments.threads.",
+        "members": [
+          {
+            "json": "open",
+            "name": "Open",
+            "shape": {
+              "kind": "integer"
+            },
+            "required": true
+          },
+          {
+            "json": "resolved",
+            "name": "Resolved",
             "shape": {
               "kind": "integer"
             },

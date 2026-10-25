@@ -135,7 +135,7 @@ func TestTicketBehaviorsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(read), &b); err != nil {
 		t.Fatal(err)
 	}
-	if b.Workflow.Status != TicketStateInProgress || b.Comments.CommentCount != 2 || *b.Revisions.Revision != 3 {
+	if b.Workflow.Status != TicketStateInProgress || b.Comments.Messages != 2 || b.Comments.Threads.Open != 1 || *b.Revisions.Revision != 3 {
 		t.Fatalf("decoded %+v", b)
 	}
 	if b.Links.Targets.Project.Id != "launch" || len(b.Links.Targets.Reviewers) != 2 || !*b.Links.Targets.Spec.Stale {

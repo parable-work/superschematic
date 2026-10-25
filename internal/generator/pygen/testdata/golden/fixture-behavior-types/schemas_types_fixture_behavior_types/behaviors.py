@@ -678,6 +678,21 @@ class TicketRevisions(BaseModel):
     # With review in the config, how many of the instance's proposals are pending; absent without review.
     pending_proposals: Any = Field(default=None, alias="pendingProposals", serialization_alias="pendingProposals")
 
+class TicketCommentsThreads(BaseModel):
+    """
+    TicketCommentsThreads types TicketComments.threads.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    open: int = Field(..., alias="open", serialization_alias="open")
+    resolved: int = Field(..., alias="resolved", serialization_alias="resolved")
+
 class TicketComments(BaseModel):
     """
     TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
@@ -690,8 +705,12 @@ class TicketComments(BaseModel):
         populate_by_name=True,
     )
 
-    # How many comments the instance has.
-    comment_count: int = Field(..., alias="commentCount", serialization_alias="commentCount")
+    # How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    messages: int = Field(..., alias="messages", serialization_alias="messages")
+    # When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    last_message_at: Optional[int] = Field(default=None, alias="lastMessageAt", serialization_alias="lastMessageAt")
+    # The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    threads: TicketCommentsThreads = Field(..., alias="threads", serialization_alias="threads")
 
 class TicketWorkflow(BaseModel):
     """
