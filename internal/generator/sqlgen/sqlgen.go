@@ -200,8 +200,11 @@ type DDLOutput struct {
 	HistoryTables []HistoryTable
 	// OptimisticTables are the @optimistic tables, in table order.
 	OptimisticTables []OptimisticTable
-	Projections      []ProjectionView
-	Timestamp        string
+	// EnqueueTriggers are the tables' @enqueueOnChange declarations, by
+	// table and queue (enqueue.go, D80).
+	EnqueueTriggers []EnqueueTrigger
+	Projections     []ProjectionView
+	Timestamp       string
 
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Options.MetadataKeyPrefix).
@@ -448,6 +451,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			usedScalars[col.Type] = true
 		}
 	}
+	enqueueTriggers, err := buildEnqueueTriggers(tableTypes, tables, schema)
+	if err != nil {
+		return nil, err
+	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
 
 	if err != nil {
@@ -486,6 +493,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		JoinTables:       joinTables,
 		HistoryTables:    historyTables,
 		OptimisticTables: optimisticTables,
+		EnqueueTriggers:  enqueueTriggers,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
 

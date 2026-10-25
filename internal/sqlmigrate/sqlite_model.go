@@ -15,9 +15,10 @@ import (
 // that name. A @searchField's search_text column keeps its expression,
 // with each field quoted as SQLite quotes it, and loses the trigram index,
 // which SQLite has no operator class for (D27, amended). SQLite keeps no
-// comments, so the model has none. The model refuses what SQLite has no
-// form of (D27), naming the feature: @versioned, @optimistic, projections,
-// GIN and GIST indexes, and types it has no storage for.
+// comments, so the model has none. A table's @enqueueOnChange (D80) is a
+// trigger per write, which holds its insert. The model refuses what SQLite
+// has no form of (D27), naming the feature: @versioned, @optimistic,
+// projections, GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -49,6 +50,7 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			// SQLite's keywords are not Postgres's, so every field is quoted.
 			columnNamed(table, sqlgen.SearchTextColumn).Generated = sqlgen.SearchTextExprQuoted(fields, qs)
 		}
+		table.Queue = queueKeyOf(schema, &out.Tables[i])
 		errs = append(errs, sqliteTable(table))
 		m.Tables = append(m.Tables, table)
 	}
@@ -59,6 +61,11 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
+	}
+	for _, e := range out.EnqueueTriggers {
+		for _, t := range e.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: e.Origin})
+		}
 	}
 
 	graphs, err := modelGraphs(schema, m)

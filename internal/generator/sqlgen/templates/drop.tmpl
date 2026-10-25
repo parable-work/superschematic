@@ -9,6 +9,15 @@ DROP VIEW IF EXISTS {{ $view.QualifiedView }};
 {{- end }}
 {{- end }}
 
+{{- if .EnqueueTriggers }}
+
+-- Drop the triggers and functions that enqueue on a write
+{{- range $enqueue := .EnqueueTriggers }}
+DROP TRIGGER IF EXISTS {{ $enqueue.TriggerName }} ON {{ $enqueue.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ $enqueue.FunctionName }}();
+{{- end }}
+{{- end }}
+
 -- Drop indexes
 {{- range $table := .Tables | reverse }}
 {{- if $table.Indexes }}

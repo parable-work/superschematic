@@ -254,7 +254,58 @@ func TestSQLiteHazardClasses(t *testing.T) {
 			want:   []HazardClass{destructive, blockingClass, compat, copyTable},
 			reason: "cannot drop NOT NULL from price and convert the elements of items"},
 		{plan: "list-element-and-drop-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive, blockingClass}},
+
+		// A queue's key, and the triggers that enqueue (D80).
+		{plan: "add-queue-key", op: "createIndex", subject: "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key", phase: Expand,
+			want: []HazardClass{destructive, blockingClass, compat, dataDependent}},
+		{plan: "add-queue-key", op: "createIndex", subject: "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key", phase: Expand,
+			want: []HazardClass{blockingClass, dataDependent}},
+		{plan: "add-enqueue-on-change", op: "createTrigger", phase: Expand},
+		{plan: "change-enqueue-on-change", op: "createTrigger", phase: Expand},
+		{plan: "change-enqueue-on-change", op: "replaceTrigger", phase: Expand},
+		{plan: "drop-enqueue-on-change", op: "dropTrigger", phase: Contract},
+		{plan: "enqueue-on-change-rebuilt", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable},
+			reason: "cannot make note NOT NULL"},
 	})
+}
+
+// TestSQLiteRebuildCreatesTheTriggersAgain: SQLite drops a table's triggers
+// with it, so a rebuild of a table with an @enqueueOnChange creates each of
+// its triggers after the new table takes the old one's name, and no step
+// of its own creates them (D80).
+func TestSQLiteRebuildCreatesTheTriggersAgain(t *testing.T) {
+	var pc planCase
+	for _, c := range sqlitePlanCases() {
+		if c.name == "enqueue-on-change-rebuilt" {
+			pc = c
+		}
+	}
+	plan := pc.plan(t)
+	var rebuild *Step
+	for _, step := range plan.Steps {
+		if step.Op == "copyTable" {
+			rebuild = step
+		}
+		if step.Op == "createTrigger" || step.Op == "dropTrigger" || step.Op == "replaceTrigger" {
+			t.Errorf("step %d %s %s: the rebuild makes every trigger change of its table", step.Index, step.Op, step.Subject)
+		}
+	}
+	if rebuild == nil {
+		t.Fatal("the plan does not rebuild order")
+	}
+	renamed := slices.Index(rebuild.Statements, `ALTER TABLE "_new_order" RENAME TO "order"`)
+	var triggers []string
+	for i, statement := range rebuild.Statements {
+		if strings.HasPrefix(statement, "CREATE TRIGGER ") {
+			if i < renamed {
+				t.Errorf("the rebuild creates a trigger before the table takes its name: %s", statement)
+			}
+			triggers = append(triggers, strings.Fields(statement)[2])
+		}
+	}
+	if want := []string{`"trg_order_enqueue_order_shipped_insert"`, `"trg_order_enqueue_order_shipped_update"`}; !slices.Equal(triggers, want) {
+		t.Errorf("the rebuild creates the triggers %v, want %v", triggers, want)
+	}
 }
 
 // TestSQLiteRebuildBatches: each table is copied or dropped by at most one

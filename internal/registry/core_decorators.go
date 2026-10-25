@@ -102,8 +102,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	specs = append(specs, jobDecorator())
 
 	// A DB service's queues, a message class each, and an API service's
-	// workers, which handle them (core_queues.go, D53).
-	specs = append(specs, queueDecorator(), workerDecorator())
+	// workers, which handle them (core_queues.go, D53); and the triggers
+	// that enqueue a queue's message on a write to a table
+	// (core_enqueue.go, D80).
+	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).

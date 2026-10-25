@@ -144,14 +144,15 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 		for i, f := range q.Fields {
 			columns[i] = f.QuotedDBName
 		}
-		q.Statements = sqlutil.PostgresQueueStatements(q.QuotedTableName, columns, q.RetainSeconds > 0)
+		spec := sqlutil.QueueSpecOf(td, q.QuotedTableName, columns, q.RetainSeconds > 0)
+		q.Statements = sqlutil.PostgresQueueStatements(spec)
 		switch {
 		case !sqlite:
 			q.SQLiteFields, q.SQLiteUnsupported = nil, ""
 		case q.SQLiteUnsupported != "":
 			q.SQLiteFields = nil
 		default:
-			statements := sqlutil.SQLiteQueueStatements(q.QuotedTableName, columns, q.RetainSeconds > 0)
+			statements := sqlutil.SQLiteQueueStatements(spec)
 			q.SQLiteStatements = &statements
 		}
 		queues = append(queues, q)

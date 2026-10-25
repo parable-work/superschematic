@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 )
 
 // sqliteDialect plans for SQLite. Its ALTER TABLE renames a table or a
@@ -46,7 +48,7 @@ func (sqliteDialect) canAlter(c *change) bool {
 	switch c.op {
 	case opRenameTable, opRenameColumn, opRenameConstraint, opRenameIndex,
 		opCreateIndex, opReplaceIndex, opAddUnique, opDropUnique, opDropIndex, opDropColumn,
-		opRegenerateColumn:
+		opRegenerateColumn, opCreateTrigger, opReplaceTrigger, opRenameTrigger, opDropTrigger:
 		return true
 	case opAddColumn:
 		return sqliteAddable(c.column, foreignKeyOver(c.tableDef, c.column.Name) != nil)
@@ -133,6 +135,9 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		if c.op == opReplaceIndex {
 			statements = append(statements, "DROP INDEX "+qs(c.index.Name))
 		}
+		if c.dedupe != nil {
+			statements = append(statements, dedupeSQL(c.table, c.dedupe, sqlutil.SQLiteNow, qs))
+		}
 		step := sqliteStep(c, append(statements, sqliteIndexSQL(c.table, c.index))...)
 		if !c.created {
 			sqliteIndexBlocking(step, c.table, "Building the index")
@@ -165,6 +170,18 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		return one(sqliteStep(c, statements...)), nil
 	case opGraphContent:
 		return noSQL(c), nil
+	case opCreateTrigger:
+		return one(sqliteStep(c, c.trigger.Definition)), nil
+	case opReplaceTrigger:
+		// A trigger's statements are its definition: SQLite has no
+		// functions, so a new one replaces the trigger.
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.trigger.Name), c.trigger.Definition)), nil
+	case opRenameTrigger:
+		// SQLite cannot rename a trigger, and its definition names its
+		// table: the replacement that follows creates it under its new name.
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldName))), nil
+	case opDropTrigger:
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldTrigger.Name))), nil
 	case opDropTable:
 		// The tables of a reference cycle go in one step (dropTables).
 		// Every other table that references one of them is gone by then.
@@ -310,6 +327,13 @@ func (d sqliteDialect) rebuild(rb *tableRebuild) (rendered, error) {
 		}
 		for _, idx := range rt.after.Indexes {
 			statements = append(statements, sqliteIndexSQL(rt.name, idx))
+		}
+	}
+	// Dropping a table drops its triggers, so the step creates those the
+	// phase leaves on each table it keeps (D80).
+	for _, rt := range kept {
+		for _, t := range rb.triggers[rt.name] {
+			statements = append(statements, t.Definition)
 		}
 	}
 	step := &Step{

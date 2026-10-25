@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlPreparedStatement, SqlValue } from './d1.js';
 import {
   canonicalUUID,
   ClaimLostError,
+  conflictOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
@@ -89,7 +90,7 @@ export function enqueueStatement<M>(db: SqlDatabase, queue: QueueDefinition<M>, 
   const text =
     columns.length === 0
       ? `${statements.insert} DEFAULT VALUES`
-      : `${statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(', ')})`;
+      : `${statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(', ')})${conflictOf(statements)}`;
   return db.prepare(text).bind(...values);
 }
 

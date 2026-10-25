@@ -561,3 +561,73 @@ describe.skipIf(dsn === '')('on Postgres', () => {
     }
   });
 });
+
+describe('a queue with a key (D80)', () => {
+  /** A unique violation, as pg reports one. */
+  const keyHeld = Object.assign(new Error('duplicate key value violates unique constraint "uq_order_placed_queue_claimed_key"'), { code: '23505' });
+
+  /** A queryable that throws error on its first query and answers the rest with results. */
+  function throwsOnce(error: unknown, ...results: { rows: unknown[]; rowCount: number | null }[]) {
+    const queries: QueueQueryConfig[] = [];
+    return {
+      queries,
+      query: async (config: QueueQueryConfig) => {
+        queries.push(config);
+        if (queries.length === 1) throw error;
+        return results.shift() ?? { rows: [], rowCount: 0 };
+      },
+    };
+  }
+
+  const conflict = `ON CONFLICT (order_id) WHERE state = 'ready' DO NOTHING`;
+  const keyed = (): QueueDefinition<OrderPlaced> => {
+    const def = definition();
+    return { ...def, statements: { ...def.statements, conflict } };
+  };
+
+  test("an enqueue ends with the queue's conflict clause, and one without it with its VALUES", async () => {
+    const db = recorder();
+    await enqueue(db, keyed(), { orderId: 'a0000000-0000-4000-8000-00000000000a', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+    expect(db.queries[0]!.text).toEndWith(`VALUES ($1, $2, $3, $4) ${conflict}`);
+    const plain = recorder();
+    await enqueue(plain, definition(), { orderId: 'a0000000-0000-4000-8000-00000000000a', quantity: 1, shipTo: { line1: '1 Main St', city: 'Springfield' } });
+    expect(plain.queries[0]!.text).toEndWith('VALUES ($1, $2, $3, $4)');
+  });
+
+  test('a claim that meets a key another claim holds takes nothing, and the next claims again', async () => {
+    // The expire, then the claim that meets the key.
+    const pool = {
+      queries: [] as QueueQueryConfig[],
+      query: async (config: QueueQueryConfig) => {
+        pool.queries.push(config);
+        if (config.text === keyed().statements.claim) throw keyHeld;
+        return { rows: [], rowCount: 0 };
+      },
+    };
+    expect(await postgresQueue(pool, keyed()).claim(5)).toEqual([]);
+    expect(pool.queries.map(q => q.text)).toEqual([keyed().statements.expire, keyed().statements.claim]);
+    // Another error still fails the claim.
+    const broken = {
+      query: async () => {
+        throw new Error('the database is down');
+      },
+    };
+    await expect(postgresQueue(broken, keyed()).claim(5)).rejects.toThrow('claim on order_placed_queue: the database is down');
+  });
+
+  test('a fail or a release that meets a concurrent enqueue of its key runs once more', async () => {
+    const failing = throwsOnce(keyHeld, { rows: [{ state: 'done' }], rowCount: 1 });
+    expect(await postgresQueue(failing, keyed()).fail('id', 'token', 'it broke')).toBe(false);
+    expect(failing.queries).toHaveLength(2);
+    const releasing = throwsOnce(keyHeld, { rows: [], rowCount: 1 });
+    await postgresQueue(releasing, keyed()).release('id', 'token');
+    expect(releasing.queries).toHaveLength(2);
+    // Twice is a failure the worker logs.
+    const twice = {
+      query: async () => {
+        throw keyHeld;
+      },
+    };
+    await expect(postgresQueue(twice, keyed()).release('id', 'token')).rejects.toThrow('duplicate key value');
+  });
+});

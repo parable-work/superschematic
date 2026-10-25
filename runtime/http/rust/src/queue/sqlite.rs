@@ -46,7 +46,8 @@ use serde_json::{Map, Value};
 
 use super::duration::{format_duration, parse_duration};
 use super::{
-    unset, Claim, QueueDefinition, QueueError, QueueField, QueueStatements, CLAIM_LOST, UNREADABLE,
+    conflict_of, unset, Claim, QueueDefinition, QueueError, QueueField, QueueStatements,
+    CLAIM_LOST, UNREADABLE,
 };
 use crate::civil::{from_days, to_days};
 use crate::error::chain;
@@ -118,10 +119,11 @@ where
     } else {
         let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
         format!(
-            "{} ({}) VALUES ({})",
+            "{} ({}) VALUES ({}){}",
             statements.insert,
             columns.join(", "),
-            placeholders.join(", ")
+            placeholders.join(", "),
+            conflict_of(statements)
         )
     };
     connection

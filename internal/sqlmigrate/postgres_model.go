@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	ir "github.com/parable-work/superschematic/ir"
@@ -47,6 +48,7 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		if err != nil {
 			return nil, err
 		}
+		table.Queue = queueKeyOf(schema, &out.Tables[i])
 		table.Optimistic = optimistic[table.Name]
 		if h, ok := histories[table.Name]; ok {
 			table.History = h.Name
@@ -101,6 +103,15 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
+	for _, e := range out.EnqueueTriggers {
+		m.Functions = append(m.Functions, &Function{Name: e.FunctionName, Definition: e.FunctionSQL(), Origin: e.Origin})
+		trigger, err := modelTrigger(e.Trigger(), e.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
 		schemas[view.Pool] = true
@@ -119,6 +130,21 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 
 	m.sort()
 	return m, nil
+}
+
+// queueKeyOf is the key of the queue whose table t is, or nil for a table
+// that is no queue's or a queue with no key (D80).
+func queueKeyOf(schema *ir.Schema, t *sqlgen.Table) *QueueKey {
+	td := schema.Types[t.OriginalName]
+	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td.Name) {
+		return nil
+	}
+	return &QueueKey{Key: codegen.ToSnakeCase(td.Queue.Key), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
+}
+
+// dedupes reports whether a queue keeps one ready message per key.
+func (q *QueueKey) dedupes() bool {
+	return q != nil && (q.OnDuplicate == ir.QueueOnDuplicateReplace || q.OnDuplicate == ir.QueueOnDuplicateSkip)
 }
 
 // entityTable is a DB type's table. The primary key and each UNIQUE clause

@@ -15,9 +15,15 @@ import (
 // keeps (ir.QueueColumns). A claim reads the messages that are ready and
 // due, or claimed past their claim's expiry, and a prune the done messages
 // by when they were done, their updated_at (D68), so a partial index on
-// each serves it. The table is a table like any other to the migration
-// planner (D27), in every dialect the service lists: the SQLite model reads
-// it from this output, as it reads every table.
+// each serves it. A queue with a key (D80) adds a partial unique index of
+// its ready messages by key when it keeps one per key, the target of an
+// enqueue's ON CONFLICT, and one of its claimed messages by key when it
+// serializes its keys, which holds a key to one claim whatever two workers
+// claim at once; a queue that serializes and appends indexes its ready
+// messages by key too, which a claim reads a key's line by. The table is a
+// table like any other to the migration planner (D27), in every dialect
+// the service lists: the SQLite model reads it from this output, as it
+// reads every table.
 
 // QueueTableName is the table of the queue whose class is name: the name
 // in snake case, as a table's, and ir.QueueTableSuffix
@@ -83,6 +89,11 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping m
 			Where:   sqlutil.QuoteIdentifier(ir.QueueColumnState) + " = '" + idx.state + "'",
 		})
 	}
+	keyIndexes, err := queueKeyIndexes(name, typeDef.Queue)
+	if err != nil {
+		return Table{}, fmt.Errorf("queue %s: %w", typeDef.Name, err)
+	}
+	indexes = append(indexes, keyIndexes...)
 	return Table{
 		Name:         name,
 		QuotedName:   sqlutil.QuoteIdentifier(name),
@@ -94,4 +105,48 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping m
 		ForeignKeys:  []ForeignKey{},
 		Indexes:      indexes,
 	}, nil
+}
+
+// The purposes of the indexes a queue's key adds (D80), which name them
+// uq_<table>_<purpose> or idx_<table>_<purpose>.
+const (
+	queueReadyKeyPurpose   = "ready_key"
+	queueClaimedKeyPurpose = "claimed_key"
+)
+
+// QueueReadyKeyIndex is the name of the partial unique index of the ready
+// messages by key of the queue table table, which keeps one per key.
+func QueueReadyKeyIndex(table string) string {
+	return "uq_" + table + "_" + queueReadyKeyPurpose
+}
+
+// queueKeyIndexes are the indexes a queue's key adds to its table: the
+// ready messages' by key, unique when the queue keeps one per key, and the
+// claimed messages', unique, when it serializes its keys.
+func queueKeyIndexes(table string, def *ir.QueueDef) ([]Index, error) {
+	key := sqlutil.QueueKeyColumn(def)
+	if key == "" {
+		return nil, nil
+	}
+	state := func(s string) string { return sqlutil.QuoteIdentifier(ir.QueueColumnState) + " = '" + s + "'" }
+	var out []Index
+	add := func(purpose string, unique bool, where string) error {
+		name, err := sqlutil.IndexName(table, nil, purpose, unique)
+		if err != nil {
+			return err
+		}
+		out = append(out, Index{Name: name, Columns: []string{key}, Type: "BTREE", Unique: unique, Where: where})
+		return nil
+	}
+	if def.Dedupes() || def.Serializes() {
+		if err := add(queueReadyKeyPurpose, def.Dedupes(), state(ir.QueueStateReady)); err != nil {
+			return nil, err
+		}
+	}
+	if def.Serializes() {
+		if err := add(queueClaimedKeyPurpose, true, state(ir.QueueStateClaimed)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

@@ -230,6 +230,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)
 	checkQueues(schema, r)
+	checkEnqueueOnChange(schema, r)
 	checkWorkers(schema, r)
 	checkDerivers(schema, r)
 	checkDerivedFields(schema, in, r)

@@ -2,6 +2,7 @@ import pg from 'pg';
 import {
   canonicalUUID,
   ClaimLostError,
+  conflictOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
@@ -99,7 +100,7 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
   const text =
     columns.length === 0
       ? `${queue.statements.insert} DEFAULT VALUES`
-      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})`;
+      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})${conflictOf(queue.statements)}`;
   try {
     await client.query({ text, values });
   } catch (error) {
@@ -117,12 +118,33 @@ function columnValue(value: unknown, field: QueueField): unknown {
   return value;
 }
 
+/**
+ * Whether error is the unique violation of a queue's index of claimed or of ready messages by key (D80): a claim
+ * on a queue that holds one claim per key meets it when another worker's claim of the key commits first, and a
+ * fail or a release on a queue that keeps one ready message per key when a concurrent enqueue of the key does.
+ * The claim then takes nothing, and the fail or the release runs once more, when the ready message it sees takes
+ * its place, as the Go ORM's and the Rust client's do.
+ */
+function keyHeld(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === '23505';
+}
+
+/** Runs query once more when it meets a key another write holds (keyHeld). */
+async function onceMoreOnKeyHeld<T>(query: () => Promise<T>): Promise<T> {
+  try {
+    return await query();
+  } catch (error) {
+    if (!keyHeld(error)) throw error;
+    return query();
+  }
+}
+
 /** The claims of queue over pool, for a worker. */
 export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>): PostgresQueue<M> {
   const update = async (what: string, statement: string, id: string, token: string, extra: unknown[] = []): Promise<void> => {
     let result: { rowCount: number | null };
     try {
-      result = await pool.query({ text: statement, values: [id, token, ...extra] });
+      result = await onceMoreOnKeyHeld(() => pool.query({ text: statement, values: [id, token, ...extra] }));
     } catch (error) {
       throw new Error(`${what} message ${id} on ${queue.table}: ${errorMessage(error)}`, { cause: error });
     }
@@ -138,6 +160,7 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
         await pool.query({ text: queue.statements.expire, values: [queue.retries] });
         ({ rows } = await pool.query({ text: queue.statements.claim, values: [n, leaseSeconds], rowMode: 'array', types: queueTypes }));
       } catch (error) {
+        if (keyHeld(error)) return [];
         throw new Error(`claim on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }
       // Each row is claimed already: one that does not read fails alone.
@@ -155,10 +178,12 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
     async fail(id, token, cause) {
       let rows: unknown[];
       try {
-        ({ rows } = await pool.query({
-          text: queue.statements.fail,
-          values: [id, token, queue.retries, queue.backoffSeconds, cause, queue.maxBackoffSeconds],
-        }));
+        ({ rows } = await onceMoreOnKeyHeld(() =>
+          pool.query({
+            text: queue.statements.fail,
+            values: [id, token, queue.retries, queue.backoffSeconds, cause, queue.maxBackoffSeconds],
+          })
+        ));
       } catch (error) {
         throw new Error(`fail message ${id} on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }

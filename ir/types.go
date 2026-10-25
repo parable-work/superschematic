@@ -179,6 +179,12 @@ type TypeDef struct {
 	// [QueueDef].
 	Queue *QueueDef `json:"queue,omitempty" yaml:"queue,omitempty"`
 
+	// EnqueueOnChange are the @enqueueOnChange declarations of a DB table:
+	// each a trigger that enqueues a message of a queue of the schema after
+	// a write to the table's rows (D80), at most one per queue. Empty for
+	// every other type. See [EnqueueOnChange].
+	EnqueueOnChange []*EnqueueOnChange `json:"enqueueOnChange,omitempty" yaml:"enqueueOnChange,omitempty"`
+
 	// Stack, Server, Database and Environment are the declarations of a
 	// Stack schema's classes: @stack, @server, @database and @environment
 	// (docs/stack-model.md, section 4.1). A class has one of them, and every

@@ -103,6 +103,22 @@ type Table struct {
 	// Optimistic is true for an @optimistic table (a _version bump with no
 	// history).
 	Optimistic bool `json:"optimistic,omitempty"`
+
+	// Queue is a queue's key, for the table of a queue with one (D80); nil
+	// for every other table. A plan that builds the index that keeps one
+	// ready message per key first marks done the ready messages it would
+	// refuse, keeping the one onDuplicate keeps.
+	Queue *QueueKey `json:"queue,omitempty"`
+}
+
+// QueueKey is a queue's key and what it does with it (D80).
+type QueueKey struct {
+	// Key is the key's column.
+	Key string `json:"key"`
+	// OnDuplicate is the queue's onDuplicate: append, replace or skip.
+	OnDuplicate string `json:"onDuplicate,omitempty"`
+	// Serialize is set for a queue that holds one claim per key.
+	Serialize bool `json:"serialize,omitempty"`
 }
 
 // Column is one column of a table.

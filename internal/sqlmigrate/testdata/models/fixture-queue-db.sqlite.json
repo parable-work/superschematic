@@ -36,6 +36,194 @@
         },
         {
           "name": "order_id",
+          "origin": "OrderChanged.orderId",
+          "type": "TEXT"
+        },
+        {
+          "name": "line_id",
+          "nullable": true,
+          "origin": "OrderChanged.lineId",
+          "type": "TEXT"
+        },
+        {
+          "name": "priority",
+          "origin": "OrderChanged.priority",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_order_changed_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_order_changed_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_changed_queue",
+      "origin": "OrderChanged",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_changed_queue_pkey"
+      },
+      "queue": {
+        "key": "order_id",
+        "onDuplicate": "replace",
+        "serialize": true
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OrderLine.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "order_id",
+          "origin": "OrderLine.order",
+          "type": "TEXT"
+        },
+        {
+          "name": "product_id",
+          "nullable": true,
+          "origin": "OrderLine.product",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "OrderLine.quantity",
+          "type": "INTEGER"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "OrderLine.note",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_line_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        },
+        {
+          "columns": [
+            "product_id"
+          ],
+          "name": "fk_order_line_product_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "product"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_line",
+      "origin": "OrderLine",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_line_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "order_id",
           "origin": "OrderPlaced.orderId",
           "type": "TEXT"
         },
@@ -240,6 +428,273 @@
         ],
         "name": "ping_queue_pkey"
       }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Product.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Product.name",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "product",
+      "origin": "Product",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "product_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "sku",
+          "origin": "StockChecked.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "StockChecked.quantity",
+          "type": "INTEGER"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_checked_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "stock_checked_queue",
+      "origin": "StockChecked",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "stock_checked_queue_pkey"
+      },
+      "queue": {
+        "key": "sku",
+        "onDuplicate": "skip"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "account_id",
+          "origin": "SyncRequested.accountId",
+          "type": "TEXT"
+        },
+        {
+          "name": "reason",
+          "nullable": true,
+          "origin": "SyncRequested.reason",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "account_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_ready_key",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "account_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_sync_requested_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        }
+      ],
+      "kind": "entity",
+      "name": "sync_requested_queue",
+      "origin": "SyncRequested",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "sync_requested_queue_pkey"
+      },
+      "queue": {
+        "key": "account_id",
+        "serialize": true
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_order_line_enqueue_order_changed_delete\" AFTER DELETE ON \"order_line\" FOR EACH ROW\nWHEN OLD.\"product_id\" IS NOT NULL\nBEGIN\n  INSERT INTO \"order_changed_queue\" (\"order_id\", \"line_id\", \"priority\") VALUES (OLD.\"order_id\", OLD.\"id\", 'low')\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND",
+      "name": "trg_order_line_enqueue_order_changed_delete",
+      "origin": "OrderLine",
+      "table": "order_line"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_order_line_enqueue_order_changed_insert\" AFTER INSERT ON \"order_line\" FOR EACH ROW\nWHEN NEW.\"product_id\" IS NOT NULL\nBEGIN\n  INSERT INTO \"order_changed_queue\" (\"order_id\", \"line_id\", \"priority\") VALUES (NEW.\"order_id\", NEW.\"id\", 'low')\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND",
+      "name": "trg_order_line_enqueue_order_changed_insert",
+      "origin": "OrderLine",
+      "table": "order_line"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_order_line_enqueue_order_changed_update\" AFTER UPDATE ON \"order_line\" FOR EACH ROW\nWHEN (OLD.\"product_id\" IS NOT NEW.\"product_id\" OR OLD.\"quantity\" IS NOT NEW.\"quantity\") AND NEW.\"product_id\" IS NOT NULL\nBEGIN\n  INSERT INTO \"order_changed_queue\" (\"order_id\", \"line_id\", \"priority\") VALUES (NEW.\"order_id\", NEW.\"id\", 'low')\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND",
+      "name": "trg_order_line_enqueue_order_changed_update",
+      "origin": "OrderLine",
+      "table": "order_line"
     }
   ],
   "version": 1

@@ -42,6 +42,11 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /**
+   * Ends an enqueue on a queue that keeps one ready message per key (D80): what it does when a ready message
+   * holds the message's key, which replaces that message or keeps it. Other queues have none.
+   */
+  readonly conflict?: string;
   readonly expire: string;
   readonly claim: string;
   readonly complete: string;
@@ -129,6 +134,11 @@ export interface Queue<M> {
 
 /** The claims of a queue over a pg pool, which postgresQueue makes. */
 export type PostgresQueue<M> = Queue<M>;
+
+/** What an enqueue ends with after its VALUES: a space and the queue's conflict clause, or nothing (D80). */
+export function conflictOf(statements: QueueStatements): string {
+  return statements.conflict ? ` ${statements.conflict}` : '';
+}
 
 /** What a message's member is, unset: absent or null. An enum with a default is also unset when empty, as in Go. */
 export function unset(value: unknown, field: QueueField): boolean {

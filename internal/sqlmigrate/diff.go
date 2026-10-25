@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // Diff plans the migration from one model to another. A nil from is an
@@ -673,7 +675,10 @@ func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) 
 			c.op = opReplaceIndex
 		}
 		d.add(c)
-		if idx.Unique {
+		switch {
+		case idx.Unique && tt.Queue != nil && len(idx.Columns) == 1 && idx.Columns[0] == tt.Queue.Key:
+			queueKeyHazards(c, tt, idx)
+		case idx.Unique:
 			what := uniqueWhat(tt, idx.Columns)
 			c.addHazard(HazardCompat, "", fmt.Sprintf(
 				"%s becomes unique: servers built from the previous version may write duplicates.", what))
@@ -692,6 +697,52 @@ func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) 
 			table: tt.Name, index: fromByName[name],
 		})
 	}
+}
+
+// queueKeyHazards are the hazards of building a unique index of a queue's
+// messages by key on its table, which exists (D80). The index of its
+// ready messages keeps one per key: its step first marks done the ready
+// messages it would refuse, keeping the one onDuplicate keeps, so it
+// fails only when a server built from the previous version enqueues a
+// duplicate between the two. That server's enqueue has no ON CONFLICT, so
+// once the index is built it fails on a key a ready message holds, and
+// the write that enqueued it with it. The index of its claimed messages
+// holds a key to one claim, and its build fails while two hold one.
+func queueKeyHazards(c *change, tt *Table, idx *Index) {
+	q := tt.Queue
+	origin := tt.Origin
+	if strings.Contains(idx.Where, "'"+ir.QueueStateReady+"'") && q.dedupes() {
+		c.dedupe = q
+		kept := "the latest enqueued, which replace keeps"
+		if q.OnDuplicate == ir.QueueOnDuplicateSkip {
+			kept = "the earliest enqueued, which skip keeps"
+		}
+		c.addHazard(HazardDestructive, "", fmt.Sprintf(
+			"The step marks done every ready message of %s but one per %s, %s: the others do not run.", origin, q.Key, kept))
+		c.addHazard(HazardCompat, "", fmt.Sprintf(
+			"Servers built from the previous version enqueue %s without ON CONFLICT: once the index is built, such an enqueue of a message whose %s a ready message holds fails, and the write that enqueued it with it.", origin, q.Key))
+		c.addHazard(HazardDataDependent, "", fmt.Sprintf(
+			"Building the index fails when such a server enqueues a duplicate %s between the step's two statements; run the plan again.", q.Key))
+		return
+	}
+	c.addHazard(HazardDataDependent, "", fmt.Sprintf(
+		"Building the index fails while two claims hold one %s of %s: let them finish or expire, and run the plan again.", q.Key, origin))
+}
+
+// dedupeSQL marks done the ready messages of a queue's table but one per
+// key: the latest enqueued under replace, the earliest under skip (D80).
+// now is the dialect's clock.
+func dedupeSQL(table string, q *QueueKey, now string, quote func(string) string) string {
+	order := "created_at DESC, id DESC"
+	if q.OnDuplicate == ir.QueueOnDuplicateSkip {
+		order = "created_at, id"
+	}
+	ready := fmt.Sprintf("state = '%s'", ir.QueueStateReady)
+	return "UPDATE " + quote(table) + " SET state = '" + ir.QueueStateDone + "', updated_at = " + now + ",\n" +
+		"  last_error = 'another ready message of its key was kept when the queue began to keep one per key'\n" +
+		"WHERE " + ready + " AND id NOT IN (\n" +
+		"  SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY " + quote(q.Key) + " ORDER BY " + order + ") AS n FROM " + quote(table) + " WHERE " + ready + ") AS kept WHERE n = 1\n" +
+		")"
 }
 
 // dropTables drops the previous model's tables the new one does not have,

@@ -152,11 +152,12 @@ func TypeScriptQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 			q.Fields = append(q.Fields, field)
 			columns = append(columns, field.Column)
 		}
-		q.Statements = sqlutil.PostgresQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+		spec := sqlutil.QueueSpecOf(td, q.Table, columns, q.RetainSeconds > 0)
+		q.Statements = sqlutil.PostgresQueueStatements(spec)
 		if !sqlite {
 			q.SQLiteUnsupported = ""
 		} else if q.SQLiteUnsupported == "" {
-			statements := sqlutil.SQLiteQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+			statements := sqlutil.SQLiteQueueStatements(spec)
 			q.SQLiteStatements = &statements
 		}
 		queues = append(queues, q)

@@ -226,6 +226,11 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.Queue != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("queue"), queueArgs(def.Queue))
 	}
+	for _, change := range def.EnqueueOnChange {
+		// The queue may be declared in another file of the schema.
+		e.recordHeritageImports(change.Queue)
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("enqueueOnChange"), enqueueOnChangeArgs(change))
+	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
 	}

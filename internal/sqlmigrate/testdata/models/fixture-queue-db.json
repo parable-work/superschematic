@@ -3,6 +3,13 @@
   "extensions": [
     "pgcrypto"
   ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION order_line_enqueue_order_changed() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of OrderChanged after a write to order_line (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.product_id IS DISTINCT FROM NEW.product_id OR OLD.quantity IS DISTINCT FROM NEW.quantity) THEN\n    RETURN NULL;\n  END IF;\n  IF TG_OP = 'DELETE' THEN\n    IF OLD.product_id IS NOT NULL THEN\n      INSERT INTO order_changed_queue (order_id, line_id, priority) VALUES (OLD.order_id, OLD.id, 'low')\n        ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n    END IF;\n    RETURN NULL;\n  END IF;\n  IF NEW.product_id IS NOT NULL THEN\n    INSERT INTO order_changed_queue (order_id, line_id, priority) VALUES (NEW.order_id, NEW.id, 'low')\n      ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n  END IF;\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "order_line_enqueue_order_changed",
+      "origin": "OrderLine"
+    }
+  ],
   "service": "fixture-queue-db",
   "tables": [
     {
@@ -29,6 +36,196 @@
           "id"
         ],
         "name": "order_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "order_id",
+          "origin": "OrderChanged.orderId",
+          "type": "UUID"
+        },
+        {
+          "name": "line_id",
+          "nullable": true,
+          "origin": "OrderChanged.lineId",
+          "type": "UUID"
+        },
+        {
+          "name": "priority",
+          "origin": "OrderChanged.priority",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when an order's lines change: a newer change replaces the one that\nwaits, and the worker handles one order's changes at a time.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_changed_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_order_changed_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_order_changed_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_changed_queue",
+      "origin": "OrderChanged",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_changed_queue_pkey"
+      },
+      "queue": {
+        "key": "order_id",
+        "onDuplicate": "replace",
+        "serialize": true
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OrderLine.id",
+          "type": "UUID"
+        },
+        {
+          "name": "order_id",
+          "origin": "OrderLine.order",
+          "type": "UUID"
+        },
+        {
+          "name": "product_id",
+          "nullable": true,
+          "origin": "OrderLine.product",
+          "type": "UUID"
+        },
+        {
+          "name": "quantity",
+          "origin": "OrderLine.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "OrderLine.note",
+          "type": "TEXT"
+        }
+      ],
+      "comment": "A line of an order. Whatever writes it, a change to its product or its\nquantity enqueues the order's OrderChanged, as does a new line or a\ndeleted one, once it names a product.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_line_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        },
+        {
+          "columns": [
+            "product_id"
+          ],
+          "name": "fk_order_line_product_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "product"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_line",
+      "origin": "OrderLine",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_line_pkey"
       }
     },
     {
@@ -244,6 +441,264 @@
         ],
         "name": "ping_queue_pkey"
       }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Product.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Product.name",
+          "type": "TEXT"
+        }
+      ],
+      "comment": "A product an order's line may name.",
+      "kind": "entity",
+      "name": "product",
+      "origin": "Product",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "product_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "sku",
+          "origin": "StockChecked.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "StockChecked.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when a stock count is asked for: one waits per SKU, and a later ask\nwhile it waits adds nothing.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_stock_checked_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "sku"
+          ],
+          "method": "BTREE",
+          "name": "uq_stock_checked_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "stock_checked_queue",
+      "origin": "StockChecked",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "stock_checked_queue_pkey"
+      },
+      "queue": {
+        "key": "sku",
+        "onDuplicate": "skip"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "account_id",
+          "origin": "SyncRequested.accountId",
+          "type": "UUID"
+        },
+        {
+          "name": "reason",
+          "nullable": true,
+          "origin": "SyncRequested.reason",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "due_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Sent when an account's records are to be synced: every request is kept,\nand the worker syncs one account at a time.",
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "account_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_ready_key",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_sync_requested_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "account_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_sync_requested_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        }
+      ],
+      "kind": "entity",
+      "name": "sync_requested_queue",
+      "origin": "SyncRequested",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "sync_requested_queue_pkey"
+      },
+      "queue": {
+        "key": "account_id",
+        "serialize": true
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_order_line_enqueue_order_changed\n  AFTER INSERT OR UPDATE OR DELETE ON order_line\n  FOR EACH ROW EXECUTE FUNCTION order_line_enqueue_order_changed()",
+      "name": "trg_order_line_enqueue_order_changed",
+      "origin": "OrderLine",
+      "table": "order_line"
     }
   ],
   "version": 1

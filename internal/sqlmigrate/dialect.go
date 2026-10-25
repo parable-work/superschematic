@@ -76,6 +76,10 @@ type tableRebuild struct {
 	// each change to one of the tables but the renames of the tables and
 	// their columns, which run first and in place.
 	changes []*change
+	// triggers are the triggers the phase leaves on each table the step
+	// keeps, by table, which a dialect whose drop of a table drops its
+	// triggers creates again (D80).
+	triggers map[string][]*Trigger
 }
 
 // rebuiltTable is one table of a tableRebuild.

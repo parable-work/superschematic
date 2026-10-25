@@ -67,6 +67,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
+  readonly conflict?: string;
   readonly expire: string;
   readonly claim: string;
   readonly complete: string;

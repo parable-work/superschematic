@@ -470,3 +470,32 @@ describe('a field on SQLite', () => {
     expect(() => sqliteColumnValue(9007199254740992n, { name: 'n', column: 'n' })).toThrow(/out of the range/);
   });
 });
+
+describe('a queue with a key on SQLite (D80)', () => {
+  test("enqueueStatement ends with the queue's conflict clause, so one message waits per key", async () => {
+    const [db] = database();
+    const setup = [
+      "CREATE TABLE stock_checked_queue (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), sku TEXT NOT NULL, quantity INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'ready')",
+      "CREATE UNIQUE INDEX uq_stock_checked_queue_ready_key ON stock_checked_queue (sku) WHERE state = 'ready'",
+    ];
+    for (const ddl of setup) await db.prepare(ddl).run();
+    const sqlite = statements('stock_checked_queue', ['sku', 'quantity'], false);
+    const definition: QueueDefinition<{ sku: string; quantity: number }> = {
+      name: 'StockChecked',
+      table: 'stock_checked_queue',
+      retries: 5,
+      backoffSeconds: 30,
+      maxBackoffSeconds: 3600,
+      leaseSeconds: 60,
+      retainSeconds: 0,
+      fields: [
+        { name: 'sku', column: 'sku' },
+        { name: 'quantity', column: 'quantity' },
+      ],
+      statements: sqlite,
+      sqliteStatements: { ...sqlite, conflict: "ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING" },
+    };
+    for (const quantity of [1, 2, 3]) await db.batch([enqueueStatement(db, definition, { sku: 'SKU-1', quantity })]);
+    expect(await db.prepare('SELECT sku, quantity FROM stock_checked_queue').raw()).toEqual([['SKU-1', 1]]);
+  });
+});

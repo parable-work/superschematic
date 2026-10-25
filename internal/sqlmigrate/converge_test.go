@@ -150,6 +150,7 @@ func writePlanCase(t *testing.T, dir string, pc planCase) *Plan {
 	t.Logf("%s: %d rows seeded, %d checks", pc.name, strings.Count(seed, "INSERT"), len(checks))
 	writeFile(t, filepath.Join(dir, "seed.sql"), []byte(seed))
 	writeJSON(t, filepath.Join(dir, "checks.json"), checks)
+	writeExtraRows(t, dir, pc.rows)
 	return plan
 }
 
