@@ -20,7 +20,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 | --- | --- | --- |
 | Go | 1.26.4 | The CLI is a Go binary, and generated Go code targets this version. |
 | A C compiler | any | The CLI and generated Go code link superscalar through cgo (`CGO_ENABLED=1`). |
-| Rust (rustup) | 1.99.0 | Builds superscalar's static archive and the version-graph archive from source. `make` and the build scripts use this toolchain whatever rustup's default is. |
+| Rust (rustup) | 1.99.0 | Builds superscalar's static archive and the version-graph archive from source. `make` and the build scripts use this toolchain whatever rustup's default is. A TypeScript project needs none: without it the scripts download those archives prebuilt ([below](#without-rust)). |
 | git | any | Checks superscalar out at the commit in `superscalar.pin`. |
 | Node | 22.12 or newer; 24 for the engine | Builds superscalar's TypeScript binding and the docs site, and runs [the engine](/superschematic/guides/engine/). |
 | Bun | 1.4 | Installs the TypeScript runtimes and the generated TypeScript packages, which use the `workspace:` protocol. |
@@ -52,6 +52,17 @@ make build
 `make build` writes the CLI to `bin/superschematic`: the core with the
 official extensions linked, the gcp target, the Cloudflare DNS platform
 and target, and the Pulumi provisioner.
+
+### Without Rust
+
+A project whose servers, jobs and sites are TypeScript needs Go, a C
+compiler, Bun, Node and Docker, and no Rust. `make cli` builds
+`bin/superschematic` and the migration runner over superscalar's archive,
+which `scripts/superscalar-dep.sh` downloads prebuilt, checked against
+the digest the checkout pins, when `cargo` is missing (D82). [A
+TypeScript project without
+Rust](/superschematic/install/typescript/#a-typescript-project-without-rust)
+has the rest of the path.
 Check it:
 
 ```sh
