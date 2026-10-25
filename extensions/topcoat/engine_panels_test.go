@@ -1,14 +1,10 @@
 package topcoat_test
 
-import (
-	"testing"
-
-	"github.com/parable-work/superschematic/extensions/topcoat"
-)
+import "testing"
 
 // TestTheEnginePanels builds fixture-engine-api's crate over
-// fixture-engine-db, with the engine panels written as the engine pages'
-// (topcoat.PanelsBeforeTheConsole), and runs cargo clippy, then cargo
+// fixture-engine-db, whose engine pages write the engine panels, and runs
+// cargo clippy, then cargo
 // test, with enginePanelsTest: pages of the test hand engine_panels::panel
 // canned describe documents and records, and Branches' a document the test
 // seeds, and drop both before they return its view.
@@ -26,7 +22,6 @@ import (
 //     the engine's refusal to a caller who may not read the document.
 //   - A behavior with no panel of its own gets none.
 func TestTheEnginePanels(t *testing.T) {
-	topcoat.PanelsBeforeTheConsole(t)
 	cargoTestCrateWith(t, engineService, enginePanelsTest, crateOptions{
 		before: map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
 	})

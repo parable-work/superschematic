@@ -1,18 +1,12 @@
 package topcoat_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
-	"text/template"
-
-	"github.com/parable-work/superschematic/extensions/topcoat"
-	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestTheCommercePanels builds fixture-engine-api's crate with its pages
@@ -39,98 +33,17 @@ import (
 // The fixture's engine composes none of commerce's behaviors, so a read a
 // panel makes is the engine's refusal; the canned answers render through
 // the panels' own views. Every page is held to the implicit-submission
-// rule. When the crate does not write engine_panels.rs yet (the engine
-// pages are not built), the test renders the commerce template into a
-// module of its own (commercePanelsModule).
+// rule.
 func TestTheCommercePanels(t *testing.T) {
 	cases, err := json.Marshal(commerceCases(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := crateOptions{
+	cargoTestCrateWith(t, engineService, commerceAppTest, crateOptions{
 		before:  map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
 		files:   map[string]string{"support/commerce.json": string(cases)},
-		appends: map[string]string{},
-	}
-	written := commerceCrate(t)
-	if written.panels {
-		options.appends["src/engine_panels.rs"] = commercePages
-	} else {
-		options.files["support/engine_panels.rs"] = commercePanelsModule(t) + commercePages
-		options.appends["src/lib.rs"] = "\n#[path = \"../tests/support/engine_panels.rs\"]\npub mod engine_panels;\n"
-	}
-	if !written.money {
-		options.appends["src/views.rs"] = "\npub fn money_text(amount: i64, currency: &str) -> String {\n    format!(\"{currency} {amount}\")\n}\n"
-	}
-	if !written.tokio {
-		options.appends["Cargo.toml"] = "\n[target.'cfg(all())'.dependencies]\ntokio = { version = \"1.52.2\", features = [\"rt\"] }\n"
-	}
-	cargoTestCrateWith(t, engineService, commerceAppTest, options)
-}
-
-// commerceWritten is what fixture-engine-api's crate holds that the
-// commerce panels need: engine_panels.rs, money_text in views.rs, and
-// tokio for the blocking pool.
-type commerceWritten struct{ panels, money, tokio bool }
-
-// commerceCrate builds fixture-engine-api's crate as TestTheCommercePanels
-// does and says what it holds of what the commerce panels need.
-func commerceCrate(t *testing.T) commerceWritten {
-	t.Helper()
-	root := testpaths.TempDir(t)
-	if _, err := buildService(t, engineDatabase, root, engineDatabaseOutputs()); err != nil {
-		t.Fatalf("build %s: %v", engineDatabase, err)
-	}
-	if _, err := buildService(t, engineService, root, outputsOf(engineService)); err != nil {
-		t.Fatalf("build %s: %v", engineService, err)
-	}
-	dir := topcoat.Dir(root, engineService)
-	read := func(name string) string {
-		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-		return string(data)
-	}
-	return commerceWritten{
-		panels: read("src/engine_panels.rs") != "",
-		money:  strings.Contains(read("src/views.rs"), "pub fn money_text("),
-		tokio:  strings.Contains(read("Cargo.toml"), "\ntokio = "),
-	}
-}
-
-// commercePanelsModule is engine_panels.rs as engine_panels.tmpl writes it,
-// with its panel calling commerce_panel alone, for a crate that does not
-// write it yet: the commerce template rendered under fixture-engine-api's
-// prefix, its engine crate and its authenticator.
-func commercePanelsModule(t *testing.T) string {
-	t.Helper()
-	funcs := template.FuncMap{"rustString": strconv.Quote, "engineMount": func() string { return topcoat.EngineMount }}
-	tmpl, err := template.New("commerce").Funcs(funcs).ParseFiles(filepath.Join("templates", "engine_panels_commerce.tmpl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	data := map[string]any{
-		"Engine":  map[string]any{"EngineIdent": "superschematic_engine"},
-		"Pages":   map[string]any{"Prefix": "/console"},
-		"HasAuth": true,
-	}
-	if err := tmpl.ExecuteTemplate(&buf, "enginePanelsCommerce", data); err != nil {
-		t.Fatal(err)
-	}
-	return `//! engine_panels.rs with the commerce panels alone, for a crate whose
-//! engine pages are not built yet.
-
-use serde_json::Value;
-use superschematic_engine::InstanceRecord;
-use topcoat::context::Cx;
-use topcoat::view::BoxView;
-
-pub async fn panel<'a>(cx: &'a Cx, behavior: &str, describe: &Value, record: &InstanceRecord) -> Option<BoxView<'a>> {
-    commerce_panel(cx, behavior, describe, record).await
-}
-` + buf.String() + "\n"
+		appends: map[string]string{"src/engine_panels.rs": commercePages},
+	})
 }
 
 // commercePages are added to engine_panels.rs for TestTheCommercePanels:
