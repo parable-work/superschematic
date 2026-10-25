@@ -50,7 +50,8 @@ type Deps struct {
 	// replica shares and can lose (D75).
 	// While the store is disabled or unreachable every call returns
 	// memorystore.ErrUnavailable at once, and the implementation takes the
-	// path it had without it.
+	// path it had without it; a Subscribe while it is unreachable is held
+	// until it reconnects.
 	DepsCache memorystore.Store
 
 	// Logger is the API's logger.

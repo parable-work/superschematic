@@ -94,8 +94,9 @@ export interface MemoryStoreRateLimitOptions {
  * A RateLimitStore over a memory store (D75): the shared rate limit of
  * service. The router composes the key it takes as
  * `<namespace>.<name>:<client>`, and the operation part is
- * `<namespace>.<name>`, as the Rust runtime names it (`orders.placeOrder`);
- * neither holds a ':'.
+ * `<namespace>.<name>`, as the Go and Rust servers name it: the operation
+ * table's kebab namespace and name (`order.placeOrder` for
+ * OrderMutations.placeOrder); neither holds a ':'.
  */
 export class MemoryStoreRateLimitStore implements RateLimitStore {
   private readonly fallback: RateLimitStore;

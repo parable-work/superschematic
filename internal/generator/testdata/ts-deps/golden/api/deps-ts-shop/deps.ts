@@ -24,7 +24,8 @@ export interface Deps {
   /**
    * deps-cache, a memory store the API lists (D75): use it through the store's
    * generated definitions. It refuses every call at once while it is
-   * disabled or unreachable, and the caller takes its fallback path.
+   * disabled or unreachable, and the caller takes its fallback path; a
+   * subscribe while it is unreachable is held until it reconnects.
    */
   readonly depsCache: MemoryStore;
   /** The API's logger. */

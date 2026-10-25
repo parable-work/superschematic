@@ -44,7 +44,8 @@ pub struct Deps {
     /// deps-cache, a memory store the API lists (D75): channels and keys
     /// every replica shares and may lose, which its generated definitions
     /// name. While it is disabled or unreachable, every call is unavailable
-    /// at once, and the implementation takes its fallback path.
+    /// at once, and the implementation takes its fallback path; a subscribe
+    /// while it is unreachable is held until it reconnects.
     pub deps_cache: Arc<dyn MemoryStore>,
     /// The API's span: the implementation logs inside it, so each event
     /// names the API.
