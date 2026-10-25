@@ -9956,6 +9956,8 @@ Three rules hold throughout.
 | Instance guards do not run for a beside operation: it changes nothing a guard protects. The policy, the params, the behavior's own checks and its preconditions do. So a lease on a ticket does not stop a person commenting on it. | Each schema listing Comments' operations in `Lease.exempt`, and the next behavior with a guard needing the same. |
 | A behavior that declares a beside operation declares every field of its own volatile ("Instances and events"): the engine computes them at the read from the behavior's columns and tables, so no event has to carry their moves. The engine refuses to register a behavior that declares a beside operation and a field that is not volatile. | Checking at runtime whether a beside write moved a field, which the engine cannot see in a behavior's tables. |
 | `events.read` and the stream return beside events with the rest; `beside: false` as a filter drops them, for a consumer that rebuilds instances. Reactions' `changes` cannot hear one, since it moves no field, and a behavior's own `react` can. | Leaving them out of `instanceId` reads, which is where a client watching one ticket's conversation reads. |
+| A beside event is known by what it is, an `operation` of an instance with no `seq`; storage marks nothing. The log's check that an event has a seq exactly when it has an instance becomes two (engine migration 13): no seq without an instance, and an instance without a seq only for an operation. One instance's events are read by cursor, through an index on it, so its beside events come in log order among the rest. | A `beside` column, which says again what the seq already says. |
+| A beside operation's handler may not call `update()`, create an instance, change references, or invoke an operation that writes and is not beside; each is a `BehaviorError` that fails the call, even when the handler catches it. It may call another beside operation or a read-only one, and the outer call appends one event. | Letting the handler catch the refusal and go on, which leaves a call that tried to write the instance looking like one that did not. |
 
 ### Primitive 2: signals
 
@@ -10017,8 +10019,8 @@ Operations, each beside the instance (primitive 1):
 | `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }` | no |
 | `finish({ message, body?, blocks?, mentions? })` | posts a composing message, its body the draft when `body` is absent | yes |
 | `edit({ message, body?, blocks?, mentions? })` | its author, or `moderatePermission`, within `editWindowMs` when the config sets one; the text before is kept (`listEdits`) | yes |
-| `delete({ message })` | its author or `moderatePermission`: the message becomes `deleted`, its body and blocks cleared, its replies kept | yes |
-| `purge({ message })` | `moderatePermission`: removes the message, its edits and its reactions from the tables | yes |
+| `deleteMessage({ message })` | its author or `moderatePermission`: the message becomes `deleted`, its body and blocks cleared, its replies kept. Not `delete`, which every schema has | yes |
+| `purge({ message })` | `moderatePermission`: removes the message, its edits and its reactions from the tables; a top-level message's whole thread with it | yes |
 | `react({ message, emoji })`, `unreact({ message, emoji })` | at most 20 emoji on a message, each a name or a character of at most 32 code points | yes |
 | `pin({ message })`, `unpin({ message })` | `pinPermission` | yes |
 | `resolve({ thread })`, `reopen({ thread })` | the thread's author, or `resolvePermission` | yes |
@@ -10077,13 +10079,20 @@ for a caller who may read the type.
 | Attachments are descriptions of files the deployment stores. | The value store, which keeps JSON in the database and is no place for a 20 MB log or a screenshot. |
 | `comment` and `listComments` are replaced by `post` and `listMessages`, and `commentCount` by `messages`; the scenario and HTTP corpora are recorded again. | Keeping the old names beside the new ones before a first release has anything that depends on them. |
 
-Migration 2 of Comments adds the columns and tables: a message's `thread`,
-`quotes`, `state`, `for`, `via`, `blocks`, `mentions`, `edited_at`,
-`pinned` and `client_id`, and `comment_edits`, `comment_reactions`,
-`comment_reads`, `comment_follows`, `comment_drafts` and
-`comment_deliveries`. A comment that exists becomes a posted message: its
-thread the root of its `replyTo` chain, its `quotes` its `replyTo` when
-that is not the root.
+Each step below adds the storage it needs as a migration of its own.
+Migration 2 of Comments, the first step's, moves the comments into
+`comment_messages` (a message's `thread`, `quotes`, `state`, `via`,
+`blocks`, `mentions`, `edited_at`, `pinned` and `client_id` beside what a
+comment held) and adds `comment_edits`, `comment_reactions` and
+`comment_conversations`, which holds each conversation's counts: a
+migration has no relation over the instances, so it cannot backfill new
+instance columns, and a volatile field reads its counts from there. A
+comment that exists becomes a posted message: its thread the root of its
+`replyTo` chain, its `quotes` its `replyTo` when that is not the root.
+Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
+`comment_deliveries`, and the acting-for subject as `for_subject`, since
+`for` is reserved in both dialects. Every top-level message is a thread,
+so a comment with no replies can be resolved.
 
 Status: proposed; nothing is built. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
@@ -10097,7 +10106,7 @@ Status: proposed; nothing is built. The order to build it in:
    Provenance and Comments.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
 
-Left: vectors over messages; moving Search's every-schema search onto
+Left: listing a conversation's pinned messages; vectors over messages; moving Search's every-schema search onto
 namespace operations; the generators' narrowing of the new operations in
 the typed client (D49); a notifier and an agent dispatcher as stack
 workers; and a conversation UI. The rule is reversible until the first
