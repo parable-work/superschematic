@@ -3,7 +3,9 @@ module github.com/parable-work/superschematic/extensions/topcoat
 go 1.26.4
 
 // The extension builds against the checkout it lives in, as the other
-// modules do (D1). A release requires the core at a tag and drops these.
+// modules do (D1). A release sets the requires below to its tag
+// (scripts/bump_version.py) and keeps these, so `go install` refuses the
+// module's command; the release ships superschematic-topcoat instead.
 replace github.com/parable-work/superschematic => ../..
 
 replace github.com/parable-work/superschematic/ir => ../../ir
