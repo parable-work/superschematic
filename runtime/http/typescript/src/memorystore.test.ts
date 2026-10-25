@@ -285,13 +285,13 @@ describe('MemoryStoreRateLimitStore', () => {
     const shared = new InProcessMemoryStore('shop-cache', { now: () => now });
     const replicas = [new MemoryStoreRateLimitStore(shared, 'shop-api'), new MemoryStoreRateLimitStore(shared, 'shop-api')];
     const decisions = [];
-    for (let i = 0; i < 4; i++) decisions.push(await replicas[i % 2]!.take('getProduct:203.0.113.7', 3, now));
+    for (let i = 0; i < 4; i++) decisions.push(await replicas[i % 2]!.take('products.getProduct:203.0.113.7', 3, now));
     expect(decisions.map(d => d.allowed)).toEqual([true, true, true, false]);
     expect(decisions[3]!.retryAfterSeconds).toBe(60);
     // Another client, and another operation, have budgets of their own.
     expect((await replicas[0]!.take('getProduct:203.0.113.8', 3, now)).allowed).toBe(true);
     expect((await replicas[0]!.take('listProducts:203.0.113.7', 3, now)).allowed).toBe(true);
-    const name = rateLimitKeyName('shop-api', 'getProduct', 1_761_350_400, '203.0.113.7');
+    const name = rateLimitKeyName('shop-api', 'products.getProduct', 1_761_350_400, '203.0.113.7');
     expect(await shared.count({ declaration: 'rate-limit', name })).toBe(3);
     expect(shared.ttlOf({ declaration: 'rate-limit', name })).toBe(125_000);
   });

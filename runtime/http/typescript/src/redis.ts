@@ -357,8 +357,12 @@ class RedisMemoryStore implements MemoryStore {
   async claim(ref: Ref, ttlMs: number): Promise<boolean> {
     checkTtl(ttlMs);
     const name = this.full(ref);
-    const reply = await this.call(client => client.sendCommand(['SET', name, '1', 'PX', String(ttlMs), 'NX']));
-    return reply !== null;
+    // A token of this call's own, which SET ... NX GET answers when the
+    // claim is already held: a retry of a claim the first attempt took
+    // reads its own token back, and still holds the claim.
+    const token = crypto.randomUUID();
+    const reply = await this.call(client => client.sendCommand(['SET', name, token, 'PX', String(ttlMs), 'NX', 'GET']));
+    return reply === null || String(reply) === token;
   }
 
   async delete(ref: Ref): Promise<void> {
