@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -240,6 +241,18 @@ func TestApplyRunsAnApp(t *testing.T) {
 			if strings.HasPrefix(url, local.ServerURL(port)) {
 				t.Errorf("the provisioner probed the app at %s; an app answers no readiness path", url)
 			}
+		}
+		// Readiness dials the app's port and never listens there, which
+		// could take the port from the app as it binds it; PortInUse
+		// checks it once, before the app starts.
+		checks := 0
+		for _, p := range f.runner.portChecks {
+			if p == port {
+				checks++
+			}
+		}
+		if !slices.Contains(f.runner.dials, port) || checks > 1 {
+			t.Errorf("the app's port was dialed %v and checked %d times, want readiness to dial it alone", f.runner.dials, checks)
 		}
 	})
 	t.Run("never listening", func(t *testing.T) {

@@ -1367,8 +1367,10 @@ func (p *Provisioner) waitReady(ctx context.Context, k string, s *Server) error 
 		default:
 		}
 		if s.Readiness == ReadinessListening {
-			// An app is ready once it listens on its port (D78).
-			if p.runner().PortInUse(s.Port) {
+			// An app is ready once it listens on its port (D78): a dial
+			// alone, since a probe that listened could take the port from
+			// the app as it binds it.
+			if p.runner().Listens(s.Port) {
 				return nil
 			}
 			if time.Now().After(deadline) {

@@ -40,6 +40,10 @@ type fakeRunner struct {
 	missing []string
 	// inUse are the ports something listens on.
 	inUse []int
+
+	// portChecks are the ports PortInUse checked, and dials the ones
+	// Listens dialed, in order.
+	portChecks, dials []int
 	// notReady is how many probes of a URL answer 503 first.
 	notReady int
 	probes   map[string]int
@@ -159,6 +163,14 @@ func (f *fakeRunner) Post(_ context.Context, url string, body []byte) (int, erro
 func (f *fakeRunner) PortInUse(port int) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.portChecks = append(f.portChecks, port)
+	return slices.Contains(f.inUse, port)
+}
+
+func (f *fakeRunner) Listens(port int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dials = append(f.dials, port)
 	return slices.Contains(f.inUse, port)
 }
 
