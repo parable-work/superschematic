@@ -11816,7 +11816,10 @@ Status: built.
   `TestDescribeDocumentForm` (runtime/migrate/go) and
   `TestDescribeDocumentMatchesTheRunner` the runner's side and the two
   JSON forms; `TestVerifyFixtureOnPostgres -update` writes the fixture's
-  lock.
+  lock. The HTTP runtime's `queries.test.ts` runs `queriesOf` over a
+  recorded runner: a list of UUIDs, a vector, a decimal, JSON and a
+  timestamp through the codec, an order refused before a statement, and
+  a page's key bound after the parameters.
 - **The forms:** `TestQueriesRoundTrip` writes the fixture to TypeScript,
   JSON and YAML and reads back the same IR; the goldens of
   fixture-queries-db's DDL, Go ORM and TypeScript types;
