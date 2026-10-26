@@ -10937,7 +10937,7 @@ pgx binds.
 | `transaction(fn)` runs fn with repositories on one connection and `query` and `exec` for raw SQL, rolls back when it throws, and returns the connection broken when it cannot end. `query` takes a pg query config too, so `enqueue(tx, queue, message)` writes the message in the transaction with no change to `enqueue`. | A transaction handle that `enqueue` would have to learn. |
 | The filters are the Go ORM's, per column kind. Both now offer `In` on integers, numbers and dates and `IsNull` on every kind (additive Go fields), which the gap asked of every column; TypeScript offers `isNull` only on a column that may be null. | The Go filters as they were, which lack both. |
 | A `Generic.JSON` column filters by `eq` and `in`, which compare JSON values as JSONB does, an object whatever the order of its keys and the string `"1"` apart from the number 1, and by `isNull` on a column that may be null (`sqlutil.FilterJSON`, TypeScript's `JsonFilter<T>`). The Go ORM's filter of such a column, a `StringFilter`, predates D79 and stays its API: its `Eq` and `In` bind JSON text, which pgx sends as such, so they compare alike, and its `ILike`, for which Postgres has no operator on JSONB, fails. | No filter but `isNull` in both, which would take `Eq` and `In` out of the Go API. Text comparison, which `ILike` implies and JSONB does not have. |
-| A create writes a member's schema default when the input leaves it unset, where Go can write only an enum's, since a Go struct cannot tell unset from zero; once columns carry their defaults (D83) the two agree. A key a create sets is written whatever its scalar; Go writes a UUID key alone. | The Go zero value, which TypeScript has no reason to copy. |
+| A create writes a member's schema default when the input leaves it unset. Go writes only an enum's: a Go struct cannot tell unset from zero, so the Go ORM writes the zero value of any other required field with a `Default<T, V>`, and writes it even where the column carries the DEFAULT (D83), which a TypeScript create and the DDL agree on: acme's `Product.inStock`, default true, is false when a Go create leaves it unset. That gap is left for the Go ORM. A key a create sets is written whatever its scalar; Go writes a UUID key alone. | The Go zero value, which TypeScript has no reason to copy. |
 
 ### Upsert
 
@@ -10990,5 +10990,6 @@ Status: built.
 
 Left: field selection, include and one-to-many loading in TypeScript; the
 `@versioned` history readers and the `IfVersion` fences in TypeScript;
-SQLite and D1 repositories; and `nearest` and `Encrypted<T>`, which the
-later gaps add.
+SQLite and D1 repositories; the Go ORM's zero value for an unset required
+field with a `Default<T, V>`, where TypeScript and the DDL write the
+default; and `nearest` and `Encrypted<T>`, which the later gaps add.
