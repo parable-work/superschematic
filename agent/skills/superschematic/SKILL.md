@@ -128,6 +128,15 @@ path for when the store is unavailable.
   `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
+- **Syncs and imports upsert by a unique key, in batches.** The generated
+  repositories' `upsertMany(inputs, on, fields, { onlyIfChanged: true })`
+  (Go `UpsertMany`) writes a batch in one statement and reports each row
+  `inserted`, `updated` or `unchanged`; an unchanged row is not rewritten,
+  so it keeps its `updatedAt` and fires no `@enqueueOnChange`. Use it, or
+  `upsertOneResult`, rather than a loop of `upsertOne` or a find then a
+  create, which races; an upsert sets an `Encrypted<T>` field on any
+  unique key. `nearest(..., { iterativeScan: 'relaxed_order' })` keeps
+  finding neighbours a selective filter keeps.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`

@@ -164,6 +164,12 @@ acme shop, an order put back to placed is fulfilled again:
 | `when` | conditions the row must meet, all of them: `{ field, isNull: true }`, `{ field, notNull: true }` or `{ field, equals: literal }`, the literal an enum's member, a text, a number or a boolean |
 | `message` | each field of the message the trigger sets, and the table's field whose value it takes |
 
+An update that changes nothing is still a write, which a trigger without
+`fields` enqueues for. An upsert with `onlyIfChanged` writes no row whose
+fields already hold the update's values, so a sync that sends the same
+rows again enqueues nothing for them
+([Upserts](/superschematic/guides/database-tables/#upserts)).
+
 The build checks the declaration against the table and the queue: each
 field has a column, a null test is of a nullable field, a literal fits
 its field, and each field of the message takes a table's field of its

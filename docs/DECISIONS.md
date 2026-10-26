@@ -11716,3 +11716,140 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D89. A table upserts many rows a statement, says what each upsert did, writes only what changed and seals an Encrypted<T> field on any unique key; nearest takes its index's settings; and a find, a transaction and a raw query take options
+
+A bank sync reads a page of up to 500 transactions, and an OFX file
+hundreds, each by its natural key, the bank's id for it or its account and
+reference. The repositories had `upsertOne` alone (D79), so a page was a
+statement per row; nothing said whether an upsert inserted or updated a
+row, so an import's summary ("12 new, 3 updated, 40 unchanged") took
+reads of its own; and an upsert that changed nothing still wrote the row:
+it stamped `updatedAt` and fired the table's triggers, so every sync of
+the same page re-enqueued its embeddings through `@enqueueOnChange` (D80).
+An upsert could set an `Encrypted<T>` field only by the primary key (D85),
+since each envelope is bound to its row's key, so storing a Plaid item by
+its unique `itemId` was a find, then a create or an update, which races.
+
+`nearest` (D84) scanned an hnsw index with pgvector's defaults: it reads
+40 candidates and keeps those the filter keeps, so a selective filter
+left fewer than `k` rows, and the only way round was raw `SET LOCAL` in a
+transaction. And a few options were missing: `findMany` always counted
+first, a raw query's rows came back in pg's forms, a transaction began at
+the server's isolation level and could not nest, and a time or a boolean
+filtered by no set.
+
+This entry adds, in both ORMs and from statements sqlutil writes once:
+- `UpsertMany`/`upsertMany`, an upsert's result (`UpsertOneResult`,
+  `upsertOneResult`), and an upsert only if changed;
+- an upsert that sets an `Encrypted<T>` field on any unique key;
+- `nearest`'s `efSearch`, `iterativeScan`, `maxScanTuples`, `probes`,
+  `maxProbes` and `excludeIds`;
+- `findMany` without its count, a transaction's isolation level and read
+  only, nested transactions as savepoints, `in` on a time and a boolean,
+  and in TypeScript a raw query read through a table's definition.
+
+### Upserts of many rows, and what each did
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `UpsertMany(ctx, inputs, on, fields, opts)` and `upsertMany(inputs, on, fields, options)` insert each input, or, when a row holds its value of the unique key `on`, set each field `fields` names to the value the input would have inserted: `SET name = EXCLUDED.name`. `fields` is Go's `<Type>Fields`, the field selection the reads take, and TypeScript's update members, the key, the audit fields and internal metadata refused; the assignments follow `UpdateOne`'s order whatever order `fields` names them in, so both ORMs write one statement. A field `fields` names that an input leaves unset takes what the insert would have written, its default or NULL. | One `Update` applied to every row, which a sync of rows of their own values cannot use. An update per row, which no single `ON CONFLICT DO UPDATE` can apply, since it sees the target row and `EXCLUDED` alone. A callback, which the statement cannot run. |
+| One statement writes a batch, `TableStatements.Upsert`: the insert of `InsertMany`, `DEFAULT` for a column a row leaves unset that another sets, `ON CONFLICT` the key's target, and the update. A batch is as many rows as Postgres binds the parameters of, 65535 over the table's insert columns less the two stamps (`TableModel.BatchRows`), or `Batch` (`batch`) rows. More rows than a batch take a statement each, in one transaction, so a failed batch writes nothing. | `COPY` into a temporary table, then an upsert from it: two statements always, and a second write path. An `unnest` of a typed array per column: a cast per column type, and the codec of each element. |
+| `UpsertOne` and `upsertOne` keep returning the row. `UpsertOneResult` and `upsertOneResult` return `{ row, status }`, and `UpsertMany` and `upsertMany` each input's, in the inputs' order. `status` is `inserted`, `updated`, or `unchanged`: the row that held the key, left as it was, since the update set no field or, only if changed, each field it set already held its value. Go's `UpsertResult[T]` and `UpsertStatus` and TypeScript's `UpsertResult<Row>` and `UpsertStatus` are shared by every table. | Changing `upsertOne`'s return type to the result, which the requirement offered first: every caller that wants the row, the acme cart among them, would unwrap it. An `inserted` boolean alone, which cannot say unchanged. |
+| The statement returns `(xmax = 0) AS _inserted` after the row (`sqlutil.UpsertInserted`): the row version an insert wrote has no `xmax`, and the one an `ON CONFLICT` update wrote holds the conflicting row's lock. | Postgres 18's `RETURNING old.*`, which Postgres 16 has not. A read of the keys before the upsert, a statement more and a race. |
+| `RETURNING` promises no order, and an update only if changed returns no row it left, so the rows come back matched to the inputs by the key's values, each read as its column's wire form: in TypeScript `decodeValue` of the bound or returned value, in Go the driver value of the field, a time in UTC to the microsecond (`<type>KeyOf`, `upsertKeyValue`). A row takes the first input left that holds its key; one whose key no input holds, as a key the database generated or a NULL, which no unique index holds, takes the first input left that sets none of the key, as Postgres returns a `VALUES` insert's rows in their order. | The order alone, which drops a row an update leaves and which the documentation does not promise. An ordinal column through a CTE over `VALUES`, which needs a cast per column and takes no `DEFAULT`. |
+| A key over an expression, `((lower(label)))`, matches no input by its columns' values, so `upsertMany` refuses it, and so does an upsert only if changed, which reads rows back by their columns; `upsertOne` and `upsertOneResult` without it take one. | Matching on the expression in the client, which would have to evaluate SQL. |
+| Two inputs of one statement that hold one key fail it: Postgres refuses to update a row twice. | Keeping the last input of a key, which would decide for the caller which change wins. |
+
+### Only if changed
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `OnlyIfChanged` (`onlyIfChanged`) adds to the update's WHERE, after the live rows' condition, `(line_item.name, line_item.amount) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.amount)` over the columns the update sets, their new values the parameters of an `upsertOne`'s update, `NULL` for a column it sets null, or `EXCLUDED`'s for `upsertMany` (`Clauses.Changed`). The stamps are not compared, so a row whose fields hold the update's values is not rewritten: its `updatedAt` and `updatedBy` stay and no trigger fires. An update that compares no column is `WHERE FALSE` (`Clauses.Never`). | Stamping by a `CASE`, which still rewrites the row and fires every trigger. A `WHEN` on each trigger, which the ORM does not own and which `updatedAt` defeats. |
+| A `POINT`, which Postgres has no equality for, compares as its text, `CAST(%s AS POINT)::text` on both sides (`ColumnModel.CompareAs`); every other column type the ORMs write has `=`. | Leaving a point out of the comparison, which would drop a change of it alone. Comparing every column as text. |
+| A row the update left is not returned, so the repository reads it back by its key in the same transaction, where the upsert locked it: `UniqueKey.Rows`, `SELECT <columns> WHERE (<key>) IN (...)` and the partial index's predicate, one statement for a batch. A deleted row of a full key, which the update's live condition also skips, reads back deleted and is `ErrNotFound` (`NotFoundError`), as before. An upsert only if changed runs in a transaction of its own when none is open. | Reporting such a row without its row. A read outside the upsert's transaction, which a write between could change. |
+
+### Encrypted fields on any unique key (D85 amended)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An insert seals its encrypted fields under the input's key, which a table with one generates when the input leaves it unset (D85), so an inserted row's envelopes open. An update's encrypted field never goes in the `ON CONFLICT` update, whose row's key the statement alone names: after it, the repository opens the row the upsert returned or read back and, where the update's value differs, sets it by `UpdateOne`, sealed under that row's key and stamped, in the upsert's transaction, which the conflict's lock holds the row for. The status is then `updated`. A null in the update goes in the statement, as there is nothing to seal. `UpsertMany` does the same per row, each input's value of each encrypted field `fields` names. The primary key takes the same path, so its upsert of an encrypted field is two statements where it was one. | A find, then a create or an update, which races. Sealing in the database, which puts the key in the statement and the server's logs. Sealing under the key the insert generates and setting it from `EXCLUDED`, which binds the envelope to a key the conflicting row does not have. |
+| An upsert only if changed compares an encrypted field's plaintext, after the statement, and sets it only when it differs; a ciphertext, sealed under a fresh nonce, always differs. | Comparing envelopes, which would update every row. |
+
+### nearest's index settings
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `nearest` takes `efSearch` (hnsw's `ef_search`, 1 to 1000), `iterativeScan` (`off`, `relaxed_order`, `strict_order`), `maxScanTuples` (`hnsw.max_scan_tuples`), `probes` (`ivfflat.probes`, 1 to 32768) and `maxProbes` (`ivfflat.max_probes`), and Go's `NearestOptions` the same, a zero unset. One statement sets those it is given before the read, `SELECT set_config('hnsw.ef_search', $1, true), ...` (`sqlutil.NearestSettingsOf`), each value bound as text, and the ORM checks each range first: a setting pgvector has not yet loaded in the session is a placeholder that takes any value, which it would drop with a warning once it loads. | `SET LOCAL hnsw.ef_search = 100`, which binds no parameter, so each value would be written into the text. pgvector's own range checks alone. |
+| `iterativeScan` sets both indexes' iterative scan, hnsw's and ivfflat's, but ivfflat's to `strict_order`, which it has not; the read uses whichever index serves its metric. pgvector 0.8 has both, as `stack dev`'s image runs. | Options per index kind, `hnsw: {...}` and `ivfflat: {...}`, which a caller reads the schema's indexes to choose between. |
+| `set_config(..., true)` holds for a transaction, so `nearest` with a setting outside one opens a transaction of its own for the setting and the read; inside one the settings hold until it ends, as `SET LOCAL`'s do. | A savepoint around the read, rolled back to after it to drop the settings: three more statements per read for what a caller in a transaction may well want kept. A CTE that sets them in the read, whose order the planner does not promise. |
+| `excludeIds` (`ExcludeIDs`) leaves out the rows of those keys, `<table>.<key> NOT IN (...)` (`Clauses.NotIn`), after the filter's conditions: the row whose vector is asked for. | The caller's filter, which has no "not in" on a key. |
+
+### Query options
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `findMany(filter, { count: false })` reads the page without the `COUNT(*)` it runs first, and its `total` is undefined, which an overload types; Go's `FindOptions.SkipCount` returns -1. | A method of its own. 0, which a count can be. |
+| `transaction(fn, { isolation, readOnly })` and Go's `TransactionWith(ctx, TxOptions{Isolation, ReadOnly}, fn)` begin with `BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY` (`sqlutil.BeginTransaction`), which Go sends through pgx's `TxOptions.BeginQuery`, so both send one text. `Transaction(ctx, fn)` keeps its signature, and `DatabaseInterface` gains `TransactionWith`. | pgx's `IsoLevel` and `AccessMode`, which write lower-case statements of their own. Options on `Transaction`, which changes the method every implementation of the interface has. |
+| A transaction nests one: `tx.transaction(fn)` and Go's `Tx.Transaction(ctx, fn)` run `SAVEPOINT sp_<depth>`, release it when `fn` returns, and when it throws or returns an error roll back to it and release it, so the transaction around it goes on, as it may after a statement of `fn` failed. `TxInterface` gains `Transaction`. | pgx's nested `Tx`, whose own savepoint names TypeScript would have to copy. Rolling back to the savepoint and keeping it, which leaves one per failure. |
+| The statements of a transaction and a savepoint name no table, so the `./orm` entry does not carry them: the TypeScript runtime writes the text sqlutil's constants say, as it wrote `BEGIN` and `COMMIT`, and the parity tests hold the two to one another. nearest's settings are nearest's own and travel in its definition beside its metrics. | Every ORM definition carrying the same statements. |
+| TypeScript's `query(text, values, { decode })`, on the ORM and on a transaction, reads each row through a table's definition, as its repository reads one: each column the row holds decoded by its name and each `Encrypted<T>` column opened; `decode` takes a list of `RowField`s too, as `decodeRow` does. The ORM gains `query` and `exec` on its pool, which `ORM_MEMBERS` already reserved. | A decode helper over `Deps.db`, a raw pool, which holds no field keys. |
+| `in` filters a time and a boolean, `DateTimeFilter.In` and `BoolFilter.In` in Go (`sqlutil.FilterIn` in their kinds' operations). | |
+
+`fixture-sync-db` holds a bank sync's tables: a line item keyed by the
+bank's id for it, a partial unique index of the lines that have one, and
+by its account and reference, with a location, a JSON value and a list,
+and a trigger that enqueues on every insert and update. Its
+`PointFilter & NullFilter`, a nullable location's filter, had orm.ts
+import a type named for both, which `RuntimeTypes` now splits.
+
+Status: built.
+- **The statements:** `TestUpsertStatementsOfASync`,
+  `TestExpressionKeysCannotBeReadBack` and
+  `TestNearestSettingsAndTransactions` (`sqlutil`), and
+  `TestTableStatementsOfALedger`; ormgen's goldens, fixture-sync-db's
+  among them.
+- **Upserts of many rows, their results and only if changed:**
+  `TestGeneratedUpsertManyOnPostgres` (Go) and
+  `TestRepositoriesOnPostgres/fixture-sync-db`'s `sync.test.ts`
+  (TypeScript): a sync of 500 lines by `plaidTransactionId` is one
+  insert, each line `inserted`; a second sync, three lines changed, is the
+  insert and one read, three `updated` and 497 `unchanged`, whose
+  `updated_at` did not move, and the trigger enqueued three messages, and
+  500 without `onlyIfChanged`; batches of two are three statements in one
+  transaction, a line without the key is inserted, and a batch that fails
+  writes nothing; `upsertOneResult` compares a location as its text and
+  reads back a line it left; a deleted line's key is `ErrNotFound`.
+  `TestUpsertParityOfGoAndTypeScriptOnPostgres` holds the two ORMs to the
+  same 24 statements over these calls. `ddl.test.ts` refuses
+  `upsertMany` and only if changed on an expression key.
+- **Encrypted fields:** `vault.test.ts`'s
+  `plaidItem.upsertOne({ itemId, accessToken, ... }, ['itemId'], {
+  accessToken })` inserts an item sealed under the key it generates, then
+  updates its token under the item's own key, and `upsertMany` seals
+  each item; the same token again is `unchanged` with no second
+  statement. `TestEncryptedFieldsAcrossGoAndTypeScriptOnPostgres` adds
+  the upserts by `itemId`, one and many, to its parity script, and its
+  shared schema's Go phase sets TypeScript's row's token by `itemId`.
+- **nearest:** `TestAnIterativeScanOnPostgres` (Go, in
+  `TestVectorsAndDecimalsOnPostgres`) and `vectors.test.ts`: of 2000
+  passages through the hnsw index, ten rare ones lie opposite the query,
+  so a filtered `nearest` finds none without an iterative scan and five
+  with `relaxed_order` and `strict_order`; outside a transaction it opens
+  one, and `excludeIds` leaves a row out. `TestNearestParityOfGoAndTypeScriptOnPostgres`
+  adds the settings, in nearest's transaction and in one already open.
+- **Query options:** `sync.test.ts` and `TestGeneratedUpsertManyOnPostgres`
+  read without a count and by `in` on a time and a boolean, begin a
+  serializable read-only transaction, refuse a write in one, and roll a
+  nested savepoint back while the transaction goes on;
+  `sync.test.ts` reads a raw query through `lineItemTable`.
+
+Left: Go's raw query read through a table, whose `Tx.Query` returns pgx
+rows; `createMany`, which writes one statement whatever its size and so
+fails past 65535 parameters; `upsertMany` on an expression key, and an
+upsert only if changed on one; an encrypted field's second statement is an
+`UpdateOne` per row, not one statement for a batch; nearest's settings in
+a transaction already open hold to its end; the match of rows a database
+keyed rests on Postgres returning a `VALUES` insert's rows in order;
+upserts of many rows on SQLite and D1, whose repositories are not built
+(D79).

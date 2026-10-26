@@ -284,10 +284,33 @@ const neighbours = await deps.orm.textEmbedding.nearest('embedding', query, { k:
 
 `k` is 10 unless set. The filter is the table's own, and a soft-deleted
 row is left out unless `includeDeleted` is set, as for a find; a row whose
-vector is null has no distance and is left out too. The vector must have
-the field's dimensions. An index finds approximate neighbours: a filter
-that keeps few rows may leave fewer than `k`, which pgvector's
-`hnsw.iterative_scan` and `hnsw.ef_search` settings trade against speed.
+vector is null has no distance and is left out too. `excludeIds`
+(`ExcludeIDs`) leaves out the rows of some keys, the row whose vector is
+asked for, say. The vector must have the field's dimensions.
+
+An index finds approximate neighbours: an hnsw scan reads `ef_search`
+candidates (40) and an ivfflat scan `probes` lists (1), and keeps those
+the filter keeps, so a filter that keeps few rows may leave fewer than
+`k`. `nearest`'s options set pgvector's settings for the read:
+
+| Option | Setting | |
+| --- | --- | --- |
+| `efSearch` (`EfSearch`) | `hnsw.ef_search` | the candidates an hnsw scan reads, 1 to 1000 |
+| `iterativeScan` (`IterativeScan`) | `hnsw.iterative_scan`, and `ivfflat.iterative_scan` but for `strict_order` | `relaxed_order` scans on until it has `k` rows, in an order a little out of the distance's; `strict_order`, hnsw's alone, in the distance's order; `off`, the default, does not |
+| `maxScanTuples` (`MaxScanTuples`) | `hnsw.max_scan_tuples` | the tuples an iterative scan reads at most (20000) |
+| `probes` (`Probes`) | `ivfflat.probes` | the lists an ivfflat scan reads, 1 to 32768 |
+| `maxProbes` (`MaxProbes`) | `ivfflat.max_probes` | the lists an iterative ivfflat scan reads at most |
+
+```ts
+// A filter that keeps few rows still finds k of them.
+await deps.orm.lineItemEmbedding.nearest('embedding', query, { k: 10, filter: { categoryId: { eq: id } }, iterativeScan: 'relaxed_order' });
+```
+
+The iterative scan is pgvector 0.8's, which `stack dev`'s image runs.
+`nearest` sets each option with `set_config(..., true)`, which holds for a
+transaction, so outside one it opens a transaction of its own for the
+read; inside one the settings hold until the transaction ends, as
+`SET LOCAL`'s do (D89).
 
 A vector crosses as pgvector's text form, `[0.5,-1,2]`: the Go ORM binds
 and scans it as text, a `[]float32`, and TypeScript's codec reads and
@@ -488,8 +511,12 @@ A ciphertext compares with nothing, so the field:
 - has no filter and no sort;
 - is left out of a `@versioned` table's history:
   `@versioned({ exclude: ["accessToken"] })`;
-- is not set by `updateMany`, nor by an upsert on another key than the
-  primary key, which do not know each row's key; `updateOne` sets it.
+- is not set by `updateMany`, which does not know each row's key;
+  `updateOne` sets it, and so does an upsert on any unique key: the
+  insert seals it under the key the ORM generates for the row, and an
+  update of the row that holds the key sets it by a second statement,
+  under that row's key, in the upsert's transaction, when it differs
+  from what the row holds ([Upserts](#upserts)).
 
 The envelope is bound to the row's key, which the ORMs must know before
 the insert: a table with an `Encrypted<T>` field has a UUID key the ORMs
@@ -543,6 +570,48 @@ the live rows alone, so a deleted row never conflicts; a conflict with a
 deleted row on a full key, such as the primary key, is not updated, and
 the upsert fails with `ErrNotFound` (`NotFoundError`).
 
+`UpsertOneResult` (`upsertOneResult`) is `UpsertOne` with what it did:
+`{ row, status }`, the status `inserted`, `updated`, or `unchanged`, the
+row that held the key left as it was. The statement returns
+`(xmax = 0) AS _inserted` beside the row, true for a row it inserted.
+
+`UpsertMany(ctx, inputs, on, fields, opts)` and `upsertMany(inputs, on,
+fields, options)` upsert a batch in one multi-row statement: each input
+is inserted, or the row that holds its key takes the input's value of
+each field `fields` names, `SET name = EXCLUDED.name`, and each input's
+row and status come back in the inputs' order (D89). A bank sync upserts a
+page of transactions by the bank's id for each:
+
+```ts
+const results = await deps.orm.lineItem.upsertMany(page, ['plaidTransactionId'], ['name', 'amount', 'postedAt', 'pending'], { onlyIfChanged: true });
+const added = results.filter(r => r.status === 'inserted').length;
+```
+
+```go
+results, err := db.LineItem.UpsertMany(ctx, page, orm.LineItemUniqueByPlaidTransactionId,
+	orm.LineItemFields{Name: true, Amount: true, PostedAt: true, Pending: true}, &orm.UpsertOptions{OnlyIfChanged: true})
+```
+
+One statement writes as many rows as Postgres binds the parameters of
+(65535 over the table's columns); more take a statement per batch, or per
+`batch` (`Batch`) rows, in one transaction, which an upsert opens itself
+when none is open, so a failed batch writes nothing. The rows the
+statement returns are matched to the inputs by the key's values, and an
+input that sets none of them, whose key the database generates, takes the
+next row in order. Two inputs of one statement that hold one key fail it,
+as Postgres refuses to update a row twice, and a key over an `expression`
+cannot be matched and is refused; `upsertOne` takes it.
+
+With `onlyIfChanged` (`OnlyIfChanged`) the update runs only where a field
+it sets differs from what the row holds, `WHERE (line_item.name, ...) IS
+DISTINCT FROM (EXCLUDED.name, ...)`, a location compared as its text, as
+Postgres has no equality for a point. A row it leaves as it was is not
+rewritten: its `updatedAt` and `updatedBy` stay, and no trigger fires, an
+`@enqueueOnChange` among them, so a sync that sends the same page again
+enqueues nothing. Postgres returns no such row, so the repository reads it
+back by its key in the same transaction and reports it `unchanged`. An
+`Encrypted<T>` field compares its plaintext, after the statement.
+
 ## Soft delete
 
 A table with nullable `deletedAt` and `deletedBy` fields, like `Review`, is
@@ -580,6 +649,15 @@ express: `Exec` for a write, and `Query` for a read such as a keyset-paged
 join across tables. `Query` returns pgx rows, which the caller closes; the
 no-op transaction returns none.
 
+`TransactionWith(ctx, orm.TxOptions{Isolation: orm.Serializable, ReadOnly:
+true}, fn)` begins at an isolation level, `ReadCommitted`, the default,
+`RepeatableRead` or `Serializable`, read only or not:
+`BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY`. `tx.Transaction(ctx, fn)`
+nests a transaction in one, a savepoint named for its depth: when `fn`
+returns an error the savepoint is rolled back to and released, and the
+transaction around it goes on, as it may after a statement that failed
+in `fn` (D89).
+
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
@@ -589,6 +667,9 @@ with repositories bound to one transaction, `tx.query(sql, values)` and
 `tx.exec(sql, values)` for raw SQL on it, and rolls it back when the
 function throws. The queue client's `enqueue` takes the transaction, so a
 message commits with the rows ([Queues and workers](/superschematic/guides/queues/#from-typescript)).
+`transaction(fn, { isolation: 'serializable', readOnly: true })` takes the
+same options as `TransactionWith`, and `tx.transaction(fn)` nests a
+savepoint, which a throw rolls back to.
 
 ## TypeScript
 
@@ -601,8 +682,11 @@ statements the Go ORM runs (D79). For each table it declares the row
 and a page sorts by, the unique keys, and the repository
 (`ReviewRepository`): `getOne`, `getManyByIds`, `findOne`, `findMany`,
 `findPage`, `createOne`, `createMany`, `updateOne`, `updateMany`,
-`upsertOne`, `deleteOne`, `deleteMany`, and `hardDeleteOne` on a
-soft-deletable table.
+`upsertOne`, `upsertOneResult`, `upsertMany`, `deleteOne`, `deleteMany`,
+and `hardDeleteOne` on a soft-deletable table. `findMany` counts the rows
+its filter finds before it reads a page of them, `total`; `{ count: false
+}` reads the page alone, and `total` is undefined (`SkipCount` in Go,
+whose total is then -1).
 
 <Snippet file="testdata/generated/types/typescript/shop-db/orm.ts" symbol="ReviewFilter" />
 
@@ -631,15 +715,21 @@ writes it) and a DATE as its text, through parsers of the pool's own;
 `typeParsers: false` keeps pg's. A vector column's value is a `number[]`,
 which crosses as pgvector's text form (`vectorText`).
 
+`query(sql, values, { decode: lineItemTable })`, on the ORM and on a
+transaction, reads a raw query's rows as the table's repository does:
+each column the row holds decoded, by its name, and an `Encrypted<T>`
+column opened. `decode` takes a list of fields too, as `decodeRow` does.
+
 A filter member per column holds its conditions, by the column's kind, as
 the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
 condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
 a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
 compare JSON values as JSONB does, an object whatever the order of its
 keys and the string `"1"` apart from the number 1, `isNull` on a column
-that may be null, and a relation's key by `<field>Id`. The Go filters take
-the same: `Int64Filter`, `FloatFilter` and `DateFilter` have `In`, and the
-filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+that may be null, and a relation's key by `<field>Id`; `in` takes a time
+and a boolean too. The Go filters take the same: `Int64Filter`,
+`FloatFilter`, `DateFilter`, `DateTimeFilter` and `BoolFilter` have `In`,
+and the filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
 alike, and whose `ILike` Postgres refuses on JSONB.
 
