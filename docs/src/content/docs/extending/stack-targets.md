@@ -322,7 +322,11 @@ names no platform for is refused in its environments, so a stack whose
 APIs declare jobs or workers resolves on it only with each placed on
 another target's platform. `Unplaced` says, for such a kind, why the
 target places none and where one runs, which the refusal gives in place
-of that advice: the cloudflare target's queue workers. A target with no
+of that advice: the cloudflare target's derivers and apps. `DatabasePlatforms`
+names, per SQL dialect, the platform of a database whose DB services all
+list that dialect first, in place of the kind's: the local target's
+`local.sqlite`, and the cloudflare target's `cloudflare.hyperdrive` for
+postgres, beside D1 for sqlite (D92). A target with no
 memoryStore platform refuses a store that is on, and its refusal names
 `settings: [{ of: ShopCache, enabled: false }]`, under which the
 environment resolves.
@@ -415,7 +419,9 @@ amended). Its bundle and site
 publishers keep files in R2 by their digest and are `ArtifactFetcher`s,
 its `PreDestroy` empties each bucket of a parameterized member, and its
 migration runner runs `superschematic-migrate` on the deploying machine
-against each D1 database. Its state store's `Backend` hands each run, in
+against each D1 database, and against each Postgres database on
+Hyperdrive with the origin's connection string from the shell, once it
+has read the Hyperdrive config and found it names that database (D92). Its state store's `Backend` hands each run, in
 `StateBackend.Env`, the S3 credentials of the shell's token and the
 passphrase of its secrets provider, and refuses a run without either
 before the provisioner starts. Its secret store's `Get` refuses, since
@@ -439,7 +445,10 @@ until bootstrap records `projectNumber`. cloudflare's kind is
 `cloudflare-api-token`, whose `token` and `passphrase` name GitHub Actions
 secrets and whose `environment`, when set, names the GitHub environment
 that holds them; `github` writes no step for it, but the job's `env` from
-those secrets, and asks for no identity token. A renderer refuses a kind
+those secrets, and asks for no identity token. A field named
+`env.<VARIABLE>` names one more secret, which the job reads into that
+variable, as the deploy job reads a Hyperdrive origin's connection string
+into `HYPERDRIVE_ORIGIN_<DB>` (D92). A renderer refuses a kind
 it does not know, so a target with a new kind of sign-in teaches the
 renderers it is used with.
 

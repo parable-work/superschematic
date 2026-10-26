@@ -204,6 +204,15 @@ set`, `stack deploy` and `stack destroy` act on cloud accounts and cost
 money. Run `stack plan <environment>` and show it to the user, and run
 those commands only when the user asks for that environment.
 
+On the cloudflare target, a DB service that lists `postgres` first is a
+Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
+through a Hyperdrive config: the user makes the config, names its id in
+the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
+and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
+for the deploy's migration. Don't make the config or handle the
+connection string yourself. Queue workers there must be TypeScript; each
+drains its queue once a minute under a Cron Trigger.
+
 ## Reference
 
 The binary prints its own references, written from what it links, its

@@ -131,6 +131,7 @@ breaks your code, the type checker of each language points at the line.
 | Everything running on your machine | a Stack service, which `stack init` writes | server entrypoints; `stack dev` runs Postgres in Docker, applies the migrations and serves | nothing | [Stacks](/superschematic/guides/stacks/#start-a-stack) |
 | Environments: dev, staging, production | `@environment` classes in the Stack schema | one resolved `environment.json` each | the values | [Stacks](/superschematic/guides/stacks/#environments) |
 | Google Cloud or Cloudflare | an environment with the `gcp` or `cloudflare` target | `stack plan` and `stack deploy`, which build what changed, deploy it and run the migrations between steps | nothing | [Stacks](/superschematic/guides/stacks/#deploy-to-google-cloud) |
+| Postgres, pgvector and queue workers on Cloudflare | a DB service that lists `postgres` first, and in its environment's settings the id of a Hyperdrive config | Workers whose ORM reaches the database through Hyperdrive, a Worker per queue worker that drains its queue at each firing of a Cron Trigger, and the deploy's migration of the database | the Hyperdrive config, once per environment | [Stacks](/superschematic/guides/stacks/#databases-on-hyperdrive) |
 | CI that deploys | `outputs.ci` on the Stack service | the workflow | nothing | [Stacks](/superschematic/guides/stacks/#generated-ci) |
 | Traces | nothing in a schema: OpenTelemetry's own `OTEL_` variables | spans from every server, job and worker | nothing | [Traces](/superschematic/guides/traces/) |
 

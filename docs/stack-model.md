@@ -5751,6 +5751,8 @@ Not kept:
 platform (section 6.9) (D64):
 - the target;
 - its Workers, Cron, D1, R2 and site platforms and their connectors;
+- its Hyperdrive platform, for a Postgres outside Cloudflare, and its
+  drainer platform, for queue workers, and their connectors (D92);
 - the policy rules;
 - the pinned schemas at pulumi-cloudflare 6.22.0;
 - bootstrap, with the R2 state bucket, the Secrets Store and the CI
@@ -5809,8 +5811,9 @@ declare module "@superschematic/stack" {
     cloudflare: {
       values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string; telemetry?: { endpoint: string; sampleRatio?: number } };
       server: { logs?: boolean; compatibilityDate?: string; cpuMs?: number; placement?: "smart"; telemetry?: boolean };
-      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" };
+      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" } | { hyperdrive?: string; caching?: boolean };
       job: { cpuMs?: number; logs?: boolean; telemetry?: boolean };
+      worker: { logs?: boolean; cpuMs?: number; telemetry?: boolean; drainSeconds?: number };
       site: {};
       bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp" };
     };
@@ -5818,19 +5821,21 @@ declare module "@superschematic/stack" {
 }
 ```
 
-There is no `worker` key: resolution refuses the kind on this target,
-saying why and where a worker runs (`TargetSpec.Unplaced`, section 18.15).
-Nor is there an `app` key, for the same reason (D78).
+A database's settings are D1's or Hyperdrive's, whichever platform its
+first dialect places it on (`TargetSpec.DatabasePlatforms`, section 18.6),
+and a worker's are the drainer's (section 18.9) (D92). There is no `app`
+key: resolution refuses the kind on this target, saying why and where an
+app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 
 ### 18.2 Realization
 
 | Stack concept | cloudflare |
 | --- | --- |
 | server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
-| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
-| database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
-| sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. |
-| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). |
+| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, a Hyperdrive config, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `hyperdrive: {binding, config}` a `hyperdrive` binding of the config's id (D92), `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. A database whose DB services list postgres first is on `cloudflare.hyperdrive` instead: a database of a Postgres outside Cloudflare, no node, reached through the Hyperdrive config whose id its settings name (section 18.6, D92). |
+| sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. To a database on Hyperdrive, `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive `hyperdrive: { binding: "<FIELD>", config: <the settings' id> }`, and the Worker connects as the config's user. |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). A database on Hyperdrive is migrated on its origin, the connection string in the shell's `HYPERDRIVE_ORIGIN_<DB>`, once the runner has read the config and found it names that database (D92). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
@@ -5838,6 +5843,7 @@ Nor is there an `app` key, for the same reason (D78).
 | site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
 | job | A Worker of `cloudflare.cron` per job, named as a server's is, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there, and a `workflow` (`<job>.workflow`) named as the Worker, of the class `JobRun` its bundle exports, through which the job runner runs it once; the version binds `SUPERSCHEMATIC_BUNDLE` to its bundle's digest. A job with no schedule has a Worker, its Workflow and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
+| worker | A Worker of `cloudflare.drainer` per worker, named as a server's is, workers.dev off, whose version runs the worker's bundle, built from `drain.ts`, with `WORKER_CONCURRENCY` and `WORKER_DRAIN_SECONDS` as `plain_text` bindings, under a `workersCronTrigger` (`<worker>.schedule`) firing every minute; each firing claims the worker's queue on Postgres through Hyperdrive for the window. Its edges are its API's, through `cloudflare.drainer-workers`, `cloudflare.drainer-r2` and `cloudflare.drainer-hyperdrive`. TypeScript only; more than one instance, `maxInstances`, and a window and grace over 15 minutes are refused as unrealizable (section 18.9, D92). |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
 | exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<label>.<domain>`, the label the deployable's name with a suffix under a parameter, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, the Worker's name, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
 | parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
@@ -6301,9 +6307,9 @@ A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
 each sqlite-first database with `d1Database`: the d1 binding its field's
 `d1.binding` names, through `binding(env, name, 'd1')`, refusing a
 connection string or a Cloud SQL configuration, which a Worker cannot
-reach; `/readyz` pings each with `./d1`'s `ping`. The generator refuses a
-Workers server whose API's database lists postgres first, which no D1
-binding reaches. The generated `main.ts`, and a
+reach; `/readyz` pings each with `./d1`'s `ping`. A Workers server whose
+API's database lists postgres first opens it through a Hyperdrive binding
+(below, D92). The generated `main.ts`, and a
 job's, open a sqlite-first database with `openDatabase`: it reads the
 field's `url`, a `sqlite:` URL, takes the file's path from it with
 `sqliteFile` (`./sqlite`), and opens it at once. It refuses a D1 binding,
@@ -6342,8 +6348,9 @@ A target may name a database platform per dialect,
 places, and whose DB services all list one dialect first, goes on that
 dialect's platform; any other goes on the target's database platform.
 `local` names `local.sqlite` for `sqlite` (section 18.13). `cloudflare`
-places every database on `cloudflare.d1`, whose one dialect is `sqlite`,
-so a database whose DB service lists no sqlite is refused there.
+names `cloudflare.hyperdrive` for `postgres` (below, D92) and places every
+other database on `cloudflare.d1`, whose one dialect is `sqlite`, so a
+database there whose DB service lists no sqlite is refused.
 `Finalize` checks that each platform named for a dialect runs it.
 
 On D1 each hosted DB schema is a `d1Database` node, `<database>.d1.<db>`,
@@ -6395,6 +6402,49 @@ id in the environment's values, the token and passphrase of section 18.3
 Write`, `D1 Write`, `Workers R2 Storage Write`, `Secrets Store Write` and
 `Account API Tokens Write`), `superschematic-migrate` on `PATH` or at
 `SUPERSCHEMATIC_MIGRATE`, the Pulumi CLI the provisioner pins, and Bun.
+
+**Databases on Hyperdrive (D92).** A database whose DB services list
+postgres first is on `cloudflare.hyperdrive`: a database of a Postgres
+outside Cloudflare, Neon, Supabase, Cloud SQL or the person's own, which
+Workers reach through a Hyperdrive config, a pool Cloudflare keeps near
+the database. The config holds the origin's password, which Cloudflare
+never returns, so it lives outside the graph as a secret's value does: the
+person makes it once per environment, caching off, and names its id in the
+database's settings, `hyperdrive`; `caching: true` allows a config that
+caches reads. The platform lowers to no node, refuses a missing id with
+the `wrangler hyperdrive create` that makes one, a parameterized
+environment, whose members would share the origin, and a database that
+hosts two DB services, which one config cannot reach.
+
+A sql edge from a server, a job or a worker derives
+`hyperdrive: {binding, config}` (`ir.HyperdriveConnection`), the variables
+`<FIELD>_HYPERDRIVE_BINDING` and `<FIELD>_HYPERDRIVE_CONFIG`, which only a
+Worker reads (Go and Rust refuse them), and the version's `hyperdrive`
+binding of the config's id. The API's `Deps.db` is a `pg` Pool and its
+`Deps.orm` the generated repositories, unchanged: the runtime's
+`./hyperdrive` entry gives a `HyperdrivePool`, whose queries run on a pool
+of the current scope, which `withHyperdrive` opens per request and per
+firing over the binding's `connectionString` and ends after it, since a
+Worker may not use one request's socket in another. The bundle keeps
+node-postgres's Node modules as `node:` imports, which workerd gives with
+no flag from 2026-08-04; a version under an earlier compatibility date
+names `nodejs_compat`.
+
+The migration runner migrates the origin from the deploying machine. It
+reads the connection string from the shell's `HYPERDRIVE_ORIGIN_<DB>`,
+which `PrepareMigrations` refuses a run without, reads the config
+(`GET /accounts/<id>/hyperdrive/configs/<id>`, `Hyperdrive Read`), and
+refuses an origin whose host, port, database or user is not the config's,
+and a config that caches without `caching: true`. It writes each plan to a
+file readable by its owner alone and runs `superschematic-migrate apply
+--plan <file> --phase <phase>`, the connection string in `DATABASE_URL`
+alone, so no file and no argument holds the password. The plan creates
+pgvector's extension for a vector column (D84), as the origin's user,
+which Neon, Supabase and Cloud SQL let a database's owner do. The CI
+identity names `env.HYPERDRIVE_ORIGIN_<DB>`, which the deploy job reads
+from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack
+bootstrap --github` sets that secret from the shell. The deployer's token
+holds `Hyperdrive Read`. `stack destroy` leaves the config and the origin.
 
 ### 18.7 Buckets on R2
 
@@ -6587,6 +6637,23 @@ A Workflow runs the Worker's current deployment, so a run takes the
 version the last rollout deployed; the bundle check makes a run that
 would take another one fail rather than run it.
 
+**Queue workers on Cron Triggers (D92).** A worker's claim loop runs as
+long as its process (D53), and a Worker runs per request or per firing, so
+`cloudflare.drainer` runs a TypeScript worker as a Worker that a Cron
+Trigger fires every minute. Its bundle is built from the generated
+`drain.ts`, whose `scheduled` handler builds the API's `Deps`, the
+database through Hyperdrive, and runs the runtime's `runWorker` over
+`postgresQueue` for a window, `WORKER_DRAIN_SECONDS`, 50 seconds unless
+the worker's `drainSeconds` says otherwise, then stops as a worker stops
+at SIGTERM: it claims no more, lets its running handlers finish within the
+`@worker`'s grace and gives back the rest. The queue is its Postgres table,
+so the outbox, keys, serialization, backoff, retention and dead messages
+are D53's, D68's and D80's. `WORKER_CONCURRENCY` is how many messages a
+firing handles at a time. The platform refuses more than one instance, an
+instance range, and a window and grace over 15 minutes; `instances: 0`
+leaves the Worker with no trigger. A worker whose queue is on D1 is
+refused (`NoQueueClaims`), and so is a Go or Rust worker.
+
 ### 18.10 Service auth on Workers
 
 Admission is the service binding: a Worker that is not exposed has no
@@ -6632,8 +6699,7 @@ records no `workersSubdomain` is refused until bootstrap records it.
 
 The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
-`r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
-written by `go run ./internal/tools/providerschemas` in
+`r2BucketLifecycle` and `accountToken`, written by `go run ./internal/tools/providerschemas` in
 `extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph
 and the bucket edges' tokens; each platform pins its own types as it
 comes, and the R2 platform has pinned `r2Bucket` and `r2BucketLifecycle`.
@@ -6641,7 +6707,9 @@ pulumi-cloudflare's bridge
 metadata lists a single nested attribute's list fields with no element,
 which `pintool` reads, so the token's `condition.requestIp.ins` pins as
 Terraform's `in`. The `tls` provider's pin comes with the generic
-connector. No provider node exists: every node names `accountId`, and the
+connector. `hyperdriveConfig` is not pinned: a Hyperdrive config is the
+person's, outside the graph, and a version's `hyperdrive` binding is
+`workerVersion`'s (D92). No provider node exists: every node names `accountId`, and the
 provider reads the token from the run's environment.
 
 ### 18.13 Local development
@@ -6692,20 +6760,25 @@ runtime tests run fixture bundles under the `workerd` binary.
 
 ### 18.15 Not built
 
-- Queue workers. A worker's claim loop runs as long as its process, on
-  Postgres or a SQLite file (D53, amended), and a Worker runs per request
-  or per firing: resolution refuses a worker on this target saying so,
-  and that gcp's `gcp.cloudrunworker` or `stack dev` runs one
-  (`TargetSpec.Unplaced`, D64, amended). `cloudflare.d1` also refuses a
-  worker of a queue on it (`NoQueueClaims`, D53, amended). A Worker or a
-  Cron job enqueues on D1 with `enqueueStatement` in its batch.
+- Queue workers on D1. `cloudflare.d1` refuses a worker of a queue on it
+  (`NoQueueClaims`, D53, amended); a Worker or a Cron job enqueues on D1
+  with `enqueueStatement` in its batch. A worker of a Postgres queue runs
+  on `cloudflare.drainer` (section 18.9, D92), woken by its Cron Trigger
+  alone, at most once a minute.
 - Apps (D78). An app is the project's own Rust program, which serves
   until it is stopped: resolution refuses an app the environment runs,
   saying that gcp's `gcp.cloudrunapp` or `stack dev` runs one
   (`TargetSpec.Unplaced`), and leaves out an app the environment turns
   off.
 - A collector header from a secret for trace export, as on gcp.
-- Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
+- Hyperdrive to a Cloud SQL database the gcp target places, and any
+  mixing of targets in one environment: a Postgres on Hyperdrive is the
+  person's own, and so is its Hyperdrive config (section 18.6, D92).
+- A Hyperdrive deploy that has reached Cloudflare: the platform, the
+  drainer, the runner's origin check and the CI secret are proven against
+  the pins, a fake account and a stand-in `superschematic-migrate`, and
+  the bundles under workerd over a hyperdrive binding to a local
+  Postgres.
 - An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
   an identity store over SQLite for a TypeScript API.
 - A D1 deploy that has reached Cloudflare: the platform, the runner and
@@ -6743,7 +6816,9 @@ from the deploying machine; the Cron platform for TypeScript jobs and
 `scheduled.ts`, with each job's Workflow and the job runner over it for
 `stack run` and a job on every deploy; trace export on Workers; buckets
 in a jurisdiction; and the site platform, its embedded script and its site
-store in R2; all proven offline (D64, amended). No Worker has deployed.
+store in R2; databases on a Postgres outside Cloudflare through
+Hyperdrive, their migrations on the origin, and queue workers under Cron
+Triggers (D92); all proven offline (D64, amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a

@@ -9,8 +9,12 @@ environment on one Cloudflare account. The target's values, its state in
 R2, its secrets in the Secrets Store, its bootstrap, its CI identity, its
 Workers platform, which runs TypeScript servers as Workers from the
 bundles it keeps in R2 and joins them through service bindings, its R2
-platform for buckets, its D1 platform and D1 migrations, its Cron
-platform, which runs TypeScript jobs as Workers under Cron Triggers, and
+platform for buckets, its D1 platform and D1 migrations, its Hyperdrive
+platform, which reaches a Postgres outside Cloudflare and migrates it from
+the deploying machine, its Cron platform, which runs TypeScript jobs as
+Workers under Cron Triggers, its drainer platform, which runs TypeScript
+queue workers as Workers that drain their Postgres queues under Cron
+Triggers, and
 its site platform, which serves sites as Workers with static assets kept
 in R2, are built.
 
@@ -119,9 +123,11 @@ with a ratio the sampler's two. A server's or a job's `telemetry: false`
 or `true` turns its own off or on; on with no endpoint is refused, and so
 is a config field of one of those names.
 
-The target places no queue worker, and says why when it refuses one
-(`TargetSpec.Unplaced`): a worker's claim loop needs a long-lived process
-and Postgres, which gcp's `gcp.cloudrunworker` and `stack dev` give.
+A database deployable whose DB service lists postgres first is on
+`cloudflare.hyperdrive` (`TargetSpec.DatabasePlatforms`, D92), and one that
+lists sqlite first on `cloudflare.d1`. A queue worker is on
+`cloudflare.drainer`, whose claims run on Postgres through Hyperdrive; one
+whose queue's database is on D1 is refused (`NoQueueClaims`).
 
 | File | |
 | --- | --- |
@@ -136,9 +142,11 @@ and Postgres, which gcp's `gcp.cloudrunworker` and `stack dev` give.
 | `bundles.go` | the bundle store: each bundle's files in the state bucket under their digest, and back |
 | `calls.go` | `cloudflare.workers-workers`, the connector of a call between Workers: a service binding and a signed token with the edge's key |
 | `r2.go` | the `cloudflare.r2` platform, `cloudflare.workers-r2`, the connector of a bucket edge, `buckets-never-public`, and `PreDestroy`, which empties a member's buckets |
+| `hyperdrive.go` | the `cloudflare.hyperdrive` platform: a database of a Postgres outside Cloudflare, no node of its own, its Hyperdrive config's id from its settings; and `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive`, the connectors of a sql edge, a hyperdrive binding |
 | `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<env>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
-| `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs (`MigrationRequest.Outputs`); a deploy that only changes which servers connect needs no runner (`PrivilegelessMigrations`) |
+| `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs (`MigrationRequest.Outputs`); for a database on Hyperdrive, `superschematic-migrate apply` against the origin in `HYPERDRIVE_ORIGIN_<DB>`, after checking it against the config (`Cloud.HyperdriveConfig`); a deploy that only changes which servers connect needs no runner (`PrivilegelessMigrations`) |
 | `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker, its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run, and its Workflow; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
+| `drainer.go` | the `cloudflare.drainer` platform: a TypeScript queue worker as a Worker that `drain.ts` runs at each firing of a Cron Trigger every minute, for `WORKER_DRAIN_SECONDS`; and `cloudflare.drainer-workers` and `cloudflare.drainer-r2`, a worker's edges through the server's connectors |
 | `jobs.go` | the job runner (`Jobs`): an instance of a job's Workflow through Cloudflare's API, for `stack run` and a job on every deploy |
 | `telemetry.go` | trace export: the environment's `telemetry` and a deployable's, as `OTEL_` bindings, and `WorkersCompatibilityFlags`, `nodejs_als` |
 | `sites.go`, `site.js` | the `cloudflare.sites` platform: a site as a Worker with static assets and the script it embeds; the `cloudflare.site-workers` connector; and the site store, each build's files in the state bucket under their digest, and back |
@@ -183,9 +191,11 @@ Config is bindings: `plain_text` for a literal, a parameter and each
 derived variable; `secret_text`, its text a reference to the output, for a
 secret member such as an edge's signing key; `secrets_store_secret` for a
 `Secret<T>` field, naming `secretsStoreId` and `SecretName`; and the `d1`,
-`service` or `r2_bucket` binding a derived value names
-(`d1: {binding, database}`, `binding: {name, worker}`, or a bucket's
-`binding`). The platform refuses, as unrealizable, a server in another
+`hyperdrive`, `service` or `r2_bucket` binding a derived value names
+(`d1: {binding, database}`, `hyperdrive: {binding, config}`,
+`binding: {name, worker}`, or a bucket's `binding`). A version that binds
+a Hyperdrive config under a compatibility date before `NodeModulesDate`
+names `nodejs_compat` too, for node-postgres. The platform refuses, as unrealizable, a server in another
 language, a Worker name over 63 characters, and an API over the user model,
 whose identity runtime needs `node:crypto` (`NoIdentity`); and it refuses
 an exposed server without a domain while the environment records no
@@ -255,6 +265,64 @@ runtime signs URLs for, and the token's `id` and `value`, the value a
 The target's `PreDestroy` empties each bucket of a member of a
 parameterized environment through `Cloud`'s S3 calls before its destroy,
 at its jurisdiction's S3 host (`JurisdictionCloud`).
+
+## Databases on Hyperdrive
+
+`cloudflare.hyperdrive` places a database whose DB service lists postgres
+first (D92) on a Postgres outside Cloudflare, which the environment's
+Workers reach through a Hyperdrive config the person makes once, as a
+secret's value is set once, and names in the database's settings:
+
+| Setting | Type | |
+| --- | --- | --- |
+| `hyperdrive` | 32 hexadecimal characters | the Hyperdrive config's id; required, and refused, with the `wrangler hyperdrive create` that makes one, when missing |
+| `caching` | boolean | whether the config may cache reads, `false` by default |
+
+The config holds the origin's password, which Cloudflare never returns,
+so the graph holds no node of the database and no password: the
+connectors `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive`
+and `cloudflare.drainer-hyperdrive` derive `hyperdrive: {binding, config}`
+for a sql edge, which the Workers platform writes as the version's
+`hyperdrive` binding of the config's id, beside `<FIELD>_HYPERDRIVE_BINDING`
+and `<FIELD>_HYPERDRIVE_CONFIG`. It refuses, as unrealizable, a database
+in a parameterized environment, whose members would share the origin, and
+one that hosts two DB services.
+
+The migration runner reads the config (`Cloud.HyperdriveConfig`, `GET
+/accounts/<id>/hyperdrive/configs/<id>`, with the deployer's `Hyperdrive
+Read`), takes the origin's connection string from the shell's
+`HYPERDRIVE_ORIGIN_<DB>` (`OriginEnv`), and refuses one whose host, port,
+database or user is not the config's, or a config that caches reads
+without `caching: true`. It writes each plan to a file of its own and runs
+`superschematic-migrate apply --plan <file> --phase <phase>` with the
+connection string in `DATABASE_URL` alone. The CI identity names
+`env.HYPERDRIVE_ORIGIN_<DB>` as a secret of the deploy job,
+`HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack bootstrap --github`
+sets it from the shell, or says how.
+
+## Queue workers on Cron Triggers
+
+`cloudflare.drainer` places a TypeScript queue worker (D92), its artifact a
+bundle built from the generated `drain.ts`. It lowers a worker to its
+Worker's three nodes, as a job's, workers.dev off, with `plain_text`
+bindings `WORKER_CONCURRENCY` and `WORKER_DRAIN_SECONDS`, and, unless the
+worker runs no instance, `<worker>.schedule`, a `workersCronTrigger` firing
+every minute (`DrainSchedule`). Each firing claims its queue on Postgres
+through the database's Hyperdrive binding for the window, then stops
+claiming, lets running handlers finish within the `@worker`'s grace and
+gives back the rest. Its edges are the server's: `cloudflare.drainer-workers`,
+`cloudflare.drainer-r2` and `cloudflare.drainer-hyperdrive`.
+
+| Setting | Type | |
+| --- | --- | --- |
+| `logs` | boolean | Workers Logs, on by default |
+| `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
+| `telemetry` | boolean | trace export, the environment's by default |
+| `drainSeconds` | integer, 1 to 900 | the window each firing claims for, 50 by default |
+
+It refuses, as unrealizable, a worker in another language, a Worker name
+over 63 characters, `instances` over one, `maxInstances`, and a
+window and grace over `MaxScheduledRunSeconds`.
 
 ## Jobs on Cron Triggers
 
@@ -396,6 +464,13 @@ jobs install `superschematic-migrate`. It resolves the web fixture
 `web-stack`, a server, its job and a site, in the same three
 environments, deploys its site with the site store, checks its workflow,
 and gives a job of the calls and D1 fixtures their edges.
+It resolves `ledger-stack`, an API, its two queue workers and a
+Postgres database with a vector column on Hyperdrive, in Staging and
+Production, against its golden files; deploys it over the fake `Cloud`;
+migrates its origin through a stand-in `superschematic-migrate`, refusing
+an origin the config does not name; checks its workflow and bootstrap's
+origin secrets; and holds servergen's workerd `ledger` fixture to its
+Staging bindings.
 The job runner runs a fake Workflow through `stack run` and a deploy's
 jobs step, and reports an errored, a terminated and a missing one;
 the telemetry tests read the `OTEL_` bindings, the compatibility flag
