@@ -211,7 +211,7 @@ func TestValidate_RelationOnDeleteInvalid(t *testing.T) {
 // TestValidate_RelationOnDeleteValid: every supported action and the empty
 // (default CASCADE) case validate cleanly.
 func TestValidate_RelationOnDeleteValid(t *testing.T) {
-	for _, action := range []string{"CASCADE", "RESTRICT", "NO ACTION", ""} {
+	for _, action := range []string{"CASCADE", "RESTRICT", "NO ACTION", "SET NULL", ""} {
 		s := newTestSchema()
 		s.Types["User"].Fields = append(s.Types["User"].Fields, &FieldDef{
 			Name:     "owner",
@@ -221,6 +221,25 @@ func TestValidate_RelationOnDeleteValid(t *testing.T) {
 		if errs := s.Validate(); len(errs) != 0 {
 			t.Errorf("onDelete %q: Validate() = %v, want no errors", action, errs)
 		}
+	}
+}
+
+// TestValidate_RelationOnDeleteSetNullRequired: SET NULL on a required
+// relation is refused, naming the nullable form, in every load format.
+func TestValidate_RelationOnDeleteSetNullRequired(t *testing.T) {
+	s := newTestSchema()
+	s.Types["User"].Fields = append(s.Types["User"].Fields, &FieldDef{
+		Name:     "owner",
+		TypeRef:  TypeRef{Name: "User"},
+		Required: true,
+		Relation: &RelationDef{Type: "User", OnDelete: "SET NULL"},
+	})
+	errs := s.Validate()
+	if len(errs) != 1 {
+		t.Fatalf("Validate() returned %d errors, want 1: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Error(), `User.owner relation onDelete "SET NULL" needs a nullable relation: declare it Nullable<Relation<User, { onDelete: "SET NULL" }>>`) {
+		t.Errorf("unexpected error: %v", errs[0])
 	}
 }
 

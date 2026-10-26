@@ -20,10 +20,10 @@ CREATE TABLE order_placed_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   order_id UUID NOT NULL,
   placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  priority TEXT NOT NULL,
+  priority TEXT DEFAULT 'low' NOT NULL,
   quantity BIGINT NOT NULL,
   note TEXT,
-  ship_to TEXT NOT NULL,
+  ship_to JSONB NOT NULL,
   tags TEXT[] DEFAULT '{}' NOT NULL,
   state TEXT DEFAULT 'ready' NOT NULL,
   attempts INTEGER DEFAULT 0 NOT NULL,
@@ -32,7 +32,9 @@ CREATE TABLE order_placed_queue (
   claim_token UUID,
   last_error TEXT,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  CONSTRAINT ck_order_placed_queue_priority CHECK (priority IN ('low', 'high')),
+  CONSTRAINT ck_order_placed_queue_note CHECK (length(note) <= 200)
 );
 
 COMMENT ON TABLE order_placed_queue IS 'Placed when an order is: the worker that fulfils orders handles it.';

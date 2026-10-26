@@ -120,10 +120,12 @@ type and is left out when `0`.
 
 ## Defaults
 
-`Default<T, V>` fills in a value when a payload leaves the field out. It is
-a default for decoders, not for the database: the Go, TypeScript, Python
-and Rust decoders all apply it, and the SQL column has no default. The
-build checks `V` as a validator checks a value: its type, its scalar's
+`Default<T, V>` fills in a value when a payload leaves the field out. The
+Go, TypeScript, Python and Rust decoders all apply it. On a required field
+of a DB table it is the column's `DEFAULT` too, when `V` is text, a number,
+a boolean or an enum member, so a row written outside the generated code
+takes it as well ([Columns](/superschematic/guides/database-tables/#columns)).
+The build checks `V` as a validator checks a value: its type, its scalar's
 lengths, pattern and range, and the field's own `Validate<T, C>` rules. A
 default that breaks them fails the build. A new order starts `Placed`:
 
@@ -166,8 +168,11 @@ that its package generates no validator for (one that is not a table, a
 view, an embedded struct or an input type) is checked for presence only.
 
 The generated servers check every request against them and answer 400,
-and every generated SDK checks an input before it sends it. The database
-does not: constraints are not part of the DDL.
+and every generated SDK checks an input before it sends it. On a DB table,
+`min` and `max` on a number column and `minLength` and `maxLength` on a
+text column are the column's `CHECK` constraint too, which a row written
+outside the generated code meets as well; a pattern and the list rules are
+not part of the DDL ([Columns](/superschematic/guides/database-tables/#columns)).
 
 ## Enums
 
@@ -178,7 +183,8 @@ An enum is a TypeScript `enum` of string values. Numeric enums are refused.
 Go gets `type Currency string` with a constant per member, `IsValid()` and
 `Values()`. TypeScript gets the same `enum`, Python a `str` `Enum` and Rust
 an `enum` with one serde rename per member. A value outside the enum fails
-validation with the `enum` rule.
+validation with the `enum` rule, and a DB table's column of the enum has a
+`CHECK` that its members' values hold it to.
 
 A member may take a title, the label a UI shows for it in place of its
 name in words. An enum member takes no decorator, so the title is a JSDoc

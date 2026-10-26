@@ -56,11 +56,33 @@ The field's type decides its column:
 
 A field is `NOT NULL` unless it is `Nullable<T>`. A required array column
 defaults to the empty array `'{}'`, whatever its element type, and a
-required `JSONB` column has no default. `Validate` constraints
-and enum membership are checked by the generated code, not by the
-database, and `Default<T, V>` fills in decoded payloads, not columns.
+required `JSONB` column has no default.
+
+The DDL says what the schema says about a column's values too, so a row
+written outside the generated code, by a script, a trigger or by hand, is
+held to them:
+
+- A required field's `Default<T, V>` is the column's `DEFAULT` when `V` is
+  text, a number, a boolean or an enum member: `status TEXT DEFAULT
+  'placed' NOT NULL`. An optional field's column defaults to `NULL`, which
+  the ORMs write for an unset value; a UUID, a time or a JSON value keeps
+  its default in the decoders alone, since `V` is written in the wire
+  form.
+- An enum column has a `CHECK` that its members' values hold it to:
+  `CONSTRAINT ck_order_status CHECK (status IN ('placed', 'fulfilled',
+  'shipped', 'cancelled'))`.
+- `Validate`'s `min` and `max` on a number column, and `minLength` and
+  `maxLength` on a text column, are the column's `CHECK`:
+  `CHECK (length(cancel_reason) <= 500)`. `length` counts characters, as
+  every validator does. A pattern and the list rules stay the generated
+  code's.
+
+A check is named `ck_<table>_<column>`, and `NULL` passes it. A list, a
+map and a JSON value get neither a default nor a check.
+
 The SQLite DDL stores each column as the type its values need, such as a
-list as JSON text; [SQLite](/superschematic/reference/migrations/#types-and-defaults)
+list as JSON text, with the same defaults and checks;
+[SQLite](/superschematic/reference/migrations/#types-and-defaults)
 has the table.
 
 The Go ORM writes a `Temporal.Duration` as its whole microseconds, the
@@ -77,9 +99,11 @@ scalars](/superschematic/reference/json-scalars/) says why.
 `Relation<T>` stores a foreign key to another table of the same schema, in
 a column named after the field with `_id`. `onDelete` says what deleting
 the referenced row does: `CASCADE`, the default, deletes this row too;
-`RESTRICT` and `NO ACTION` refuse the delete. A relation is never null, so
-`SET NULL` is not offered. The DDL adds the foreign keys once every table
-exists:
+`RESTRICT` and `NO ACTION` refuse the delete; `SET NULL` keeps the row and
+clears its reference. `SET NULL` needs a column that can hold null, so it
+goes on a nullable relation only, `Nullable<Relation<Category, { onDelete:
+"SET NULL" }>>`, and a required one fails the load with that fix. The DDL
+adds the foreign keys once every table exists:
 
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from={'ALTER TABLE "order"'} to="ON DELETE RESTRICT;" />
 
@@ -105,7 +129,21 @@ field selection of the order's options:
 `@index<T>(keys, options?)` on the class adds an index over the listed
 fields, in order. A relation field indexes its foreign key column.
 `{ unique: true }` makes it unique, and `name` names it. A key that names
-no field fails the build.
+no field fails the build. The other options shape the index:
+
+| Option | What it does |
+| --- | --- |
+| `method` | the access method: `btree`, `gin`, `gist`, `brin`, `hnsw` or `ivfflat`. Unset picks one from the columns' types: GIST for `ltree` and geometric types, GIN for `JSONB`, arrays and `tsvector`, else BTREE. `hnsw` and `ivfflat` index vector columns, which follow, so either fails the load today |
+| `ops` | the operator class each key is indexed with, such as `gin_trgm_ops`, whose extension the DDL enables |
+| `where` | makes the index partial: a SQL predicate over the table's columns, without `WHERE`. On a unique index of a soft-deletable table it is ANDed with `deleted_at IS NULL` |
+| `expression` | indexes a SQL expression over the table's columns, such as `lower(email)`, in place of the keys' columns; the keys name the fields it reads and give the index its default name |
+| `concurrently` | how a migration plan builds the index on a table that holds rows: `true`, the default, builds it concurrently, outside a transaction; `false` builds it inside the step's transaction, which blocks writes while it builds |
+
+`where` and `expression` are SQL, written once for every dialect the
+service lists, and hold one expression each. SQLite takes an expression
+and a predicate, and refuses a method other than BTREE and an operator
+class. An engine type's index is the engine's, over its fields alone, so
+it takes none of these options.
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Review" />
 
@@ -213,10 +251,14 @@ finds.
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
-A field of its type is a `JSONB` column, read and written with its row, and
-the ORM marshals it for you. `shop-db`'s `ShippingAddress` is one; see
+A field of its type, or of a list of it, is a `JSONB` column, read and
+written with its row, and the ORM marshals it for you. `shop-db`'s
+`ShippingAddress` is one; see
 [Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
-and lists of lists are `JSONB` too.
+and lists of lists are `JSONB` too. A compiler before D83 made such a
+field `TEXT`; a migration plan from a database it built casts the column
+with `USING shipping_address::JSONB`, which fails on text that is not JSON
+(`data-dependent`).
 
 ## Inserts
 
@@ -264,6 +306,43 @@ no-op transaction returns none.
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
+
+## Raw SQL
+
+What the schema cannot say, such as a function, an extension or a
+materialized view for a dashboard, is raw SQL the DB service declares with
+`@rawSql` on any of its tables. The class is only where it is written: the
+piece belongs to the service. `examples/migrations`' `tasks-db` keeps a
+materialized view of each project's open tasks for a dashboard:
+
+<Snippet example="migrations" file="v2/schemas/services/tasks-db/src/tasks.schema.ts" symbol="Project" />
+
+- `id` names the piece: a lowercase identifier, unique in the service.
+- `up` is one or more statements, separated by semicolons. A migration
+  plan runs the piece again when it changes, so each statement must run
+  again over what it made: `CREATE OR REPLACE`, `CREATE ... IF NOT
+  EXISTS`, `DROP ... IF EXISTS`, `REFRESH`, `COMMENT ON`, `GRANT`,
+  `REVOKE`, `INSERT ... ON CONFLICT` (or SQLite's `INSERT OR IGNORE`), or a
+  `DO` block, which you vouch for. Any other statement fails the load and
+  names the fix. So does `CONCURRENTLY`, which a plan's transaction
+  refuses; an `@index` is built concurrently.
+- `down`, under the same rules, is what a plan runs when the piece is no
+  longer declared.
+- `after` places it: `"tables"` runs it after the tables, before the
+  indexes; `"indexes"`, the default, after every object the schema
+  declares; another piece's id, right after that piece. Pieces in one
+  place run in the order of their ids. An `after` that names no piece, and
+  pieces that run after each other, fail the load.
+- `dialects` lists the dialects it runs on, `postgres` and `sqlite`; unset
+  is every dialect the service lists.
+
+A template literal with no `${}` is a string, so the SQL can span lines.
+`create.sql` runs every piece, in order, at its place, and `drop.sql` runs
+each `down` first. A migration plan records each piece by id and the
+checksum of its statements, runs a new or changed one in `expand` and a
+removed one's `down` in `contract`, and marks each such step `raw-sql`,
+since it cannot judge what the SQL does
+([Raw SQL](/superschematic/reference/migrations/#raw-sql)).
 
 ## Change tables that hold data
 

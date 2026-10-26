@@ -1,0 +1,33 @@
+{
+  "dialect": "postgres",
+  "expanded": "5354e0bcaafbe156db34a756971b256c3f8a105216520d0690ca67a6427bf601",
+  "from": "5354e0bcaafbe156db34a756971b256c3f8a105216520d0690ca67a6427bf601",
+  "hash": "c77e915360b7ec48608d694bd8194947e1c6f408226f0e8110b93606268c1822",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE order_line DROP CONSTRAINT fk_order_line_product_id",
+        "ALTER TABLE order_line ADD CONSTRAINT fk_order_line_product_id FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE SET NULL NOT VALID"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_product_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "validateForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE order_line VALIDATE CONSTRAINT fk_order_line_product_id"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_product_id",
+      "transactional": true
+    }
+  ],
+  "to": "eb457bddebc8ffbda9621b336e8a2df13a4fa522ed90610134bf8d9718eeead2",
+  "toModel": null,
+  "version": 1
+}

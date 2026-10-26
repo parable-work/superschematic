@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -86,10 +87,44 @@ func oneLine(doc string) string {
 	return strings.Join(strings.Fields(doc), " ")
 }
 
+// rawSQLSection is the raw SQL create.sql runs at one place.
+type rawSQLSection struct {
+	Where  string
+	Pieces []sqlutil.RawSQL
+}
+
+// rawSQLAt is the section of the pieces that run at position: after the
+// tables, or after every object the schema declares.
+func rawSQLAt(pieces []sqlutil.RawSQL, position string) rawSQLSection {
+	section := rawSQLSection{Where: "after the tables"}
+	if position == ir.RawSQLAfterIndexes {
+		section.Where = "after every object above"
+	}
+	for _, piece := range pieces {
+		if piece.Position == position {
+			section.Pieces = append(section.Pieces, piece)
+		}
+	}
+	return section
+}
+
+// rawSQLDowns lists the pieces with a down, the last one to run first.
+func rawSQLDowns(pieces []sqlutil.RawSQL) []sqlutil.RawSQL {
+	var out []sqlutil.RawSQL
+	for i := len(pieces) - 1; i >= 0; i-- {
+		if len(pieces[i].Down) > 0 {
+			out = append(out, pieces[i])
+		}
+	}
+	return out
+}
+
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"searchTextExpr":    SearchTextExpr,
 		"projectionViewDDL": projectionViewDDL,
+		"rawSQLAt":          rawSQLAt,
+		"rawSQLDowns":       rawSQLDowns,
 		"reverse": func(tables []Table) []Table {
 			reversed := make([]Table, len(tables))
 			for i, t := range tables {

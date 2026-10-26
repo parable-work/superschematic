@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "3d7a5a3430d90285447bc5adfac799b59a003fdb3f487fda2f1889c799811a6c",
+  "hash": "885732bcd112e9a8728ab805475dfa6a9c0b0acb3f620217aaa6e018681b18de",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT ck_order_note"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}
