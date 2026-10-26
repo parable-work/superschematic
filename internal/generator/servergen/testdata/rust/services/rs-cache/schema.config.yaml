@@ -2,7 +2,10 @@
 # which its Rust server, job and worker each open once, on Redis through
 # the HTTP runtime's memorystore-redis feature. rs-stack's Local runs it on
 # the local target's Valkey; its Offline turns it off, so each opens it
-# disabled there.
+# disabled there. Its Rust definitions, schemas-rs-cache-types, are a
+# dependency of rs-stock's implementation scaffold.
 name: rs-cache
 kind: MemoryStore
-outputs: {}
+outputs:
+  types:
+    rust: { enabled: true }

@@ -115,6 +115,11 @@ type DepsMemoryStore struct {
 
 	// Field is the Deps member that holds the store.
 	Field string
+
+	// Definitions is the npm package of the store's TypeScript
+	// definitions, which the implementation's package depends on to name a
+	// channel or a key; empty when the store's outputs write none.
+	Definitions string
 }
 
 // DepsCall is an SDK client in Deps.

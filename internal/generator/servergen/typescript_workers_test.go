@@ -307,7 +307,7 @@ func TestTypeScriptWorkersEntrypointCompilesAndBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, paths, "ts-pricing", tsWorkersStack)
+	f.build(t, repoRoot, paths, "ts-cache", "ts-pricing", tsWorkersStack)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	impl := naming.Default().TypeScriptImplementationDir(repoRoot, "ts-pricing")
 	if err := os.WriteFile(filepath.Join(impl, "index.ts"), []byte(tsPricingImplementation), 0o644); err != nil {
@@ -502,7 +502,7 @@ func TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey(t *testing.T) {
 		paths = testpaths.Local(t)
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, paths, "ts-pricing", tsCheckout, tsTillStack)
+	f.build(t, repoRoot, paths, "ts-cache", "ts-pricing", tsCheckout, tsTillStack)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	pkg := servergen.ServerDir(out, tsTillStack, tsTillServer)
 	fetch, err := os.ReadFile(filepath.Join(pkg, servergen.TypeScriptFetchFile))

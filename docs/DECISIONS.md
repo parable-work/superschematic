@@ -10262,6 +10262,16 @@ Status: built, as amended below. Nothing has run on Google Cloud.
   server, job and worker entrypoint, and each TypeScript and Rust deriver's, opens each store once,
   hands it to every API that lists it and closes it on shutdown. A
   TypeScript Worker holds a disabled store and imports no Redis client.
+- **The implementations.** Each implementation depends on the
+  definitions of every store its API lists, in its language, when the
+  store's outputs write them: Go's server and job modules require and
+  replace the store's module, and the scaffold of a TypeScript
+  implementation's `package.json` names `@schemas/<store>-types`
+  (`workspace:*`) and of a Rust one's `Cargo.toml` names
+  `schemas-<store>-types` by its path under the output root, which the
+  mirror re-bases (D65). A TypeScript or Rust build that has no config for
+  the store adds neither, since a manifest naming a package no build
+  writes fails its install.
 - **Local.** `local.valkey`: one Valkey container per environment and
   checkout, with no persistence, on ports from 26000, with
   `memoryStoreImage` and `memoryStorePort`, and its connectors from every
@@ -10302,6 +10312,15 @@ The tests that hold it:
   where `SUPERSCHEMATIC_TEST_MEMORY_STORE` or Docker gives a server;
   `TestTypeScriptMemoryStoreWiring` and the servergen goldens for the
   entrypoints;
+- the implementations: the servergen goldens of `ts-shop`'s scaffolded
+  `package.json` and `rs-stock`'s mirrored `Cargo.toml`;
+  `TestTypeScriptCronEntrypointCompilesAndBundles`, whose `ts-reports`
+  implementation publishes through `@schemas/ts-cache-types` from its
+  scaffold's `package.json` and whose `scheduled.ts` holds the store
+  disabled and bundles no Redis client; and
+  `TestRustEntrypointCompilesAndServes`, whose `rs-stock` implementation
+  publishes `schemas_rs_cache_types::LEVEL_CHANGED` from its scaffold's
+  `Cargo.toml`, through the mirror;
 - the targets: `internal/stack/local/memorystore_test.go`, which runs the
   container under Docker; `extensions/gcp/memorystore_test.go`, the
   pulumi renders of the gcp shop with its store
@@ -10333,8 +10352,6 @@ Not built:
   none; Rust logs a decode failure at debug. Go records the metrics this
   entry names through OpenTelemetry's global meter, which
   `telemetry.Start` does not export yet.
-- The scaffolded implementations do not depend on the definitions
-  package; an implementation adds it by hand, as acme-shop's does.
 - A store on cloudflare.
 
 A project bootstrapped before this needs `stack bootstrap` again for

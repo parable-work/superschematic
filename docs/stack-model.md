@@ -4053,7 +4053,12 @@ never waits for it.
   channel's decoder keeps only the members its payload declares, at every
   depth. Beside them, `memorystore/<store>/inventory.json` lists each
   declaration's symbol, kind, name pattern, parts, payload or signal, TTL
-  and owning file.
+  and owning file. An API's implementation depends on the definitions of
+  each store it lists: Go's server module requires them, and the scaffold
+  of a TypeScript implementation's `package.json` and of a Rust one's
+  `Cargo.toml` names them, so `import { productChanged } from
+  '@schemas/shop-cache-types'` and `use schemas_shop_cache_types::PRODUCT_CHANGED`
+  need no edit to a manifest.
 - **Deployable.** Each MemoryStore service an API of the stack lists is a
   deployable of kind `memoryStore`, named after its service, which a
   settings element names by its handle: `{ of: ShopCache, enabled?,
