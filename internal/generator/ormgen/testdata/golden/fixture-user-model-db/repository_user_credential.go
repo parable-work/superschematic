@@ -1034,7 +1034,7 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
-			fields = append(fields, "user_id")
+			fields = append(fields, `user_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1178,7 +1178,7 @@ func (r *UserCredentialRepository) UpsertOne(ctx context.Context, input *types.U
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
-			fields = append(fields, "user_id")
+			fields = append(fields, `user_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1362,7 +1362,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: user (FK: user_id)
 		{
-			cell := batchInsertCell{column: "user_id"}
+			cell := batchInsertCell{column: `user_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

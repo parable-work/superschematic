@@ -198,7 +198,7 @@ func RustQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 			DocLines: queueDocLines(codegen.DocText(td.Description, td.Comment)),
 			Descriptor: QueueDescriptor{
 				Name:              td.Name,
-				Table:             sqlutil.QuoteIdentifier(sqlutil.QueueTableName(td.Name)),
+				Table:             sqlutil.QuoteIdentifier(sqlutil.QueueTableName(td)),
 				Retries:           settings.Retries,
 				BackoffSeconds:    settings.BackoffSeconds,
 				MaxBackoffSeconds: settings.MaxBackoffSeconds,

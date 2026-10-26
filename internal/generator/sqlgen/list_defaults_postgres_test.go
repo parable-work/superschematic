@@ -68,3 +68,31 @@ func TestDDLCreateSQLOnPostgres(t *testing.T) {
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)
 }
+
+// TestNamingCreateSQLOnPostgres applies the create.sql and drop.sql
+// generated for fixture-naming-db, whose tables and columns @table and
+// @column name in camel case (D85), to a real Postgres; testdata/pgcheck's
+// TestNamingOnPostgres holds the checks: every name the DDL derives is the
+// one Postgres holds, and the DDL works under them.
+func TestNamingCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-naming-db's create.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-naming-db"))
+	if err != nil {
+		t.Fatalf("load fixture-naming-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-naming-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestNamingOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}

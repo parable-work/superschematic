@@ -80,6 +80,11 @@ type DepsInfo struct {
 	// Deps.db is a pool and Database's TypeScript types write orm.ts;
 	// empty otherwise.
 	ORM string
+
+	// ORMFieldKeys is the field of the API's env config that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open Deps.orm
+	// with (D85): its key. Empty for a database without one.
+	ORMFieldKeys string
 }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine

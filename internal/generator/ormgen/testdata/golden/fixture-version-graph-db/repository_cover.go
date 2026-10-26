@@ -1428,7 +1428,7 @@ func (r *CoverRepository) CreateOne(ctx context.Context, input *types.Cover) (*t
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := coverUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1438,7 +1438,7 @@ func (r *CoverRepository) CreateOne(ctx context.Context, input *types.Cover) (*t
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := coverUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1567,7 +1567,7 @@ func (r *CoverRepository) UpsertOne(ctx context.Context, input *types.Cover, on 
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := coverUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1577,7 +1577,7 @@ func (r *CoverRepository) UpsertOne(ctx context.Context, input *types.Cover, on 
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := coverUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1737,7 +1737,7 @@ func (r *CoverRepository) CreateMany(ctx context.Context, inputs []*types.Cover)
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := coverUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1746,7 +1746,7 @@ func (r *CoverRepository) CreateMany(ctx context.Context, inputs []*types.Cover)
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := coverUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

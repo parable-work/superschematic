@@ -24,6 +24,9 @@ import (
 	"{{ .Naming.VersionGraphGoModule }}/engine"
 	"{{ .Naming.VersionGraphGoModule }}/postgres"
 {{- end }}
+{{- if .HasEncryptedFields }}
+	"{{ .Naming.SchemaRuntimeGoModule }}/fieldcrypt"
+{{- end }}
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -37,6 +40,10 @@ const (
 // Database represents the ORM database connection
 type Database struct {
 	pool *pgxpool.Pool
+	{{- if .HasEncryptedFields }}
+	// fieldKeys seal and open the Encrypted<T> fields (WithFieldKeys, D85).
+	fieldKeys *fieldcrypt.Keyring
+	{{- end }}
 	{{- range .Repositories }}
 	{{ .TypeName }} *{{ .Name }}
 	{{- end }}
@@ -60,8 +67,8 @@ type Config struct {
 	SSLMode  string
 }
 
-// Connect creates a new database connection
-func Connect(ctx context.Context, connString string) (*Database, error) {
+// Connect creates a new database connection{{ if .HasEncryptedFields }}, configured by options{{ end }}
+func Connect(ctx context.Context, connString string{{ if .HasEncryptedFields }}, options ...Option{{ end }}) (*Database, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
@@ -74,6 +81,12 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	}
 
 	db := &Database{pool: pool}
+	{{- if .HasEncryptedFields }}
+	if err := applyOptions(db, options); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	{{- end }}
 
 	// Initialize repositories
 	{{- range .Repositories }}
@@ -92,10 +105,16 @@ func ConnectWithConfig(ctx context.Context, cfg *Config) (*Database, error) {
 	return Connect(ctx, connString)
 }
 
-// ConnectWithPool creates a Database using an existing pgxpool.Pool.
+// ConnectWithPool creates a Database using an existing pgxpool.Pool{{ if .HasEncryptedFields }},
+// configured by options{{ end }}.
 // Use this when you need custom pool configuration not supported by Connect.
-func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
+func ConnectWithPool(pool *pgxpool.Pool{{ if .HasEncryptedFields }}, options ...Option{{ end }}) (*Database, error) {
 	db := &Database{pool: pool}
+	{{- if .HasEncryptedFields }}
+	if err := applyOptions(db, options); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	// Initialize repositories
 	{{- range .Repositories }}

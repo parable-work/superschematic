@@ -181,7 +181,7 @@ func checkIdentityNames(schema *ir.Schema, user *ir.TypeDef, r *Result) {
 			continue
 		}
 		if td := dbTableNamed(schema, codegen.ToSnakeCase(table)); td != nil {
-			r.errorf(td.Owner, "%s: its table %s is the table of %s, which the User trait of %s adds; rename it", td.Name, codegen.ToSnakeCase(table), table, user.Name)
+			r.errorf(td.Owner, "%s: its table %s is the table of %s, which the User trait of %s adds; rename it, or give it another with @table", td.Name, codegen.ToSnakeCase(table), table, user.Name)
 		}
 	}
 	generated := identity.Indexes(schema)
@@ -191,6 +191,9 @@ func checkIdentityNames(schema *ir.Schema, user *ir.TypeDef, r *Result) {
 	authored := authoredIndexNames(schema)
 	for _, gen := range generated {
 		id, err := sqlutil.IndexName(codegen.ToSnakeCase(gen.Type), gen.Index.Keys, gen.Index.Name, gen.Index.Unique)
+		if td := schema.Types[gen.Type]; td != nil {
+			id, err = sqlutil.IndexNameIn(td, gen.Index.Keys, gen.Index.Name, gen.Index.Unique)
+		}
 		if err != nil {
 			continue
 		}

@@ -1534,7 +1534,7 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeCommitUUIDValue(input.Root.Id); ok && relID != zeroId {
-			fields = append(fields, "root_id")
+			fields = append(fields, `root_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1544,7 +1544,7 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeCommitUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1555,7 +1555,7 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 		var zeroId types.IdentityUUID
 		if input.ParentCommit != nil {
 			if relID, ok := recipeCommitUUIDValue(input.ParentCommit.Id); ok && relID != zeroId {
-				fields = append(fields, "parent_commit_id")
+				fields = append(fields, `parent_commit_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -1726,7 +1726,7 @@ func (r *RecipeCommitRepository) UpsertOne(ctx context.Context, input *types.Rec
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeCommitUUIDValue(input.Root.Id); ok && relID != zeroId {
-			fields = append(fields, "root_id")
+			fields = append(fields, `root_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1736,7 +1736,7 @@ func (r *RecipeCommitRepository) UpsertOne(ctx context.Context, input *types.Rec
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeCommitUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1747,7 +1747,7 @@ func (r *RecipeCommitRepository) UpsertOne(ctx context.Context, input *types.Rec
 		var zeroId types.IdentityUUID
 		if input.ParentCommit != nil {
 			if relID, ok := recipeCommitUUIDValue(input.ParentCommit.Id); ok && relID != zeroId {
-				fields = append(fields, "parent_commit_id")
+				fields = append(fields, `parent_commit_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -1978,7 +1978,7 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: root (FK: root_id)
 		{
-			cell := batchInsertCell{column: "root_id"}
+			cell := batchInsertCell{column: `root_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeCommitUUIDValue(input.Root.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1987,7 +1987,7 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeCommitUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1996,7 +1996,7 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		}
 		// Relationship: parentCommit (FK: parent_commit_id)
 		{
-			cell := batchInsertCell{column: "parent_commit_id"}
+			cell := batchInsertCell{column: `parent_commit_id`}
 			var zeroId types.IdentityUUID
 			if input.ParentCommit != nil {
 				if relID, ok := recipeCommitUUIDValue(input.ParentCommit.Id); ok && relID != zeroId {

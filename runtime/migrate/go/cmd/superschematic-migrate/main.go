@@ -47,7 +47,7 @@ const (
 const usage = `usage:
   superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
   superschematic-migrate status --service NAME [--model] [--database-url URL]
-  superschematic-migrate adopt --model model.json [--database-url URL]
+  superschematic-migrate adopt --model model.json [--diff] [--database-url URL]
   superschematic-migrate job --job job.json|gs://bucket/job.json
   superschematic-migrate queue --queue queue.json [--database-url URL | --cloud-sql INSTANCE
       --cloud-sql-user USER --database NAME] [--result result.json|gs://bucket/result.json]
@@ -58,6 +58,11 @@ URL selects Postgres; a sqlite: URL, a file: URI or a path selects SQLite;
 a d1://<account id>/<database id> URL selects a Cloudflare D1 database,
 reached with the API token in $CLOUDFLARE_API_TOKEN. SQLite and D1 run
 sqlite plans.
+
+adopt records a model as a database's state, which the database must
+already hold. With --diff it records nothing: it prints each way the
+database differs from the model, one line each, and fails when there is
+one.
 
 job runs a job document: one phase of the plans it names, each on its
 database, then the read and write privileges of the roles it lists. Its
@@ -344,6 +349,7 @@ func status(ctx context.Context, args []string, o options) error {
 func adopt(ctx context.Context, args []string, o options) error {
 	fs, urlFlag := flags("adopt", o)
 	modelPath := fs.String("model", "", "the model `file` superschematic migrate plan --print-model wrote")
+	diff := fs.Bool("diff", false, "print how the database differs from the model, and record nothing")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -370,6 +376,22 @@ func adopt(ctx context.Context, args []string, o options) error {
 		return err
 	}
 	defer closeDriver()
+	if *diff {
+		lines, err := o.runner(driver).Drift(ctx, model)
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			if _, err := fmt.Fprintln(o.stdout, line); err != nil {
+				return err
+			}
+		}
+		if len(lines) > 0 {
+			return fmt.Errorf("the database differs from model %s of service %s in %d ways; change it, or the schema, before adopting", model.Hash, model.Service, len(lines))
+		}
+		_, err = fmt.Fprintf(o.stdout, "the database holds model %s of service %s\n", model.Hash, model.Service)
+		return err
+	}
 	replaced, err := o.runner(driver).Adopt(ctx, model)
 	if err != nil {
 		return err

@@ -116,6 +116,50 @@ type SQLOutputConfig struct {
 	// ["postgres"]. ParseOutputs refuses a list without postgres, since the
 	// DB kind always generates the Go ORM, which runs on Postgres.
 	Dialects []string `json:"dialects,omitempty"`
+
+	// Encryption names the key of the schema's Encrypted<T> fields (D85).
+	// Nil for a service without one; a schema with one needs it.
+	Encryption *SQLEncryptionConfig `json:"encryption,omitempty"`
+}
+
+// SQLEncryptionConfig is outputs.sql.encryption (D85): where the keys of a
+// DB service's Encrypted<T> fields come from.
+type SQLEncryptionConfig struct {
+	// Key is the @envVars Secret<string> that holds the keys, by the type
+	// that declares the field and the field's name, as a stack names the
+	// secret: "FieldKeys.FINANCES_DB_KEY". Every API whose servers, jobs
+	// and workers open the service's ORM must hold it in its @envVars, so
+	// each reads the one secret each environment sets.
+	Key string `json:"key"`
+}
+
+// SplitEncryptionKey is the declaring type and the field a key of the form
+// SQLEncryptionConfig.Key names, and whether it has that form: a type
+// name, a dot and a field name.
+func SplitEncryptionKey(key string) (typeName, field string, ok bool) {
+	typeName, field, ok = strings.Cut(key, ".")
+	return typeName, field, ok && identifier(typeName) && identifier(field)
+}
+
+func identifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		letter := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !letter && (i == 0 || r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// EncryptionKey is outputs.sql.encryption.key, or "".
+func (o *Outputs) EncryptionKey() string {
+	if o == nil || o.SQL == nil || o.SQL.Encryption == nil {
+		return ""
+	}
+	return o.SQL.Encryption.Key
 }
 
 // EngineOutputConfig configures a DB service's engine document (D58): the
@@ -344,6 +388,11 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if sql.Dialects != nil {
 			if err := checkSQLDialects(sql.Dialects); err != nil {
 				return nil, err
+			}
+		}
+		if e := sql.Encryption; e != nil {
+			if _, _, ok := SplitEncryptionKey(e.Key); !ok {
+				return nil, fmt.Errorf("outputs.sql.encryption.key %q must name an @envVars Secret<string> by its declaring type and field, such as \"FieldKeys.FINANCES_DB_KEY\"", e.Key)
 			}
 		}
 	}

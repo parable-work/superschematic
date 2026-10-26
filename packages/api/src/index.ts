@@ -4,6 +4,7 @@ export {
   app,
   auth,
   bodyLimit,
+  decrypted,
   deriver,
   docs,
   encrypted,

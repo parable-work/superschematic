@@ -19,3 +19,8 @@ export type ManyToMany<T> = T[] & { readonly __manyToMany: true };
 export type AutoGenerate<T> = T & { readonly __autogen: true };
 // The field is stored as JSONB.
 export type JsonField<T> = T & { readonly __jsonField: true };
+// The column holds the value encrypted with the DB service's field keys
+// (outputs.sql.encryption, D85): AES-256-GCM, bound to the table, the column
+// and the row's key. The ORMs encrypt it on write and decrypt it on read, and
+// a read holds it as a SecretValue. It has no filter, index or default.
+export type Encrypted<T extends string> = T & { readonly __encrypted: true };

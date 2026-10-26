@@ -1,6 +1,6 @@
 ---
 title: Database tables
-description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns, upserts and soft delete in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
+description: Keys, columns, table and column names, relations, one-to-many, indexes, text search, JSON columns, encrypted fields, upserts and soft delete in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
 sidebar:
   order: 2
 ---
@@ -21,8 +21,9 @@ covers the basics of the users and products tables.
 ## Tables and keys
 
 Every class in a DB schema is a table, named after the class in snake case
-(`OrderLine` is `order_line`). Postgres keywords are quoted: the `Order`
-class is the `"order"` table.
+(`OrderLine` is `order_line`), unless `@table` names it
+([Table and column names](#table-and-column-names)). Postgres keywords are
+quoted: the `Order` class is the `"order"` table.
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Order" />
 
@@ -96,6 +97,51 @@ days, so one written by hand as `'1 mon 2 days 03:04:05'` reads as
 values: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
 `Geo.Location`'s filter, `GeoPointFilter`, has `IsNull` only; [JSON-valued
 scalars](/superschematic/reference/json-scalars/) says why.
+
+## Table and column names
+
+A database the schema did not create, or one whose names follow another
+convention, keeps its names: `@table("lineItem")` on a class names its
+table, and `@column("createdAt")` on a field names its column, a to-one
+relation's foreign key among them (`@column("categoryId")` in place of
+`category_id`). Both come from `@superschematic/db` and take a SQL
+identifier: letters, digits and underscores, not starting with a digit.
+
+```ts
+@table("lineItem")
+export abstract class LineItem {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @column("amountCents")
+  amountCents: Generic.Int64;
+
+  @column("categoryId")
+  category: Nullable<Relation<Category, { onDelete: "SET NULL" }>>;
+}
+```
+
+Every name derived from a table's or a column's follows it, quoted where
+Postgres would fold its case: the DDL's columns, foreign keys
+(`fk_lineItem_categoryId`), indexes (`idx_lineItem_postedOn`), checks
+(`ck_lineItem_amountCents`) and defaults, the audit columns the ORMs set,
+a `@versioned` table's history table, functions and triggers
+(`ledgerNote_history`, `trg_ledgerNote_capture_history_write`), a `@source`
+view's columns and a projection's joins, the user model's tables, and
+both ORMs' statements. On a `@queue` class, `@table` names the queue's
+table whole, with no `_queue`, and `@column` its message's columns; an
+`@enqueueOnChange` trigger is named after both tables
+(`trg_lineItem_enqueue_linePosted`). The fields keep their names in the
+row types, the filters and the API.
+
+Two tables, or two columns of a table, a column the generator adds among
+them, may not take one name, and the load says which. A table the engine,
+a version graph or a projection view names itself takes no override, nor
+do the tables the user model adds (`Session`, `UserCredential`,
+`UserRoleGrant`), though the `User` and `UserRole` tables do, and neither
+does a list relation, whose foreign key is a column of the other table. Adding, changing or removing an override of a
+table that holds rows is a rename to the migration planner
+([Renames](/superschematic/reference/migrations/#renames)).
 
 ## Relations
 
@@ -276,6 +322,94 @@ field `TEXT`; a migration plan from a database it built casts the column
 with `USING shipping_address::JSONB`, which fails on text that is not JSON
 (`data-dependent`).
 
+## Encrypted fields
+
+`Secret<T>` keeps a value out of logs; its column still holds the value.
+A field whose value must not be readable in the database, a backup or a
+replica, such as a bank's access token, is `Encrypted<string>`, from
+`@superschematic/db`:
+
+```ts
+import { AutoGenerate, Encrypted, key } from "@superschematic/db";
+
+export abstract class PlaidItem {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  itemId: string;
+
+  accessToken: Encrypted<string>;
+
+  webhookSecret: Nullable<Encrypted<string>>;
+}
+```
+
+Its column is `TEXT` and holds an envelope, `v1:<key id>:<nonce>:<ciphertext>`:
+the value sealed with AES-256-GCM under a random nonce, bound to the
+table, the field and the row's key, so an envelope copied to another row
+or column does not open. The Go ORM and the TypeScript repositories seal
+it on every write and open it on every read, byte for byte alike; `psql`
+sees only the envelope. An `Encrypted<T>` field is a `Secret<T>` too: the
+mask helpers clear it, and a TypeScript row holds it as a `SecretValue`.
+
+The keys come from an `@envVars` `Secret<string>` the DB service's config
+names, by the type that declares the field and the field's name, as a
+stack names the secret:
+
+```ts
+// schema.config.ts of finances-db
+outputs: { sql: { encryption: { key: "FieldKeys.FINANCES_DB_FIELD_KEYS" } } }
+```
+
+Its value is one or more 32-byte keys in base64, separated by commas. Each
+API on the database holds that field in its `@envVars` class, usually by
+extending the class that declares it, so its servers, jobs and workers
+read the one secret each environment sets, and the generated entrypoints
+open the ORM with it: `ConnectWithPool(pool, WithFieldKeys(config.FinancesDbFieldKeys))`
+in Go, `createOrm(pool, { fieldKeys: config.FINANCES_DB_FIELD_KEYS })` in
+TypeScript. The build refuses an
+API on the database whose `@envVars` lacks it, and a stack a deployable
+that reads no binding of it. Without the keys, a read or a write of the
+field fails with a typed error (`fieldcrypt.ErrNoKeys` in Go,
+`FieldEncryptionError` with reason `no-keys` in TypeScript); an envelope
+under a key the keyring does not hold fails with `ErrUnknownKey`
+(`unknown-key`), one that does not open with `ErrDecrypt` (`decrypt`).
+None of them carries the value or a key.
+
+A ciphertext compares with nothing, so the field:
+
+- takes no `@key`, `@unique`, `@searchField`, `@index` or
+  `Default<T, V>`, and is no relation; its column has no `CHECK` and no
+  `DEFAULT`, and `Validate` holds the value in the decoders alone;
+- has no filter and no sort;
+- is left out of a `@versioned` table's history:
+  `@versioned({ exclude: ["accessToken"] })`;
+- is not set by `updateMany`, nor by an upsert on another key than the
+  primary key, which do not know each row's key; `updateOne` sets it.
+
+The envelope is bound to the row's key, which the ORMs must know before
+the insert: a table with an `Encrypted<T>` field has a UUID key the ORMs
+generate when a create leaves it unset, or a key each create sets. A
+table the engine, a version graph or the user model keeps cannot have one.
+A queue's message carries none, and an `@enqueueOnChange` neither copies
+one into a message, nor compares one in `fields`, nor tests what one
+equals; whether it is null it may test. Carry the row's key in the
+message, and read the field through the repository. A `@source` view's
+field that reads one carries the plaintext to every response the view is
+in, so it says so with `@decrypted`, or the load fails.
+
+`@rawSql`, a trigger, a projection view and a hand-written query see only
+the envelope.
+
+To rotate the key, put a new key first in the secret's value and keep the
+old ones after it: the first seals, and each opens what it sealed. Then
+reseal the rows: `Reencrypt(ctx, batch)` on each Go repository, or
+`reencrypt({ batch })` on each TypeScript one, reseals every envelope an
+older key sealed under the current one, `batch` rows at a time (100),
+deleted rows among them, and returns how many rows it resealed. A row a
+write changes meanwhile keeps the write's envelope. Once every table's
+`Reencrypt` has run, drop the old keys from the secret.
+
 ## Inserts
 
 `CreateOne` inserts only the optional fields a row sets, so an unset
@@ -435,6 +569,9 @@ materialized view of each project's open tasks for a dashboard:
   pieces that run after each other, fail the load.
 - `dialects` lists the dialects it runs on, `postgres` and `sqlite`; unset
   is every dialect the service lists.
+
+Raw SQL sees an `Encrypted<T>` field's envelope, never its value
+([Encrypted fields](#encrypted-fields)).
 
 A template literal with no `${}` is a string, so the SQL can span lines.
 `create.sql` runs every piece, in order, at its place, and `drop.sql` runs

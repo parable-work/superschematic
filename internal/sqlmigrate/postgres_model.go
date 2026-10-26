@@ -137,7 +137,7 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 // that is no queue's or a queue with no key (D80).
 func queueKeyOf(schema *ir.Schema, t *sqlgen.Table) *QueueKey {
 	td := schema.Types[t.OriginalName]
-	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td.Name) {
+	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td) {
 		return nil
 	}
 	return &QueueKey{Key: sqlutil.QueueKeyColumnName(td), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}

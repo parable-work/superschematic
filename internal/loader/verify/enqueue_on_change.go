@@ -88,8 +88,16 @@ func checkOneEnqueueOnChange(schema *ir.Schema, td *ir.TypeDef, def *ir.EnqueueO
 		}
 		return c, ok
 	}
+	// An Encrypted<T> field's column holds a ciphertext (D85) the trigger
+	// cannot open: each write seals it with a fresh nonce, so a comparison
+	// sees every write, and a message would carry a value no worker opens.
+	encrypted := func(c tableColumn) bool { return c.field != nil && c.field.EncryptedAtRest }
 	for _, name := range def.Fields {
-		if c, ok := column(name, "fields"); ok && !comparable(c.column.Type) {
+		c, ok := column(name, "fields")
+		switch {
+		case ok && encrypted(c):
+			r.errorf(td.Owner, "%s: fields names %s, an Encrypted<T> field, whose ciphertext every write and every key rotation changes, so the trigger would enqueue on each; leave it out, and compare a field that changes with it", where, name)
+		case ok && !comparable(c.column.Type):
 			r.errorf(td.Owner, "%s: fields names %s, a %s column, which IS DISTINCT FROM cannot compare; leave it out", where, name, c.column.Type)
 		}
 	}
@@ -100,6 +108,8 @@ func checkOneEnqueueOnChange(schema *ir.Schema, td *ir.TypeDef, def *ir.EnqueueO
 			continue
 		}
 		switch {
+		case cond.Equals != nil && encrypted(c):
+			r.errorf(td.Owner, "%s: when %s equals %v: %s is an Encrypted<T> field, whose column holds a ciphertext no value equals; test whether it is null, or test another field", where, cond.Field, cond.Equals, cond.Field)
 		case (cond.IsNull || cond.NotNull) && !c.column.Nullable:
 			r.errorf(td.Owner, "%s: when tests whether %s is null, and it is required, so it never is; leave the condition out", where, cond.Field)
 		case cond.Equals != nil:
@@ -132,6 +142,10 @@ func checkOneEnqueueOnChange(schema *ir.Schema, td *ir.TypeDef, def *ir.EnqueueO
 		}
 		c, ok := column(from, "message field "+name)
 		if !ok {
+			continue
+		}
+		if encrypted(c) {
+			r.errorf(td.Owner, "%s: message field %s takes %s, an Encrypted<T> field, whose ciphertext is bound to %s's row and no worker opens; carry the row's key in the message, and read %s through the repository", where, name, from, td.Name, from)
 			continue
 		}
 		if err := linesUp(schema, mf, c, scalarTypes); err != nil {

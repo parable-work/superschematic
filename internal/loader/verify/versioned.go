@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -158,11 +158,11 @@ const int64Column = "Generic.Int64"
 const generatedIDType = "Identity.UUID"
 
 // dbTableNamed returns the DB table type of this schema whose table is
-// named table (snake_case), or nil.
+// named table (sqlutil.TableName), or nil.
 func dbTableNamed(schema *ir.Schema, table string) *ir.TypeDef {
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
-		if isDBTable(td) && codegen.ToSnakeCase(td.Name) == table {
+		if isDBTable(td) && sqlutil.TableName(td) == table {
 			return td
 		}
 	}
@@ -188,11 +188,11 @@ func tableColumns(schema *ir.Schema, td *ir.TypeDef) map[string]string {
 		switch {
 		case isTableRelation(schema, fd) && (fd.TypeRef.IsArray || fd.TypeRef.IsMap):
 		case isTableRelation(schema, fd):
-			columns[codegen.ToSnakeCase(fd.Name)+"_id"] = keyTypeName(schema.Types[relationTarget(fd)])
+			columns[sqlutil.ForeignKeyColumn(fd)] = keyTypeName(schema.Types[relationTarget(fd)])
 		case fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.JsonField:
-			columns[codegen.ToSnakeCase(fd.Name)] = ""
+			columns[sqlutil.ColumnName(fd)] = ""
 		default:
-			columns[codegen.ToSnakeCase(fd.Name)] = fd.TypeRef.Name
+			columns[sqlutil.ColumnName(fd)] = fd.TypeRef.Name
 		}
 	}
 	if _, ok := columns["id"]; !ok && !hasKey {
@@ -208,7 +208,7 @@ func tableColumns(schema *ir.Schema, td *ir.TypeDef) map[string]string {
 		}
 		for _, fd := range parent.Fields {
 			if fd.HasMany && !fd.ManyToMany && fd.TypeRef.IsArray && !fd.JsonField && fd.TypeRef.Name == td.Name {
-				if column := codegen.ToSnakeCase(parent.Name) + "_id"; columns[column] == "" {
+				if column := sqlutil.TableName(parent) + "_id"; columns[column] == "" {
 					columns[column] = keyTypeName(parent)
 				}
 			}
