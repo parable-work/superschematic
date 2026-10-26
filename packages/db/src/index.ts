@@ -1,6 +1,7 @@
 export {
   column,
   conflictUnit,
+  enqueueOnChange,
   graphMember,
   index,
   join,
@@ -19,6 +20,9 @@ export {
 } from "./decorators";
 export type {
   ConflictUnitStrategy,
+  EnqueueCondition,
+  EnqueueOnChangeOptions,
+  EnqueueWrite,
   GraphMemberOptions,
   GraphParent,
   IndexMethod,
@@ -30,9 +34,11 @@ export type {
   ProjectionOrder,
   ProjectionPredicate,
   ProjectionSettingBinding,
+  QueueOnDuplicate,
   QueueOptions,
   RawSqlOptions,
   SchemaClass,
+  TableField,
   VersionedOptions,
   VersionGraphOptions,
 } from "./decorators";

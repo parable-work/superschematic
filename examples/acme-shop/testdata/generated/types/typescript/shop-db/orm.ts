@@ -20,7 +20,10 @@ import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefi
 import type * as T from './types';
 
 /**
- * A row of Order, the "order" table: A shopper's order. Staff look orders up by customer, newest first.
+ * A row of Order, the "order" table: A shopper's order. Staff look orders up by customer, newest first. An
+ * order put back to placed, by staff or by a script in psql, is fulfilled
+ * again: the database's trigger enqueues its OrderPlaced, whatever wrote
+ * the row.
  */
 export interface OrderRow {
   createdAt: T.TemporalDateTime;

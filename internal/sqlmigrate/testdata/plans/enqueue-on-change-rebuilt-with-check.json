@@ -1,0 +1,40 @@
+{
+  "dialect": "postgres",
+  "expanded": "29e06e58c38c67dde43a188a618ba1caca9d0ad1c5a9de1fe09cd25253e0f7aa",
+  "from": "29e06e58c38c67dde43a188a618ba1caca9d0ad1c5a9de1fe09cd25253e0f7aa",
+  "hash": "947079b01bc80619085c489de9ca77e8dd15f1a9ff87a4631d22868caa29135b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_note CHECK (length(note) \u003c= 100) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/ck_order_note",
+          "reason": "Order.note gets a CHECK in the database: validating ck_order_note fails when a row of order holds a value longer than 100 characters.",
+          "subject": "table/order/constraint/ck_order_note"
+        }
+      ],
+      "index": 2,
+      "op": "validateCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_note"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    }
+  ],
+  "to": "0edd715156b713cce559652de167e5575b7f03bcd09db12c051e6f9647ce70fc",
+  "toModel": null,
+  "version": 1
+}

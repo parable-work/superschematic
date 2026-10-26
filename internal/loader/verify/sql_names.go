@@ -8,10 +8,12 @@ import (
 
 // checkSQLNames holds @table and @column (D85) to the tables the
 // generators name through sqlutil: a DB table the ORMs keep, and a field
-// of one that is a column, a to-one relation's foreign key among them. A
-// name the engine, a version graph or a projection view gives itself takes
-// no override, and two tables, or two columns of one table, may not take
-// one name, a column the generator adds among them.
+// of one that is a column, a to-one relation's foreign key among them, and
+// a queue's table and its message's columns. A name the engine, a version
+// graph or a projection view gives itself takes no override, and two
+// tables, or two columns of one table, may not take one name, a column the
+// generator adds among them; checkQueues holds a queue's table and columns
+// to the same.
 func checkSQLNames(schema *ir.Schema, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	tables := map[string]string{}
@@ -63,7 +65,7 @@ func checkTableName(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, r 
 	case schema.Kind != ir.SchemaKindDB:
 		r.errorf(td.Owner, "%s: @table names a DB table, and %s is a schema of kind %s", td.Name, schema.Name, schema.Kind)
 	case td.Queue != nil:
-		r.errorf(td.Owner, "%s: @table names a table, and %s is a @queue, whose table is named after it (support follows)", td.Name, td.Name)
+		// A queue's table takes @table's name whole, with no _queue.
 	case bases[td.Name]:
 		r.errorf(td.Owner, "%s: @table names a table, and %s is a base class, whose fields its subclasses' tables hold; name each subclass's table instead", td.Name, td.Name)
 	case overrideRefusal(td) != "":
@@ -81,7 +83,7 @@ func checkColumnName(schema *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, bases m
 	case td.Role == ir.RoleProjection:
 		r.errorf(td.Owner, "%s: a projection column's @column names the alias.field it reads, such as base.%s", owner, fd.Name)
 	case td.Queue != nil:
-		r.errorf(td.Owner, "%s: @column names a table's column, and %s is a @queue, whose columns are named after its fields (support follows)", owner, td.Name)
+		// A message's field is a column of the queue's table.
 	case overrideRefusal(td) != "":
 		r.errorf(td.Owner, "%s: @column names a column the ORMs keep, and %s: %s", owner, td.Name, overrideRefusal(td))
 	case !hasTable(td, bases) && !bases[td.Name]:
@@ -104,7 +106,7 @@ func checkColumnCollisions(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 			continue
 		}
 		hasKey = hasKey || fd.Key
-		column := sqlutil.ColumnOf(schema, fd)
+		column := sqlutil.ColumnNameIn(schema, fd)
 		if other, taken := columns[column]; taken {
 			r.errorf(td.Owner, "%s.%s: its column is %s, the column of %s.%s; give one of them another name with @column", td.Name, fd.Name, column, td.Name, other)
 			continue

@@ -32,14 +32,26 @@ func namingErrors(schema *ir.Schema) []string {
 	r := &Result{}
 	checkSQLNames(schema, r)
 	checkProjections(schema, r)
+	checkQueues(schema, r)
 	return errorStrings(r)
 }
 
+// postedQueue is a queue whose @table names its table and whose @column
+// names its message's field's column.
+func postedQueue(s *ir.Schema) {
+	s.Types["Posted"] = &ir.TypeDef{Name: "Posted", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{}, SQLName: "postedLines", Fields: []*ir.FieldDef{
+		{Name: "lineId", TypeRef: ir.TypeRef{Name: "string"}, Required: true, SQLName: "lineId"},
+	}}
+}
+
 // TestSQLNamesLoad: @table on a table and @column on its fields, a
-// relation's foreign key among them, load (D85).
+// relation's foreign key among them, load, as they do on a queue (D85).
 func TestSQLNamesLoad(t *testing.T) {
 	if errs := namingErrors(namingSchema(nil)); len(errs) != 0 {
 		t.Fatalf("errors = %v", errs)
+	}
+	if errs := namingErrors(namingSchema(postedQueue)); len(errs) != 0 {
+		t.Fatalf("a queue: errors = %v", errs)
 	}
 	aliased := namingSchema(func(s *ir.Schema) { s.Types["LineItem"].Fields[1].ProjectedFrom = "base.memo" })
 	if errs := namingErrors(aliased); !slices.ContainsFunc(errs, func(e string) bool {
@@ -75,9 +87,18 @@ func TestSQLNamesRefusals(t *testing.T) {
 		{"a list relation", func(s *ir.Schema) {
 			s.Types["Category"].Fields = append(s.Types["Category"].Fields, &ir.FieldDef{Name: "lines", TypeRef: ir.TypeRef{Name: "LineItem", IsArray: true}, HasMany: true, SQLName: "lineIds"})
 		}, "Category.lines: @column names a column, and a list relation has none"},
-		{"a queue", func(s *ir.Schema) {
-			s.Types["Posted"] = &ir.TypeDef{Name: "Posted", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{}, SQLName: "postedQueue"}
-		}, "Posted: @table names a table, and Posted is a @queue, whose table is named after it (support follows)"},
+		{"a queue's table of a table's name", func(s *ir.Schema) {
+			postedQueue(s)
+			s.Types["Posted"].SQLName = "lineItem"
+		}, "queue Posted's table is lineItem, the table of LineItem; rename one of them, or name one with @table"},
+		{"a queue column the queue keeps", func(s *ir.Schema) {
+			postedQueue(s)
+			s.Types["Posted"].Fields[0].SQLName = "state"
+		}, "queue Posted field lineId is the column state, which the queue keeps itself; rename the field, or name its column with @column"},
+		{"two queue columns of one name", func(s *ir.Schema) {
+			postedQueue(s)
+			s.Types["Posted"].Fields = append(s.Types["Posted"].Fields, &ir.FieldDef{Name: "line_id", TypeRef: ir.TypeRef{Name: "string"}, SQLName: "lineId"})
+		}, "queue Posted field line_id is the column lineId, the column of its field lineId; give one of them another name with @column"},
 		{"a version graph", func(s *ir.Schema) {
 			s.Types["Category"].VersionGraph = &ir.VersionGraphConfig{}
 			s.Types["Category"].SQLName = "cat"

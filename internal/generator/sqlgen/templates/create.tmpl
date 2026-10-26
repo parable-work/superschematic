@@ -159,6 +159,17 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $optimistic.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if .EnqueueTriggers }}
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+{{- range $enqueue := .EnqueueTriggers }}
+
+{{ $enqueue.FunctionSQL }};
+
+{{ $enqueue.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Create projection views: read-only relations over the tables above. A

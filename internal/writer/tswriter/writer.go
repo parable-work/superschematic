@@ -16,6 +16,7 @@
 package tswriter
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -126,7 +127,7 @@ var symbolPackages = map[string]string{
 	// @superschematic/db
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
-	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db",
+	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
@@ -334,10 +335,58 @@ func queueArgs(def *ir.QueueDef) string {
 	if def.Retain != "" {
 		parts = append(parts, "retain: "+quote(def.Retain))
 	}
+	if def.Key != "" {
+		parts = append(parts, "key: "+quote(def.Key))
+	}
+	if def.OnDuplicate != "" {
+		parts = append(parts, "onDuplicate: "+quote(def.OnDuplicate))
+	}
+	if def.Serialize {
+		parts = append(parts, "serialize: true")
+	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return objectLiteral(parts)
+}
+
+// enqueueOnChangeArgs renders @enqueueOnChange's arguments (D80): the
+// queue's class, then its writes, fields, conditions and message.
+func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
+	strs := func(items []string) string {
+		quoted := make([]string, len(items))
+		for i, item := range items {
+			quoted[i] = quote(item)
+		}
+		return "[" + strings.Join(quoted, ", ") + "]"
+	}
+	parts := []string{"on: " + strs(def.On)}
+	if len(def.Fields) > 0 {
+		parts = append(parts, "fields: "+strs(def.Fields))
+	}
+	if len(def.When) > 0 {
+		conditions := make([]string, len(def.When))
+		for i, c := range def.When {
+			cond := []string{"field: " + quote(c.Field)}
+			switch {
+			case c.IsNull:
+				cond = append(cond, "isNull: true")
+			case c.NotNull:
+				cond = append(cond, "notNull: true")
+			default:
+				literal, _ := json.Marshal(c.Equals)
+				cond = append(cond, "equals: "+string(literal))
+			}
+			conditions[i] = objectLiteral(cond)
+		}
+		parts = append(parts, "when: ["+strings.Join(conditions, ", ")+"]")
+	}
+	var message []string
+	for _, field := range sortedKeys(def.Message) {
+		message = append(message, propertyName(field)+": "+quote(def.Message[field]))
+	}
+	parts = append(parts, "message: "+objectLiteral(message))
+	return def.Queue + ", " + objectLiteral(parts)
 }
 
 // emitJob renders a job as the class the reader reads it from (D52):
@@ -483,11 +532,11 @@ func equalOptionalInt64(left, right *int64) bool {
 	return *left == *right
 }
 
-// sortedTypes returns type names topologically sorted so heritage, @source
-// and @graphMember targets, and the classes a Stack declaration names, are
-// declared before the classes that reference them (decorator arguments and
-// extends clauses are value positions in TypeScript: forward references do
-// not compile). The @environment classes come last, in declaration order
+// sortedTypes returns type names topologically sorted so heritage, @source,
+// @graphMember and @enqueueOnChange targets, and the classes a Stack
+// declaration names, are declared before the classes that reference them
+// (decorator arguments and extends clauses are value positions in
+// TypeScript: forward references do not compile). The @environment classes come last, in declaration order
 // (ir.EnvironmentNames), since the reader numbers them by their place.
 func (e *emitter) sortedTypes() []string {
 	var names []string
@@ -527,6 +576,12 @@ func (e *emitter) sortedTypes() []string {
 				if _, ok := e.doc.Types[target]; ok && target != name {
 					d = append(d, target)
 				}
+			}
+		}
+		// @enqueueOnChange names its queue's class as a value.
+		for _, change := range def.EnqueueOnChange {
+			if _, ok := e.doc.Types[change.Queue]; ok && change.Queue != name {
+				d = append(d, change.Queue)
 			}
 		}
 		// A Stack declaration names a declared deployable by its class.

@@ -119,6 +119,9 @@ func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) 
 	if len(columns) > 0 {
 		query = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
+	if t.statements.conflict != "" {
+		query += " " + t.statements.conflict
+	}
 	if _, err := tx.ExecContext(ctx, query, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
@@ -424,6 +427,130 @@ func canonicalDuration(d time.Duration) string {
 	return sign + seconds + "s"
 }
 
+// orderChangedSQLiteQueue is the table of the queue OrderChanged on SQLite.
+var orderChangedSQLiteQueue = sqliteQueueTable{
+	name:       `order_changed_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	fields: []sqliteQueueField{
+		{name: "orderId", column: `order_id`, uuid: true},
+		{name: "lineId", column: `line_id`, uuid: true},
+		{name: "priority", column: `priority`, def: "low"},
+	},
+	statements: queueStatements{
+		insert:   `INSERT INTO order_changed_queue`,
+		conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+		expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
+		claim: `UPDATE order_changed_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+  SELECT m.id FROM order_changed_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS o WHERE o.order_id = m.order_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT ?1
+)
+RETURNING id, claim_token, attempts, order_id, line_id, priority`,
+		complete: `UPDATE order_changed_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		fail: `UPDATE order_changed_queue SET
+  state = CASE WHEN attempts > ?3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > ?3 OR EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
+  last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE order_changed_queue SET claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		release: `UPDATE order_changed_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = MAX(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		prune: `DELETE FROM order_changed_queue WHERE id IN (
+  SELECT id FROM order_changed_queue
+  WHERE state = 'done' AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || (?1) || ' seconds')
+  ORDER BY updated_at
+  LIMIT ?2
+)`,
+		due: `SELECT 1 FROM order_changed_queue AS m
+WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS o WHERE o.order_id = m.order_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+LIMIT 1`,
+	},
+}
+
+// EnqueueOrderChangedSQLite writes msg into the queue OrderChanged on SQLite through
+// tx, the caller's transaction: the message is due once tx commits, and
+// never if it rolls back.
+func EnqueueOrderChangedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.OrderChanged) error {
+	return orderChangedSQLiteQueue.insert(ctx, tx, msg)
+}
+
+// OrderChangedSQLiteQueue claims the messages of the queue OrderChanged on SQLite for
+// a worker, as OrderChangedQueue does on Postgres.
+type OrderChangedSQLiteQueue struct {
+	db *sql.DB
+}
+
+// NewOrderChangedSQLiteQueue returns the queue OrderChanged of the SQLite database db.
+func NewOrderChangedSQLiteQueue(db *sql.DB) *OrderChangedSQLiteQueue {
+	return &OrderChangedSQLiteQueue{db: db}
+}
+
+// Claim claims up to n due messages for lease, each read from its JSON form
+// as the types read it; one that does not read it fails alone.
+func (q *OrderChangedSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]OrderChangedClaim, error) {
+	rows, err := orderChangedSQLiteQueue.claim(ctx, q.db, n, lease)
+	if err != nil {
+		return nil, err
+	}
+	claims := make([]OrderChangedClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := OrderChangedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			orderChangedSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *OrderChangedSQLiteQueue) Complete(ctx context.Context, id, token string) error {
+	return orderChangedSQLiteQueue.update(ctx, q.db, "complete", orderChangedSQLiteQueue.statements.complete, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *OrderChangedSQLiteQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return orderChangedSQLiteQueue.fail(ctx, q.db, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *OrderChangedSQLiteQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return orderChangedSQLiteQueue.update(ctx, q.db, "extend", orderChangedSQLiteQueue.statements.extend, id, token, lease.Seconds())
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *OrderChangedSQLiteQueue) Release(ctx context.Context, id, token string) error {
+	return orderChangedSQLiteQueue.update(ctx, q.db, "release", orderChangedSQLiteQueue.statements.release, id, token)
+}
+
+// Prune deletes up to limit messages done for the queue's retention or
+// longer, the oldest first, and returns how many it deleted. It never
+// deletes a dead message.
+func (q *OrderChangedSQLiteQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return orderChangedSQLiteQueue.prune(ctx, q.db, limit)
+}
+
 // orderPlacedSQLiteQueue is the table of the queue OrderPlaced on SQLite.
 var orderPlacedSQLiteQueue = sqliteQueueTable{
 	name:       `order_placed_queue`,
@@ -661,4 +788,244 @@ func (q *PingSQLiteQueue) Release(ctx context.Context, id, token string) error {
 // deletes a dead message.
 func (q *PingSQLiteQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return pingSQLiteQueue.prune(ctx, q.db, limit)
+}
+
+// stockCheckedSQLiteQueue is the table of the queue StockChecked on SQLite.
+var stockCheckedSQLiteQueue = sqliteQueueTable{
+	name:       `stock_checked_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	fields: []sqliteQueueField{
+		{name: "sku", column: `sku`},
+		{name: "quantity", column: `quantity`},
+	},
+	statements: queueStatements{
+		insert:   `INSERT INTO stock_checked_queue`,
+		conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
+		expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
+		claim: `UPDATE stock_checked_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+  SELECT id FROM stock_checked_queue
+  WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  ORDER BY due_at, id
+  LIMIT ?1
+)
+RETURNING id, claim_token, attempts, sku, quantity`,
+		complete: `UPDATE stock_checked_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		fail: `UPDATE stock_checked_queue SET
+  state = CASE WHEN attempts > ?3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > ?3 OR EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
+  last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE stock_checked_queue SET claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		release: `UPDATE stock_checked_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = MAX(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		prune: `DELETE FROM stock_checked_queue WHERE id IN (
+  SELECT id FROM stock_checked_queue
+  WHERE state = 'done' AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || (?1) || ' seconds')
+  ORDER BY updated_at
+  LIMIT ?2
+)`,
+		due: `SELECT 1 FROM stock_checked_queue
+WHERE (state = 'ready' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+LIMIT 1`,
+	},
+}
+
+// EnqueueStockCheckedSQLite writes msg into the queue StockChecked on SQLite through
+// tx, the caller's transaction: the message is due once tx commits, and
+// never if it rolls back.
+func EnqueueStockCheckedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.StockChecked) error {
+	return stockCheckedSQLiteQueue.insert(ctx, tx, msg)
+}
+
+// StockCheckedSQLiteQueue claims the messages of the queue StockChecked on SQLite for
+// a worker, as StockCheckedQueue does on Postgres.
+type StockCheckedSQLiteQueue struct {
+	db *sql.DB
+}
+
+// NewStockCheckedSQLiteQueue returns the queue StockChecked of the SQLite database db.
+func NewStockCheckedSQLiteQueue(db *sql.DB) *StockCheckedSQLiteQueue {
+	return &StockCheckedSQLiteQueue{db: db}
+}
+
+// Claim claims up to n due messages for lease, each read from its JSON form
+// as the types read it; one that does not read it fails alone.
+func (q *StockCheckedSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]StockCheckedClaim, error) {
+	rows, err := stockCheckedSQLiteQueue.claim(ctx, q.db, n, lease)
+	if err != nil {
+		return nil, err
+	}
+	claims := make([]StockCheckedClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := StockCheckedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			stockCheckedSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *StockCheckedSQLiteQueue) Complete(ctx context.Context, id, token string) error {
+	return stockCheckedSQLiteQueue.update(ctx, q.db, "complete", stockCheckedSQLiteQueue.statements.complete, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *StockCheckedSQLiteQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return stockCheckedSQLiteQueue.fail(ctx, q.db, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *StockCheckedSQLiteQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return stockCheckedSQLiteQueue.update(ctx, q.db, "extend", stockCheckedSQLiteQueue.statements.extend, id, token, lease.Seconds())
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *StockCheckedSQLiteQueue) Release(ctx context.Context, id, token string) error {
+	return stockCheckedSQLiteQueue.update(ctx, q.db, "release", stockCheckedSQLiteQueue.statements.release, id, token)
+}
+
+// Prune deletes up to limit messages done for the queue's retention or
+// longer, the oldest first, and returns how many it deleted. It never
+// deletes a dead message.
+func (q *StockCheckedSQLiteQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return stockCheckedSQLiteQueue.prune(ctx, q.db, limit)
+}
+
+// syncRequestedSQLiteQueue is the table of the queue SyncRequested on SQLite.
+var syncRequestedSQLiteQueue = sqliteQueueTable{
+	name:       `sync_requested_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	fields: []sqliteQueueField{
+		{name: "accountId", column: `account_id`, uuid: true},
+		{name: "reason", column: `reason`},
+	},
+	statements: queueStatements{
+		insert: `INSERT INTO sync_requested_queue`,
+		expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE state = 'claimed' AND claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AND attempts > ?1`,
+		claim: `UPDATE sync_requested_queue SET state = 'claimed', attempts = attempts + 1, claim_token = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+  claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?2) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+  SELECT m.id FROM sync_requested_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM sync_requested_queue AS o WHERE o.account_id = m.account_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT ?1
+)
+RETURNING id, claim_token, attempts, account_id, reason`,
+		complete: `UPDATE sync_requested_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		fail: `UPDATE sync_requested_queue SET
+  state = CASE WHEN attempts > ?3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > ?3 THEN due_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (COALESCE(MIN(?4 * (1 << MIN(attempts - 1, 40)), ?6), ?4 * (1 << MIN(attempts - 1, 40)))) || ' seconds') END,
+  last_error = ?5, claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE sync_requested_queue SET claim_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		release: `UPDATE sync_requested_queue SET state = 'ready', attempts = MAX(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND claim_token = ?2 AND state = 'claimed'`,
+		prune: `DELETE FROM sync_requested_queue WHERE id IN (
+  SELECT id FROM sync_requested_queue
+  WHERE state = 'done' AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || (?1) || ' seconds')
+  ORDER BY updated_at
+  LIMIT ?2
+)`,
+		due: `SELECT 1 FROM sync_requested_queue AS m
+WHERE ((m.state = 'ready' AND m.due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) OR (m.state = 'claimed' AND m.claim_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    AND NOT EXISTS (SELECT 1 FROM sync_requested_queue AS o WHERE o.account_id = m.account_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+LIMIT 1`,
+	},
+}
+
+// EnqueueSyncRequestedSQLite writes msg into the queue SyncRequested on SQLite through
+// tx, the caller's transaction: the message is due once tx commits, and
+// never if it rolls back.
+func EnqueueSyncRequestedSQLite(ctx context.Context, tx SQLiteExecer, msg *types.SyncRequested) error {
+	return syncRequestedSQLiteQueue.insert(ctx, tx, msg)
+}
+
+// SyncRequestedSQLiteQueue claims the messages of the queue SyncRequested on SQLite for
+// a worker, as SyncRequestedQueue does on Postgres.
+type SyncRequestedSQLiteQueue struct {
+	db *sql.DB
+}
+
+// NewSyncRequestedSQLiteQueue returns the queue SyncRequested of the SQLite database db.
+func NewSyncRequestedSQLiteQueue(db *sql.DB) *SyncRequestedSQLiteQueue {
+	return &SyncRequestedSQLiteQueue{db: db}
+}
+
+// Claim claims up to n due messages for lease, each read from its JSON form
+// as the types read it; one that does not read it fails alone.
+func (q *SyncRequestedSQLiteQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]SyncRequestedClaim, error) {
+	rows, err := syncRequestedSQLiteQueue.claim(ctx, q.db, n, lease)
+	if err != nil {
+		return nil, err
+	}
+	claims := make([]SyncRequestedClaim, 0, len(rows))
+	for _, row := range rows {
+		claim := SyncRequestedClaim{ID: row.id, Token: row.token, Attempt: row.attempt}
+		if err := json.Unmarshal(row.message, &claim.Message); err != nil {
+			// Its JSON reads, and its type refuses it: it fails alone.
+			syncRequestedSQLiteQueue.unreadable(ctx, q.db, &queueUnreadable{id: row.id, token: row.token, err: fmt.Errorf("message %s: %w", row.id, err)})
+			continue
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *SyncRequestedSQLiteQueue) Complete(ctx context.Context, id, token string) error {
+	return syncRequestedSQLiteQueue.update(ctx, q.db, "complete", syncRequestedSQLiteQueue.statements.complete, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *SyncRequestedSQLiteQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return syncRequestedSQLiteQueue.fail(ctx, q.db, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *SyncRequestedSQLiteQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return syncRequestedSQLiteQueue.update(ctx, q.db, "extend", syncRequestedSQLiteQueue.statements.extend, id, token, lease.Seconds())
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *SyncRequestedSQLiteQueue) Release(ctx context.Context, id, token string) error {
+	return syncRequestedSQLiteQueue.update(ctx, q.db, "release", syncRequestedSQLiteQueue.statements.release, id, token)
+}
+
+// Prune deletes up to limit messages done for the queue's retention or
+// longer, the oldest first, and returns how many it deleted. It never
+// deletes a dead message.
+func (q *SyncRequestedSQLiteQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return syncRequestedSQLiteQueue.prune(ctx, q.db, limit)
 }

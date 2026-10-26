@@ -333,6 +333,9 @@ func (postgresDialect) index(c *change) *Step {
 	if c.op == opReplaceIndex {
 		statements = append(statements, "DROP INDEX CONCURRENTLY IF EXISTS "+name)
 	}
+	if c.dedupe != nil {
+		statements = append(statements, dedupeSQL(c.table, c.dedupe, "now()", q))
+	}
 	step := stepFor(c, append(statements, indexSQL(c.table, c.index, true))...)
 	step.Transactional = false
 	step.Recovery = []string{"DROP INDEX CONCURRENTLY IF EXISTS " + name}

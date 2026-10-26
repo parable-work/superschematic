@@ -2174,7 +2174,10 @@ func InventoryFromYAMLNonStrict(data []byte) (*Inventory, error) {
 	return decoded, nil
 }
 
-// Order - A shopper's order. Staff look orders up by customer, newest first.
+// Order - A shopper's order. Staff look orders up by customer, newest first. An
+// order put back to placed, by staff or by a script in psql, is fulfilled
+// again: the database's trigger enqueues its OrderPlaced, whatever wrote
+// the row.
 type Order struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 
@@ -2855,9 +2858,11 @@ func OrderLineFromYAMLNonStrict(data []byte) (*OrderLine, error) {
 	return decoded, nil
 }
 
-// OrderPlaced - Placed with each order, in the transaction that writes it: shop-orders'
-// worker FulfilOrders handles each message, and a message whose handler
-// fails is retried every half minute, five times at most.
+// OrderPlaced - Placed with each order, in the transaction that writes it, and by the
+// trigger on an order put back to placed: shop-orders' worker FulfilOrders
+// handles each message, and a message whose handler fails is retried every
+// half minute, five times at most. One waits per order: an order placed
+// again while its message waits adds none.
 type OrderPlaced struct {
 	OrderId IdentityUUID `json:"orderId"`
 }
@@ -5265,9 +5270,11 @@ func ShippingAddressFromYAMLNonStrict(data []byte) (*ShippingAddress, error) {
 // available units at or below its reorderAt (Stock.low, D70), and by its
 // job OrderRestocks for one a count left low: shop-stock's worker
 // ReorderStock files a restock request for the product. The message holds
-// the units available and the reorder level as the sale left them. A
-// message whose handler fails is retried every half minute, five times at
-// most.
+// the units available and the reorder level as the sale left them. One
+// waits per product: a later sale that leaves the product low replaces it,
+// so the worker reads the latest level, and the worker handles one
+// product's message at a time. A message whose handler fails is retried
+// every half minute, five times at most.
 type StockLow struct {
 	ProductId IdentityUUID `json:"productId"`
 

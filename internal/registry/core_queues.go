@@ -31,18 +31,22 @@ func queueDecorator() DecoratorSpec {
 
 // queueArgs are the arguments of @queue, all optional.
 type queueArgs struct {
-	Retries    *any    `json:"retries"`
-	Backoff    *string `json:"backoff"`
-	MaxBackoff *string `json:"maxBackoff"`
-	Lease      *string `json:"lease"`
-	Retain     *string `json:"retain"`
+	Retries     *any    `json:"retries"`
+	Backoff     *string `json:"backoff"`
+	MaxBackoff  *string `json:"maxBackoff"`
+	Lease       *string `json:"lease"`
+	Retain      *string `json:"retain"`
+	Key         *string `json:"key"`
+	OnDuplicate *string `json:"onDuplicate"`
+	Serialize   *bool   `json:"serialize"`
 }
 
 // queueOptions names @queue's options, for its errors.
-const queueOptions = "retries, backoff, maxBackoff, lease and retain"
+const queueOptions = "retries, backoff, maxBackoff, lease, retain, key, onDuplicate and serialize"
 
-// queueOf reads @queue({ retries, backoff, maxBackoff, lease, retain }) on
-// td. Errors in the object are ArgErrors, so the frontend points at it.
+// queueOf reads @queue({ retries, backoff, maxBackoff, lease, retain, key,
+// onDuplicate, serialize }) on td. Errors in the object are ArgErrors, so
+// the frontend points at it.
 func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	if len(td.Fields) == 0 {
 		return nil, fmt.Errorf("@queue class %s has no fields; a queue's class holds its message's fields", td.Name)
@@ -56,11 +60,11 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	}
 	obj, ok := args[0].(map[string]any)
 	if !ok {
-		return nil, ArgErrorf(0, "@queue takes an options object: { retries, backoff, maxBackoff, lease, retain }")
+		return nil, ArgErrorf(0, "@queue takes an options object: { retries, backoff, maxBackoff, lease, retain, key, onDuplicate, serialize }")
 	}
 	for key := range obj {
 		switch key {
-		case "retries", "backoff", "maxBackoff", "lease", "retain":
+		case "retries", "backoff", "maxBackoff", "lease", "retain", "key", "onDuplicate", "serialize":
 		default:
 			return nil, ArgErrorf(0, "@queue has no option %q; it takes %s", key, queueOptions)
 		}
@@ -71,7 +75,7 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	}
 	var a queueArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, ArgErrorf(0, "@queue options: backoff, maxBackoff, lease and retain are strings and retries a whole number: %v", err)
+		return nil, ArgErrorf(0, "@queue options: backoff, maxBackoff, lease, retain, key and onDuplicate are strings, retries a whole number and serialize a boolean: %v", err)
 	}
 	if a.Retries != nil {
 		n, ok := (*a.Retries).(float64)
@@ -93,6 +97,15 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	if a.Retain != nil {
 		def.Retain = *a.Retain
 	}
+	if a.Key != nil {
+		def.Key = *a.Key
+	}
+	if a.OnDuplicate != nil {
+		def.OnDuplicate = *a.OnDuplicate
+	}
+	if a.Serialize != nil {
+		def.Serialize = *a.Serialize
+	}
 	if err := CheckQueue(def); err != nil {
 		return nil, ArgErrorf(0, "@queue %s: %v", td.Name, err)
 	}
@@ -101,8 +114,11 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 
 // CheckQueue checks a queue's arguments in every form: retries that are
 // not negative, a backoff, a maximum backoff and a lease of whole seconds,
-// the maximum no shorter than the backoff, and a retention of whole
-// seconds, zero or more.
+// the maximum no shorter than the backoff, a retention of whole seconds,
+// zero or more, and an onDuplicate of append, replace or skip, which with
+// serialize takes effect on a key alone, and a key that one of them uses
+// (D80). Whether the key is a field of the message, and of what type, is
+// verification's to check, which reads the message's fields.
 func CheckQueue(def *ir.QueueDef) error {
 	if def.Retries != nil && *def.Retries < 0 {
 		return fmt.Errorf("retries is %d; it is zero or more", *def.Retries)
@@ -133,6 +149,20 @@ func CheckQueue(def *ir.QueueDef) error {
 		if _, err := RetainSeconds(def.Retain); err != nil {
 			return fmt.Errorf("retain: %w", err)
 		}
+	}
+	switch def.OnDuplicate {
+	case "", ir.QueueOnDuplicateAppend, ir.QueueOnDuplicateReplace, ir.QueueOnDuplicateSkip:
+	default:
+		return fmt.Errorf("onDuplicate is %q; it is %q, %q or %q", def.OnDuplicate, ir.QueueOnDuplicateAppend, ir.QueueOnDuplicateReplace, ir.QueueOnDuplicateSkip)
+	}
+	dedupes := def.OnDuplicate == ir.QueueOnDuplicateReplace || def.OnDuplicate == ir.QueueOnDuplicateSkip
+	switch {
+	case def.Key == "" && dedupes:
+		return fmt.Errorf("onDuplicate is %q, which needs a key: name the message's field that keys it, as key: \"orderId\"", def.OnDuplicate)
+	case def.Key == "" && def.Serialize:
+		return fmt.Errorf("serialize needs a key: name the message's field that keys it, as key: \"orderId\"")
+	case def.Key != "" && !dedupes && !def.Serialize:
+		return fmt.Errorf("key %q takes effect with onDuplicate \"replace\" or \"skip\", or with serialize; set one of them, or leave the key out", def.Key)
 	}
 	return nil
 }

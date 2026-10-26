@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,12 @@ const namingFixture = "fixture-naming-db"
 // page, update, upsert, soft delete and hard delete its rows on the
 // Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, in a schema of
 // their own with its create.sql applied, under the quoted camel-case
-// names @table and @column give its tables and columns, and send the same
-// statements, call by call. Each side checks what it reads back. It needs
+// names @table and @column give its tables and columns, and claim,
+// complete and enqueue the messages of its queue, whose table @table names
+// too, the ones its lines' trigger enqueued among them. They send the
+// same statements, call by call, but for a transaction's BEGIN and
+// COMMIT, which pgx writes in lower case. Each side checks what it reads
+// back. It needs
 // Bun, builds the HTTP runtime, and skips without the database, or without
 // Bun unless SUPERSCHEMATIC_REQUIRE_TS_CHECKS says it must run.
 func TestNamedTablesAcrossGoAndTypeScriptOnPostgres(t *testing.T) {
@@ -107,6 +112,18 @@ func TestNamedTablesAcrossGoAndTypeScriptOnPostgres(t *testing.T) {
 		t.Fatalf("Go made %d calls and TypeScript %d", len(goCalls), len(tsCalls))
 	}
 	statements := 0
+	control := func(statements []string) []string {
+		var out []string
+		for _, s := range statements {
+			if !slices.Contains([]string{"BEGIN", "COMMIT", "ROLLBACK"}, strings.ToUpper(s)) {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	for i := range goCalls {
+		goCalls[i].Statements, tsCalls[i].Statements = control(goCalls[i].Statements), control(tsCalls[i].Statements)
+	}
 	for i, g := range goCalls {
 		want := g.Statements
 		// The Go ORM hydrates a to-one relation a full selection names with
@@ -128,8 +145,9 @@ func TestNamedTablesAcrossGoAndTypeScriptOnPostgres(t *testing.T) {
 // each call's statements as JSON to its second argument.
 const namingScript = `import { readFileSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
-import type { OrmPool, OrmQueryable } from '@superschematic/http-runtime/postgres';
+import { enqueue, postgresQueue, uuidToDb, type OrmPool, type OrmQueryable } from '@superschematic/http-runtime/postgres';
 import { createOrm } from '@TYPES@/orm';
+import { linePostedQueue } from '@TYPES@/queues';
 
 const [createSQL, out] = process.argv.slice(2);
 const dsn = process.env.SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL!;
@@ -190,6 +208,16 @@ try {
   await call('deleteLine', () => orm.lineItem.deleteOne(lines[1]!.id));
   const deleted = await call('findDeleted', () => orm.lineItem.findOne({ amountCents: { eq: cents(500) } }, { includeDeleted: true }));
   check(deleted?.deletedAt instanceof Date, 'a soft delete stamps the renamed deletedAt');
+  // The trigger enqueued x1's posting when the line was created, and the
+  // upsert's new amount replaced it; the line with no externalId posted
+  // nothing. A claimed message holds a UUID hyphenated.
+  const postings = postgresQueue(pool, linePostedQueue);
+  const posted = await call('claimPostings', () => postings.claim(10, 60));
+  check(posted.length === 1 && posted[0]!.message.lineId === uuidToDb(lines[0]!.id) && Number(posted[0]!.message.amountCents) === -1300, 'the trigger enqueued into the renamed queue table');
+  await call('completePosting', () => postings.complete(posted[0]!.id, posted[0]!.token));
+  await call('enqueuePosting', () => orm.transaction(tx => enqueue(tx, linePostedQueue, { lineId: lines[1]!.id, amountCents: cents(500) })));
+  const enqueued = await call('claimEnqueued', () => postings.claim(10, 60));
+  check(enqueued.length === 1 && enqueued[0]!.message.lineId === uuidToDb(lines[1]!.id), 'an enqueue writes the renamed columns');
   const note = await call('createNote', () => orm.note.createOne({ body: 'first' }));
   await call('updateNote', () => orm.note.updateOne(note.id, { body: 'second' }));
   await call('hardDeleteNote', () => orm.note.deleteOne(note.id));
@@ -348,6 +376,21 @@ func TestNaming(t *testing.T) {
 	deleted, err := db.LineItem.FindOne(ctx, &LineItemFilter{AmountCents: &Int64Filter{Eq: &five}}, &LineItemFindOptions{IncludeDeleted: true})
 	must(err)
 	check(deleted.DeletedAt != nil, "a soft delete stamps the renamed deletedAt")
+	postings := db.LinePostedQueue()
+	rec.call("claimPostings")
+	posted, err := postings.Claim(ctx, 10, time.Minute)
+	must(err)
+	check(len(posted) == 1 && posted[0].Message.LineId == *lines[0].Id && posted[0].Message.AmountCents == -1300, "the trigger enqueued into the renamed queue table")
+	rec.call("completePosting")
+	must(postings.Complete(ctx, posted[0].ID, posted[0].Token))
+	rec.call("enqueuePosting")
+	must(db.Transaction(ctx, func(tx TxInterface) error {
+		return EnqueueLinePosted(ctx, tx, &types.LinePosted{LineId: *lines[1].Id, AmountCents: 500})
+	}))
+	rec.call("claimEnqueued")
+	enqueued, err := postings.Claim(ctx, 10, time.Minute)
+	must(err)
+	check(len(enqueued) == 1 && enqueued[0].Message.LineId == *lines[1].Id, "an enqueue writes the renamed columns")
 	rec.call("createNote")
 	note, err := db.Note.CreateOne(ctx, &types.Note{Body: "first"})
 	must(err)

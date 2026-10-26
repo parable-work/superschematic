@@ -21,14 +21,18 @@ const (
 // goldenRequests are the documents of testdata/golden, which the runner's
 // tests run (runtime/migrate/go/cmd/superschematic-migrate): on
 // fixture-queue-db's OrderPlaced, a listing, a retry and a drop of IDs and
-// of every dead message, and a retry that names a message that is not dead.
+// of every dead message, and a retry that names a message that is not
+// dead; and on StockChecked, which keeps one ready message per SKU (D80),
+// a retry of two dead messages of one SKU and of every dead message.
 var goldenRequests = map[string]Request{
-	"dead":          {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Dead, Limit: 1},
-	"retry":         {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, IDs: []string{deadID}},
-	"retry-all":     {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, All: true},
-	"retry-refused": {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, IDs: []string{deadID, readyID, "00000000-0000-4000-8000-0000000000ff"}},
-	"drop":          {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Drop, IDs: []string{dead2ID}},
-	"drop-all":      {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Drop, All: true},
+	"retry-keyed":     {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, IDs: []string{deadID, dead2ID}, Key: "sku"},
+	"retry-all-keyed": {Service: "fixture-queue-db", Queue: "StockChecked", Operation: Retry, All: true, Key: "sku"},
+	"dead":            {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Dead, Limit: 1},
+	"retry":           {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, IDs: []string{deadID}},
+	"retry-all":       {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, All: true},
+	"retry-refused":   {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Retry, IDs: []string{deadID, readyID, "00000000-0000-4000-8000-0000000000ff"}},
+	"drop":            {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Drop, IDs: []string{dead2ID}},
+	"drop-all":        {Service: "fixture-queue-db", Queue: "OrderPlaced", Operation: Drop, All: true},
 }
 
 // TestGoldenDocuments writes each golden request's document and compares
@@ -111,5 +115,25 @@ func TestReadResult(t *testing.T) {
 	}
 	if _, err := ReadResult(req, []byte(`{"version":2}`)); err == nil || !strings.Contains(err.Error(), "version 2") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// TestDocumentNamesTheQueuesTable: a queue whose @table names its table
+// (D85) has its statements run on that table, quoted, and a queue without
+// one on its class's name with _queue.
+func TestDocumentNamesTheQueuesTable(t *testing.T) {
+	for _, tc := range []struct {
+		table, want string
+	}{
+		{"linePosted", `"linePosted"`},
+		{"", "line_posted_queue"},
+	} {
+		doc, err := Document(Request{Service: "fixture-naming-db", Queue: "LinePosted", Operation: Dead, Limit: 1, Table: tc.table})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(doc), "FROM "+strings.ReplaceAll(tc.want, `"`, `\"`)+" ") {
+			t.Errorf("table %q: the document names no %s:\n%s", tc.table, tc.want, doc)
+		}
 	}
 }

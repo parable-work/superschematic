@@ -42,6 +42,18 @@ func TableNameOf(schema *ir.Schema, typeName string) string {
 	return codegen.ToSnakeCase(typeName)
 }
 
+// QueueTableName is the table of the queue td declares (D53): the name
+// @table gives it (D85), else the class's name in snake case and
+// ir.QueueTableSuffix, order_placed_queue. sqlgen's DDL and every queue
+// client name it here, and its key indexes and @enqueueOnChange triggers
+// are named from it.
+func QueueTableName(td *ir.TypeDef) string {
+	if td.SQLName != "" {
+		return td.SQLName
+	}
+	return codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix
+}
+
 // ColumnName is the column a field is stored in: the name @column gives it
 // (D85), else its name in snake case. Like TableName, it is the one place a
 // column is named; a CHECK's name (CheckName) and an @index key's column
@@ -76,10 +88,10 @@ func IsTableRelation(schema *ir.Schema, f *ir.FieldDef) bool {
 	return !f.JsonField && !f.TypeRef.IsMap && relationalTarget(schema, f.TypeRef.Name)
 }
 
-// ColumnOf is the column that holds f, a field of a table of schema: a
-// to-one relation's foreign key (ForeignKeyColumn), any other field's
-// column (ColumnName).
-func ColumnOf(schema *ir.Schema, f *ir.FieldDef) string {
+// ColumnNameIn is the name of the column that holds f, a field of a table
+// of schema: a to-one relation's foreign key (ForeignKeyColumn), any other
+// field's column (ColumnName). ColumnOf adds its type.
+func ColumnNameIn(schema *ir.Schema, f *ir.FieldDef) string {
 	if IsTableRelation(schema, f) && !f.TypeRef.IsArray {
 		return ForeignKeyColumn(f)
 	}
@@ -100,11 +112,11 @@ func FieldNamed(td *ir.TypeDef, name string) *ir.FieldDef {
 }
 
 // KeyColumnIn is the column an @index key of td, a table of schema, names:
-// its field's column (ColumnOf), or the key in snake case when td has no
+// its field's column (ColumnNameIn), or the key in snake case when td has no
 // field of its name.
 func KeyColumnIn(schema *ir.Schema, td *ir.TypeDef, key string) string {
 	if f := FieldNamed(td, key); f != nil {
-		return ColumnOf(schema, f)
+		return ColumnNameIn(schema, f)
 	}
 	return ColumnNameOf(key)
 }

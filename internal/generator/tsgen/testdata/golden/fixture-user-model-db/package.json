@@ -63,6 +63,11 @@
   "peerDependencies": {
     "pg": ">=8.11.0"
   },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",
     "@types/pg": "8.23.1",

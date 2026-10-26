@@ -34,6 +34,10 @@
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
     },
+    "./queues": {
+      "types": "./queues.ts",
+      "import": "./queues.ts"
+    },
     "./orm": {
       "types": "./orm.ts",
       "import": "./orm.ts"
@@ -58,6 +62,11 @@
   },
   "peerDependencies": {
     "pg": ">=8.11.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",

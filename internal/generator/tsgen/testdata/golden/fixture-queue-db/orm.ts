@@ -19,7 +19,7 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -45,6 +45,8 @@ export interface OrderUpdate {
 export interface OrderFilter {
   id?: UuidFilter<T.IdentityUUID>;
   placedAt?: DateTimeFilter<T.TemporalDateTime>;
+  /** The rows a OrderLine row's order points at, or none does. */
+  referencedByOrderLineOrder?: ReferencedByFilter;
 }
 
 /** The members findOne and findMany order rows of Order by. */
@@ -116,11 +118,230 @@ export const orderTable: TableDefinition = {
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
   },
+  referencedBy: [
+    { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
+  ],
+};
+
+/**
+ * A row of OrderLine, the order_line table: A line of an order. Whatever writes it, a change to its product or its
+ * quantity enqueues the order's OrderChanged, as does a new line or a
+ * deleted one, once it names a product.
+ */
+export interface OrderLineRow {
+  id: T.IdentityUUID;
+  orderId: T.IdentityUUID;
+  productId: T.IdentityUUID | null;
+  quantity: T.GenericInt64;
+  note: string | null;
+}
+
+/** What a create of a row of OrderLine sets; a member left unset takes its column's default, or the schema's. */
+export interface OrderLineCreate {
+  id?: T.IdentityUUID | null;
+  orderId: T.IdentityUUID;
+  productId?: T.IdentityUUID | null;
+  quantity: T.GenericInt64;
+  note?: string | null;
+}
+
+/** What an update of a row of OrderLine sets: each member set, null setting a column that may be null to NULL. */
+export interface OrderLineUpdate {
+  orderId?: T.IdentityUUID;
+  productId?: T.IdentityUUID | null;
+  quantity?: T.GenericInt64;
+  note?: string | null;
+}
+
+/** The rows of OrderLine a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface OrderLineFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  orderId?: UuidFilter<T.IdentityUUID>;
+  productId?: UuidFilter<T.IdentityUUID> & NullFilter;
+  quantity?: NumberFilter<T.GenericInt64>;
+  note?: StringFilter<string> & NullFilter;
+}
+
+/** The members findOne and findMany order rows of OrderLine by. */
+export type OrderLineOrderField = "id" | "quantity" | "note";
+
+/** The members findPage orders rows of OrderLine by (D60, amended); ties break by id. */
+export type OrderLineSortField = "id" | "quantity";
+
+/** The unique keys upsertOne is keyed by, by their fields. */
+export type OrderLineUniqueKey = readonly ["id"];
+
+/** The position of a row of OrderLine in a findPage order: its id. */
+export interface OrderLinePageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The repository of OrderLine. */
+export type OrderLineRepository = Repository<
+  OrderLineRow,
+  OrderLineCreate,
+  OrderLineUpdate,
+  OrderLineFilter,
+  OrderLineOrderField,
+  OrderLineSortField,
+  OrderLineUniqueKey,
+  T.IdentityUUID,
+  OrderLinePageKey
+>;
+
+/** The order_line table, as the runtime reads and writes it. */
+export const orderLineTable: TableDefinition = {
+  name: "OrderLine",
+  table: "order_line",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "order_line.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "orderId", column: "order_id", field: "order", qualified: "order_line.order_id", uuid: true, required: true, relation: "Order", filter: ["eq", "in", "isNull"] },
+    { name: "productId", column: "product_id", field: "product", qualified: "order_line.product_id", uuid: true, relation: "Product", filter: ["eq", "in", "isNull"] },
+    { name: "quantity", column: "quantity", field: "quantity", qualified: "order_line.quantity", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "note", column: "note", field: "note", qualified: "order_line.note", filter: ["eq", "in", "ilike", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
+    qualifiedColumns: "\"order_line\".\"id\", \"order_line\".\"order_id\", \"order_line\".\"product_id\", \"order_line\".\"quantity\", \"order_line\".\"note\"",
+    getOne: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id = $1",
+    getMany: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM order_line%s%s LIMIT 1",
+    findMany: "SELECT %s FROM order_line%s%s%s",
+    count: "SELECT COUNT(*) FROM order_line%s",
+    page: "SELECT %s FROM order_line%s%s LIMIT %d",
+    pageAfterKey: "order_line.id %s %s",
+    pageAfter: "(%s, order_line.id) %s ((SELECT %s FROM order_line AS page_key WHERE page_key.id = %s), %s)",
+    pageOrder: " ORDER BY %s %s",
+    pageTiebreak: ", order_line.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM order_line WHERE order_line.id = $1)",
+    insert: "INSERT INTO order_line (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO order_line (%s) VALUES %s RETURNING %s",
+    update: "UPDATE order_line SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
+    updateMany: "UPDATE order_line SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO order_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM order_line WHERE id = $1",
+    deleteMany: "DELETE FROM order_line%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+  },
+};
+
+/**
+ * A row of Product, the product table: A product an order's line may name.
+ */
+export interface ProductRow {
+  id: T.IdentityUUID;
+  name: string;
+}
+
+/** What a create of a row of Product sets; a member left unset takes its column's default, or the schema's. */
+export interface ProductCreate {
+  id?: T.IdentityUUID | null;
+  name: string;
+}
+
+/** What an update of a row of Product sets: each member set, null setting a column that may be null to NULL. */
+export interface ProductUpdate {
+  name?: string;
+}
+
+/** The rows of Product a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface ProductFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  name?: StringFilter<string>;
+  /** The rows a OrderLine row's product points at, or none does. */
+  referencedByOrderLineProduct?: ReferencedByFilter;
+}
+
+/** The members findOne and findMany order rows of Product by. */
+export type ProductOrderField = "id" | "name";
+
+/** The members findPage orders rows of Product by (D60, amended); ties break by id. */
+export type ProductSortField = "id" | "name";
+
+/** The unique keys upsertOne is keyed by, by their fields. */
+export type ProductUniqueKey = readonly ["id"];
+
+/** The position of a row of Product in a findPage order: its id. */
+export interface ProductPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The repository of Product. */
+export type ProductRepository = Repository<
+  ProductRow,
+  ProductCreate,
+  ProductUpdate,
+  ProductFilter,
+  ProductOrderField,
+  ProductSortField,
+  ProductUniqueKey,
+  T.IdentityUUID,
+  ProductPageKey
+>;
+
+/** The product table, as the runtime reads and writes it. */
+export const productTable: TableDefinition = {
+  name: "Product",
+  table: "product",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "product.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "product.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"name\"",
+    qualifiedColumns: "\"product\".\"id\", \"product\".\"name\"",
+    getOne: "SELECT \"id\", \"name\" FROM product WHERE id = $1",
+    getMany: "SELECT \"id\", \"name\" FROM product WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM product%s%s LIMIT 1",
+    findMany: "SELECT %s FROM product%s%s%s",
+    count: "SELECT COUNT(*) FROM product%s",
+    page: "SELECT %s FROM product%s%s LIMIT %d",
+    pageAfterKey: "product.id %s %s",
+    pageAfter: "(%s, product.id) %s ((SELECT %s FROM product AS page_key WHERE page_key.id = %s), %s)",
+    pageOrder: " ORDER BY %s %s",
+    pageTiebreak: ", product.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM product WHERE product.id = $1)",
+    insert: "INSERT INTO product (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO product (%s) VALUES %s RETURNING %s",
+    update: "UPDATE product SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"name\"",
+    updateMany: "UPDATE product SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO product (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"name\"",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM product WHERE id = $1",
+    deleteMany: "DELETE FROM product%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+  },
+  referencedBy: [
+    { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
+  ],
 };
 
 /** The repositories of fixture-queue-db, by table. */
 export interface FixtureQueueDbRepositories {
   readonly order: OrderRepository;
+  readonly orderLine: OrderLineRepository;
+  readonly product: ProductRepository;
 }
 
 /** The repositories of fixture-queue-db over a pool, acting as a user or none. */
@@ -161,6 +382,8 @@ export const fixtureQueueDbOrm: OrmDefinition = {
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {
     order: orderTable,
+    orderLine: orderLineTable,
+    product: productTable,
   },
 };
 

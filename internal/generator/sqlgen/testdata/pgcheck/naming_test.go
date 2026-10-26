@@ -15,10 +15,11 @@ import (
 // tables and columns @table and @column name in camel case (D85), and
 // checks that every name the DDL derives from them is the one Postgres
 // holds, case and all: the tables, the columns, the CHECKs, the foreign
-// key, the indexes, the history table, its function and triggers. A raw
-// INSERT that leaves out a defaulted column, a value a CHECK refuses, the
-// partial unique index over the live rows, SET NULL and the history
-// trigger's image all work under the quoted names. drop.sql then removes
+// key, the indexes, the history table, its function and triggers, the
+// queue's table and the trigger that enqueues to it. A raw INSERT that
+// leaves out a defaulted column, a value a CHECK refuses, the partial
+// unique index over the live rows, SET NULL, the history trigger's image
+// and the enqueue trigger's message all work under the quoted names. drop.sql then removes
 // them all. TestNamingCreateSQLOnPostgres in the sqlgen package runs it
 // with PGCHECK_DATABASE_URL and PGCHECK_SQL_DIR.
 func TestNamingOnPostgres(t *testing.T) {
@@ -48,12 +49,12 @@ func TestNamingOnPostgres(t *testing.T) {
 	for _, tc := range []struct {
 		what, sql, want string
 	}{
-		{"tables", `SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = 'public'::regnamespace`, "budgetCategory ledgerNote ledgerNote_history lineItem"},
+		{"tables", `SELECT relname FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = 'public'::regnamespace`, "budgetCategory ledgerNote ledgerNote_history lineItem linePosted"},
 		{"lineItem's columns", `SELECT attname FROM pg_attribute WHERE attrelid = '"lineItem"'::regclass AND attnum > 0 AND NOT attisdropped`, "amountCents categoryId createdAt deletedAt externalId id memo postedOn search_text updatedAt"},
 		{"constraints", `SELECT conname FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND contype IN ('c', 'f')`, "ck_budgetCategory_displayName ck_budgetCategory_kind fk_lineItem_categoryId"},
-		{"indexes", `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname NOT LIKE '%_pkey'`, "idx_ledgerNote_history_id_recorded idx_lineItem_postedOn idx_lineItem_search_trgm uq_ledgerNote_history_id_version uq_lineItem_external"},
-		{"triggers", `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal`, "trg_ledgerNote_bump_version trg_ledgerNote_capture_history_delete trg_ledgerNote_capture_history_write"},
-		{"functions", `SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prorettype = 'trigger'::regtype`, "ledgerNote_capture_history"},
+		{"indexes", `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname NOT LIKE '%_pkey'`, "idx_ledgerNote_history_id_recorded idx_lineItem_postedOn idx_lineItem_search_trgm idx_linePosted_claim_expires_at idx_linePosted_due_at idx_linePosted_updated_at uq_ledgerNote_history_id_version uq_lineItem_external uq_linePosted_ready_key"},
+		{"triggers", `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal`, "trg_ledgerNote_bump_version trg_ledgerNote_capture_history_delete trg_ledgerNote_capture_history_write trg_lineItem_enqueue_linePosted"},
+		{"functions", `SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prorettype = 'trigger'::regtype`, "ledgerNote_capture_history lineItem_enqueue_linePosted"},
 	} {
 		if got := strings.Join(names(tc.sql), " "); got != tc.want {
 			t.Errorf("%s = %s\nwant %s", tc.what, got, tc.want)
@@ -80,6 +81,14 @@ func TestNamingOnPostgres(t *testing.T) {
 	var orphans int
 	if err := conn.QueryRow(ctx, `SELECT count(*) FROM "lineItem" WHERE "categoryId" IS NULL`).Scan(&orphans); err != nil || orphans != 2 {
 		t.Errorf("SET NULL cleared %d lines (%v), want 2", orphans, err)
+	}
+	// Each line from the bank enqueued its posting, and a change of the
+	// amount replaced the one that waits; the soft delete and SET NULL left
+	// the amounts as they were.
+	mustExec(t, ctx, conn, `UPDATE "lineItem" SET "amountCents" = "amountCents" + 50 WHERE "amountCents" = 300`)
+	var postings string
+	if err := conn.QueryRow(ctx, `SELECT string_agg(p."amountCents"::text, ',' ORDER BY p."amountCents") FROM "linePosted" p JOIN "lineItem" l ON l.id = p."lineId" WHERE p.state = 'ready'`).Scan(&postings); err != nil || postings != "100,350" {
+		t.Errorf("the ready postings are %q (%v), want 100,350", postings, err)
 	}
 
 	var note string

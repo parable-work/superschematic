@@ -149,3 +149,64 @@ func TestASourceViewOfAnEncryptedFieldSaysSo(t *testing.T) {
 		t.Errorf("@decrypted outside a view: %v", errs)
 	}
 }
+
+// TestEncryptedFieldsStayOutOfQueues: a queue's message carries no
+// Encrypted<T> field, and an @enqueueOnChange neither copies one into a
+// message, nor compares one, nor tests what it equals, since its column
+// holds a ciphertext the trigger cannot open; whether it is null it may
+// test (D85, D80).
+func TestEncryptedFieldsStayOutOfQueues(t *testing.T) {
+	str := ir.TypeRef{Name: "string"}
+	queue := func(fields ...*ir.FieldDef) *ir.TypeDef {
+		return &ir.TypeDef{Name: "Linked", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{}, Fields: fields}
+	}
+	t.Run("a message field", func(t *testing.T) {
+		schema := vaultSchema(nil)
+		schema.Types["Linked"] = queue(&ir.FieldDef{Name: "token", TypeRef: str, Required: true, EncryptedAtRest: true})
+		want := "Linked.token: Encrypted<T> marks a field of a table the ORMs keep, and Linked is a @queue, whose workers read its message as it was enqueued"
+		if errs := encryptedErrors(schema); !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, want) }) {
+			t.Fatalf("errors = %v, want one that says %q", errs, want)
+		}
+	})
+	enqueue := func(def *ir.EnqueueOnChange) []string {
+		schema := vaultSchema(func(td *ir.TypeDef, token *ir.FieldDef) {
+			token.Required = false
+			def.Queue = "Linked"
+			if def.On == nil {
+				def.On = []string{"insert", "update"}
+			}
+			td.EnqueueOnChange = []*ir.EnqueueOnChange{def}
+		})
+		schema.Types["Linked"] = queue(
+			&ir.FieldDef{Name: "itemId", TypeRef: str, Required: true},
+			&ir.FieldDef{Name: "token", TypeRef: str},
+		)
+		r := &Result{}
+		checkEnqueueOnChange(schema, r)
+		return errorStrings(r)
+	}
+	for _, tc := range []struct {
+		name string
+		def  *ir.EnqueueOnChange
+		want string
+	}{
+		{"a mapped field", &ir.EnqueueOnChange{Message: map[string]string{"itemId": "itemId", "token": "accessToken"}},
+			"message field token takes accessToken, an Encrypted<T> field, whose ciphertext is bound to PlaidItem's row and no worker opens"},
+		{"a compared field", &ir.EnqueueOnChange{Fields: []string{"accessToken"}, Message: map[string]string{"itemId": "itemId"}},
+			"fields names accessToken, an Encrypted<T> field, whose ciphertext every write and every key rotation changes"},
+		{"a field it equals", &ir.EnqueueOnChange{When: []*ir.EnqueueCondition{{Field: "accessToken", Equals: "x"}}, Message: map[string]string{"itemId": "itemId"}},
+			"when accessToken equals x: accessToken is an Encrypted<T> field, whose column holds a ciphertext no value equals"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := enqueue(tc.def); !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, tc.want) }) {
+				t.Fatalf("errors = %v, want one that says %q", errs, tc.want)
+			}
+		})
+	}
+	t.Run("a null test", func(t *testing.T) {
+		def := &ir.EnqueueOnChange{When: []*ir.EnqueueCondition{{Field: "accessToken", NotNull: true}}, Message: map[string]string{"itemId": "itemId"}}
+		if errs := enqueue(def); len(errs) != 0 {
+			t.Fatalf("errors = %v", errs)
+		}
+	})
+}

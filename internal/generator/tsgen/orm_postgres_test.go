@@ -18,10 +18,10 @@ import (
 var ormTests embed.FS
 
 // repositoryCase is a generated package's repository test: the fixture,
-// the test file of testdata/orm it runs, and the tests that must pass.
+// the test files of testdata/orm it runs, and the tests that must pass.
 type repositoryCase struct {
 	fixture string
-	test    string
+	files   []string
 	tests   []string
 }
 
@@ -30,15 +30,15 @@ type repositoryCase struct {
 // search, pages, upsert, acting user, soft delete, transaction with a
 // queued message and raw rows through the codec; fixture-db's pages, the
 // counterpart of page_postgres_test.go; fixture-queue-db's order by on a
-// keyword table, order_by_postgres_test.go's; fixture-db's JSON column
-// through the codec; fixture-user-model-db's user model tables,
+// keyword table, order_by_postgres_test.go's, and its keyed queues and
+// trigger under a transaction of the repositories (D80); fixture-db's JSON
+// column through the codec; fixture-user-model-db's user model tables,
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
 // the repositories; and fixture-vault-db's Encrypted<T> fields (D85),
-// sealed, opened, refused and resealed. A fixture may run more than one
-// file.
+// sealed, opened, refused and resealed.
 var repositoryCases = []repositoryCase{
-	{fixture: "fixture-ledger-db", test: "ledger.test.ts", tests: []string{
+	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
 		"a relation loads in a batch through getManyByIds, keyed by base62",
 		"a write that stamps a user needs one, as the Go ORM refuses with ErrNoUserInContext",
@@ -54,32 +54,33 @@ var repositoryCases = []repositoryCase{
 		"a field of a @jsonField type is a JSON object in its JSONB column, and reads back as its value",
 		"a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts",
 	}},
-	{fixture: "fixture-db", test: "page.test.ts", tests: []string{
+	{fixture: "fixture-db", files: []string{"page.test.ts", "json.test.ts"}, tests: []string{
 		"pages by text, a number and a time, each way, ties broken by the key in the sort's direction",
 		"a filter and a search sit beside the keyset, and a deleted member is out of every page unless included",
 		"a key is the row's id alone, which places a page however the row changed since",
 		"a page reads in a transaction",
-	}},
-	{fixture: "fixture-db", test: "json.test.ts", tests: []string{
 		"a JSON column holds a string, a number, a list, an object and the JSON null as they are, with the pool's parsers on and off",
 		"eq and in on a JSON column compare JSON values as JSONB does",
 	}},
-	{fixture: "fixture-queue-db", test: "order_by.test.ts", tests: []string{
+	{fixture: "fixture-queue-db", files: []string{"order_by.test.ts", "queue_key.test.ts"}, tests: []string{
 		"findMany and findOne order a keyword-named table by a column, each way",
+		"an enqueue in a transaction of the ORM keeps one waiting message per key: skip the first, replace the latest",
+		"a line the repositories write enqueues its order's change through the trigger, under the queue's key with the code's",
+		"a transaction that throws enqueues nothing, by its code or by its trigger",
 	}},
-	{fixture: "fixture-user-model-db", test: "user_model.test.ts", tests: []string{
+	{fixture: "fixture-user-model-db", files: []string{"user_model.test.ts"}, tests: []string{
 		"a login that differs only in case is the same login, and the identity tables keep their keys unique",
 		"deleting a user deletes its sessions, credential and grants, and deleting a role its grants",
 		"a principal's base62 subject matches its user row through uuidToDb",
 	}},
-	{fixture: "fixture-ddl-db", test: "ddl.test.ts", tests: []string{
+	{fixture: "fixture-ddl-db", files: []string{"ddl.test.ts"}, tests: []string{
 		"a create that leaves a defaulted field unset writes what the column's DEFAULT gives a raw insert",
 		"a value a column's CHECK refuses fails the write, naming the constraint",
 		"deleting a category clears the references SET NULL names, and keeps their rows",
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
 	}},
-	{fixture: "fixture-vault-db", test: "vault.test.ts", tests: []string{
+	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",
 		"a wrong key, no key and an envelope moved to another row fail with FieldEncryptionError",
 		"updateMany and an upsert on another key than the primary key cannot set an encrypted field; an upsert on the primary key can",
@@ -108,22 +109,22 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 	var packages []tsPackageCase
 	files := map[string]map[string]string{}
 	for _, rc := range repositoryCases {
-		source, err := ormTests.ReadFile("testdata/orm/" + rc.test)
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, rc.fixture))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("load %s: %v", rc.fixture, err)
 		}
-		if files[rc.fixture] == nil {
-			schema, err := loader.LoadService(filepath.Join(fixturesDir, rc.fixture))
+		packages = append(packages, tsPackageCase{name: rc.fixture, schema: schema})
+		files[rc.fixture] = map[string]string{
+			"harness.ts": string(harness),
+			"create.sql": createSQLOf(t, schema, rc.fixture),
+		}
+		for _, file := range rc.files {
+			source, err := ormTests.ReadFile("testdata/orm/" + file)
 			if err != nil {
-				t.Fatalf("load %s: %v", rc.fixture, err)
+				t.Fatal(err)
 			}
-			packages = append(packages, tsPackageCase{name: rc.fixture, schema: schema})
-			files[rc.fixture] = map[string]string{
-				"harness.ts": string(harness),
-				"create.sql": createSQLOf(t, schema, rc.fixture),
-			}
+			files[rc.fixture][file] = string(source)
 		}
-		files[rc.fixture][rc.test] = string(source)
 	}
 	typesRoot, bunPath := buildTSPackages(t, packages)
 	// The tests are written once the packages type-check: bun runs them
@@ -136,12 +137,16 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 		}
 	}
 	for _, rc := range repositoryCases {
-		t.Run(rc.fixture+"/"+rc.test, func(t *testing.T) {
+		t.Run(rc.fixture, func(t *testing.T) {
 			dir := filepath.Join(typesRoot, rc.fixture)
-			report := filepath.Join(dir, strings.TrimSuffix(rc.test, ".test.ts")+".junit.xml")
+			report := filepath.Join(dir, "orm.junit.xml")
 			// A test and a hook, which creates a database and runs its DDL,
 			// may take longer than bun's 5s on a loaded machine.
-			run := exec.Command(bunPath, "test", "./"+rc.test, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
+			args := []string{"test"}
+			for _, file := range rc.files {
+				args = append(args, "./"+file)
+			}
+			run := exec.Command(bunPath, append(args, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)...)
 			run.Dir = dir
 			out, err := run.CombinedOutput()
 			if err != nil {
@@ -165,7 +170,7 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 				}
 			}
 			if len(cases) != len(rc.tests) {
-				t.Fatalf("bun ran %d tests of %s, and the case names %d:\n%s", len(cases), rc.test, len(rc.tests), junit)
+				t.Fatalf("bun ran %d tests of %s, and the case names %d:\n%s", len(cases), strings.Join(rc.files, ", "), len(rc.tests), junit)
 			}
 			t.Logf("bun ran the repository tests:\n%s", out)
 		})

@@ -514,7 +514,7 @@ func keyColumn(schema *ir.Schema, td *ir.TypeDef) string {
 // <field>_id, every other field its snake_case name, unless @column names
 // it (D85).
 func Column(schema *ir.Schema, fd *ir.FieldDef) string {
-	return sqlutil.ColumnOf(schema, fd)
+	return sqlutil.ColumnNameIn(schema, fd)
 }
 
 // isAudit reports whether a field is one of the audit fields D17 leaves out

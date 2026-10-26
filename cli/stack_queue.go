@@ -268,6 +268,7 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	req := request(service, queue)
+	req.Key, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
 	doc, err := queueops.Document(req)
 	if err != nil {
 		return err
@@ -362,6 +363,28 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 			c.env.Environment, service, host.Name, host.Dialect)
 	}
 	return host.Name, nil
+}
+
+// queueKey is the quoted key column of the queue of the DB service when it
+// keeps one ready message per key (D80), else "".
+func (c *deployContext) queueKey(service, queue string) string {
+	for _, svc := range c.services {
+		if svc.Name == service {
+			return svc.QueueKeys[queue]
+		}
+	}
+	return ""
+}
+
+// queueTable is the table of service's queue, as its class names it
+// (D85), or "" when the service is not among the stack's.
+func (c *deployContext) queueTable(service, queue string) string {
+	for _, svc := range c.services {
+		if svc.Name == service {
+			return svc.QueueTables[queue]
+		}
+	}
+	return ""
 }
 
 // writeQueueText prints what a queue operation did for a person.

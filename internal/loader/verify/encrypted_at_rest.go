@@ -13,7 +13,8 @@ import (
 // row key they know before the insert, since the ciphertext is bound to
 // it. A ciphertext compares with nothing, so the field takes no @key,
 // @unique, @searchField, @index or Default, and no history image keeps it.
-// Each refusal names the fix. An Encrypted<T> field is a Secret<T>, which
+// A queue's message carries none (checkEnqueueOnChange refuses a trigger
+// that reads one). Each refusal names the fix. An Encrypted<T> field is a Secret<T>, which
 // the data forms may leave unsaid, so the pass marks it one.
 func checkEncryptedFields(schema *ir.Schema, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
@@ -35,6 +36,9 @@ func checkEncryptedFields(schema *ir.Schema, r *Result) {
 			case bases[td.Name]:
 				// A base class's fields are checked on each table that
 				// extends it, where they are copied.
+				continue
+			case td.Queue != nil:
+				r.errorf(td.Owner, "%s: Encrypted<T> marks a field of a table the ORMs keep, and %s is a @queue, whose workers read its message as it was enqueued; carry the key of the row that holds the value, and read the field through the row's repository", owner, td.Name)
 				continue
 			case !hasTable(td, bases):
 				r.errorf(td.Owner, "%s: Encrypted<T> marks a field of a table; %s is no table, and its value is stored whole with the row that holds it", owner, td.Name)

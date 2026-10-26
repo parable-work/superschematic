@@ -18,6 +18,12 @@ export interface QueueField {
   readonly column: string;
   /** The column holds the value as JSON, which an enqueue writes with JSON.stringify. */
   readonly json?: boolean;
+  /**
+   * The kind of JSON value a JSON column holds for the member's type: an object for a @jsonField type or a map, a
+   * list for a list of them. A claim refuses a row whose JSON is of another kind, as Go's and Rust's types do.
+   * None for a JSON scalar, which holds any value.
+   */
+  readonly shape?: 'object' | 'list';
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
@@ -44,6 +50,11 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /**
+   * Ends an enqueue on a queue that keeps one ready message per key (D80): what it does when a ready message
+   * holds the message's key, which replaces that message or keeps it. Other queues have none.
+   */
+  readonly conflict?: string;
   readonly expire: string;
   readonly claim: string;
   readonly complete: string;
@@ -132,6 +143,11 @@ export interface Queue<M> {
 /** The claims of a queue over a pg pool, which postgresQueue makes. */
 export type PostgresQueue<M> = Queue<M>;
 
+/** What an enqueue ends with after its VALUES: a space and the queue's conflict clause, or nothing (D80). */
+export function conflictOf(statements: QueueStatements): string {
+  return statements.conflict ? ` ${statements.conflict}` : '';
+}
+
 /** What a message's member is, unset: absent or null. An enum with a default is also unset when empty, as in Go. */
 export function unset(value: unknown, field: QueueField): boolean {
   return value === undefined || value === null || (field.default !== undefined && value === '');
@@ -201,6 +217,47 @@ export function formatDuration(nanos: bigint): string {
   if (hours > 0n) return `${sign}${hours}h${minutes}m${seconds}`;
   if (minutes > 0n) return `${sign}${minutes}m${seconds}`;
   return `${sign}${seconds}`;
+}
+
+/**
+ * A JSON column's text as the message's member: the JSON it holds, decoded once, of the kind the field's shape
+ * names, or JSON null. A claim reads a JSON column as its text on every database: Postgres's json and jsonb
+ * columns arrive unparsed (queue.ts's type parsers), and SQLite's are TEXT. So a value that is itself a JSON
+ * string, "1" or "x", reads as that string, and is not parsed a second time.
+ */
+export function jsonMemberValue(text: unknown, field: QueueField): unknown {
+  return decodeJSONText(text, field.shape);
+}
+
+/**
+ * A JSON column's text decoded once (D79, D80): the JSON value it holds, a JSON string among them, and of the kind
+ * shape names when it names one. A queue's claim reads every JSON column so, and the Postgres value codec
+ * (pgcodec.ts) a TEXT column that holds JSON; a json or jsonb column a repository reads arrives parsed by pg, the
+ * same value.
+ */
+export function decodeJSONText(text: unknown, shape?: 'object' | 'list'): unknown {
+  if (typeof text !== 'string') throw new Error(`the column holds ${JSON.stringify(text)}, no JSON text`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`holds no JSON: ${errorMessage(error)}`, { cause: error });
+  }
+  if (shape !== undefined && value !== null && jsonKind(value) !== shape) {
+    throw new Error(`holds ${article(jsonKind(value))}, where its type is ${article(shape)}`);
+  }
+  return value;
+}
+
+/** The kind of a decoded JSON value: an object, a list, a string, a number or a boolean. */
+function jsonKind(value: unknown): string {
+  if (Array.isArray(value)) return 'list';
+  return typeof value === 'object' ? 'object' : typeof value;
+}
+
+/** A kind with its article: an object, a list. */
+function article(kind: string): string {
+  return /^[aeiou]/u.test(kind) ? `an ${kind}` : `a ${kind}`;
 }
 
 /** An error's message. */

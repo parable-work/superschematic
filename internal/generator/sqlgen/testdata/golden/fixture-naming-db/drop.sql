@@ -2,7 +2,15 @@
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
 
+-- Drop the triggers and functions that enqueue on a write
+DROP TRIGGER IF EXISTS "trg_lineItem_enqueue_linePosted" ON "lineItem";
+DROP FUNCTION IF EXISTS "lineItem_enqueue_linePosted"();
+
 -- Drop indexes
+DROP INDEX IF EXISTS "idx_linePosted_due_at" CASCADE;
+DROP INDEX IF EXISTS "idx_linePosted_claim_expires_at" CASCADE;
+DROP INDEX IF EXISTS "idx_linePosted_updated_at" CASCADE;
+DROP INDEX IF EXISTS "uq_linePosted_ready_key" CASCADE;
 DROP INDEX IF EXISTS "idx_lineItem_postedOn" CASCADE;
 DROP INDEX IF EXISTS "uq_lineItem_external" CASCADE;
 
@@ -22,6 +30,7 @@ DROP TABLE IF EXISTS "ledgerNote_history" CASCADE;
 -- Drop join tables first
 
 -- Drop tables in reverse order (to handle foreign key dependencies)
+DROP TABLE IF EXISTS "linePosted" CASCADE;
 DROP TABLE IF EXISTS "ledgerNote" CASCADE;
 DROP TABLE IF EXISTS "lineItem" CASCADE;
 DROP TABLE IF EXISTS "budgetCategory" CASCADE;

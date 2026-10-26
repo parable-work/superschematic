@@ -32,7 +32,9 @@ export interface Category {
 /**
  * LineItem - A line of spending, in the application's lineItem table: its columns
  * keep their camel-case names, its category's foreign key among them, and
- * the bank's id of a line is unique among its category's.
+ * the bank's id of a line is unique among its category's. A line from the
+ * bank enqueues a LinePosted when it is written and when its amount
+ * changes; the trigger is named after both tables.
  */
 export interface LineItem {
   id?: IdentityUUID | null;
@@ -44,6 +46,16 @@ export interface LineItem {
   createdAt: TemporalDateTime;
   updatedAt: TemporalDateTime;
   deletedAt?: TemporalDateTime | null;
+}
+
+/**
+ * LinePosted - Sent when a line from the bank is posted or its amount changes, in the
+ * application's linePosted table: a newer posting of a line replaces the
+ * one that waits.
+ */
+export interface LinePosted {
+  lineId: IdentityUUID;
+  amountCents: GenericInt64;
 }
 
 /**

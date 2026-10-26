@@ -206,6 +206,35 @@ func (d *differ) rebuilds(phase Phase, changes []*change) map[string]*tableRebui
 		}
 		rb.changes = append(rb.changes, c)
 	}
+	for name, rb := range out {
+		if rb.triggers == nil {
+			rb.triggers = map[string][]*Trigger{}
+		}
+		rb.triggers[name] = d.phaseTriggers(phase, name)
+	}
+	return out
+}
+
+// phaseTriggers are the triggers a phase leaves on table: the new model's,
+// and in expand also the previous model's that contract drops, on a table
+// that keeps its name, since their definitions name it.
+func (d *differ) phaseTriggers(phase Phase, table string) []*Trigger {
+	var out []*Trigger
+	named := map[string]bool{}
+	for _, t := range d.to.Triggers {
+		if t.Table == table {
+			out = append(out, t)
+			named[t.Name] = true
+		}
+	}
+	if phase == Expand {
+		for _, t := range d.from.Triggers {
+			if t.Table == table && !named[t.Name] && d.renames.table(t.Table) == table {
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

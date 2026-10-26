@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
@@ -90,6 +91,18 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		svc.FieldKeys = outputs.EncryptionKey()
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
+			if td.SQLName != "" {
+				if svc.QueueTables == nil {
+					svc.QueueTables = map[string]string{}
+				}
+				svc.QueueTables[td.Name] = sqlutil.QueueTableName(td)
+			}
+			if td.Queue.Dedupes() {
+				if svc.QueueKeys == nil {
+					svc.QueueKeys = map[string]string{}
+				}
+				svc.QueueKeys[td.Name] = sqlutil.QueueKeyColumn(td)
+			}
 		}
 		engineTypes := codegen.EngineTypes(schema)
 		svc.Engine = len(engineTypes) > 0

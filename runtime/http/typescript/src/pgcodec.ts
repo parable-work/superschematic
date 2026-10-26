@@ -1,4 +1,4 @@
-import { formatDuration } from './queue-core.js';
+import { decodeJSONText, formatDuration } from './queue-core.js';
 import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './queue.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 
@@ -171,7 +171,8 @@ export function decodeValue(value: unknown, codec: ValueCodec): unknown {
   // pg parses a JSON or JSONB column itself: its value is the JSON value,
   // which a string may be. Only a TEXT column holds JSON as its text.
   if (codec.json) return value;
-  if (codec.jsonText) return typeof value === 'string' ? JSON.parse(value) : value;
+  // A TEXT column's JSON is decoded once, as a queue's claim decodes it.
+  if (codec.jsonText) return decodeJSONText(value);
   if (codec.point) return decodePoint(value);
   if (codec.interval) return decodeInterval(value);
   if (codec.list) {

@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
   "from": "8f8a634659902bbb610a36f200465aa34f1aaa89666f553f0340f89cacc221f6",
-  "hash": "18cdbaeefca1263b13bdc24a3dcbef7d14fa638feb72bcef950e123fa5ce9e5d",
+  "hash": "4cf40ad8f38abd15d14a93a5dedf234f1399b0dd0ed6a51653b29035a323cbb9",
   "service": "shop-db",
   "steps": [
     {
@@ -270,39 +270,6 @@
     },
     {
       "index": 22,
-      "op": "replaceTrigger",
-      "phase": "expand",
-      "statements": [
-        "DROP TRIGGER \"trg_purchaseOrder_bump_version\" ON \"purchaseOrder\"",
-        "CREATE TRIGGER \"trg_purchaseOrder_bump_version\"\n  BEFORE UPDATE ON \"purchaseOrder\"\n  FOR EACH ROW EXECUTE FUNCTION \"purchaseOrder_capture_history\"()"
-      ],
-      "subject": "trigger/purchaseOrder/trg_purchaseOrder_bump_version",
-      "transactional": true
-    },
-    {
-      "index": 23,
-      "op": "replaceTrigger",
-      "phase": "expand",
-      "statements": [
-        "DROP TRIGGER \"trg_purchaseOrder_capture_history_delete\" ON \"purchaseOrder\"",
-        "CREATE TRIGGER \"trg_purchaseOrder_capture_history_delete\"\n  AFTER DELETE ON \"purchaseOrder\"\n  FOR EACH ROW EXECUTE FUNCTION \"purchaseOrder_capture_history\"()"
-      ],
-      "subject": "trigger/purchaseOrder/trg_purchaseOrder_capture_history_delete",
-      "transactional": true
-    },
-    {
-      "index": 24,
-      "op": "replaceTrigger",
-      "phase": "expand",
-      "statements": [
-        "DROP TRIGGER \"trg_purchaseOrder_capture_history_write\" ON \"purchaseOrder\"",
-        "CREATE TRIGGER \"trg_purchaseOrder_capture_history_write\"\n  AFTER INSERT OR UPDATE ON \"purchaseOrder\"\n  FOR EACH ROW EXECUTE FUNCTION \"purchaseOrder_capture_history\"()"
-      ],
-      "subject": "trigger/purchaseOrder/trg_purchaseOrder_capture_history_write",
-      "transactional": true
-    },
-    {
-      "index": 25,
       "op": "commentOnTable",
       "phase": "expand",
       "statements": [
@@ -312,7 +279,7 @@
       "transactional": true
     },
     {
-      "index": 26,
+      "index": 23,
       "op": "commentOnTable",
       "phase": "expand",
       "statements": [

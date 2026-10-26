@@ -41,7 +41,9 @@ ALTER TABLE "lineItem" ADD COLUMN search_text TEXT GENERATED ALWAYS AS (
 
 COMMENT ON TABLE "lineItem" IS 'A line of spending, in the application''s lineItem table: its columns
 keep their camel-case names, its category''s foreign key among them, and
-the bank''s id of a line is unique among its category''s.';
+the bank''s id of a line is unique among its category''s. A line from the
+bank enqueues a LinePosted when it is written and when its amount
+changes; the trigger is named after both tables.';
 
 CREATE TABLE "ledgerNote" (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -53,6 +55,24 @@ CREATE TABLE "ledgerNote" (
 
 COMMENT ON TABLE "ledgerNote" IS 'A note on the ledger, whose every version a history keeps: its history
 table, functions and triggers are named after its table.';
+
+CREATE TABLE "linePosted" (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "lineId" UUID NOT NULL,
+  "amountCents" BIGINT NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE "linePosted" IS 'Sent when a line from the bank is posted or its amount changes, in the
+application''s linePosted table: a newer posting of a line replaces the
+one that waits.';
 
 -- Create history tables for versioned entities
 
@@ -85,6 +105,14 @@ CREATE INDEX "idx_lineItem_postedOn" ON "lineItem" USING BTREE ("postedOn");
 CREATE UNIQUE INDEX "uq_lineItem_external" ON "lineItem" USING BTREE ("categoryId", "externalId") WHERE "deletedAt" IS NULL;
 
 CREATE INDEX "idx_lineItem_search_trgm" ON "lineItem" USING GIN (search_text gin_trgm_ops);
+
+CREATE INDEX "idx_linePosted_due_at" ON "linePosted" USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX "idx_linePosted_claim_expires_at" ON "linePosted" USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX "idx_linePosted_updated_at" ON "linePosted" USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE UNIQUE INDEX "uq_linePosted_ready_key" ON "linePosted" USING BTREE ("lineId") WHERE state = 'ready';
 
 -- Create history capture functions and triggers
 
@@ -135,3 +163,24 @@ CREATE TRIGGER "trg_ledgerNote_capture_history_write"
 CREATE TRIGGER "trg_ledgerNote_capture_history_delete"
   AFTER DELETE ON "ledgerNote"
   FOR EACH ROW EXECUTE FUNCTION "ledgerNote_capture_history"();
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+
+CREATE OR REPLACE FUNCTION "lineItem_enqueue_linePosted"() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of LinePosted after a write to lineItem (D80).
+  IF TG_OP = 'UPDATE' AND NOT (OLD."amountCents" IS DISTINCT FROM NEW."amountCents") THEN
+    RETURN NULL;
+  END IF;
+  IF NEW."externalId" IS NOT NULL THEN
+    INSERT INTO "linePosted" ("lineId", "amountCents") VALUES (NEW.id, NEW."amountCents")
+      ON CONFLICT ("lineId") WHERE state = 'ready' DO UPDATE SET "amountCents" = excluded."amountCents", due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "trg_lineItem_enqueue_linePosted"
+  AFTER INSERT OR UPDATE ON "lineItem"
+  FOR EACH ROW EXECUTE FUNCTION "lineItem_enqueue_linePosted"();

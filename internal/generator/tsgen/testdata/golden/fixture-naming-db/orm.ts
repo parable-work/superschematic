@@ -135,7 +135,9 @@ export const categoryTable: TableDefinition = {
 /**
  * A row of LineItem, the "lineItem" table: A line of spending, in the application's lineItem table: its columns
  * keep their camel-case names, its category's foreign key among them, and
- * the bank's id of a line is unique among its category's.
+ * the bank's id of a line is unique among its category's. A line from the
+ * bank enqueues a LinePosted when it is written and when its amount
+ * changes; the trigger is named after both tables.
  */
 export interface LineItemRow {
   id: T.IdentityUUID;

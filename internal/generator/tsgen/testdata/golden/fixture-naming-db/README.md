@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, IdentityUUID, TemporalDate, TemporalDateTime, CategoryKind, Category, LineItem, Note,  } from '@schemas/fixture-naming-db-types/types';
+import type { GenericInt64, IdentityUUID, TemporalDate, TemporalDateTime, CategoryKind, Category, LineItem, LinePosted, Note,  } from '@schemas/fixture-naming-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-naming-db-types';
@@ -112,7 +112,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (3)
+### Types (4)
 
 
 - **Category** - A category of spending, in the table the application named
@@ -120,7 +120,13 @@ budgetCategory.
 
 - **LineItem** - A line of spending, in the application's lineItem table: its columns
 keep their camel-case names, its category's foreign key among them, and
-the bank's id of a line is unique among its category's.
+the bank's id of a line is unique among its category's. A line from the
+bank enqueues a LinePosted when it is written and when its amount
+changes; the trigger is named after both tables.
+
+- **LinePosted** - Sent when a line from the bank is posted or its amount changes, in the
+application's linePosted table: a newer posting of a line replaces the
+one that waits.
 
 - **Note** - A note on the ledger, whose every version a history keeps: its history
 table, functions and triggers are named after its table.

@@ -106,6 +106,8 @@ breaks your code, the type checker of each language points at the line.
 | A scheduled or on-demand job | a class with `@job({ schedule, timeZone, timeout, retries })` in an API schema | the job's interface and a deployable the stack runs | the job's body | [Stacks](/superschematic/guides/stacks/#jobs) |
 | A queue, written in the transaction that causes it | a class with `@queue({ retries, backoff, lease })` in a DB schema | the queue's table, `Enqueue<Class>` in the ORM, retries and dead messages | the enqueue call | [Queues and workers](/superschematic/guides/queues/#declare-a-queue) |
 | A worker that handles a queue | a class with `@worker({ queue, concurrency })` in an API schema | the claim loop, a deployable the stack runs | the handler | [Queues and workers](/superschematic/guides/queues/#write-a-worker) |
+| One waiting message per key, or one running | `@queue({ key, onDuplicate: "replace", serialize: true })` | the unique indexes, the enqueue's `ON CONFLICT`, claims that hold a key to one worker | nothing | [Queues and workers](/superschematic/guides/queues/#one-message-per-key) |
+| A message whatever writes a row | `@enqueueOnChange(Queue, { on, fields, when, message })` on a DB table | a trigger on Postgres and SQLite, its migration | nothing | [Queues and workers](/superschematic/guides/queues/#enqueue-on-a-change) |
 
 ## Files, front ends and clients
 

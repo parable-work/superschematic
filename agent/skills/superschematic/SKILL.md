@@ -123,8 +123,11 @@ path for when the store is unavailable.
   `@userSessions` on an API class) instead of writing auth.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
-  transaction as the change that causes them, and `@deriver` on an API
-  class to fill an engine type's Derived fields from a model.
+  transaction as the change that causes them; `key` with `onDuplicate` or
+  `serialize` for one waiting or one running message per key;
+  `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
+  `@deriver` on an API class to fill an engine type's Derived fields from
+  a model.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`

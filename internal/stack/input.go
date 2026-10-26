@@ -143,6 +143,16 @@ type Service struct {
 	// (D53), sorted. A worker's queue is one of its API's database.
 	Queues []string
 
+	// QueueKeys are the quoted key columns of a DB service's queues that
+	// keep one ready message per key (D80), by queue: an operator's retry
+	// of such a queue's dead messages leaves a key one ready message.
+	QueueKeys map[string]string
+
+	// QueueTables are the tables of a DB service's queues whose @table
+	// names them (D85), by queue, so the operator's statements name that
+	// table; every other queue's table is its class's name with _queue.
+	QueueTables map[string]string
+
 	// Engine reports that a DB service is an engine database (D58): a type
 	// of it composes a behavior. The servers of the APIs that connect to it
 	// open the engine on its database, and the stack runs the engine's
