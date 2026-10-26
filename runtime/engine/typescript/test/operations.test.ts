@@ -454,8 +454,15 @@ describe("the core's behaviors over HTTP", () => {
     const { app } = withDocument();
     const posted = await data(call(app, 'POST', `${DOCUMENT}/operations/post`, { body: { body: 'First pass is up.' }, headers: { 'if-match': '"1"' } }));
     assert.deepEqual([posted.data.id, posted.data.body, posted.etag], [1, 'First pass is up.', '"1"']);
+    // markRead asks read (D77), so the reader marks what it read, and its
+    // listing carries its marker as readUpTo.
+    const marked = await data(call(app, 'POST', `${DOCUMENT}/operations/markRead`, { token: 'reader', body: { upTo: 1 } }));
+    assert.deepEqual([marked.data, marked.etag], [{ readUpTo: 1, unread: 0 }, '"1"']);
     const page = await data(call(app, 'POST', `${DOCUMENT}/operations/listMessages`, { token: 'reader', body: { limit: 10 }, headers: { 'if-match': '"1"' } }));
-    assert.deepEqual([page.data.items.map((item: { body: string }) => item.body), page.data.before, page.data.after, page.etag], [['First pass is up.'], null, null, '"1"']);
+    assert.deepEqual(
+      [page.data.items.map((item: { body: string }) => item.body), page.data.before, page.data.after, page.data.readUpTo, page.etag],
+      [['First pass is up.'], null, null, 1, '"1"']
+    );
     assert.equal((await problem(call(app, 'POST', `${DOCUMENT}/operations/post`, { token: 'reader', body: { body: 'Me too.' } }), 403)).code, 'forbidden');
   });
 });
