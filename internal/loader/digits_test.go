@@ -106,6 +106,18 @@ func TestLoadVectorsFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Finance.SignedMoney amount shows in the currency its sibling holds,
+	// as a Finance.Money does: verification takes it as an integer scalar.
+	amount := fieldNamed(schema.Types["LedgerLine"].Fields, "amount")
+	if amount == nil || amount.TypeRef.Name != "Finance.SignedMoney" || amount.Display == nil || amount.Display.Currency == nil || amount.Display.Currency.Field != "currency" {
+		t.Errorf("LedgerLine.amount = %+v", amount)
+	}
+	if got := schema.Scalars["Finance.SignedMoney"].TypeMappings["sql"]; got != "BIGINT" {
+		t.Errorf("Finance.SignedMoney's SQL type = %q, want BIGINT", got)
+	}
+	if got := schema.Scalars["Generic.Decimal"].TypeMappings["sql"]; got != "NUMERIC" {
+		t.Errorf("Generic.Decimal's SQL type = %q, want NUMERIC", got)
+	}
 	rate := fieldNamed(schema.Types["LedgerLine"].Fields, "rate")
 	if rate == nil || rate.ValidatePrecision == nil || *rate.ValidatePrecision != 10 || rate.ValidateScale == nil || *rate.ValidateScale != 4 {
 		t.Errorf("LedgerLine.rate = %+v", rate)
@@ -127,4 +139,30 @@ func fieldNamed(fields []*ir.FieldDef, name string) *ir.FieldDef {
 		}
 	}
 	return nil
+}
+
+// TestVerifyQueueMessageScalarsJSON: a queue's message carries no
+// Generic.Decimal and no Embedding.Vector, which its codecs do not read
+// alike yet (D84).
+func TestVerifyQueueMessageScalarsJSON(t *testing.T) {
+	dir := writeService(t, map[string]string{
+		"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,
+		"src/jobs.schema.json": `{"scalars": {"Generic.Decimal": {"name": "Generic.Decimal", "languagePrimitive": "string"}, "Embedding.Vector": {"name": "Embedding.Vector", "languagePrimitive": "string"}},
+		"types": {"Embed": {"name": "Embed", "role": "DBTable", "queue": {}, "fields": [
+			{"name": "rate", "typeRef": {"name": "Generic.Decimal"}, "required": true},
+			{"name": "vector", "typeRef": {"name": "Embedding.Vector"}, "validateDimensions": 3}
+		]}}}`,
+	})
+	_, err := LoadService(dir)
+	if err == nil {
+		t.Fatal("expected schema errors")
+	}
+	for _, want := range []string{
+		`Embed.rate is a Generic.Decimal, which a queue's message does not carry yet: carry its text as a string, or the key of the row that holds it; support follows`,
+		`Embed.vector is an Embedding.Vector, which a queue's message does not carry: carry the key of the row that holds it`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err.Error(), want)
+		}
+	}
 }

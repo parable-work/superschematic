@@ -11235,3 +11235,100 @@ opt-out of the checks; raw SQL that a plan knows to take down around a
 change to the columns it reads (a materialized view over a column a plan
 retypes fails the step, as Postgres refuses it); `SET DEFAULT`. The rule
 is reversible until the first release.
+
+## D84. A decimal is exact and a vector is pgvector's, in every validator, the DDL and both ORMs, and a table finds a row's nearest neighbours
+
+A ledger line is a signed amount, and `Finance.Money` holds 0 and up, so
+it fell back to `Generic.Int64` and lost being money. A rate, an exchange
+rate or a quantity had no exact type: a float loses digits, and nothing
+mapped to `NUMERIC`. An embedding, `Embedding.Vector`, was a `TEXT` column
+of its JSON text, since superscalar's catalog names no SQL type for it, so
+it had no dimensions, no index, and no way to ask for a row's nearest
+neighbours; D83 left `hnsw` and `ivfflat` refused until vector columns
+arrived.
+
+superscalar #94 adds `Finance.SignedMoney`, signed minor units from
+-(2^53 - 1) to 2^53 - 1 as `BIGINT`, and `Generic.Decimal`, an exact
+decimal carried as its canonical text, `NUMERIC`. This entry adds:
+- the pin bump to it, with the scalar catalogs written again;
+- `Validate<Generic.Decimal, { precision, scale }>`, a `NUMERIC(p,s)`
+  column, and `Validate<Embedding.Vector, { dimensions }>`, a pgvector
+  `vector(n)` column, which every validator checks;
+- `hnsw` and `ivfflat` indexes over a vector column, with pgvector's `m`,
+  `efConstruction` and `lists`;
+- `Nearest` in the Go ORM and `nearest` in the TypeScript repositories,
+  one statement sqlutil writes;
+- the codecs: a decimal's canonical text and a vector's text form in both
+  ORMs, and `decimal.Decimal` in the generated Python types;
+- pgvector's image for `stack dev` when a database has a vector column, and
+  a second Postgres in CI that has it.
+
+### The scalars
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superscalar.pin`, the pseudo-version in every go.mod that links the Go binding, and their go.sums move to `5cc6787`; `scalarcatalog` writes the TypeScript, Python and Rust IR catalogs and the docs' scalar page again. The release goldens' go.mods pin a fixed test version and do not move. `prebuilt.pin` names no key yet (D82), so nothing keyed on the pin changes; the next publish keys the superscalar family by the new commit. | |
+| A decimal's type is superscalar's in each language: Go's `GenericDecimal`, a string whose `Scan` and `Value` canonicalize it; TypeScript's string; Python's `decimal.Decimal`, which pygen now maps (`parse_generic_decimal_to_decimal` reads it, a JSON dump writes the canonical text, a float is refused as having lost digits already); Rust's `superscalar::Decimal`. | pygen's `Any`, which it gave the catalog's `decimal.Decimal` mapping before, and which let a float through. |
+| `precision` and `scale` are `Validate` rules of the field, as `minLength` is: precision and scale are the column's, as superscalar's docstring says, and `NUMERIC(p,s)` is the column. `scale` is 0 unless set, as `NUMERIC(p)` means; a `scale` without a `precision`, one above it, a precision past 1000 (Postgres's limit) or under 1 fail the load, and so do the rules on another type, on a map or a list of lists, and on an operation's argument, each naming the fix. | A `Decimal<p, s>` wrapper, a new type the loader, the writer and the IR would each learn for what a rule says. Refusing `scale: 0`, which the request asked of non-positive values: `NUMERIC(20,0)` is an integer past 2^53, a real column. |
+| Every validator, the generated Go, TypeScript, Python and Rust ones and the Go, TypeScript, Python and Rust IR schema runtimes, counts a decimal's digits on its canonical form: no sign, no leading zero before the point (`0` has none), no trailing zero after it. More than `precision - scale` before the point fails `precision`, more than `scale` after it fails `scale`, and one value may fail both. Text that is no decimal is the scalar's pattern to report, and is not counted. The parity matrix's `DigitMatrix` holds them to one another. | Counting the text as written, under which `1.50` would break `scale: 1` though it is the decimal `1.5`. |
+| No CHECK for a decimal: `NUMERIC(p,s)` holds the precision itself, and rounds a value with too many digits after the point, which the validators refuse first. | D83's CHECKs for the digit rules, a second statement of what the type already says. |
+| Both ORMs read a `NUMERIC` as the canonical text: Postgres writes a `NUMERIC(10,4)`'s `1.5` as `1.5000`, the wire form is `1.5`. TypeScript's `decodeRow` canonicalizes through superscalar and refuses `NaN`, which a `NUMERIC` without a precision may hold and no decimal is; the pool's parser canonicalizes a raw query's finite `NUMERIC` and leaves `NaN` and the infinities as Postgres writes them. | The exact text Postgres writes, which D79 kept and which disagrees with the wire. |
+| A decimal column's filter compares numbers: `DecimalFilter` in Go (`Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In`, `IsNull`, each a decimal's text) and `NumberFilter` in TypeScript (`sqlutil.FilterDecimal`). | The string filter its text type gave it, whose `ILIKE` Postgres has no operator for on `NUMERIC`. |
+| A versioned table's history readers read a `NUMERIC` from the number `to_jsonb` writes, and a vector from its text. | |
+| A queue's message carries no `Generic.Decimal` and no `Embedding.Vector` yet, and either fails the load, naming the fix: the Rust queue codec reads a `NUMERIC` column as a JSON number, which a decimal's JSON form is not, and no queue codec reads a vector. A message carries the key of the row that holds the value, or a decimal's text as a string. | Carrying them in the Go and TypeScript queue clients alone, which would leave a Rust worker of the same queue unable to read its messages. |
+| `Finance.SignedMoney` is a `BIGINT`, and `@display({ currency })` shows it as it shows `Finance.Money`: verification takes any integer scalar. | Topcoat's inference of a lone `Finance.Currency` sibling for a `Finance.Money` field, which stays `Finance.Money`'s (left). |
+
+superscalar's Go metadata writes `Format: ""` for every scalar, so the
+`decimal` format hint does not reach a Go consumer of the catalog; that is
+superscalar's to fix.
+
+### Vectors
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A vector's length is `Validate<Embedding.Vector, { dimensions: n }>`, a field rule as the digits are, which every validator checks on each value, a JSON array or its JSON text, failing `dimensions`. | A `Vector<1024>` wrapper, a type of its own for a rule. |
+| On a table, an `Embedding.Vector` with dimensions is a `vector(n)` column (`sqlutil.ColumnType`), the DDL enables the `vector` extension (`postgresTypeExtensions`), and both ORMs treat the column as a vector (`ColumnClass.Vector`). One without dimensions, and a list of vectors, fail the load naming the fix; JSON (`JsonField<T>`) holds either. | `vector` without dimensions, which no index takes, or the `TEXT` the scalar had, which neither ORM could write. |
+| `halfvec` is left. A 1024-dimension embedding fits `vector`'s 2000-dimension index limit, and a half-precision column is a storage choice the field could take later, as `ops` already names an operator class whatever the column's type. | A `halfvec` option now, a second column type, codec and set of operator classes for no present need. |
+| SQLite has no vector type, so the SQLite model refuses the column at build and plan, naming the fix, `outputs.sql.dialects: ["postgres"]`, beside D83's other SQLite refusals. | Refusing in the loader's verification, which does not know a service's dialects. Storing JSON text and scanning every row in the ORM, which would be a nearest no index serves. |
+| `@index`'s `ops` keeps D83's meaning, an operator class, and a vector index must name one of the three nearest orders by: `vector_cosine_ops`, `vector_l2_ops`, `vector_ip_ops`. `m` and `efConstruction` are hnsw's, `lists` ivfflat's, each in pgvector's range and written `WITH (m = 16, ef_construction = 64)`. A vector index covers one key, a vector column of at most 2000 dimensions, with no expression, and is never unique. | Metric names in `ops` (`cosine`), a second vocabulary for one option. pgvector's default class, `vector_l2_ops`, when `ops` is unset, which an index built for a cosine query would silently not serve. |
+| A plan creates the extension in its first step and builds a vector index concurrently, D83's default, which takes no long lock however big the table; `concurrently: false` is `blocking`. Changing a vector's dimensions is `destructive` and `data-dependent`: a stored vector of another length fails the cast, so the column is cleared or embedded again first. | |
+| `Nearest(ctx, field, vector, opts)` in Go and `nearest(field, vector, { k, metric, filter, includeDeleted })` in TypeScript read the rows nearest a vector, nearest first, at most `k` (10 unless set), each with its distance: one statement, `TableStatements.Nearest`, beside `Page`, whose WHERE is the table's filter, then the live rows, then, for a field that may be null, its presence, the vector the last parameter, and whose ORDER BY is the metric's distance, which a vector index of its operator class serves. The metrics are `cosine`, the default, `l2` and `ip`, whose distance is the negative inner product (`sqlutil.NearestMetrics`). A vector of another length is refused before it reaches Postgres. `TestNearestParityOfGoAndTypeScriptOnPostgres` holds the two to the same statements. | A separate distance query, or one per metric. |
+| A vector crosses as pgvector's text form, `[0.5,-1,2]`. The Go ORM binds it as a string, which pgx sends as text for a type it does not know, and scans it through a `sql.Scanner`, so it needs no pgvector library and no type registered on the pool a server opens; TypeScript's codec reads and writes a `number[]` (`vectorText`). | `pgvector-go`, a new dependency for one text form. Registering a codec on each connection, which a pool `ConnectWithPool` is given never runs. |
+| `stack dev` runs Postgres on `pgvector/pgvector:<PGVECTOR_VERSION>-pg16` when a DB service of the stack has a vector column and the environment names no `postgresImage` (`StackEnvironment.Vectors`). On Cloud SQL, which ships pgvector, the migration job creates the extension: its user holds `cloudsqlsuperuser`, which may. | pgvector's image for every stack, where most need none. |
+| CI keeps `postgres:16-alpine` for the database tests and runs a second Postgres, `pgvector/pgvector:<PGVECTOR_VERSION>-pg16`, for the tests of vector columns, which read `SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL` (`pgtest.VectorDatabaseURL`) and skip without it, or fail under `SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS=1`, which CI sets. | pgvector's image for every test, whose Debian tzdata reads 1890 Amsterdam's offset differently, so a version-graph vector fails on it. pgvector built into the alpine image, a custom image or a build per run, which no official image provides. |
+
+Status: built.
+- **The pin and the catalog:** `TestSuperscalarPinMatchesGoModPseudoVersions`,
+  `make catalog-check`, and `TestCatalogCommand`, which finds both scalars
+  in `superschematic catalog scalars` with their SQL types and their types
+  in the four languages.
+- **The rules:** `TestGeneratedValidatorParity`'s `DigitMatrix` vectors in
+  the generated Go, TypeScript, Python and Rust validators, and the
+  schema runtimes' parity suites over the same corpus;
+  `TestVerifyDigitRulesJSON`, `TestVerifyVectorColumnsJSON`,
+  `TestVerifyVectorsTS`, `TestVerifyQueueMessageScalarsJSON` and
+  `TestLoadVectorsFixture` for the refusals and the fixture; `TestGeneratedDecimalIsADecimal` for pygen's
+  `decimal.Decimal`; the Rust runtime's rule tests.
+- **The DDL and the plans:** sqlgen's golden `fixture-vectors-db`, a
+  `vector(1024)` column and its HNSW index with the extension, and
+  `NUMERIC(p,s)`; the plan cases `add-vector-column`,
+  `change-vector-dimensions` and `narrow-decimal`, which
+  `TestVectorPlansOnPostgres` applies with fixture-vectors-db's plan from
+  empty; `TestSQLiteRefusals`.
+- **The ORMs:** `TestVectorsAndDecimalsOnPostgres` (Go) and
+  `TestRepositoriesOnPostgres`'s `vectors.test.ts` (TypeScript), each a
+  round trip of signed amounts, decimals and vectors and `nearest` by each
+  metric, through a filter and around a soft-deleted row, on Postgres
+  with pgvector; `TestNearestParityOfGoAndTypeScriptOnPostgres`; the
+  codec's `pgcodec.test.ts`.
+- **The stack:** `TestStackDevMigratesAVectorDatabase` runs `stack dev`
+  over a database with a 1024-dimension embedding and an HNSW index, on
+  pgvector's image, and finds the extension, the column and the index;
+  `TestPostgresImage` and `TestVectorPostgresMatchesCIPin`.
+
+Left: `halfvec`; vectors on SQLite; a list of vectors as a column; a
+decimal and a vector in a queue's message; the
+digit and dimension rules on an operation's argument; a version graph's
+value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
+implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
+format hint in superscalar's Go metadata.

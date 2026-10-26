@@ -47,7 +47,9 @@ The field's type decides its column:
 | `Identity.UUID` | `UUID` |
 | `Identity.Slug`, `Contact.Email` | `CITEXT` (compares case-insensitively) |
 | `Identity.Name` | `VARCHAR(80)` |
-| `Generic.Int64` | `BIGINT` |
+| `Generic.Int64`, `Finance.Money`, `Finance.SignedMoney` | `BIGINT` |
+| `Generic.Decimal` | `NUMERIC`, or `NUMERIC(p,s)` with `Validate`'s `precision` and `scale` |
+| `Embedding.Vector` with `Validate`'s `dimensions` | pgvector's `vector(n)`, and the DDL enables the `vector` extension |
 | `Temporal.DateTime` | `TIMESTAMPTZ` |
 | `Temporal.Duration` | `INTERVAL` |
 | `Geo.Location` | `POINT`, x the longitude and y the latitude |
@@ -81,7 +83,28 @@ held to them:
   code's.
 
 A check is named `ck_<table>_<column>`, and `NULL` passes it. A list, a
-map and a JSON value get neither a default nor a check.
+map and a JSON value get neither a default nor a check. A decimal's
+`precision` and `scale` are its column's type, `NUMERIC(p,s)`, which
+refuses a value with too many digits before the point and rounds one with
+too many after it, which the validators refuse first.
+
+A decimal crosses as its canonical text in every language: Postgres writes
+a `NUMERIC(10,4)`'s `1.5` as `1.5000`, and both ORMs read it back as
+`1.5`, the wire form. The Go ORM holds superscalar's `GenericDecimal`,
+whose `Scan` and `Value` canonicalize it; TypeScript holds the text
+(`decodeRow`, and the pool's parser for a raw query, canonicalize it
+through superscalar); Python `decimal.Decimal`; Rust `superscalar::Decimal`.
+A decimal's filter, `DecimalFilter` in Go and `NumberFilter` in TypeScript,
+compares numbers: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In` and
+`IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
+`BIGINT` from -(2^53 - 1) to 2^53 - 1, a debit negative, which
+`@display({ currency })` shows in its currency as it does a
+`Finance.Money`.
+
+An `Embedding.Vector` on a table needs `dimensions`, and a list of them is
+no column: either fails the load, naming the fix, and JSON
+(`JsonField<T>`) holds one without them. [Vectors](#vectors) has the
+indexes and the nearest-neighbour reads.
 
 The SQLite DDL stores each column as the type its values need, such as a
 list as JSON text, with the same defaults and checks;
@@ -139,8 +162,10 @@ no field fails the build. The other options shape the index:
 
 | Option | What it does |
 | --- | --- |
-| `method` | the access method: `btree`, `gin`, `gist`, `brin`, `hnsw` or `ivfflat`. Unset picks one from the columns' types: GIST for `ltree` and geometric types, GIN for `JSONB`, arrays and `tsvector`, else BTREE. `hnsw` and `ivfflat` index vector columns, which follow, so either fails the load today |
-| `ops` | the operator class each key is indexed with, such as `gin_trgm_ops`, whose extension the DDL enables |
+| `method` | the access method: `btree`, `gin`, `gist`, `brin`, `hnsw` or `ivfflat`. Unset picks one from the columns' types: GIST for `ltree` and geometric types, GIN for `JSONB`, arrays and `tsvector`, else BTREE. `hnsw` and `ivfflat` index one vector column ([Vectors](#vectors)) |
+| `ops` | the operator class each key is indexed with, such as `gin_trgm_ops`, whose extension the DDL enables; a vector index's names its metric |
+| `m`, `efConstruction` | an `hnsw` index's links per vector (2 to 100, 16 unless set) and candidates per vector while it builds (4 to 1000, at least twice `m`, 64 unless set) |
+| `lists` | an `ivfflat` index's lists (1 to 32768, 100 unless set) |
 | `where` | makes the index partial: a SQL predicate over the table's columns, without `WHERE`. On a unique index of a soft-deletable table it is ANDed with `deleted_at IS NULL` |
 | `expression` | indexes a SQL expression over the table's columns, such as `lower(email)`, in place of the keys' columns; the keys name the fields it reads and give the index its default name |
 | `concurrently` | how a migration plan builds the index on a table that holds rows: `true`, the default, builds it concurrently, outside a transaction; `false` builds it inside the step's transaction, which blocks writes while it builds |
@@ -162,6 +187,78 @@ A [page](#pages) reads fastest with an index over the columns its filter
 compares for equality, then its sort's column, then the key: the index
 holds the page's rows in its order, from the cursor's on.
 `idx_order_customer_placed_at` serves a shopper's orders by `placedAt`.
+
+## Vectors
+
+An `Embedding.Vector` with `dimensions` is a pgvector `vector(n)` column,
+and an `hnsw` or `ivfflat` index over it serves the nearest-neighbour
+reads by one metric, which its `ops` names:
+
+```ts
+@index<TextEmbedding>(["embedding"], { method: "hnsw", ops: "vector_cosine_ops", m: 16, efConstruction: 64 })
+export abstract class TextEmbedding {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  text: string;
+  embedding: Validate<Embedding.Vector, { dimensions: 1024 }>;
+}
+```
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE text_embedding (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  text TEXT NOT NULL,
+  embedding vector(1024) NOT NULL
+);
+CREATE INDEX idx_text_embedding_embedding ON text_embedding USING HNSW (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+```
+
+| Metric | Distance | Operator class |
+| --- | --- | --- |
+| `cosine`, the default | 1 less the cosine similarity, from 0 to 2 (`<=>`) | `vector_cosine_ops` |
+| `l2` | Euclidean distance (`<->`) | `vector_l2_ops` |
+| `ip` | the negative inner product, so the largest product is nearest (`<#>`) | `vector_ip_ops` |
+
+A vector index covers one key, a vector column of at most 2000 dimensions,
+with no expression, and is never unique; it names its metric's operator
+class. A table's repository finds the rows nearest a vector, nearest first,
+each with its distance, through the same statement in both ORMs:
+
+```go
+neighbours, err := db.TextEmbedding.Nearest(ctx, orm.TextEmbeddingVectorEmbedding, query,
+	&orm.TextEmbeddingNearestOptions{K: 5, Metric: orm.VectorCosine, Filter: &orm.TextEmbeddingFilter{...}})
+// neighbours[0].Row, neighbours[0].Distance
+```
+
+```ts
+const neighbours = await deps.orm.textEmbedding.nearest('embedding', query, { k: 5, metric: 'cosine', filter: { ... } });
+// neighbours[0].row, neighbours[0].distance
+```
+
+`k` is 10 unless set. The filter is the table's own, and a soft-deleted
+row is left out unless `includeDeleted` is set, as for a find; a row whose
+vector is null has no distance and is left out too. The vector must have
+the field's dimensions. An index finds approximate neighbours: a filter
+that keeps few rows may leave fewer than `k`, which pgvector's
+`hnsw.iterative_scan` and `hnsw.ef_search` settings trade against speed.
+
+A vector crosses as pgvector's text form, `[0.5,-1,2]`: the Go ORM binds
+and scans it as text, a `[]float32`, and TypeScript's codec reads and
+writes a `number[]` (`vectorText`), so neither needs a pgvector client
+library. A migration plan creates the extension in its first step, builds
+a vector index concurrently unless `concurrently: false` says otherwise,
+and names changing a vector's dimensions as `destructive` and
+`data-dependent`: a stored vector of another length fails the cast, so the
+column is cleared or embedded again first. SQLite has no vector type, and
+a SQLite build of a service with one fails, naming the fix:
+`outputs.sql.dialects: ["postgres"]`.
+
+`stack dev` runs Postgres on `pgvector/pgvector:0.8.7-pg16` when a DB
+service of the stack has a vector column and the environment names no
+`postgresImage`. On Cloud SQL for PostgreSQL, which ships pgvector, the
+migration job creates the extension: its user holds `cloudsqlsuperuser`,
+which may run `CREATE EXTENSION vector`.
 
 ## Text search
 
@@ -388,8 +485,10 @@ reads a row of the review table's columns, and `uuidToDb(id)` turns a
 base62 id, `ctx.principal.subject` among them, into the hyphenated text a
 `UUID` column compares. `connectPostgres`, which opens `Deps.db`, reads a
 BIGINT as a number, refusing one past 2^53 - 1, a NUMERIC as its exact
-text and a DATE as its text, through parsers of the pool's own;
-`typeParsers: false` keeps pg's.
+text in a decimal's canonical form (`1.50` as `1.5`; `NaN` as Postgres
+writes it) and a DATE as its text, through parsers of the pool's own;
+`typeParsers: false` keeps pg's. A vector column's value is a `number[]`,
+which crosses as pgvector's text form (`vectorText`).
 
 A filter member per column holds its conditions, by the column's kind, as
 the Go ORM's filters do: `eq` and `in` (`in` with no values adds no

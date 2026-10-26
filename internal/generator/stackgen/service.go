@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
@@ -87,6 +88,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
+		svc.Vectors = hasVectorColumns(schema)
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 		}
@@ -102,6 +104,20 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		// code is, the stack's build reads with SiteOf (D55).
 	}
 	return svc, nil
+}
+
+// hasVectorColumns reports whether a table of schema has a vector(n)
+// column (D84).
+func hasVectorColumns(schema *ir.Schema) bool {
+	scalarTypes := sqlutil.ScalarSQLTypes(schema)
+	for _, td := range sqlutil.TableTypes(schema) {
+		for _, fd := range td.Fields {
+			if sqlutil.IsVectorType(sqlutil.ColumnType(schema, fd, scalarTypes)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // configOf reads a service's @envVars type, or nil when it has none.

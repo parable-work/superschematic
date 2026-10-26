@@ -50,6 +50,9 @@ func TestConvergenceOnPostgres(t *testing.T) {
 		}
 	}
 	for _, dir := range modelFixtures {
+		if dir == vectorsFixture {
+			continue
+		}
 		schema, err := loader.LoadService(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -90,7 +93,8 @@ func TestConvergenceOnPostgres(t *testing.T) {
 // convergence Postgres cannot (noPgvector), to the Postgres with pgvector
 // that pgtest.VectorDatabaseURL names, as TestConvergenceOnPostgres applies
 // the others: each from create.sql of the previous version, with its rows,
-// to create.sql of the new one.
+// to create.sql of the new one; and fixture-vectors-db's plan from an empty
+// database.
 func TestVectorPlansOnPostgres(t *testing.T) {
 	dsn := pgtest.VectorDatabaseURL(t)
 	cases := t.TempDir()
@@ -108,6 +112,11 @@ func TestVectorPlansOnPostgres(t *testing.T) {
 	if applied == 0 {
 		t.Fatal("no plan case is a vector case")
 	}
+	schema, err := loader.LoadService(vectorsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeEmptyCase(t, filepath.Join(cases, "empty-"+filepath.Base(vectorsFixture)), schema, sqlgen.Options{SchemaName: filepath.Base(vectorsFixture)})
 	module := t.TempDir()
 	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgconverge"))); err != nil {
 		t.Fatal(err)

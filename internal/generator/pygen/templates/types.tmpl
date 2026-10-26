@@ -13,7 +13,7 @@ from typing import Optional, List, Any, Dict, TYPE_CHECKING{{if .NeedsLiteralImp
 {{- if .HasVersionedTypes}}
 from datetime import datetime
 {{- end}}
-{{- if .HasDecimalDigits}}
+{{- if .HasDecimal}}
 import decimal
 {{- end}}
 import json
@@ -54,6 +54,19 @@ else:
 {{- end}}
 {{end}}
 from .validation_errors import ValidationErrors
+{{- if .HasDecimal}}
+
+
+def _decimal_text(value: Any) -> str:
+    """
+    The text a rule checks of a Generic.Decimal value (D84): a
+    decimal.Decimal in plain notation, as superscalar reads it, where str
+    would write 1E-7; any other value its str.
+    """
+    if isinstance(value, decimal.Decimal):
+        return format(value, "f")
+    return str(value)
+{{- end}}
 {{- if .HasDecimalDigits}}
 
 
@@ -236,15 +249,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and len(str(item)) < {{.Value}}:
+                        if item is not None and len({{ruleText $field "item"}}) < {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "minLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and len(str(item)) < {{.Value}}:
+                    if item is not None and len({{ruleText $field "item"}}) < {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "minLength", "{{pythonString .Message}}")
 {{- else}}
-            if len(str(self.{{$fieldAttr}})) < {{.Value}}:
+            if len({{ruleText $field (printf "self.%s" $fieldAttr)}}) < {{.Value}}:
                 errors.add_field_error("{{$fieldName}}", "minLength", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "maxLength"}}
@@ -254,15 +267,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and len(str(item)) > {{.Value}}:
+                        if item is not None and len({{ruleText $field "item"}}) > {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "maxLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and len(str(item)) > {{.Value}}:
+                    if item is not None and len({{ruleText $field "item"}}) > {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "maxLength", "{{pythonString .Message}}")
 {{- else}}
-            if len(str(self.{{$fieldAttr}})) > {{.Value}}:
+            if len({{ruleText $field (printf "self.%s" $fieldAttr)}}) > {{.Value}}:
                 errors.add_field_error("{{$fieldName}}", "maxLength", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "pattern"}}
@@ -272,15 +285,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
+                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field "item"}}, re.ASCII) is None:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "pattern", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
+                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field "item"}}, re.ASCII) is None:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "pattern", "{{pythonString .Message}}")
 {{- else}}
-            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(self.{{$fieldAttr}}), re.ASCII) is None:
+            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field (printf "self.%s" $fieldAttr)}}, re.ASCII) is None:
                 errors.add_field_error("{{$fieldName}}", "pattern", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "min"}}

@@ -27,6 +27,12 @@ const (
 	// tests against and the gcp target runs.
 	DefaultPostgresImage = "postgres:16-alpine"
 
+	// DefaultVectorPostgresImage is the image it runs instead when a DB
+	// service of the stack has a vector column (D84): Postgres 16 with
+	// pgvector at tools.env's PGVECTOR_VERSION, which CI's vector tests run
+	// on.
+	DefaultVectorPostgresImage = "pgvector/pgvector:0.8.7-pg16"
+
 	// PostgresUser is the role every connection uses. The container trusts
 	// every connection, and publishes its port on loopback only.
 	PostgresUser = "postgres"
@@ -208,10 +214,14 @@ func PostgresPort(env registry.StackEnvironment) int {
 }
 
 // PostgresImage returns the image the environment's Postgres container
-// runs: the `postgresImage` value, or DefaultPostgresImage.
+// runs: the `postgresImage` value, or DefaultVectorPostgresImage for a
+// stack with a vector column, or DefaultPostgresImage.
 func PostgresImage(env registry.StackEnvironment) string {
 	if image, ok := env.Values["postgresImage"].(string); ok && image != "" {
 		return image
+	}
+	if env.Vectors {
+		return DefaultVectorPostgresImage
 	}
 	return DefaultPostgresImage
 }

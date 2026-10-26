@@ -150,6 +150,28 @@ func checkVectorColumns(schema *ir.Schema, r *Result) {
 	}
 }
 
+// checkQueueMessageScalars refuses a queue message field of
+// Generic.Decimal or Embedding.Vector (D84): the Rust queue codec reads a
+// NUMERIC column as a JSON number, which a decimal's JSON text is not, and
+// no queue codec reads a vector column. A message carries the row's key, or
+// the decimal's text as a string, instead.
+func checkQueueMessageScalars(schema *ir.Schema, r *Result) {
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if td.Queue == nil {
+			continue
+		}
+		for _, fd := range td.Fields {
+			switch fd.TypeRef.Name {
+			case ir.DecimalScalarName:
+				r.errorf(td.Owner, "%s.%s is a %s, which a queue's message does not carry yet: carry its text as a string, or the key of the row that holds it; support follows", td.Name, fd.Name, ir.DecimalScalarName)
+			case ir.VectorScalarName:
+				r.errorf(td.Owner, "%s.%s is an %s, which a queue's message does not carry: carry the key of the row that holds it", td.Name, fd.Name, ir.VectorScalarName)
+			}
+		}
+	}
+}
+
 // isVectorColumn reports whether a column type is pgvector's vector(n),
 // which the vector index methods read.
 func isVectorColumn(columnType string) bool {

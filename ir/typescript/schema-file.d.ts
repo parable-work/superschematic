@@ -312,8 +312,11 @@ export interface Import {
 
 export interface IndexDef {
   concurrently?: boolean;
+  efConstruction?: number;
   expression?: string;
   keys: string[];
+  lists?: number;
+  m?: number;
   method?: string;
   name?: string;
   ops?: string;

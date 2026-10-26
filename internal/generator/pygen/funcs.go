@@ -34,6 +34,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"pythonScalarModule":    pythonScalarModule,
 		"pythonParsesJSON":      pythonParsesJSON,
 		"isPythonDecimal":       isPythonDecimal,
+		"ruleText":              ruleText,
 		"pythonScalarLibType":   pythonScalarLibType,
 		"pythonExample":         pythonExample,
 		"scalarDoc": func(s codegen.ScalarInfo) string {
@@ -226,6 +227,16 @@ func buildModelFieldLookup(output *ModuleOutput) func(codegen.FieldInfo) bool {
 		_, ok := models[field.Type]
 		return ok || field.IsUnion
 	}
+}
+
+// ruleText is the Python that renders value, a value of field, as the text
+// a length or pattern rule checks: str(value), but a Generic.Decimal's in
+// plain notation, which str writes as 1E-7 (D84).
+func ruleText(field codegen.FieldInfo, value string) string {
+	if field.ScalarInfo != nil && isPythonDecimal(*field.ScalarInfo) {
+		return "_decimal_text(" + value + ")"
+	}
+	return "str(" + value + ")"
 }
 
 // pythonDecimalType is Generic.Decimal's Python type, the catalog's

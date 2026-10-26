@@ -144,13 +144,36 @@ its lines and checks the country code:
 | `minLength`, `maxLength`, `pattern` | strings; lengths count and patterns match Unicode code points, and a pattern's `\d`, `\w` and `\b` are ASCII classes |
 | `listMin`, `listMax` | lists (`Validate<T[], { ... }>`); `[]` satisfies a required list |
 | `uploadMaxBytes` | file-upload scalars |
+| `precision`, `scale` | `Generic.Decimal`, a value or each element of a list: at most `scale` digits after the point, 0 unless set, and at most `precision - scale` before it; a DB column is `NUMERIC(p,s)` |
+| `dimensions` | `Embedding.Vector`, a value or each element of a list: exactly that many numbers; a DB column is pgvector's `vector(n)` |
 
-`minLength`, `maxLength`, `listMin`, `listMax` and `uploadMaxBytes` are
-whole numbers. A fraction fails the load and names the key and the value
+`minLength`, `maxLength`, `listMin`, `listMax`, `uploadMaxBytes`,
+`precision`, `scale` and `dimensions` are whole numbers. A fraction fails the load and names the key and the value
 (`Validate maxLength must be a finite JavaScript-safe integer literal, got 2.5`)
 rather than being cut to a whole number. A pattern's `\s` is ASCII
 whitespace in Go, Python and Rust, and Unicode whitespace in TypeScript,
 so the validators differ only on a non-ASCII space.
+
+A decimal's digits count on its canonical form, superscalar's: no sign,
+no leading zero before the point (`0` has none) and no trailing zero after
+it, so `+007.50` has one digit each side. A value that breaks a digit rule
+fails `precision` or `scale`, and may fail both; a value that is no decimal
+fails the scalar's own `pattern`, and its digits are not counted. A vector
+of another length fails `dimensions`, whether it arrives as a JSON array or
+as its JSON text. `precision` and `scale` belong on a `Generic.Decimal`,
+`dimensions` on an `Embedding.Vector`, each on a single value or a list of
+them, and an operation's argument takes none of them: anything else fails
+the load and names the fix.
+
+```ts
+import { Embedding, Finance, Generic } from "superscalar";
+
+export abstract class LedgerLine {
+  amount: Finance.SignedMoney;                                    // BIGINT, a debit negative
+  rate: Validate<Generic.Decimal, { precision: 10; scale: 4 }>;   // NUMERIC(10,4)
+  embedding: Validate<Embedding.Vector, { dimensions: 1024 }>;    // vector(1024)
+}
+```
 
 The generated validators check them: `Validate()` in Go, `validate<Type>`
 and the parsers in TypeScript, `validate_all()` in Python, and

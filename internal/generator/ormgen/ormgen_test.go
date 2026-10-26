@@ -79,6 +79,8 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-queue-db", []string{"repository_order.go", "queues.go", "queues_sqlite.go"}},
 		// The tables both ORMs are held to (D79).
 		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
+		// Vectors and decimals, and Nearest (D84).
+		{"fixture-vectors-db", []string{"repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

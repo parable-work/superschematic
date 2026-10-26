@@ -251,7 +251,7 @@ Each step lists the hazard classes it falls in.
 
 | Class | The step | For example |
 | --- | --- | --- |
-| `destructive` | deletes data the new version cannot recover | dropping a table, a column or a history table; a narrowing cast that truncates |
+| `destructive` | deletes data the new version cannot recover | dropping a table, a column or a history table; a narrowing cast that truncates; changing a vector's dimensions, whose stored vectors must be cleared or embedded again |
 | `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
 | `compat` | breaks a server built from the previous version, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
 | `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default on a table with rows |
@@ -631,8 +631,9 @@ the feature and the dialect:
 - an index method other than BTREE, such as the GIN or GIST an `@index`
   over a list, a JSON or an `LTREE` column picks, and an operator class
   (`ops`);
-- the types SQLite has no storage for: `LTREE` and the PostGIS types
-  (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
+- the types SQLite has no storage for: `LTREE`, the PostGIS types
+  (`POINT`, `GEOGRAPHY`, `GEOMETRY`), and pgvector's `vector(n)`, whose
+  error names the fix, `outputs.sql.dialects: ["postgres"]`.
 
 ### What SQLite does not keep
 

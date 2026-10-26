@@ -125,7 +125,7 @@ type DateRange struct {
 	End   string
 }
 
-{{- if .HasDecimalFilters }}
+{{ if .HasDecimalFilters -}}
 // DecimalFilter provides filtering operations for decimal fields stored as
 // NUMERIC (D84). Each value is a decimal's text, bound as it is, and
 // Postgres compares them as numbers: "1.50" equals "1.5".

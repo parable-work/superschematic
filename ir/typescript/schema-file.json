@@ -4184,6 +4184,9 @@
         "concurrently": {
           "type": "boolean"
         },
+        "efConstruction": {
+          "type": "integer"
+        },
         "expression": {
           "default": "",
           "type": "string"
@@ -4193,6 +4196,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "lists": {
+          "type": "integer"
+        },
+        "m": {
+          "type": "integer"
         },
         "method": {
           "default": "",
