@@ -101,6 +101,10 @@ var corpus = []roundtripFixture{
 	{name: "fixture-refs-api", dir: tsFixtures + "/fixture-refs-api", native: FormatTS},
 	{name: "fixture-refs-api-json", dir: dataFixtures + "/fixture-refs-api-json", native: FormatJSON},
 	{name: "fixture-refs-api-yaml", dir: dataFixtures + "/fixture-refs-api-yaml", native: FormatYAML},
+	// A FileUpload field, bare and with its constraints, and FileDownload
+	// results (D81), from TypeScript and from YAML.
+	{name: "fixture-files-api", dir: tsFixtures + "/fixture-files-api", native: FormatTS},
+	{name: "fixture-files-api-yaml", dir: dataFixtures + "/fixture-files-api-yaml", native: FormatYAML},
 	// A relation's key on an @source type, with no @virtual, whose
 	// reference the loader derives and no form writes (D61, amended).
 	{name: "fixture-refs-keys-api", dir: tsFixtures + "/fixture-refs-keys-api", native: FormatTS},

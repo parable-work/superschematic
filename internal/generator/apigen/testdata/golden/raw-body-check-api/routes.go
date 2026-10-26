@@ -6,11 +6,13 @@
 package rawbodycheckapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	gohttp "net/http"
 	"strconv"
-	"strings"
 
 	jsonkeys "example.com/checks/jsonkeys"
 	types "example.com/schemas/types/go/raw-body-check-api"
@@ -216,78 +218,104 @@ func createNoteAttachPhotoHandler(impl NoteImplementation) gohttp.HandlerFunc {
 			return
 		}
 		Id := IdStr
+		// A multipart input (D81), as every generated server reads one: the
+		// files first, each checked against its field, then the other fields,
+		// from the data part or a JSON body with no file, checked as a JSON
+		// input is, the file fields set aside.
 		var input types.AttachPhotoInput
-		var files map[string]*FileUploadData
-		contentType := r.Header.Get("Content-Type")
-		if strings.Contains(contentType, "application/json") {
-			rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		var rawInput json.RawMessage
+		var form *multipart.Form
+		switch RequestMediaType(r) {
+		case "application/json":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: bodyargs.BodyNotJSON})
+				return
+			}
+			rawInput = body
+		case "multipart/form-data":
+			if err := r.ParseMultipartForm(defaultMaxMultipartMemory); err != nil {
+				RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: BodyNotMultipart})
+				return
+			}
+			defer func() {
+				_ = r.MultipartForm.RemoveAll()
+			}()
+			form = r.MultipartForm
+			if data := form.Value["data"]; len(data) > 0 {
+				rawInput = json.RawMessage(data[0])
+			}
+		default:
+			RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: BodyNotMultipart})
+			return
+		}
+		files, fileRefusals, err := CheckFileUploads(form, NoteAttachPhotoHandlerFileUploadConfigs())
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "File upload error: "+err.Error())
+			return
+		}
+		if len(fileRefusals) > 0 {
+			validationErrors := types.NewValidationErrors()
+			for _, refusal := range fileRefusals {
+				validationErrors.AddFieldError(refusal.Field, refusal.Validator, refusal.Message)
+			}
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+		defer func() {
+			if closeErr := CloseFileUploads(files); closeErr != nil {
+				LoggerFromContext(r.Context()).Warn("failed to close uploaded file", zap.Error(closeErr))
+			}
+		}()
+		// Extract and validate image metadata for plain image uploads (no transparency required)
+		imageMetadata := make(map[string]*ImageUploadMetadata)
+		if PhotoFile, ok := files["photo"]; ok && PhotoFile != nil {
+			PhotoMeta, err := ExtractImageUploadMetadata(PhotoFile)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "Failed to process image 'photo': "+err.Error())
+				return
+			}
+			if validationErrs := ValidateImageUploadMetadata(PhotoMeta); len(validationErrs) > 0 {
+				RespondError(w, r, gohttp.StatusBadRequest, "Image 'photo' validation failed: "+validationErrs[0])
+				return
+			}
+			imageMetadata["photo"] = PhotoMeta
+		}
+		_ = imageMetadata // Available for handler use
+
+		// An empty JSON body is no input; a multipart body without data holds
+		// none of the other fields.
+		hasFields := len(rawInput) > 0 || form != nil
+		if !hasFields {
+			RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: bodyargs.BodyRequired})
+			return
+		}
+		if len(rawInput) > 0 {
+			checked, refusal := bodyargs.ReadInput(bytes.NewReader(rawInput), input.JSONFieldNames())
 			if refusal != nil {
 				RespondInputRefusal(w, r, refusal)
 				return
 			}
 			// Decoding keeps the last of two equal keys, so check
 			// the raw body first.
-			if keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, "caption"); keyErrors.HasErrors() {
+			if keyErrors := jsonkeys.DuplicateKeyErrors(checked, "caption"); keyErrors.HasErrors() {
 				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", keyErrors))
 				return
 			}
-			if err := json.Unmarshal(rawInput, &input); err != nil {
-				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			if err := json.Unmarshal(checked, &input); err != nil {
+				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(checked, &input, err))
 				return
-			}
-			files = nil
-		} else {
-			if err := r.ParseMultipartForm(defaultMaxMultipartMemory); err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "Failed to parse multipart form: "+err.Error())
-				return
-			}
-			defer func() {
-				if r.MultipartForm != nil {
-					_ = r.MultipartForm.RemoveAll()
-				}
-			}()
-			var err error
-			files, err = ParseMultipleFileUploads(r, NoteAttachPhotoHandlerFileUploadConfigs())
-			if err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "File upload error: "+err.Error())
-				return
-			}
-			defer func() {
-				if closeErr := CloseFileUploads(files); closeErr != nil {
-					LoggerFromContext(r.Context()).Warn("failed to close uploaded file", zap.Error(closeErr))
-				}
-			}()
-			// Extract and validate image metadata for plain image uploads (no transparency required)
-			imageMetadata := make(map[string]*ImageUploadMetadata)
-			if PhotoFile, ok := files["photo"]; ok && PhotoFile != nil {
-				PhotoMeta, err := ExtractImageUploadMetadata(PhotoFile)
-				if err != nil {
-					RespondError(w, r, gohttp.StatusBadRequest, "Failed to process image 'photo': "+err.Error())
-					return
-				}
-				if validationErrs := ValidateImageUploadMetadata(PhotoMeta); len(validationErrs) > 0 {
-					RespondError(w, r, gohttp.StatusBadRequest, "Image 'photo' validation failed: "+validationErrs[0])
-					return
-				}
-				imageMetadata["photo"] = PhotoMeta
-			}
-			_ = imageMetadata // Available for handler use
-			dataField := r.FormValue("data")
-			if dataField != "" {
-				if keyErrors := jsonkeys.DuplicateKeyErrors([]byte(dataField), "caption"); keyErrors.HasErrors() {
-					RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", keyErrors))
-					return
-				}
-				if err := json.Unmarshal([]byte(dataField), &input); err != nil {
-					RespondInputRefusal(w, r, bodyargs.DecodeRefusal(json.RawMessage(dataField), &input, err))
-					return
-				}
 			}
 		}
-		// Validate input (excluding file upload fields which are handled separately)
-		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
-			return
+		if hasFields {
+			// The JSON never holds the files, so their fields' errors are set
+			// aside.
+			validationErrors := input.Validate()
+			delete(validationErrors, "photo")
+			if validationErrors.HasErrors() {
+				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+				return
+			}
 		}
 
 		// Ensure request context is still valid before entering implementation logic.

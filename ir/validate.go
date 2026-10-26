@@ -170,7 +170,14 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []error {
 	var errs []error
 	for _, op := range set.Operations {
-		if !s.isResolvable(cfg, op.TypeRef.Name) {
+		switch {
+		case op.FileDownload != nil:
+			// A FileDownload result (D81) is a file, which names no type.
+			if op.TypeRef != (TypeRef{}) {
+				errs = append(errs, fmt.Errorf("%s.%s answers a FileDownload, which names no result type, and names %q", set.Name, op.Name, op.TypeRef.Name))
+			}
+			errs = append(errs, ValidateFileDownload(set.Name+"."+op.Name, op.FileDownload)...)
+		case !s.isResolvable(cfg, op.TypeRef.Name):
 			errs = append(errs, fmt.Errorf("%s.%s references unknown type %q", set.Name, op.Name, op.TypeRef.Name))
 		}
 		errs = append(errs, validateArrayOfArrays(set.Name+"."+op.Name, op.TypeRef)...)

@@ -592,13 +592,20 @@ pub async fn identity_users_page(cx: &Cx) -> topcoat::Result<impl View> {
 async fn users(cx: &Cx) -> Result<(Vec<IdentityUser>, bool), Refusal> {
     let caller = needs_caller(cx).await?;
     let service = service(cx)?;
-    let users = service.list_users(&caller).await.map_err(|err| Refusal::from_api(&err))?;
+    let users = service.list_users(&caller, None).await.map_err(|err| Refusal::from_api(&err))?;
     Ok((users, may(service, &caller, identity::PERMISSION_USERS_WRITE)))
 }
 
-/// The state of a user, as the pages word it.
-fn state_of(disabled: bool) -> &'static str {
-    if disabled { "Disabled" } else { "Active" }
+/// The state of a user, as the pages word it: one who registered under
+/// approval and waits for it is pending (D81).
+fn state_of(disabled: bool, pending: bool) -> &'static str {
+    if disabled {
+        "Disabled"
+    } else if pending {
+        "Pending approval"
+    } else {
+        "Active"
+    }
 }
 
 /// The users as a table: a row per user, its login linked to their page.
@@ -608,7 +615,7 @@ async fn users_list(users: Vec<IdentityUser>, writes: bool) -> topcoat::Result<i
         .into_iter()
         .map(|user| {
             let roles: Vec<String> = user.roles.into_iter().map(|role| role.name).collect();
-            (user_href(&user.id), user.login, user.name, roles.join(", "), state_of(user.disabled))
+            (user_href(&user.id), user.login, user.name, roles.join(", "), state_of(user.disabled, user.pending))
         })
         .collect();
     Ok(view! {
@@ -906,7 +913,7 @@ async fn user_details(page: UserPage, failed: Failed) -> topcoat::Result<impl Vi
     let UserPage { user, grantable, writes_users, writes_roles } = page;
     let href = user_href(&user.id);
     let heading = user_label(&user);
-    let state = state_of(user.disabled);
+    let state = state_of(user.disabled, user.pending);
     let (toggle, toggle_label) =
         if user.disabled { (format!("{href}/enable"), "Enable the user") } else { (format!("{href}/disable"), "Disable the user") };
     let held: Vec<(String, String)> = user.roles.iter().map(|role| (role.id.clone(), role.name.clone())).collect();

@@ -197,6 +197,12 @@
           "nullable": true,
           "origin": "UserCredential.disabledAt",
           "type": "TEXT"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
+          "type": "TEXT"
         }
       ],
       "foreignKeys": [

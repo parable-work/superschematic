@@ -773,6 +773,7 @@ type UserCredentialFields struct {
 	PasswordHash      bool
 	PasswordChangedAt bool
 	DisabledAt        bool
+	PendingAt         bool
 	// User selects the user_id foreign key field
 	User bool
 	// UserNested selects fields for the related User
@@ -798,6 +799,9 @@ func (f UserCredentialFields) ToStringSlice() []string {
 	if f.DisabledAt {
 		fields = append(fields, "disabled_at")
 	}
+	if f.PendingAt {
+		fields = append(fields, "pending_at")
+	}
 	return fields
 }
 
@@ -819,6 +823,7 @@ func (UserCredentialFields) All() UserCredentialFields {
 		PasswordHash:      true,
 		PasswordChangedAt: true,
 		DisabledAt:        true,
+		PendingAt:         true,
 		User:              true,
 	}
 }
@@ -837,6 +842,7 @@ func (UserCredentialFields) WithoutAudit() UserCredentialFields {
 		PasswordHash:      true,
 		PasswordChangedAt: true,
 		DisabledAt:        true,
+		PendingAt:         true,
 	}
 }
 
@@ -848,6 +854,7 @@ const (
 	UserCredentialOrderByPasswordHash      UserCredentialOrderByField = "password_hash"
 	UserCredentialOrderByPasswordChangedAt UserCredentialOrderByField = "password_changed_at"
 	UserCredentialOrderByDisabledAt        UserCredentialOrderByField = "disabled_at"
+	UserCredentialOrderByPendingAt         UserCredentialOrderByField = "pending_at"
 )
 
 // UserCredentialOrderBy specifies ordering for UserCredential queries
@@ -1880,6 +1887,7 @@ type UserCredentialFilter struct {
 	PasswordHash      *StringFilter
 	PasswordChangedAt *DateTimeFilter
 	DisabledAt        *DateTimeFilter
+	PendingAt         *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
 }
@@ -1890,6 +1898,8 @@ type UserCredentialUpdate struct {
 	PasswordChangedAt *types.TemporalDateTime
 	DisabledAt        *types.TemporalDateTime
 	DisabledAtSetNull bool
+	PendingAt         *types.TemporalDateTime
+	PendingAtSetNull  bool
 	// UserID allows updating the foreign key for user
 	UserID *types.IdentityUUID
 	// UpdatedBy is automatically set if not provided and user is in context
@@ -1911,6 +1921,11 @@ func NewUserCredentialSnapshotUpdate(input *types.UserCredential) *UserCredentia
 	} else {
 		update.DisabledAt = input.DisabledAt
 	}
+	if input.PendingAt == nil {
+		update.PendingAtSetNull = true
+	} else {
+		update.PendingAt = input.PendingAt
+	}
 	return update
 }
 
@@ -1930,6 +1945,11 @@ func (u *UserCredentialUpdate) ApplyTo(row *types.UserCredential) {
 		row.DisabledAt = nil
 	} else if u.DisabledAt != nil {
 		row.DisabledAt = u.DisabledAt
+	}
+	if u.PendingAtSetNull {
+		row.PendingAt = nil
+	} else if u.PendingAt != nil {
+		row.PendingAt = u.PendingAt
 	}
 	if u.UserID != nil {
 		row.User.Id = u.UserID
@@ -2095,6 +2115,48 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 				conditions = append(conditions, `user_credential.disabled_at IS NULL`)
 			} else {
 				conditions = append(conditions, `user_credential.disabled_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.PendingAt != nil {
+		if f.PendingAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at = $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Eq)
+		}
+		if f.PendingAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at > $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Gt)
+		}
+		if f.PendingAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at >= $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Gte)
+		}
+		if f.PendingAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at < $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Lt)
+		}
+		if f.PendingAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at <= $%d`, paramNum))
+			*args = append(*args, *f.PendingAt.Lte)
+		}
+		if f.PendingAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at >= $%d`, paramNum))
+			*args = append(*args, f.PendingAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at <= $%d`, paramNum))
+			*args = append(*args, f.PendingAt.Between.End)
+		}
+		if f.PendingAt.IsNull != nil {
+			if *f.PendingAt.IsNull {
+				conditions = append(conditions, `user_credential.pending_at IS NULL`)
+			} else {
+				conditions = append(conditions, `user_credential.pending_at IS NOT NULL`)
 			}
 		}
 	}

@@ -6133,6 +6133,8 @@ type UserCredential struct {
 	PasswordChangedAt TemporalDateTime `json:"passwordChangedAt"`
 
 	DisabledAt *TemporalDateTime `json:"disabledAt,omitempty"`
+
+	PendingAt *TemporalDateTime `json:"pendingAt,omitempty"`
 }
 
 // MaskSecrets returns a copy of UserCredential with secret fields cleared.
@@ -6157,6 +6159,8 @@ func (t *UserCredential) MaskSecrets() *UserCredential {
 
 	masked.DisabledAt = t.DisabledAt
 
+	masked.PendingAt = t.PendingAt
+
 	return masked
 }
 
@@ -6164,7 +6168,7 @@ func (t *UserCredential) MaskSecrets() *UserCredential {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*UserCredential) JSONFieldNames() []string {
-	return []string{"id", "user", "passwordHash", "passwordChangedAt", "disabledAt"}
+	return []string{"id", "user", "passwordHash", "passwordChangedAt", "disabledAt", "pendingAt"}
 }
 
 // Validate validates all fields in UserCredential
@@ -6198,6 +6202,15 @@ func (t *UserCredential) Validate() ValidationErrors {
 	if t.DisabledAt != nil {
 		if valid, fieldErrs := t.DisabledAt.Validate(); !valid {
 			errors.SetFieldErrors("disabledAt", fieldErrs)
+		}
+	}
+
+	// Validate pendingAt (optional)
+
+	// Validate optional pointer field
+	if t.PendingAt != nil {
+		if valid, fieldErrs := t.PendingAt.Validate(); !valid {
+			errors.SetFieldErrors("pendingAt", fieldErrs)
 		}
 	}
 

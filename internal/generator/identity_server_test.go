@@ -133,6 +133,7 @@ import (
 
 	api "example.com/schemas/api/fixture-user-routes-api"
 	sdk "example.com/schemas/sdk/go/fixture-user-routes-api"
+	"example.com/schemas/sdk/go/fixture-user-routes-api/namespaces"
 	dbtypes "example.com/schemas/types/go/fixture-user-model-db"
 	types "example.com/schemas/types/go/fixture-user-routes-api"
 )
@@ -353,9 +354,12 @@ func TestServerOverTheUserModel(t *testing.T) {
 	}
 }
 
-// testSessions: a user registers, signs in with a bearer session, reads
-// me and capabilities, calls the project's protected route, changes their
-// password and signs out, after which the session authenticates no one.
+// testSessions: a user registers and waits for approval, as the fixture's
+// @userSessions registers under approval (D81): no token, and a login
+// refused as pending until the admin approves them through the SDK. Then
+// they sign in with a bearer session holding the default role, read me and
+// capabilities, call the project's protected route, change their password
+// and sign out, after which the session authenticates no one.
 func testSessions(t *testing.T, s *server) {
 	ctx := context.Background()
 	anonymous := s.client(t)
@@ -367,9 +371,24 @@ func testSessions(t *testing.T, s *server) {
 		Name:     types.InputField[types.IdentityName]{Set: true, Value: "Ada"},
 		Password: "ada's password",
 	})
-	if err != nil || registered.Token == "" || registered.User.Login != "ada@example.com" || registered.User.Name != "Ada" {
+	if err != nil || !registered.Pending || registered.Token != "" || registered.User.Login != "ada@example.com" || registered.User.Name != "Ada" {
 		t.Fatalf("register: %+v, %v", registered, err)
 	}
+	_, err = s.client(t).AccountNamespace.Login(ctx, types.LoginInput{Login: "ada@example.com", Password: "ada's password"})
+	expect(t, "a pending user's login", err, 403, "pending_approval")
+	admin := s.client(t)
+	login(t, admin, adminLogin, adminPassword)
+	pendingOnly := true
+	pending, err := admin.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{Pending: &pendingOnly})
+	if err != nil || len(pending) != 1 || pending[0].Id != registered.User.Id || !pending[0].Pending {
+		t.Fatalf("listUsers ?pending=true: %+v, %v", pending, err)
+	}
+	approved, err := admin.AccountAdminNamespace.ApproveUser(ctx, registered.User.Id.String())
+	if err != nil || approved.Pending || len(approved.Roles) != 1 || approved.Roles[0].Name != "member" {
+		t.Fatalf("approveUser: %+v, %v", approved, err)
+	}
+	_, err = admin.AccountAdminNamespace.ApproveUser(ctx, registered.User.Id.String())
+	expect(t, "approving an approved user", err, 409, "not_pending")
 
 	ada := s.client(t)
 	signedIn := login(t, ada, "ada@example.com", "ada's password")
@@ -380,7 +399,7 @@ func testSessions(t *testing.T, s *server) {
 	expect(t, "login with a wrong password", err, 401, "invalid_credentials")
 
 	me, err := ada.AccountNamespace.Me(ctx)
-	if err != nil || me.User.Id != registered.User.Id || me.User.Name != "Ada" || len(me.Roles) != 0 || len(me.Permissions) != 0 {
+	if err != nil || me.User.Id != registered.User.Id || me.User.Name != "Ada" || len(me.Roles) != 1 || me.Roles[0].Name != "member" || len(me.Permissions) != 0 {
 		t.Fatalf("me: %+v, %v", me, err)
 	}
 	capabilities, err := ada.AccountNamespace.Capabilities(ctx)
@@ -398,8 +417,8 @@ func testSessions(t *testing.T, s *server) {
 			t.Errorf("capabilities[%s] = %v (listed %v), want %v", operation, got, ok, want)
 		}
 	}
-	if len(capabilities.Operations) != 19 {
-		t.Errorf("capabilities lists %d operations, want 19", len(capabilities.Operations))
+	if len(capabilities.Operations) != 20 {
+		t.Errorf("capabilities lists %d operations, want 20", len(capabilities.Operations))
 	}
 
 	greeting, err := ada.GreetingNamespace.Greet(ctx)
@@ -445,7 +464,7 @@ func testAdministration(t *testing.T, s *server) {
 	}
 	grace := s.client(t)
 	login(t, grace, "grace@example.com", "grace's password")
-	_, err = grace.AccountAdminNamespace.ListUsers(ctx)
+	_, err = grace.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{})
 	expect(t, "listUsers without identity.users.read", err, 403, "forbidden")
 
 	reader, err := admin.AccountAdminNamespace.CreateRole(ctx, types.RoleInput{Name: "user reader", Permissions: []string{"identity.users.read"}})
@@ -456,7 +475,7 @@ func testAdministration(t *testing.T, s *server) {
 	if err != nil || len(granted.Roles) != 1 || granted.Roles[0].Name != "user reader" {
 		t.Fatalf("grantRole: %+v, %v", granted, err)
 	}
-	users, err := grace.AccountAdminNamespace.ListUsers(ctx)
+	users, err := grace.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{})
 	if err != nil || len(users) != 2 {
 		t.Fatalf("listUsers with identity.users.read: %+v, %v", users, err)
 	}
@@ -482,7 +501,7 @@ func testAdministration(t *testing.T, s *server) {
 	if err != nil || len(revoked.Roles) != 0 {
 		t.Fatalf("revokeRole: %+v, %v", revoked, err)
 	}
-	_, err = grace.AccountAdminNamespace.ListUsers(ctx)
+	_, err = grace.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{})
 	expect(t, "listUsers once the role is revoked", err, 403, "forbidden")
 
 	deleted, err := admin.AccountAdminNamespace.DeleteRole(ctx, reader.Id.String())

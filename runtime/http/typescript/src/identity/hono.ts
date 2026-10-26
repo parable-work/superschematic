@@ -18,6 +18,7 @@ import {
   type IssuedSession,
   type LoginInput,
   type RegisterInput,
+  registerResultOf,
   type RoleInput,
   type SetPasswordInput,
 } from './service.js';
@@ -87,6 +88,7 @@ export type IdentityOperationName =
   | 'getUser'
   | 'disableUser'
   | 'enableUser'
+  | 'approveUser'
   | 'setUserPassword'
   | 'listRoles'
   | 'createRole'
@@ -113,6 +115,7 @@ export const identityOperations: readonly IdentityOperation[] = [
   { name: 'getUser', administration: true, method: 'GET', path: 'users/{id}', rule: PERMISSION_USERS_READ },
   { name: 'disableUser', administration: true, method: 'POST', path: 'users/{id}/disable', rule: PERMISSION_USERS_WRITE },
   { name: 'enableUser', administration: true, method: 'POST', path: 'users/{id}/enable', rule: PERMISSION_USERS_WRITE },
+  { name: 'approveUser', administration: true, method: 'POST', path: 'users/{id}/approve', rule: PERMISSION_USERS_WRITE },
   { name: 'setUserPassword', administration: true, method: 'PUT', path: 'users/{id}/password', rule: PERMISSION_USERS_WRITE },
   { name: 'listRoles', administration: true, method: 'GET', path: 'roles', rule: PERMISSION_ROLES_READ },
   { name: 'createRole', administration: true, method: 'POST', path: 'roles', rule: PERMISSION_ROLES_WRITE },
@@ -207,6 +210,15 @@ function pathParam(c: Context, name: string): string {
   return value;
 }
 
+/** listUsers' ?pending: absent, or true or false; 400 for any other value (D81). */
+function pendingParam(c: Context): boolean | undefined {
+  const values = c.req.queries('pending');
+  if (values === undefined) return undefined;
+  if (values.length === 1 && values[0] === 'true') return true;
+  if (values.length === 1 && values[0] === 'false') return false;
+  throw badRequest('pending must be true or false');
+}
+
 /** The answer of an operation the contract types as returning true: the envelope with data true. */
 function done(requestId: string, headers: Record<string, string> = {}): Response {
   return envelopeResponse(true, requestId, 200, headers);
@@ -266,7 +278,17 @@ export function identityHandler<E extends Env = Env>(service: IdentityService, o
       return handle(async (c, requestId) => {
         const input = await decodeBody<RegisterInput>(c.req.raw, REGISTER_FIELDS);
         checkCookieLogin(c, input.session);
-        return issued(await service.register(input), requestId);
+        const registered = await service.register(input);
+        if (!service.registration.approval) {
+          if (registered.pending) throw new Error('identity: open registration left the user pending');
+          return issued(registered.session, requestId);
+        }
+        // Under approval register answers RegisterResult (D81): 202 with
+        // no session for a pending user, 200 with one otherwise.
+        if (registered.pending) return envelopeResponse(registerResultOf(registered), requestId, 202);
+        const cookie: Record<string, string> =
+          registered.session.transport === 'cookie' ? { 'set-cookie': service.sessionCookie(registered.session.token) } : {};
+        return envelopeResponse(registerResultOf(registered), requestId, 200, cookie);
       });
     case 'logout':
       return authed(async (_c, requestId, p) => {
@@ -285,13 +307,15 @@ export function identityHandler<E extends Env = Env>(service: IdentityService, o
     case 'createUser':
       return authed(async (c, requestId, p) => ok(await service.createUser(p, await decodeBody<CreateUserInput>(c.req.raw, CREATE_USER_FIELDS)), requestId));
     case 'listUsers':
-      return authed(async (_c, requestId, p) => ok(await service.listUsers(p), requestId));
+      return authed(async (c, requestId, p) => ok(await service.listUsers(p, pendingParam(c)), requestId));
     case 'getUser':
       return authed(async (c, requestId, p) => ok(await service.getUser(p, pathParam(c, 'id')), requestId));
     case 'disableUser':
       return authed(async (c, requestId, p) => ok(await service.disableUser(p, pathParam(c, 'id')), requestId));
     case 'enableUser':
       return authed(async (c, requestId, p) => ok(await service.enableUser(p, pathParam(c, 'id')), requestId));
+    case 'approveUser':
+      return authed(async (c, requestId, p) => ok(await service.approveUser(p, pathParam(c, 'id')), requestId));
     case 'setUserPassword':
       return authed(async (c, requestId, p) => {
         const id = pathParam(c, 'id');

@@ -8,13 +8,14 @@ without a verifier for each provider, and a provider's verifier runs before
 the rate limit, the body limit and the permission check of its routes, the
 manual one included. The route reads the body the verifier read, and a
 route that is not a webhook runs no verifier. The service step (D37) runs
-after the verifier too.
+after the verifier too. The runtime's jwtBodyHashVerifier (D81) is a
+provider's verifier as it is, with no generated code of its own.
 */
 import { describe, expect, test } from 'bun:test';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { Hono } from 'hono';
 import { HttpProblem } from '@superschematic/http-runtime';
-import { errorHandler, notFoundHandler, type WebhookVerifier } from '@superschematic/http-runtime/hono';
+import { errorHandler, jwtBodyHashVerifier, notFoundHandler, type WebhookVerifier } from '@superschematic/http-runtime/hono';
 
 const apiDir = process.env.API_DIR;
 if (!apiDir) throw new Error('API_DIR is required');
@@ -163,6 +164,36 @@ describe('generated fixture-webhooks-api router', () => {
     expect(await accepted.text()).toBe(`raw ${body}`);
     expect(verified).toEqual(['github']);
     await expectRefusedSignature(await post(app(), 'github', '/api/webhooks/github/raw', body, { signed: false }));
+  });
+
+  test("the runtime's jwtBodyHashVerifier is a provider's verifier, before the body limit (D81)", async () => {
+    const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const { x, y } = await crypto.subtle.exportKey('jwk', pair.publicKey);
+    const stripe = jwtBodyHashVerifier({
+      header: 'stripe-jwt',
+      jwks: async kid => (kid === 'k1' ? { kty: 'EC', crv: 'P-256', x, y } : null),
+      alg: 'ES256',
+      maxAge: '5m',
+      bodyHashClaim: 'request_body_sha256',
+    });
+    const root = new Hono();
+    root.route('/', buildRouter({ ...implementations, webhookVerifiers: { ...implementations.webhookVerifiers, stripe } }, { bodyLimits: { receiveStripeEvent: 64 } }));
+    root.onError(errorHandler());
+    const body = JSON.stringify({ id: 'evt_9', type: 'invoice.paid' });
+    const segment = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const claims = { iat: Math.floor(Date.now() / 1000), request_body_sha256: createHash('sha256').update(body).digest('hex') };
+    const input = `${segment({ alg: 'ES256', kid: 'k1' })}.${segment(claims)}`;
+    const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(input));
+    const token = `${input}.${Buffer.from(signature).toString('base64url')}`;
+    const send = (sent: string, jwt = token) =>
+      root.request('/api/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-jwt': jwt }, body: sent });
+
+    const accepted = await send(body);
+    expect(accepted.status).toBe(200);
+    expect(received.at(-1)).toEqual({ input: { id: 'evt_9', type: 'invoice.paid' } });
+    // Another body under the same token, and a forged token past the body limit.
+    await expectRefusedSignature(await send(JSON.stringify({ id: 'evt_10', type: 'invoice.paid' })));
+    await expectRefusedSignature(await send(JSON.stringify({ id: 'x'.repeat(100) }), 'forged'));
   });
 
   test('a route that is not a webhook runs no verifier', async () => {

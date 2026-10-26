@@ -210,3 +210,37 @@ func TestEncryptedFieldsStayOutOfQueues(t *testing.T) {
 		}
 	})
 }
+
+// TestEncryptedFieldsAreNoFiles: D81's file types and Encrypted<T> meet
+// nowhere. A FileUpload is a field of an API's input, where Encrypted<T>
+// is refused, and a DB table's field is no FileUpload, so an encrypted
+// upload fails the load in either schema; FileDownload marks a result, no
+// field (D85, D81).
+func TestEncryptedFieldsAreNoFiles(t *testing.T) {
+	str := ir.TypeRef{Name: "string"}
+	file := func(kind ir.SchemaKind) *ir.Schema {
+		schema := vaultSchema(nil)
+		schema.Kind = kind
+		schema.Types["PlaidItem"].Fields = append(schema.Types["PlaidItem"].Fields,
+			&ir.FieldDef{Name: "statement", TypeRef: str, Required: true, EncryptedAtRest: true, FileUpload: &ir.FileUploadConfig{MaxSize: 1 << 20}})
+		return schema
+	}
+	for _, tc := range []struct {
+		kind ir.SchemaKind
+		want []string
+	}{
+		{ir.SchemaKindDB, []string{"PlaidItem.statement: FileUpload in a DB schema"}},
+		{ir.SchemaKindAPI, []string{"PlaidItem.statement: Encrypted<T> marks a stored field of a DB table, and vault-db is a schema of kind API"}},
+	} {
+		schema := file(tc.kind)
+		r := &Result{}
+		checkEncryptedFields(schema, r)
+		checkFileTransfers(schema, r)
+		errs := errorStrings(r)
+		for _, want := range tc.want {
+			if !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, want) }) {
+				t.Errorf("%s: errors = %v, want one that says %q", tc.kind, errs, want)
+			}
+		}
+	}
+}

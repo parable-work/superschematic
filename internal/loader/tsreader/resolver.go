@@ -68,6 +68,12 @@ type typeInfo struct {
 	sortBy   []string
 	sortItem string
 
+	// fileUpload is set by FileUpload<C> and fileDownload by
+	// FileDownload<C> (D81): the constraints of a field that is a file, and
+	// an operation's result that is one.
+	fileUpload   *ir.FileUploadConfig
+	fileDownload *ir.FileDownloadDef
+
 	// Classification of the base reference.
 	isScalar    bool
 	isEnum      bool
@@ -94,6 +100,7 @@ var wrapperNames = map[string]bool{
 	"Relation": true, "HasMany": true, "ManyToMany": true, "AutoGenerate": true,
 	"JsonField": true, "QueryParam": true, "EncryptedField": true, "Encrypted": true,
 	"RefersTo": true, "SearchQuery": true, "SortBy": true,
+	"FileUpload": true, "FileDownload": true,
 }
 
 // resolveTypeNode resolves a type expression into a typeInfo. It works
@@ -355,6 +362,13 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 	if id.name == "SearchQuery" && (args == nil || len(args.Nodes) == 0) {
 		// SearchQuery<T extends string = string>: a bare SearchQuery is text.
 		return &typeInfo{ref: ir.TypeRef{Name: "string"}, isPrimitive: true, queryParam: true, nullable: true, search: true}, nil
+	}
+	switch id.name {
+	case "FileUpload":
+		// FileUpload<C = {}>: C is the file's constraints, not a value's type.
+		return w.fileUploadFromTypeArgs(node, args)
+	case "FileDownload":
+		return w.fileDownloadFromTypeArgs(node, args)
 	}
 	if id.name == "SortBy" {
 		// SortBy<Item, Fields>: args[0] is the item type, not the value's.
