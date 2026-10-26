@@ -70,14 +70,15 @@ pub use descriptor::{
 };
 pub use errors::{
     CODE_CONFLICT, CODE_CROSS_ORIGIN, CODE_FORBIDDEN, CODE_INVALID_CREDENTIALS,
-    CODE_INVALID_PERMISSION, CODE_NOT_FOUND, CODE_UNAUTHORIZED,
+    CODE_INVALID_PERMISSION, CODE_NOT_FOUND, CODE_NOT_PENDING, CODE_PENDING_APPROVAL,
+    CODE_UNAUTHORIZED,
 };
 pub use handlers::{
     Cors, CorsLayer, IdentityAuthenticator, Operation, UserAdministration, UserSessions,
-    DEFAULT_USER_ADMINISTRATION_PATH, DEFAULT_USER_SESSIONS_PATH, OPERATIONS, OP_CAPABILITIES,
-    OP_CHANGE_PASSWORD, OP_CREATE_ROLE, OP_CREATE_USER, OP_DELETE_ROLE, OP_DISABLE_USER,
-    OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_ROLES, OP_LIST_USERS, OP_LOGIN, OP_LOGOUT,
-    OP_ME, OP_REGISTER, OP_REVOKE_ROLE, OP_SET_USER_PASSWORD, OP_UPDATE_ROLE,
+    DEFAULT_USER_ADMINISTRATION_PATH, DEFAULT_USER_SESSIONS_PATH, OPERATIONS, OP_APPROVE_USER,
+    OP_CAPABILITIES, OP_CHANGE_PASSWORD, OP_CREATE_ROLE, OP_CREATE_USER, OP_DELETE_ROLE,
+    OP_DISABLE_USER, OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_ROLES, OP_LIST_USERS,
+    OP_LOGIN, OP_LOGOUT, OP_ME, OP_REGISTER, OP_REVOKE_ROLE, OP_SET_USER_PASSWORD, OP_UPDATE_ROLE,
 };
 pub use password::{
     check_password, hash_password, hash_password_with_salt, verify_password, Argon2Params,
@@ -90,9 +91,9 @@ pub use scalars::{parse_uuid, uuid_to_base62, Scalars};
 pub use service::{
     Capabilities, ChangePasswordInput, Clock, CreateUserInput, CurrentUser, IdentityPrincipal,
     IdentityRole, IdentityUser, Input, IssuedSession, LoginInput, LoginResult, Permits,
-    RegisterInput, RoleInput, RoleRef, Service, SessionUser, SetPasswordInput,
-    DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ, PERMISSION_ROLES_WRITE,
-    PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
+    RegisterInput, RegisterResult, Registered, Registration, RoleInput, RoleRef, Service,
+    SessionUser, SetPasswordInput, DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ,
+    PERMISSION_ROLES_WRITE, PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
 };
 #[cfg(all(feature = "identity-postgres", feature = "postgres"))]
 pub use sql::PostgresPool;
@@ -102,7 +103,8 @@ pub use sql::Rusqlite;
 pub use sql::TokioPostgres;
 pub use sql::{Client, ClientError, Conn, Dialect, SqlStore, SqlValue};
 pub use store::{
-    LoginRecord, NewSession, NewUser, Role, Session, SessionRecord, Store, StoreError, User,
+    FirstUser, LoginRecord, NewSession, NewUser, NewUserGrants, Role, Session, SessionRecord,
+    Store, StoreError, User,
 };
 pub use time::{format_rfc3339, format_sqlite, parse_timestamp};
 pub use token::{

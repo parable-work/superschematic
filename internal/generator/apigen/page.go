@@ -119,6 +119,9 @@ func (e EndpointInfo) ArgQueryParams() []Param {
 // list, and a pointer to the output otherwise.
 func (e EndpointInfo) GoResultType() string {
 	switch {
+	case e.FileDownload != nil:
+		// The file (D81), the API package's alias of the runtime's.
+		return "*FileDownload"
 	case e.Page != nil:
 		return "paging.Page[" + e.OutputGoType + "]"
 	case e.OutputIsMap:
@@ -127,6 +130,26 @@ func (e EndpointInfo) GoResultType() string {
 		return e.OutputGoListType()
 	}
 	return "*" + e.OutputGoType
+}
+
+// GoImplResultType is GoResultType as the implementation package, which
+// imports the API package as api, writes it.
+func (e EndpointInfo) GoImplResultType() string {
+	if e.FileDownload != nil {
+		return "*api.FileDownload"
+	}
+	return e.GoResultType()
+}
+
+// HasFileDownloads reports whether an endpoint's result is a FileDownload
+// (D81): response.go then aliases the runtime's FileDownload.
+func (o *APIOutput) HasFileDownloads() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.FileDownload != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // GoZeroResult is the result a Go method of GoResultType returns beside an

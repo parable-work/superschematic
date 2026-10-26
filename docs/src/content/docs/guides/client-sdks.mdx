@@ -135,6 +135,38 @@ iterator ends with an error, not a loop, on a page whose `next` is the
 cursor it was asked with. The server refuses a cursor it never returned
 with 400, and the caller starts again from the first page.
 
+## Files
+
+An operation whose input has file fields
+([Uploads](/superschematic/guides/api-routes/#uploads)) takes the files
+beside the input, which leaves the file fields out, and each SDK sends them
+as `multipart/form-data`: the input as JSON in the `data` part, and each
+file in a part named as its field, with its filename and media type.
+
+| Language | The files | A FileDownload result |
+| --- | --- | --- |
+| TypeScript | `importCartLines(cartId, input, { lines: file })`, each a `File`; `importCartLinesRaw(cartId, formData)` sends a `FormData` of your own | `{ blob, filename, contentType }` (`DownloadedFile`) |
+| Go | a `<Namespace><Operation>Files` struct of `runtime.UploadFile{Filename, ContentType, Reader}` | `*runtime.DownloadedFile{Body, Filename, ContentType}` |
+| Python | a `FilePart(filename, content, content_type)` for each file field | `DownloadedFile(content, filename, content_type)` |
+| Rust | a `<Namespace><Operation>Files` struct of `UploadFile` | refused at build, for now |
+
+A refused file is a refused input, its error at its field, so the 400's
+error carries it among its field errors, as a refused rule's
+([Errors](#errors)): TypeScript's `ApiError.validationErrors.lines`, say.
+
+An operation whose result is a `FileDownload`
+([Downloads](/superschematic/guides/api-routes/#downloads)) resolves to
+the file: its bytes, the media type the server sent, and the filename its
+`Content-Disposition` offered, `filename*` before `filename`, or null (Go:
+`""`, Python: `None`) when it offered none. A refusal is the error any call's is. The
+storefront's test imports a cart from a CSV and reads it back:
+
+<Snippet file="typescript/shop-storefront/index.test.ts" from="test('a shopper imports lines" to="  });" />
+
+The Rust SDK refuses to generate an API with a `FileDownload` result,
+naming the operation; generate another language's SDK for it, or leave
+Rust out of `outputs.sdk`. Support follows.
+
 ## Errors
 
 A response outside 2xx is an error that carries the status, the problem's

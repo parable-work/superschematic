@@ -86,8 +86,9 @@ YAML forms write the same object under the operation's `docs` key, with
 ### What the generators do with it
 
 The API's OpenAPI document, `openapi.json`, which every server's build
-writes (the Go server embeds it in `openapi.go` and the Rust server in
-`src/openapi.rs`, and both serve it at `GET /api/openapi.json`):
+writes (the Go server embeds it in `openapi.go`, the Rust server in
+`src/openapi.rs` and the TypeScript package in `openapi.ts`, and each
+serves it at `GET /api/openapi.json`):
 
 - `summary` is `title`. Without `@docs` it is the operation name.
 - `description` is the `@docs` description. Without `@docs` it is the

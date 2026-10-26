@@ -36,6 +36,37 @@ export interface OperationInput {
   /** The generated strict parser of the input type (parse<Input>FromJSON). */
   readonly parse: (value: unknown) => unknown;
   readonly required: boolean;
+  /**
+   * The input type's wire-to-runtime conversion alone (parse<Input>FromJSON),
+   * for an input with file parts (D81): the router validates the JSON
+   * fields with parse, sets aside the errors at the file fields, which the
+   * JSON never holds, and converts with this.
+   */
+  readonly fromJSON?: (value: unknown) => unknown;
+}
+
+/**
+ * A file part of a multipart input (D81): a FileUpload field of the input
+ * type, or one of a file-upload scalar, sent as a part named as the field.
+ */
+export interface OperationUpload {
+  /** The part's name, the input type's field. */
+  readonly name: string;
+  readonly required: boolean;
+  /** The largest file the part may hold, in bytes. */
+  readonly maxBytes: number;
+  /** The media types the part's Content-Type may name, without parameters; empty admits any. */
+  readonly contentTypes: readonly string[];
+  /** The extensions the part's filename may end in, with the dot, matched without case; empty admits any. */
+  readonly extensions: readonly string[];
+}
+
+/** A FileDownload result (D81): the file the route answers in place of the envelope. */
+export interface OperationDownload {
+  /** The Content-Type the route answers with. */
+  readonly contentType: string;
+  /** The filename Content-Disposition offers when the implementation names none. */
+  readonly filename?: string;
 }
 
 export interface OperationSpec {
@@ -51,6 +82,14 @@ export interface OperationSpec {
   /** Undecorated scalar arguments of a non-GET operation, read from the JSON body object. */
   readonly bodyParams: readonly ParamSpec[];
   readonly input?: OperationInput;
+  /**
+   * The input's file parts (D81): the body is multipart/form-data, its
+   * `data` part the input's other fields as JSON, or JSON alone with no
+   * file. Absent for an operation whose input holds no file.
+   */
+  readonly uploads?: readonly OperationUpload[];
+  /** The result is a file (D81): the adapter answers its bytes, not the envelope. */
+  readonly download?: OperationDownload;
   /** The result is a list of lists (T[][]): the adapter sends a nullish outer or inner list as []. */
   readonly outputIsArrayOfArrays?: boolean;
   readonly auth: OperationAuth;

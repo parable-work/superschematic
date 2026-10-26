@@ -4000,6 +4000,12 @@
           },
           "type": "object"
         },
+        "fileDownload": {
+          "$ref": "#/$defs/FileDownloadDef"
+        },
+        "fileUpload": {
+          "$ref": "#/$defs/FileUploadConfig"
+        },
         "filterable": {
           "default": false,
           "type": "boolean"
@@ -4231,9 +4237,32 @@
       },
       "type": "object"
     },
+    "FileDownloadDef": {
+      "additionalProperties": false,
+      "properties": {
+        "contentType": {
+          "type": "string"
+        },
+        "filename": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contentType"
+      ],
+      "type": "object"
+    },
     "FileUploadConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowedExtensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "allowedTypes": {
           "default": [],
           "items": {
@@ -4307,6 +4336,25 @@
       },
       "required": [
         "contentType"
+      ],
+      "type": "object"
+    },
+    "IdentityFirstUser": {
+      "additionalProperties": false,
+      "properties": {
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "permissions"
       ],
       "type": "object"
     },
@@ -5988,6 +6036,16 @@
     "UserSessionsConfig": {
       "additionalProperties": false,
       "properties": {
+        "defaultRoles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "firstUser": {
+          "$ref": "#/$defs/IdentityFirstUser"
+        },
         "noLogin": {
           "default": false,
           "type": "boolean"
@@ -5999,6 +6057,10 @@
         "register": {
           "default": false,
           "type": "boolean"
+        },
+        "registration": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"

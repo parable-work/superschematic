@@ -92,6 +92,7 @@ func TestUserRoutesAreSDKMethods(t *testing.T) {
 			"GetUser":         {"GET", "/api/auth/admin/users/%v"},
 			"DisableUser":     {"POST", "/api/auth/admin/users/%v/disable"},
 			"EnableUser":      {"POST", "/api/auth/admin/users/%v/enable"},
+			"ApproveUser":     {"POST", "/api/auth/admin/users/%v/approve"},
 			"SetUserPassword": {"PUT", "/api/auth/admin/users/%v/password"},
 			"ListRoles":       {"GET", "/api/auth/admin/roles"},
 			"CreateRole":      {"POST", "/api/auth/admin/roles"},
@@ -166,7 +167,7 @@ func TestUserRoutesAreTools(t *testing.T) {
 	want := []string{
 		"account.login", "account.logout", "account.me", "account.capabilities", "account.changePassword", "account.register",
 		"account-admin.createUser", "account-admin.listUsers", "account-admin.getUser", "account-admin.disableUser",
-		"account-admin.enableUser", "account-admin.setUserPassword", "account-admin.listRoles", "account-admin.createRole",
+		"account-admin.enableUser", "account-admin.approveUser", "account-admin.setUserPassword", "account-admin.listRoles", "account-admin.createRole",
 		"account-admin.updateRole", "account-admin.deleteRole", "account-admin.grantRole", "account-admin.revokeRole",
 		"greeting.greet",
 	}

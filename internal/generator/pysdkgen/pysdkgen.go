@@ -154,6 +154,9 @@ type EndpointInfo struct {
 	MultipartStripKeys   []string
 	MethodParams         []MethodParam
 	Filterable           bool
+	// FileDownload marks a FileDownload result (D81): the method returns
+	// the client's DownloadedFile, the bytes and the filename.
+	FileDownload bool
 
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
@@ -669,6 +672,10 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 
 	if converted.OutputTypeHint == "" {
 		converted.OutputTypeHint = "Any"
+	}
+	if endpoint.FileDownload != nil {
+		converted.FileDownload = true
+		converted.OutputTypeHint = "DownloadedFile"
 	}
 	if endpoint.Page != nil {
 		converted.Paged = true

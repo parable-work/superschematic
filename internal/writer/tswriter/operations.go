@@ -97,6 +97,15 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 		if cfg.Register {
 			keys = append(keys, "register: true")
 		}
+		if cfg.Registration != "" && cfg.Registration != ir.IdentityRegistrationOpen {
+			keys = append(keys, "registration: "+quote(cfg.Registration))
+		}
+		if len(cfg.DefaultRoles) > 0 {
+			keys = append(keys, "defaultRoles: ["+quotedList(cfg.DefaultRoles)+"]")
+		}
+		if first := cfg.FirstUser; first != nil {
+			keys = append(keys, "firstUser: { role: "+quote(first.Role)+", permissions: ["+quotedList(first.Permissions)+"] }")
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), optionalObjectLiteral(keys))
 	}
 	if cfg := set.UserAdministration; cfg != nil {
@@ -200,6 +209,13 @@ func (e *emitter) operationReturnExpr(op *ir.FieldDef, owner string) string {
 		e.failf("%s: map-typed returns have no TypeScript authoring form", owner)
 		return "never"
 	}
+	if op.FileDownload != nil {
+		// A FileDownload result (D81) names no type.
+		if op.TypeRef != (ir.TypeRef{}) || op.Encrypted || !op.Required {
+			e.failf("%s: a FileDownload result with a type, encrypted or nullable has no TypeScript authoring form", owner)
+		}
+		return e.fileDownloadExpr(op.FileDownload)
+	}
 	expr := e.renderTypeName(op.TypeRef.Name, owner) + arraySuffix(op.TypeRef)
 	if op.Encrypted {
 		expr = fmt.Sprintf("%s<%s>", e.use("EncryptedField"), expr)
@@ -275,6 +291,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.ServiceCallers = nil
 	rest.ManualRouteRegistration = false
 	rest.Page = nil
+	rest.FileDownload = nil
 	rest.Middleware = nil
 	rest.Arguments = nil
 	if !reflect.DeepEqual(&rest, &ir.FieldDef{}) {

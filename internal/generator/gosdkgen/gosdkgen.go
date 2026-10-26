@@ -167,6 +167,9 @@ type EndpointInfo struct {
 	FileUploadFields         []FileUploadField
 	FilesStructName          string
 	Filterable               bool
+	// FileDownload marks a FileDownload result (D81): the method returns
+	// the runtime's DownloadedFile, the bytes and the filename.
+	FileDownload bool
 
 	// OutputArrayDepth is the number of list levels of the response: 0, 1
 	// for a list, 2 for a list of lists. For a map it is the list levels
@@ -578,6 +581,10 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		outputGoType = "runtime.Page[" + itemGoType + "]"
 		allMethodName = methodName + "All"
 	}
+	if ep.FileDownload != nil {
+		// The file (D81), not a JSON value.
+		outputGoType = "*runtime.DownloadedFile"
+	}
 
 	return EndpointInfo{
 		MethodName:            methodName,
@@ -587,6 +594,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		InputType:             qualifyType(ep.InputType, scalarSymbols),
 		OutputType:            ep.OutputType,
 		OutputGoType:          outputGoType,
+		FileDownload:          ep.FileDownload != nil,
 		OutputArrayDepth:      ep.OutputArrayDepth(),
 		OutputIsMap:           ep.OutputIsMap,
 		OutputNullable:        ep.OutputNullable,
@@ -1193,7 +1201,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 				}
 			}
 		}
-		if ep.HasEncryptedBody {
+		if ep.HasEncryptedBody || ep.FileDownload {
 			needsRuntime = true
 		}
 		if ep.HasInput || ep.HasScalarArgs {

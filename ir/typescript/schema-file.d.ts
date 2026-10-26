@@ -224,6 +224,8 @@ export interface FieldDef {
   docs?: OperationDocs;
   encrypted?: boolean;
   extensions?: Extensions;
+  fileDownload?: FileDownloadDef;
+  fileUpload?: FileUploadConfig;
   filterable?: boolean;
   hasMany?: boolean;
   hmacVerifiedProvider?: string;
@@ -285,7 +287,13 @@ export interface FieldDisplay {
   multiline?: boolean;
 }
 
+export interface FileDownloadDef {
+  contentType: string;
+  filename?: string;
+}
+
 export interface FileUploadConfig {
+  allowedExtensions?: string[];
   allowedTypes?: string[];
   category?: string;
   maxSize?: number;
@@ -306,6 +314,11 @@ export interface GraphParent {
 export interface HTTPBinaryStreamDef {
   contentType: string;
   responseHeaders?: string[];
+}
+
+export interface IdentityFirstUser {
+  permissions: string[];
+  role: string;
 }
 
 export interface ImageConstraints {
@@ -736,9 +749,12 @@ export interface UserRoleTrait {
 }
 
 export interface UserSessionsConfig {
+  defaultRoles?: string[];
+  firstUser?: IdentityFirstUser;
   noLogin?: boolean;
   path?: string;
   register?: boolean;
+  registration?: string;
 }
 
 export interface UserTrait {

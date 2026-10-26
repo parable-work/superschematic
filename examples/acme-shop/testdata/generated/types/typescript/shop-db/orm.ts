@@ -1043,6 +1043,7 @@ export interface UserCredentialRow {
   passwordHash: string;
   passwordChangedAt: T.TemporalDateTime;
   disabledAt: T.TemporalDateTime | null;
+  pendingAt: T.TemporalDateTime | null;
 }
 
 /** What a create of a row of UserCredential sets; a member left unset takes its column's default, or the schema's. */
@@ -1052,6 +1053,7 @@ export interface UserCredentialCreate {
   passwordHash: string;
   passwordChangedAt: T.TemporalDateTime;
   disabledAt?: T.TemporalDateTime | null;
+  pendingAt?: T.TemporalDateTime | null;
 }
 
 /** What an update of a row of UserCredential sets: each member set, null setting a column that may be null to NULL. */
@@ -1060,6 +1062,7 @@ export interface UserCredentialUpdate {
   passwordHash?: string;
   passwordChangedAt?: T.TemporalDateTime;
   disabledAt?: T.TemporalDateTime | null;
+  pendingAt?: T.TemporalDateTime | null;
 }
 
 /** The rows of UserCredential a read or a write finds: each member set is one condition, all of them ANDed. */
@@ -1069,10 +1072,11 @@ export interface UserCredentialFilter {
   passwordHash?: StringFilter<string>;
   passwordChangedAt?: DateTimeFilter<T.TemporalDateTime>;
   disabledAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  pendingAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
 }
 
 /** The members findOne and findMany order rows of UserCredential by. */
-export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedAt" | "disabledAt";
+export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedAt" | "disabledAt" | "pendingAt";
 
 /** The members findPage orders rows of UserCredential by (D60, amended); ties break by id. */
 export type UserCredentialSortField = "id" | "passwordChangedAt";
@@ -1109,12 +1113,13 @@ export const userCredentialTable: TableDefinition = {
     { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "in", "ilike", "isNull"] },
     { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
   ],
   statements: {
-    columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\"",
-    qualifiedColumns: "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\"",
-    getOne: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\" FROM user_credential WHERE id = $1",
-    getMany: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\" FROM user_credential WHERE id IN (%s)",
+    columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+    qualifiedColumns: "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+    getOne: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = $1",
+    getMany: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
     liveCondition: "",
@@ -1130,11 +1135,11 @@ export const userCredentialTable: TableDefinition = {
     insert: "INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s",
     insertMany: "INSERT INTO user_credential (%s) VALUES %s RETURNING %s",
     update: "UPDATE user_credential SET %s WHERE id = $%d",
-    returning: " RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\"",
+    returning: " RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
     updateMany: "UPDATE user_credential SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO user_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\"",
+    upsert: "INSERT INTO user_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM user_credential WHERE id = $1",

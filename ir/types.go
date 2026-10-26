@@ -400,6 +400,14 @@ type FieldDef struct {
 	// scalar's own upload limit.
 	ValidateUploadMaxBytes *int64 `json:"validateUploadMaxBytes,omitempty" yaml:"validateUploadMaxBytes,omitempty"`
 
+	// FileUpload is FileUpload<C> (D81): the field is a file the request
+	// sends as a multipart part of its own, named as the field, under the
+	// constraints C names. Its TypeRef is string, which every language's
+	// types hold it as. Only on a single field of an operation's input
+	// type; nil for every other field. A field of a file-upload scalar
+	// takes the scalar's FileUpload instead.
+	FileUpload *FileUploadConfig `json:"fileUpload,omitempty" yaml:"fileUpload,omitempty"`
+
 	// ValidateMinLength is the minimum character length for string-like fields
 	// (@validateMinLength). Nil means no minimum.
 	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
@@ -554,6 +562,12 @@ type FieldDef struct {
 	// explicit content type and optional response headers that must be
 	// available at stream start (@httpBinaryStream).
 	HTTPBinaryStream *HTTPBinaryStreamDef `json:"httpBinaryStream,omitempty" yaml:"httpBinaryStream,omitempty"`
+
+	// FileDownload is a FileDownload<C> result (D81): the operation answers
+	// a file, not the JSON envelope, of the media type C names, offered
+	// under a filename in Content-Disposition. Its TypeRef names no type.
+	// Nil for every other operation and for data fields.
+	FileDownload *FileDownloadDef `json:"fileDownload,omitempty" yaml:"fileDownload,omitempty"`
 
 	// ManualRouteRegistration marks an operation that should be registered
 	// manually instead of the generated route registration chain

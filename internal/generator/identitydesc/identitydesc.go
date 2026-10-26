@@ -92,6 +92,7 @@ type CredentialColumns struct {
 	PasswordHash      string `json:"passwordHash"`
 	PasswordChangedAt string `json:"passwordChangedAt"`
 	DisabledAt        string `json:"disabledAt"`
+	PendingAt         string `json:"pendingAt"`
 }
 
 // Role is the table with the UserRole trait.
@@ -213,6 +214,7 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 			PasswordHash:      credential.column(credential.field(ir.IdentityCredentialPasswordHashField)),
 			PasswordChangedAt: credential.column(credential.field(ir.IdentityCredentialPasswordChangedAtField)),
 			DisabledAt:        credential.column(credential.field(ir.IdentityCredentialDisabledAtField)),
+			PendingAt:         credential.column(credential.field(ir.IdentityCredentialPendingAtField)),
 		},
 	}
 	if credential.err != nil {

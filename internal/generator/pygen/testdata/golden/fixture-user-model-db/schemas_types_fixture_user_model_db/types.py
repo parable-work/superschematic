@@ -723,6 +723,9 @@ class UserCredential(BaseModel):
     # When the user was disabled; a disabled user cannot sign in.
     disabled_at: Optional[TemporalDateTime] = Field(default=None, alias="disabledAt", serialization_alias="disabledAt")
 
+    # When the user registered to wait for an administrator's approval; a pending user cannot sign in (D81).
+    pending_at: Optional[TemporalDateTime] = Field(default=None, alias="pendingAt", serialization_alias="pendingAt")
+
     def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -780,11 +783,19 @@ class UserCredential(BaseModel):
             except PydanticValidationError as e:
                 errors.add_field_error("disabled_at", "invalid", str(e))
 
+        # Validate pendingAt
+        if self.pending_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.pending_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("pending_at", "invalid", str(e))
+
         if by_alias:
             return errors._with_field_names({
                 "password_hash": "passwordHash",
                 "password_changed_at": "passwordChangedAt",
                 "disabled_at": "disabledAt",
+                "pending_at": "pendingAt",
             })
 
         return errors

@@ -75,12 +75,30 @@ Its entry points:
   streaming response, say). An `@hmacVerified` operation's spec names its
   `webhookProvider`, and both mount it only with a `webhookVerifier`, Hono
   middleware that runs before every other step. It may read the body to
-  check the signature; the route reads a copy taken before it ran. The runtime has no step that decrypts a request
+  check the signature; the route reads a copy taken before it ran.
+  `jwtBodyHashVerifier` is a built-in one (D81), for a provider that signs
+  each webhook with an ES256 JWT carrying the body's SHA-256, as Plaid
+  does: it looks keys up by `kid` or fetches a JWKS, holds them by `kid`,
+  and asks the provider at most once a minute. The runtime has no step that decrypts a request
   body or reads a multipart one, so the generator refuses an encrypted
   operation or a file upload that is not `@manualRouteRegistration`; the
   service's handler decrypts or reads the body itself. `notFoundHandler` and `errorHandler` cover the
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
+- `@superschematic/http-runtime/openapi`, what a generated router mounts
+  beside its operations (D81): `mountOpenAPI` serves the document the
+  package embeds at `GET /api/openapi.json`, with the running version and
+  server URL (`openAPIVersion`, `openAPIBaseURL`, `1.0.0` and
+  `http://localhost:8080` unless set), and its RapiDoc page at
+  `GET /api/docs`, as the Go and Rust servers do, unless `serveOpenAPI` is
+  false.
+- `@superschematic/http-runtime/mcp`, the MCP endpoint of an API with
+  `outputs.api.mcp` on (D81): `serveMcp` is the engine's stateless
+  streamable HTTP transport over any tool set, and `mountMcp` mounts it at
+  `POST /api/mcp` behind the router's auth gate, listing the tools whose
+  routes the caller may call and running each `tools/call` in process
+  through its operation's route. `src/mcp-parity.test.ts` replays the
+  engine's MCP corpus through the transport.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
   database connection, the Postgres value codec, the generated
   repositories' runtime, and a queue's enqueue and claims (below). It is
@@ -110,8 +128,9 @@ Its entry points:
 - `@superschematic/http-runtime/r2`, a `Bucket` over a Worker's R2
   binding, which presigns S3 URLs with WebCrypto.
 
-The main entry, `./hono`, `./workers`, `./d1` and `./r2` import nothing
-from `node:` and read no Bun global, so a Worker bundles them with no
+The main entry, `./hono`, `./openapi`, `./mcp`, `./workers`, `./d1` and
+`./r2` import nothing from `node:` and read no Bun global, so a Worker
+bundles them with no
 `nodejs_compat`; `scripts/workers-check.mjs` holds them to it (below).
 
 ## Authentication and permissions
@@ -563,7 +582,8 @@ edge's token id and its secret the hex SHA-256 of the token's value, which
 it computes once. `presignV4` signs AWS's published example as AWS does.
 
 `scripts/workers-check.mjs` bundles the main entry, `./hono`,
-`./workers`, `./d1` and `./r2` from `dist/` as a Worker's `bundle.ts`
+`./openapi`, `./mcp`, `./workers`, `./d1` and `./r2` from `dist/` as a
+Worker's `bundle.ts`
 does, `bun build --target=browser --conditions=workerd` with `.wasm`
 modules external, and fails on an import from `node:` (read from the
 bundle's metafile, since Bun's browser target swaps such a module for a

@@ -83,6 +83,7 @@ export {
   PERMISSION_USERS_READ,
   PERMISSION_USERS_WRITE,
   formatDateTime,
+  registerResultOf,
 } from './service.js';
 export type {
   Capabilities,
@@ -98,6 +99,9 @@ export type {
   LoginInput,
   LoginResult,
   RegisterInput,
+  RegisterResult,
+  Registered,
+  RegistrationOptions,
   RoleInput,
   RoleRef,
   SessionUser,

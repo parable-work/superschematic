@@ -1,0 +1,10 @@
+# A TypeScript API over users-db's user model (D50, D51) that serves its
+# visible @mcp operations over MCP (outputs.api.mcp, D81): an agent signs in
+# through the session routes and calls them as the user.
+name: users-ts-agent
+kind: API
+authDb: users-db
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT, mcp: true }

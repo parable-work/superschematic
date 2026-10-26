@@ -673,6 +673,8 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		Naming:       r.Options.Naming,
 		Clock:        r.Options.Clock,
 		AuthDB:       authDB,
+		// The router serves the visible @mcp tools at POST /api/mcp (D81).
+		MCP: r.Outputs.APIEnabled() && r.Outputs.API.MCP,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)

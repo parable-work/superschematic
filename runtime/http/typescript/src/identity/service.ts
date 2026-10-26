@@ -13,11 +13,13 @@ import {
   invalidCredentials,
   invalidPermissions,
   notCovered,
+  notPending,
+  pendingApproval,
   unauthenticated,
 } from './errors.js';
 import { dummyHash, hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { capabilitiesOf, effectivePermissions, uncovered, uncoveredUser, validPermission, type IdentityRoute } from './permissions.js';
-import { IdentityStoreError, isStoreError, type IdentityStore, type StoredRole, type StoredUser } from './store.js';
+import { IdentityStoreError, isStoreError, type IdentityStore, type NewUser, type StoredRole, type StoredUser } from './store.js';
 import { extractCredential, hashToken, newToken, type Transport } from './token.js';
 
 /*
@@ -82,6 +84,14 @@ export interface LoginResult {
   readonly token?: string;
 }
 
+/** register's answer under approval (D81): pending and no session, or a session as LoginResult has one. */
+export interface RegisterResult {
+  readonly pending: boolean;
+  readonly user: SessionUser;
+  readonly expiresAt?: string;
+  readonly token?: string;
+}
+
 export interface RoleRef {
   readonly id: string;
   readonly name: string;
@@ -117,6 +127,7 @@ export interface IdentityUser {
   readonly login: string;
   readonly name: string;
   readonly disabled: boolean;
+  readonly pending: boolean;
   readonly roles: readonly RoleRef[];
 }
 
@@ -140,6 +151,31 @@ export interface IssuedSession {
   readonly expiresAt: Date;
 }
 
+/** What register did: started a session, or, for a user who waits for approval, none (D81). */
+export type Registered =
+  | { readonly pending: false; readonly user: SessionUser; readonly session: IssuedSession }
+  | { readonly pending: true; readonly user: SessionUser };
+
+/** A Registered as register answers it under approval. */
+export function registerResultOf(registered: Registered): RegisterResult {
+  if (registered.pending) return { pending: true, user: registered.user };
+  const { expiresAt, token } = registered.session.result;
+  return { pending: false, user: registered.user, expiresAt, ...(token !== undefined ? { token } : {}) };
+}
+
+/**
+ * How register admits a user (D81), as the API's @userSessions({
+ * registration, defaultRoles, firstUser }) declares it.
+ */
+export interface RegistrationOptions {
+  /** Creates the user pending: register starts no session, and login refuses them with 403 pending_approval until approveUser. */
+  readonly approval?: boolean;
+  /** The roles each new user is granted, by name, each created with no permissions when no role has the name; a pending user holds them from registration, and they take effect at approval. */
+  readonly defaultRoles?: readonly string[];
+  /** Makes the registration that finds no role grant the first administrator: active even under approval, and holding the role beside defaultRoles. */
+  readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
+}
+
 /** What the service reads of a request it authenticates: its method, Host and headers. */
 export type IdentityRequest = CrossOriginRequest;
 
@@ -159,6 +195,8 @@ export interface IdentityServiceOptions {
   readonly routes?: readonly IdentityRoute[];
   /** Answers capabilities in place of the routes, for a server whose routes the operation table does not describe (the engine's access policy). */
   readonly capabilities?: (principal: IdentityPrincipal) => Readonly<Record<string, boolean>> | Promise<Readonly<Record<string, boolean>>>;
+  /** How register admits users (D81); open registration with no roles when absent. */
+  readonly registration?: RegistrationOptions;
 }
 
 /** Go's RFC 3339 with the fraction's trailing zeros dropped, in UTC: how the Go runtime writes a time. */
@@ -175,7 +213,7 @@ function roleRefs(roles: readonly StoredRole[]): RoleRef[] {
 }
 
 function identityUserOf(user: StoredUser): IdentityUser {
-  return { id: user.id, login: user.login, name: user.name, disabled: user.disabled, roles: roleRefs(user.roles) };
+  return { id: user.id, login: user.login, name: user.name, disabled: user.disabled, pending: user.pending, roles: roleRefs(user.roles) };
 }
 
 function identityRoleOf(role: StoredRole): IdentityRole {
@@ -213,6 +251,30 @@ function storeProblem(error: unknown, what: string): unknown {
   return error;
 }
 
+/**
+ * Refuses a registration whose roles a store could not write: an empty
+ * role name, or a first administrator without a role or with no
+ * permission or one of the wrong form.
+ */
+function checkRegistration(registration: RegistrationOptions): RegistrationOptions {
+  if ((registration.defaultRoles ?? []).some(role => role === '')) throw new Error('identity: a default role has no name');
+  const first = registration.firstUser;
+  if (first) {
+    if (first.role === '' || first.permissions.length === 0) {
+      throw new Error('identity: the first administrator needs a role and at least one permission');
+    }
+    const bad = first.permissions.find(p => !validPermission(p));
+    if (bad !== undefined) {
+      throw new Error(`identity: the first administrator's permission ${JSON.stringify(bad)} is not dotted segments of letters, digits, '_' and '-'`);
+    }
+  }
+  return {
+    approval: registration.approval === true,
+    defaultRoles: [...(registration.defaultRoles ?? [])],
+    ...(first ? { firstUser: { role: first.role, permissions: [...first.permissions] } } : {}),
+  };
+}
+
 /** The identity service. */
 export class IdentityService {
   readonly config: IdentityConfig;
@@ -225,6 +287,8 @@ export class IdentityService {
   private readonly capabilitiesOf: IdentityServiceOptions['capabilities'];
   private readonly params: Argon2Params;
   private readonly dummy: Promise<string>;
+  /** How register admits users. */
+  readonly registration: RegistrationOptions;
 
   /** Validates the config and starts hashing the dummy password an unknown login verifies against, at the config's cost. */
   constructor(options: IdentityServiceOptions) {
@@ -242,6 +306,7 @@ export class IdentityService {
     }
     this.routes = [...(options.routes ?? [])];
     this.capabilitiesOf = options.capabilities;
+    this.registration = checkRegistration(options.registration ?? {});
     this.params = this.config.password.argon2;
     this.dummy = dummyHash(this.params);
     // A failure surfaces on the first login that needs the hash.
@@ -282,7 +347,9 @@ export class IdentityService {
    * failure, an unknown login, a login the scalar refuses, a user without a
    * password and a disabled user included, is 401 invalid_credentials after
    * a verify of the same cost, so neither the answer nor its timing tells
-   * which. A hash at an older cost is written again at the config's.
+   * which. A user whose password verifies and who waits for approval is
+   * 403 pending_approval (D81). A hash at an older cost is written again
+   * at the config's.
    */
   async login(input: LoginInput): Promise<IssuedSession> {
     const f = new FieldErrors();
@@ -308,6 +375,7 @@ export class IdentityService {
     const verified = await verifyPassword(rec.passwordHash, input.password, this.params);
     if (!verified.ok) throw invalidCredentials();
     if (rec.user.disabled) throw invalidCredentials();
+    if (rec.user.pending) throw pendingApproval();
     if (verified.rehash) {
       const hash = await hashPassword(input.password, this.params);
       await this.store.rehashPassword(rec.user.id, rec.passwordHash, hash);
@@ -315,21 +383,37 @@ export class IdentityService {
     return this.issue(rec.user, transport);
   }
 
-  /** Creates a user with a password and signs them in, as login does. A taken login is 409 conflict. */
-  async register(input: RegisterInput): Promise<IssuedSession> {
+  /**
+   * Creates a user with a password, with the registration's default
+   * roles, and signs them in, as login does. Under approval the user waits
+   * for an administrator and no session starts, unless they are the first
+   * administrator (D81). A taken login is 409 conflict.
+   */
+  async register(input: RegisterInput): Promise<Registered> {
     const f = new FieldErrors();
     const transport = transportOf(input.session, f);
     if (input.login === '') f.add('login', 'required', 'login is required');
     checkPasswordField(f, 'password', input.password);
     f.throwIfAny();
-    const user = await this.createStoredUser(input.login, input.name ?? '', input.password);
-    return this.issue(user, transport);
+    const { approval, defaultRoles, firstUser } = this.registration;
+    const user = await this.createStoredUser(input.login, input.name ?? '', input.password, {
+      pending: approval === true,
+      roles: defaultRoles ?? [],
+      ...(firstUser ? { first: firstUser } : {}),
+    });
+    if (user.pending) return { pending: true, user: sessionUserOf(user) };
+    return { pending: false, user: sessionUserOf(user), session: await this.issue(user, transport) };
   }
 
-  private async createStoredUser(login: string, name: string, password: string): Promise<StoredUser> {
+  private async createStoredUser(
+    login: string,
+    name: string,
+    password: string,
+    registration: Pick<NewUser, 'pending' | 'roles' | 'first'> = {}
+  ): Promise<StoredUser> {
     const hash = await hashPassword(password, this.params);
     try {
-      return await this.store.createUser({ login, name, passwordHash: hash, at: this.now() });
+      return await this.store.createUser({ login, name, passwordHash: hash, at: this.now(), ...registration });
     } catch (error) {
       if (error instanceof IdentityStoreError && (error.kind === 'invalid_login' || error.kind === 'invalid_name')) {
         const f = new FieldErrors();
@@ -338,7 +422,7 @@ export class IdentityService {
         f.throwIfAny();
       }
       if (isStoreError(error, 'login_taken')) throw identityConflict('The login is taken');
-      throw error;
+      throw storeProblem(error, 'Role');
     }
   }
 
@@ -398,6 +482,7 @@ export class IdentityService {
     if (session.revokedAt !== null) throw unauthenticated(new Error('the session is revoked'));
     if (now >= session.expiresAt.getTime()) throw unauthenticated(new Error('the session is expired'));
     if (user.disabled) throw unauthenticated(new Error('the user is disabled'));
+    if (user.pending) throw unauthenticated(new Error('the user waits for approval'));
     const lastSeen = (session.lastSeenAt ?? session.createdAt).getTime();
     const idle = this.config.idleTimeoutSeconds * 1000;
     if (idle > 0 && now - lastSeen >= idle) throw unauthenticated(new Error('the session is idle'));
@@ -470,10 +555,15 @@ export class IdentityService {
     return identityUserOf(await this.createStoredUser(input.login, input.name ?? '', input.password));
   }
 
-  /** Lists every user, by login (users.read). */
-  async listUsers(p: IdentityPrincipal): Promise<IdentityUser[]> {
+  /**
+   * Lists the users, by login (users.read): every one when pending is
+   * absent, else those who wait for approval when it is true and the
+   * others when it is false (D81).
+   */
+  async listUsers(p: IdentityPrincipal, pending?: boolean): Promise<IdentityUser[]> {
     this.require(p, PERMISSION_USERS_READ);
-    return (await this.store.listUsers()).map(identityUserOf);
+    const users = await this.store.listUsers();
+    return users.filter(user => pending === undefined || user.pending === pending).map(identityUserOf);
   }
 
   /** One user (users.read). */
@@ -506,6 +596,24 @@ export class IdentityService {
     try {
       await this.store.setDisabled(id, disabled, this.now());
     } catch (error) {
+      throw storeProblem(error, 'User');
+    }
+    return this.storedUser(id);
+  }
+
+  /**
+   * Approves a user who waits for approval, who can then sign in
+   * (users.write, D81). The caller's permissions must cover each of the
+   * user's, the roles register granted them included; a user who is not
+   * pending is 409 not_pending.
+   */
+  async approveUser(p: IdentityPrincipal, id: string): Promise<IdentityUser> {
+    this.require(p, PERMISSION_USERS_WRITE);
+    await this.covers(p, id);
+    try {
+      await this.store.approveUser(id);
+    } catch (error) {
+      if (isStoreError(error, 'not_pending')) throw notPending();
       throw storeProblem(error, 'User');
     }
     return this.storedUser(id);

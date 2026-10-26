@@ -5,7 +5,8 @@ its generated TypeScript SDK and IDENTITY_DDL to its authDb's SQLite DDL).
 The generated router serves the API over bun:sqlite with the identity
 service identityService builds, and every call but the cross-origin
 refusals goes through the SDK, whose fetch hands each request to the app:
-a bearer session from register to logout, the administration routes under
+a bearer session from register, under approval (D81), to logout, the
+administration routes under
 the grant rule, and a cookie session in a browser's place, which keeps the
 cookies the app sets and sends the credentials mode the SDK passes.
 */
@@ -119,21 +120,32 @@ describe('generated fixture-user-routes-api router with the identity runtime', (
     );
   });
 
-  test('a bearer session: register, login, me, capabilities, a protected route, changePassword and logout', async () => {
+  test('a bearer session: register under approval, approval, login, me, capabilities, a protected route, changePassword and logout', async () => {
     const served = await serve();
     const anonymous = sdkFor(served);
     expect(await refusal(anonymous.greeting.greet())).toEqual([401, 'unauthorized']);
 
+    // The fixture registers under approval (D81): a 202 with no session,
+    // and a login refused as pending until the administrator approves.
     const registered = await anonymous.account.register({ login: 'Grace@Example.com', name: 'Grace', password: GRACE_PASSWORD });
+    expect(registered.pending).toBe(true);
     expect(registered.user).toMatchObject({ login: 'grace@example.com', name: 'Grace' });
-    expect(registered.token).toBeString();
-    expect(registered.expiresAt).toBeInstanceOf(Date);
+    expect(registered.token).toBeUndefined();
+    expect(await refusal(anonymous.account.login({ login: 'grace@example.com', password: GRACE_PASSWORD }))).toEqual([403, 'pending_approval']);
     expect(await refusal(anonymous.account.login({ login: 'grace@example.com', password: 'not her password' }))).toEqual([401, 'invalid_credentials']);
+    const { token: adminToken } = await anonymous.account.login({ login: 'admin@example.com', password: ADMIN_PASSWORD });
+    const admin = sdkFor(served, { auth: { token: adminToken } });
+    expect((await admin.accountAdmin.listUsers(true)).map((user: { login: string }) => user.login)).toEqual(['grace@example.com']);
+    expect(await admin.accountAdmin.approveUser(registered.user.id)).toMatchObject({ pending: false, roles: [{ name: 'member' }] });
+    expect(await refusal(admin.accountAdmin.approveUser(registered.user.id))).toEqual([409, 'not_pending']);
 
     const login = await anonymous.account.login({ login: 'GRACE@example.com', password: GRACE_PASSWORD });
     const grace = sdkFor(served, { auth: { token: login.token } });
-    const other = sdkFor(served, { auth: { token: registered.token } });
-    expect(await grace.account.me()).toEqual({ user: { id: registered.user.id, login: 'grace@example.com', name: 'Grace' }, roles: [], permissions: [] });
+    const second = await anonymous.account.login({ login: 'grace@example.com', password: GRACE_PASSWORD });
+    const other = sdkFor(served, { auth: { token: second.token } });
+    const me = await grace.account.me();
+    expect(me.user).toEqual({ id: registered.user.id, login: 'grace@example.com', name: 'Grace' });
+    expect({ roles: me.roles.map((role: { name: string }) => role.name), permissions: me.permissions }).toEqual({ roles: ['member'], permissions: [] });
 
     // Capabilities answers for every operation of the API, by operation id.
     const { operations } = await grace.account.capabilities();

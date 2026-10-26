@@ -11,6 +11,13 @@ use crate::types;
 pub struct AccountAdminNamespace {
     client: HttpClient,
 }
+#[derive(Debug, Clone, Serialize)]
+pub struct ListUsersInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<bool>,
+}
+
+
 
 impl AccountAdminNamespace {
     pub(crate) fn new(
@@ -19,6 +26,23 @@ impl AccountAdminNamespace {
         Self {
             client,
         }
+    }
+    /// Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+    ///
+    /// Requires authentication.
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+    pub async fn approve_user(
+        &self,
+        id: types::IdentityUUID,
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<types::IdentityUser, SDKError> {
+        let path = &format!("/api/auth/admin/users/{}/approve", runtime::path_segment(&id));
+        let query_params: Vec<(String, String)> = Vec::new();
+        self.client
+            .request_json("POST", path, &query_params, None, options)
+            .await
     }
     /// Creates a role. The caller's own permissions must cover each permission it grants.
     ///
@@ -170,10 +194,15 @@ impl AccountAdminNamespace {
     /// - `options.request_hook`: optional request builder hook.
     pub async fn list_users(
         &self,
+        input: ListUsersInput,
         options: Option<&runtime::RequestOptions>,
     ) -> Result<Vec<types::IdentityUser>, SDKError> {
         let path = "/api/auth/admin/users";
-        let query_params: Vec<(String, String)> = Vec::new();
+        let mut query_params: Vec<(String, String)> = Vec::new();
+        // GET endpoint: scalar args go as query parameters, not request body.
+        if let Some(ref val) = input.pending {
+            query_params.push(("pending".to_string(), val.to_string()));
+        }
         self.client
             .request_json("GET", path, &query_params, None, options)
             .await

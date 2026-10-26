@@ -241,7 +241,9 @@ site: { build: "build", output: "dist", fallback: "index.html", dev: { command: 
   works as it does for an API on the page's own origin: the session
   cookie, `SameSite=Lax`, travels with each call, and the identity
   runtime's cross-origin check sees a same-origin request, so neither
-  `trustedOrigins` nor CORS needs setting.
+  `trustedOrigins` nor CORS needs setting. The proxy serves the APIs the
+  site calls alone: an API's [app](/superschematic/guides/stacks/#apps)
+  keeps its own address, where it signs its users in on its own pages.
 
 ```
   site     shop-web                 http://127.0.0.1:22638, its dev server (bun run dev) and its APIs under /api/<service>

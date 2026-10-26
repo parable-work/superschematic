@@ -33,6 +33,7 @@ type NamespaceInfo struct {
 	HasEncryptedPayload    bool           // Whether namespace has encrypted POST/PUT/PATCH endpoints
 	HasFilterableEndpoints bool           // Whether namespace has any @filterable endpoint
 	HasFileUpload          bool           // Whether namespace has a file upload endpoint, whose methods name RequestOptions
+	HasFileDownload        bool           // Whether namespace has a FileDownload endpoint (D81), whose methods resolve to DownloadedFile
 	ScopeParamName         string         // Name of the hoisted scope parameter if IsScopedNS
 	Imports                []string       // Unique list of types to import from types package
 	// HasMapArgs gates the validateMapArgument helper, for a map argument
@@ -83,6 +84,11 @@ type EndpointInfo struct {
 	// File upload configuration
 	HasFileUpload    bool              // True if any input field is a file-type scalar
 	FileUploadFields []FileUploadField // File upload field metadata for multipart handling
+
+	// FileDownload is the endpoint's FileDownload result (D81), nil for
+	// every other: the method resolves to a DownloadedFile, the bytes and
+	// the filename the server offered.
+	FileDownload *ir.FileDownloadDef
 
 	// JSON parse configuration
 	HasOutputParser bool // True if the output type has a parseFromJSON function
@@ -401,6 +407,9 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if sdkEndpoint.HasFileUpload {
 			namespaceMap[ns].HasFileUpload = true
 		}
+		if sdkEndpoint.FileDownload != nil {
+			namespaceMap[ns].HasFileDownload = true
+		}
 		if sdkEndpoint.Page != nil {
 			namespaceMap[ns].HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
@@ -454,10 +463,15 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 
 	fileUploadFields := make([]FileUploadField, len(ep.FileUploadFields))
 	for i, field := range ep.FileUploadFields {
+		scalarType := field.ScalarType
+		if codegen.IsLanguagePrimitive(scalarType) {
+			// A FileUpload field (D81) is a string of no scalar.
+			scalarType = ""
+		}
 		fileUploadFields[i] = FileUploadField{
 			Name:       field.Name,
 			TSName:     tsutil.ToCamelCase(field.Name),
-			ScalarType: field.ScalarType,
+			ScalarType: scalarType,
 			Required:   field.Required,
 		}
 	}
@@ -538,6 +552,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 		Page:             ep.Page,
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
+		FileDownload:     ep.FileDownload,
 		HasOutputParser:  hasOutputParser,
 
 		OutputIsArrayOfArrays: ep.OutputIsArrayOfArrays,
@@ -587,6 +602,9 @@ func (e EndpointInfo) OutputArrayDepth() int {
 // in a Record<string, ...> for a map, with "| null" when the response may
 // be null, or a paged endpoint's page of its items ("Page<ItemView>", D60).
 func (e EndpointInfo) TSOutputType() string {
+	if e.FileDownload != nil {
+		return "DownloadedFile"
+	}
 	if e.Page != nil {
 		pageType := e.PageType
 		if pageType == "" {
