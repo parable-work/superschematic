@@ -108,7 +108,10 @@ fn decimal_digits(value: &Value) -> Option<(usize, usize)> {
     if whole.is_empty() || !digits(whole) || !digits(fraction) {
         return None;
     }
-    Some((whole.trim_start_matches('0').len(), fraction.trim_end_matches('0').len()))
+    Some((
+        whole.trim_start_matches('0').len(),
+        fraction.trim_end_matches('0').len(),
+    ))
 }
 
 /// The length of an Embedding.Vector: the JSON array, or the array its JSON
