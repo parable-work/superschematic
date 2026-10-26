@@ -892,7 +892,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
+| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, and `perReader`, true for a volatile one whose value is the caller's (below) |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
@@ -932,7 +932,12 @@ needs only the name to refuse a collision. A volatile field
 is computed when the instance is read, from other instances, the clock
 or the config, as `Rollups.values` and `Dependencies.blocked` are. No
 event records such a move, so `Reactions`' `changes`, which hears a
-field through its instance's events, refuses one (D56).
+field through its instance's events, refuses one (D56). A volatile field
+whose value is the caller's, not the instance's, as Comments' `unread`
+is, also says `"perReader": true` (D77): an engine computes it at each
+read for that reader, and leaves it out of every event and of the moves
+a referring behavior hears. `RegisterBehavior` refuses `perReader` on a
+field that is not volatile, and the engine does too.
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the

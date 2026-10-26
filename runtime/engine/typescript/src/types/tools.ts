@@ -64,7 +64,7 @@ export interface DescribeDocument {
    * The JSON Schema of an instance's behaviors: by behavior name, an
    * object of each field the behavior declares, read-only, for every
    * behavior on the type that declares one; a volatile field says
-   * `volatile: true`.
+   * `volatile: true`, and a per-reader one `perReader: true` besides.
    */
   instanceBehaviors: JSONSchemaObject;
   behaviors: DescribedBehavior[];
@@ -90,8 +90,8 @@ export interface DescribedBehavior {
   config: unknown;
   /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
   summary?: string;
-  /** Its fields, as its declaration lists them; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields, as its declaration lists them; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
   /** Its operations on the type: an instance's and the schema's. */
   operations: string[];
   /** Its namespace operations (D77), which run on no schema and the tools document lists by the behavior's name; absent when it has none. */
@@ -224,8 +224,8 @@ export interface BehaviorDocument {
   preconditionSchema?: JSONSchema;
   requires: string[];
   conflicts: string[];
-  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
   operations: BehaviorOperationDocument[];
   /** Its signals (D77), present when it declares any. */
   signals?: Array<{ name: string; description?: string; access: 'read' | 'write' | 'operation'; paramsSchema: JSONSchema }>;

@@ -132,9 +132,10 @@ for (const driver of drivers) {
             'wes',
             {
               data: { title: 'Launch plan' },
+              // Comments' unread is the reader's (perReader): no event records it.
               behaviors: {
                 Workflow: { status: 'draft', enteredAt: events[0].at },
-                Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 },
+                Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] },
                 Revisions: { revision: 1, pendingProposals: 0 },
               },
             },
@@ -148,12 +149,13 @@ for (const driver of drivers) {
         ]
       );
       // The log replays, a merge patch at a time, to the instance a read
-      // returns, but for the volatile fields beside events move.
+      // returns, but for the volatile fields beside events move, and the
+      // reader's own unread, which no event records.
       let replayed: unknown = {};
       for (const event of events.filter((one) => !one.beside)) {
         replayed = mergePatch(replayed, event.kind === 'create' ? event.change : (event.change as { patch: unknown }).patch);
       }
-      assert.deepEqual(replayed, { data: read?.data, behaviors: { ...read?.behaviors, Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 } } });
+      assert.deepEqual(replayed, { data: read?.data, behaviors: { ...read?.behaviors, Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] } } });
 
       const revisions = engine.instances.invoke(alice, 'documents', 'doc-1', 'listRevisions') as { items: Array<{ revision: number; data: unknown; proposal?: number }> };
       assert.deepEqual(

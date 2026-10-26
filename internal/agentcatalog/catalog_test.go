@@ -136,6 +136,20 @@ func TestNamespaceOperationsAndAsksReadAreListed(t *testing.T) {
 	}
 }
 
+// A per-reader field (D77) says that each caller reads its own and no
+// event records it.
+func TestPerReaderFieldsAreListed(t *testing.T) {
+	reg := generator.CoreRegistry(naming.Naming{})
+	catalog := render(t, Behaviors, reg)
+	want := "- `Comments.unread` (volatile, per reader: computed for each caller when read, and no event records it): "
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Comments' entry lacks its per-reader unread:\n%s", catalog[strings.Index(catalog, "## `Comments`"):])
+	}
+	if !strings.Contains(catalog, "- `Comments.messages` (volatile: computed when read)") {
+		t.Errorf("Comments' messages is not listed as volatile alone")
+	}
+}
+
 func TestScalarsAndCapabilities(t *testing.T) {
 	reg := generator.CoreRegistry(naming.Naming{})
 	scalars := render(t, Scalars, reg)

@@ -86,7 +86,10 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 			b.WriteString("\nFields:\n\n")
 			for _, f := range beh.Fields {
 				fmt.Fprintf(&b, "- `%s`", registry.BehaviorFieldPath(beh.Name, f.Name))
-				if f.Volatile {
+				switch {
+				case f.PerReader:
+					b.WriteString(" (volatile, per reader: computed for each caller when read, and no event records it)")
+				case f.Volatile:
 					b.WriteString(" (volatile: computed when read)")
 				}
 				if f.Description != "" {

@@ -59,6 +59,13 @@ export interface BehaviorFieldDeclaration {
    * event records such a move, so Reactions' changes refuses one (D56).
    */
   readonly volatile?: boolean;
+  /**
+   * True for a volatile field whose value is the caller's, not the
+   * instance's, as Comments.unread is (D77): a read computes it for its
+   * caller, and no event patch, create event or reference move records it.
+   * Only a volatile field may say so.
+   */
+  readonly perReader?: boolean;
 }
 
 export interface BehaviorOperationDeclaration {

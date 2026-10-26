@@ -2747,6 +2747,16 @@ such a field as the instance's last event found it, the describe
 document marks it, and `Reactions`' `changes`, which hears a field
 through its instance's events, refuses it (D56).
 
+A volatile field may also say `"perReader": true` when its value is the
+caller's rather than the instance's, as Comments' `unread` is (D77). A
+read computes it for whoever reads. No event records it: an operation's
+or an update's `patch` leaves it out, as does a create event's
+`behaviors`, and so do the moves a referring behavior's hook hears, so
+a caller's own count never lands in the log as the instance's. A
+declaration that gives `perReader` without `"volatile": true` is
+refused, by registration and by the compiler's registry. The describe
+document marks it `perReader: true` beside `volatile: true`.
+
 A writing operation appends an `operation` event, `{ behavior,
 operation, params, patch, attribution? }`, its `patch` a merge patch of `{ data,
 behaviors }`: under `data` the own fields its `update()` changed, under
@@ -3082,7 +3092,7 @@ and refusal in its order.
 | | |
 | --- | --- |
 | Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
-| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own: how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
+| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own (`perReader`, so no event records it): how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
 | Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }`, which reads, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
 | Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
 | Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run; `prune`, hourly: removes the schema's deliveries made more than `deliveryRetentionMs` ago that no live claim holds, oldest first, in batches of 1000, going on while a batch comes back full, at most 20 batches a run |
@@ -5145,13 +5155,14 @@ a schema's live version:
   by behavior name, each behavior on the type that declares a field,
   with its fields `readOnly` and without a type, since a declaration
   gives a field a name, a description and whether it is volatile, and no
-  type. A volatile field says `"volatile": true` there, an annotation as
-  `readOnly` is ("Instances and events"). Each result that returns an
+  type. A volatile field says `"volatile": true` there, and a per-reader
+  one `"perReader": true` besides, annotations as `readOnly` is
+  ("Instances and events"). Each result that returns an
   instance carries it beside `data`.
 - `behaviors` lists each behavior's config, its `summary`, what its
   guidance says it does under the config ("Guidance", below; absent for
   a behavior that gives none), its fields, each with `volatile: true`
-  when it is, operations and the codes its vetoes carry (`vetoes`). A
+  and `perReader: true` when it is, operations and the codes its vetoes carry (`vetoes`). A
   behavior with namespace operations (D77) names them in
   `namespaceOperations`, apart from the type's `operations`, which they
   are not among.

@@ -1478,6 +1478,116 @@ fn a_run_of_prune_removes_full_batches_up_to_its_budget() {
     }
 }
 
+/// test.Relay: `relay`, an operation that is not beside the instance,
+/// posts its body through Comments' `post`.
+struct Relay;
+
+impl Behavior for Relay {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        r#"{"name": "test.Relay", "operations": [
+            {"name": "relay", "writes": true, "resultSchema": true, "paramsSchema": {"type": "object", "additionalProperties": false, "required": ["body"],
+                "properties": {"body": {"type": "string"}}}}]}"#
+    }
+
+    fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            operations: vec![("relay", |_, cx, params| {
+                cx.call("Comments", "post", &json!({"body": params["body"]}))
+            })],
+            ..Hooks::default()
+        }
+    }
+}
+
+#[test]
+fn an_operation_that_posts_through_comments_records_no_ones_unread() {
+    for target in targets("comments_inbox_per_reader") {
+        let mut options = target.options(superschematic_engine_behaviors::core().with(Relay));
+        options.clock = Clock::Manual(1000);
+        let engine = Engine::open(options).expect("open");
+        let mut document = schema_of("Review", &json!({}));
+        document["types"]["Review"]["behaviors"] =
+            json!([{"name": "Comments", "config": {}}, {"name": "test.Relay"}]);
+        engine
+            .schemas()
+            .define(&alice(), document, DefineOptions::default())
+            .expect("define");
+        engine
+            .schemas()
+            .publish(&alice(), "Review", SchemaTarget::default())
+            .expect("publish");
+        create(&engine, "Review", "r1");
+        let invoke = |who: &Principal, operation: &str, params: Value| {
+            engine
+                .instances()
+                .invoke(
+                    who,
+                    "Review",
+                    "r1",
+                    operation,
+                    &params,
+                    WriteOptions::default(),
+                )
+                .unwrap_or_else(|error| panic!("{operation}: {error}"))
+        };
+        let unread = |who: &Principal| {
+            engine
+                .instances()
+                .get(who, "Review", "r1", Default::default())
+                .expect("get")
+                .expect("r1")
+                .behaviors["Comments"]["unread"]
+                .clone()
+        };
+        invoke(&alice(), "post", json!({"body": "Mine."}));
+        invoke(&bob(), "post", json!({"body": "Bob's."}));
+        assert_eq!((unread(&alice()), unread(&bob())), (json!(1), json!(0)));
+        // alice's relayed post moves her own unread, and bob's, which a
+        // read still computes for each; the event records neither.
+        invoke(&alice(), "relay", json!({"body": "Relayed."}));
+        assert_eq!((unread(&alice()), unread(&bob())), (json!(0), json!(1)));
+        let events = engine
+            .events()
+            .read(
+                &alice(),
+                &ReadEvents {
+                    schema: Some("Review"),
+                    instance_id: Some("r1"),
+                    limit: Some(50),
+                    ..ReadEvents::default()
+                },
+            )
+            .expect("events")
+            .events;
+        let relayed = events
+            .iter()
+            .find(|event| event.change.get("operation") == Some(&json!("relay")))
+            .expect("relay's event");
+        let comments = &relayed.change["patch"]["behaviors"]["Comments"];
+        assert_eq!(comments["messages"], json!(3), "{}", relayed.change);
+        assert!(comments.get("unread").is_none(), "{}", relayed.change);
+        // Nor does the create event's instance.
+        let created = events
+            .iter()
+            .find(|event| event.kind == "create")
+            .expect("the create event");
+        assert!(
+            created.change["behaviors"]["Comments"]
+                .get("unread")
+                .is_none(),
+            "{}",
+            created.change
+        );
+        engine.shutdown();
+    }
+}
+
 // Comments at migration 3, as batch 2 shipped it: its tables, and `seed`,
 // which writes a message as batch 2's post, begin and deleteMessage left
 // it.

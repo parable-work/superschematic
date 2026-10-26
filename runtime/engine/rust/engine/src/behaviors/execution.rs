@@ -402,6 +402,34 @@ impl<'t, 'db> Execution<'t, 'db> {
     /// instance's other behaviors, or a list whose instances share one,
     /// reads each field once.
     pub fn fields(&self, only: Option<&[&str]>) -> Result<Map<String, Value>> {
+        self.fields_of(only, true)
+    }
+
+    /// The behaviors' declared fields as an event and a reference move
+    /// record them: [`Execution::fields`] without the per-reader ones
+    /// (D77), whose values are the caller's, not the instance's.
+    pub fn logged_fields(&self) -> Result<Map<String, Value>> {
+        self.fields_of(None, false)
+    }
+
+    /// `fields`, as [`Execution::fields`] read them, without the per-reader
+    /// ones: what an event records of them.
+    pub fn logged(&self, fields: &Map<String, Value>) -> Map<String, Value> {
+        let mut out = fields.clone();
+        for bound in self.behaviors().iter() {
+            let Some(Value::Object(entry)) = out.get_mut(&bound.behavior.name) else {
+                continue;
+            };
+            for declared in &bound.behavior.declaration.fields {
+                if declared.per_reader {
+                    entry.remove(&declared.name);
+                }
+            }
+        }
+        out
+    }
+
+    fn fields_of(&self, only: Option<&[&str]>, per_reader: bool) -> Result<Map<String, Value>> {
         let tx = self.reach.tx;
         let chain = self.reach.chain;
         let still = !self.writable && tx.read_only() && tx.stable(&chain.namespace);
@@ -414,6 +442,15 @@ impl<'t, 'db> Execution<'t, 'db> {
                 .iter()
                 .filter(|field| {
                     only.is_none_or(|only| only.contains(&format!("{name}.{field}").as_str()))
+                })
+                .filter(|field| {
+                    per_reader
+                        || !bound
+                            .behavior
+                            .declaration
+                            .fields
+                            .iter()
+                            .any(|declared| &declared.name == *field && declared.per_reader)
                 })
                 .collect();
             if wanted.is_empty() {

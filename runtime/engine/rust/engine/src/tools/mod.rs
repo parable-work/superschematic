@@ -2289,6 +2289,9 @@ fn declared_fields(declaration: &BehaviorDeclaration) -> Value {
                 if field.volatile {
                     entry.insert("volatile".into(), Value::Bool(true));
                 }
+                if field.per_reader {
+                    entry.insert("perReader".into(), Value::Bool(true));
+                }
                 Value::Object(entry)
             })
             .collect(),
@@ -2368,7 +2371,8 @@ fn params_required(params: &Value) -> bool {
 
 /// The JSON Schema of an instance's behaviors as reads return them: by
 /// behavior name, for each behavior on the type that declares a field, an
-/// object of its fields, read-only, a volatile one marked `volatile: true`.
+/// object of its fields, read-only, a volatile one marked `volatile: true`
+/// and a per-reader one `perReader: true` besides.
 fn behaviors_schema(behaviors: &[ComposedBehavior]) -> Value {
     let mut properties = Map::new();
     for behavior in behaviors {
@@ -2390,6 +2394,9 @@ fn behaviors_schema(behaviors: &[ComposedBehavior]) -> Value {
             entry.insert("readOnly".into(), Value::Bool(true));
             if field.get("volatile") == Some(&Value::Bool(true)) {
                 entry.insert("volatile".into(), Value::Bool(true));
+            }
+            if field.get("perReader") == Some(&Value::Bool(true)) {
+                entry.insert("perReader".into(), Value::Bool(true));
             }
             members.insert(
                 text_of(field, "name").unwrap_or_default().to_owned(),

@@ -177,7 +177,10 @@ same.
   `lastMessageAt`, `threads`, `composing` and `unread`. Its declaration
   says `"volatile": true`, and so does the describe document. Comments'
   `unread` is the one field that differs by who reads: the reader's
-  count of top-level messages of others since its read marker.
+  count of top-level messages of others since its read marker. It also
+  says `"perReader": true`, so no event records it: an operation's patch,
+  an update's and a create event's instance leave it out, and a read
+  computes it for each caller.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`. An operation beside the
