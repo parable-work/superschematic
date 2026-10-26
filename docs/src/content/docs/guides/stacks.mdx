@@ -406,13 +406,15 @@ export abstract class Production {}
 export abstract class Preview extends Staging {}
 ```
 
-- **`@stack({ deploy, expose })`** declares the stack, once per schema.
-  `deploy` names the entry points, API and DB handles; every service they
-  reach through `authDb`, DB dependencies and `calls` joins the stack, so
-  `shop-db` needs no mention. `expose` names what is reachable from
-  outside the environment, an API's handle, an `@server` class, or an app
-  beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`
-  ([Apps](#apps)). Everything else is internal.
+- **`@stack({ deploy, expose, origins })`** declares the stack, once per
+  schema. `deploy` names the entry points, API and DB handles; every
+  service they reach through `authDb`, DB dependencies and `calls` joins
+  the stack, so `shop-db` needs no mention. `expose` names what is
+  reachable from outside the environment, an API's handle, an `@server`
+  class, or an app beside its API's handle, `{ of: ShopStock, app:
+  "Backoffice" }` ([Apps](#apps)). Everything else is internal.
+  `origins` put a site and the APIs it calls on one origin, `{ site:
+  ShopWeb, apis: [ShopApi] }` ([Static sites](#static-sites)).
 - **`@server({ serves })`** declares one server for the listed APIs in
   place of their default servers. Here `Orders` serves `shop-orders`, and
   takes its edges from it: `shop-db` through `authDb`, `shop-api` through
@@ -993,6 +995,22 @@ export abstract class Shop {}
 `stack deploy` builds it, publishes its files and its config through the
 target, and records their digest. [Static
 sites](/superschematic/guides/static-sites/) is the guide.
+
+`origins` put a site and the APIs it calls on one origin in every
+environment, as `stack dev`'s proxy does for a dev server (D91): each API
+under `/api/<service>` on the site's own address, so a cookie session
+needs no CORS, no `trustedOrigins` and no `cookie.domain`. An API of an
+origin needs no `expose` of its own:
+
+```ts
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb, apis: [ShopApi] }] })
+export abstract class Shop {}
+```
+
+On gcp the site's load balancer routes each API's path to its Cloud Run
+service; on Cloudflare the site's Worker forwards it through a service
+binding to the API's Worker. [One
+origin](/superschematic/guides/static-sites/#one-origin) has the details.
 
 ## Build a stack
 
@@ -2251,6 +2269,13 @@ without one at `https://<worker>.<workersSubdomain>.workers.dev`, its
 Worker's name, which needs bootstrap's `workersSubdomain`. That address is the site's origin
 in the CORS field of each API it calls, each of which must be a server on
 Workers, exposed.
+
+A site with an [origin](/superschematic/guides/static-sites/#one-origin)
+(D91) also holds `SITE_ORIGIN`, the path of each API of it, and a service
+binding to each API's Worker, `SITE_API_<API>`, and runs its script first
+for those paths, which it forwards through the binding with the prefix
+taken off, as `stack dev`'s proxy does. Such an API's Worker is internal:
+no workers.dev address and no custom domain.
 
 ## Generated CI
 

@@ -11716,3 +11716,116 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D91. A stack's origins put a site and the APIs it calls on one origin in every environment: the site's load balancer or Worker serves each under /api/<service>, as stack dev's proxy does
+
+D82's proxy puts a site and the APIs it calls on one origin under `stack
+dev` alone, and left "a proxy for a site served by a deploy". Deployed,
+the site and each API sit on separate origins, a bucket behind a load
+balancer and Cloud Run on gcp, a Worker and another Worker on Cloudflare,
+so a cookie session needs `trustedOrigins`, CORS and both hosts under one
+registrable domain, or the page switches to bearer tokens. That is
+configuration per environment, and a failure only a deploy shows, since
+`stack dev` never meets it.
+
+This entry adds:
+- `origins` on `@stack`, a site and the APIs its origin serves, in the
+  Stack IR and its data forms, the TypeScript writer and
+  `@superschematic/stack`'s types;
+- resolution of an origin: the APIs on the resolved site, the site on
+  each API's server, the same-origin URL on the site edge, no CORS for
+  the site, and no exposure needed for a server on the site's provider;
+- `PlatformSpec.ServesOrigin`, and the local, gcp and cloudflare site
+  platforms that serve one;
+- `stack dev`'s proxy in front of a built site too.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@stack({ origins: [{ site, apis? }] })`: an origin names a Site service the stack deploys and the APIs its origin serves, each one the site calls; `apis` left out is every API the site calls, as D82's proxy serves them. A site has one origin; an API may sit on two sites' origins. It is the stack's, the same in every environment. | A setting per environment, under which a deploy and `stack dev` could differ, the failure this removes. `origin` in the Site's config, which says how a site builds, not where a stack runs it. A single `origin: { site, apis }`, which a stack with two sites could not use twice. |
+| The paths are D82's: `/api/<service>` and every path under it reach the API's server with that prefix taken off and the query kept, the browser's `Host` passed on, with `X-Forwarded-Prefix`, `-Host`, `-Proto` (and on Workers `-For`) set. Every other path is the site's: its files, its fallback, and its config at `/__superschematic/config.json`. | A prefix each API mounts its routes under, which would differ between an API on an origin and one on its own host. A path per target. |
+| The site edge to an API of the origin derives the same-origin URL, `ir.SiteOriginURL`: the site's public address and the path, a string or a concatenation, which resolution checks against what the connector derived (`checkOriginURLs`). The deploy writes it into the config as it writes any address; `stack dev`'s proxy answers it on the `Host` the page was opened on, as D82 does. So `loadApis()` hands the SDK its API's path on the page's own origin wherever the page runs. | A relative base URL, which D82 refused. A URL the Worker computes from each request, which gcp's config, an object in a bucket, cannot. |
+| An API of an origin needs no `expose` when its server runs on the site's provider: resolution skips `site-calls-unexposed` for it, the resolved site lists it (`ResolvedSite.Origin`, its service, server and path), and its server names the site (`ResolvedDeployable.Origins`). The server has no public address of its own unless the stack exposes it, which it does when other clients need one. A server on another provider is reached at its public address (`SiteEndpoint.Upstream`, the generic connector's), so it must be exposed (`cross-provider-unexposed`). | Requiring `expose`, as every API a site calls needs today: on gcp a second load balancer, host and certificate, and on Cloudflare a workers.dev address or a custom domain, for an API the page reaches through the site. Exposing the server at an address of its own implicitly, which puts a host on the internet the stack does not name. |
+| The site is left out of the API's CORS field (`siteEdgesTo` skips an origin's edges), so an API only origins call has no CORS field and answers none, and the generated entrypoint, which wires CORS for each API a site calls, loads an empty list. Another site that calls the API from its own origin stays in the field. | Keeping the site's origin in the field, a CORS answer to a request that never needs one. |
+| A site platform says it serves origins with `PlatformSpec.ServesOrigin`, which only a site platform sets; resolution refuses an origin on one without it (`unrealizable`). Its connector derives the same-origin URL and what the platform needs to reach the server: nothing on gcp, which knows Cloud Run's nodes, a service binding on Workers, the loopback URL locally. | Every site platform assumed to serve one, whose config would name paths a target that does not know origins serves 404. |
+| An origin forwards to the API's server, which answers every API it serves, as an exposed server does: exposure is per server. | Routing each API's own routes alone, which needs every operation's path at the edge. |
+| gcp: the site's load balancer, its one host and certificate, routes each API of the origin. Per API, a serverless network endpoint group of its Cloud Run service and a backend service over it with Cloud CDN off (`enableCdn: false`), in the site's rollout step after the server's; and two route rules ahead of the files' rule, `fullPathMatch: /api/<service>` and `prefixMatch: /api/<service>/`, each with `pathPrefixRewrite: /` and `headerAction` adding `X-Forwarded-Prefix`. Google's front end passes `Host` on and sets `X-Forwarded-Proto` and `X-Forwarded-For`. | An internet network endpoint group in front of the run.app URL, a public run.app and a second TLS hop. Cloud CDN on with bypass rules, where the backend's CDN off says it once. `customRequestHeaders` on the backend service, which works too; the rule keeps the header next to the path it names. |
+| gcp: with an origin, the fallback's custom error response sits on the files' two rules, `/` and the catch-all, and not on the path matcher, whose policy answers every 404 under it, an API's too, with the site's page at 200. A site without an origin keeps D55's. | One policy for both, which turns an API's 404 into the site's index. |
+| gcp: a server only an origin serves takes `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`, with its invoker check off, since a load balancer's request carries no ID token, with or without a domain, and has no load balancer of its own. `nothing-public-unless-exposed` allows that and nothing wider for it; a caller sends its ID token in `Service-Authorization` alone, as to an exposed server. | The run.app URL open to all, which the origin does not need. IAP or an ID token from the load balancer, which a serverless network endpoint group does not send. |
+| gcp without a domain: the origin is the load balancer's address over HTTP, as the site is (D55, amended), where a browser keeps no `Secure` cookie; a cookie session there needs a domain, and a bearer session works. | Turning `Secure` off, a session cookie in clear on the internet. Refusing an origin without a domain, which a bearer page uses. |
+| Cloudflare: the site's Worker forwards each API of its origin through a service binding of its version, `SITE_API_<API>`, which the site edge's connector derives as `binding: {name, worker}` and the platform renders as a binding. `SITE_ORIGIN` lists each API's path with its binding, and `runWorkerFirst` each path, so `site.js` sees them before the assets. The script forwards with any method, on a URL with the browser's host, and puts the prefix back on a redirect within the API's routes, as D82's proxy does. The API's Worker stays internal, with workers.dev off: the binding admits the site's Worker, which carries the browser's request and no service credential. It works at workers.dev and under a custom domain alike. | Workers routes on the zone, `<host>/api/<service>/*` to the API's Worker: a route needs a zone, so no workers.dev and no Preview without a domain; the API would see its prefix on every path, unlike under `stack dev`; and `nothing-public-unless-exposed` refuses a route. |
+| A site and an API on two providers: the generic site connector derives the same-origin URL and the server's public address as the upstream, and the site's Worker fetches it with the prefix taken off (`SITE_ORIGIN`'s `url`, a reference the provider writes in). gcp's site refuses one, since a serverless network endpoint group reaches Cloud Run alone. | An internet network endpoint group on gcp, left. |
+| `stack dev` serves a site with an origin from the proxy whether it runs a dev server or its build (`OriginProxy` in front of `SiteHandler`): the origin's APIs under their paths and every other API the site calls at its own address in the config, as a deploy serves them. A dev server's proxy for a site with no origin keeps D82's, every API the site calls. The summary names the origin's APIs. | D82's proxy narrowed to origins for every site, which would turn existing dev servers' APIs back into CORS calls. A built site left on its file server, which would not show what a deploy serves. |
+
+The identity runtime's check, Go's `net/http.CrossOriginProtection` and
+TypeScript's `crossOriginAllowed`, passes a same-origin login on either
+header: `Sec-Fetch-Site: same-origin`, which every browser sends, or,
+without it, an `Origin` whose host is the request's `Host`, which each
+front passes on. Its defaults serve the session: the `__Host-session`
+cookie, `Secure`, `Path=/` and with no `Domain`, is the site's host's
+alone. So neither `trustedOrigins` nor `cookie.domain` is set.
+
+Two answers differ from the request this entry answers:
+- It asked for the option to name the APIs; `apis` may be left out for
+  every API the site calls, D82's set.
+- On gcp, Google's load balancer rewrites no answer's header, so a
+  redirect an API answers with a path of its own routes does not get the
+  prefix back there, as the Worker and `stack dev`'s proxy give it. No
+  route the runtimes generate redirects.
+
+Status: built, proven offline.
+- **The model:** `internal/stack`'s
+  `TestOriginServesAnAPIOnTheSitesOrigin`,
+  `TestOriginWithoutAPIsServesEveryCall`, `TestOriginKeepsAnotherSitesCORS`,
+  `TestOriginAcrossProviders`, `TestOriginRefusals` and
+  `TestSiteOriginURL`; the registry's `TestStackDecoratorReadsOrigins`;
+  the writer's `TestTSWriterWritesOrigins`; `@superschematic/stack`'s
+  type checks; the schema-file JSON Schema and types written again.
+- **stack dev:** `TestOriginSiteWiring`,
+  `TestOriginProxyServesAnOriginAndNamesTheOtherAPIs`,
+  `TestABuiltSiteServesItsOriginBehindItsProxy`, which builds a site with
+  Bun and signs in through its proxy, and `TestPrintLocalSummaryNamesAnOrigin`.
+- **gcp:** `TestOriginOnGCP`, `TestOriginWithoutDomainOnGCP` and
+  `TestOriginRefusesAnAPIOnAnotherProvider` read the nodes, each checked
+  against its pinned type; `TestOriginGolden` holds OriginShop's Staging
+  and Preview, and `extensions/pulumi` renders its Staging
+  (`gcp-originshop-staging`). `TestDeployOriginOnGCP` deploys Staging over
+  the fakes and follows the rendered URL map as Google's reference
+  documents it, in front of the bucket's objects and a stand-in for the
+  API behind the standard library's check with no trusted origin: the
+  config names the API on the site's origin, the page and the fallback
+  are served, a cookie login with `Sec-Fetch-Site` or `Origin` alone
+  reaches the API at `/auth/login` with the site's `Host` and the prefix
+  header, one from another origin is refused, a cookie call keeps its
+  query, and the API's 404 reaches the page.
+- **Cloudflare:** `TestOriginGolden` (origin-web-stack), `TestOriginOnWorkers`
+  and `TestOriginAcrossProvidersOnWorkers`; `extensions/pulumi` renders
+  `cloudflare-origin-staging`. `TestSiteOriginUnderWorkerd` runs `site.js`
+  under the pinned workerd with the fixture's bindings, beside a stand-in
+  API Worker bundled from the TypeScript identity runtime's own config,
+  check and cookie over its defaults: a cookie login with either header
+  passes and sets the host-only `__Host-session`, one from another origin
+  is refused, a cookie call keeps its query, a redirect gets its prefix
+  back, the API's 404 and another provider's API, fetched at its public
+  address, reach the page, and a path of no API is the fallback.
+- **The runtime:** the Go identity runtime's
+  `TestCookieSessionOnASitesOrigin` signs in with a cookie over its
+  defaults with the site's `Host` and the forwarded headers, calls the
+  API with the cookie, answers no CORS, and refuses the same login sent
+  to the API's own host from the site's page.
+
+Left, which only a live deploy proves: on gcp, that the load balancer
+passes the browser's `Host` to Cloud Run through a serverless network
+endpoint group, that a `fullPathMatch` rule's `pathPrefixRewrite` makes
+the whole path `/`, that the route rules' error response serves the
+fallback with none on the path matcher and passes the API's 404, and that
+`INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` admits the site's load balancer;
+on Cloudflare, that `runWorkerFirst` takes the API's paths, that a
+service binding reaches a Worker with no workers.dev, what `Host` header
+and client address a binding's request carries, and that a request's
+body streams through it. Also left: a site on Cloudflare in front of an
+API on gcp, which resolves and renders, though no environment gives two
+targets' values and a mixed deploy is D63's Left; a cookie sign-in with
+the identity runtime on Workers, which D64 refuses (`NoIdentity`); an
+internet network endpoint group for an API of another provider behind a
+gcp site; the prefix on a redirect on gcp; acme-shop's stacks, which
+keep D82's proxy and their own addresses.

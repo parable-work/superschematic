@@ -163,6 +163,23 @@ config does not trust is refused with 403 `cross_origin`, the check Go's
 server answers preflights from the trusted origins. A session has no
 refresh: after a 401, sign in again.
 
+### A site on the API's origin
+
+A browser app a stack deploys as a [site](/superschematic/guides/static-sites/)
+calls the API on another origin unless the stack puts them on one:
+`origins: [{ site: ShopWeb, apis: [ShopApi] }]` in `@stack` serves the API
+under `/api/shop-api` on the site's own address, in `stack dev` and on
+every target ([one origin](/superschematic/guides/static-sites/#one-origin)).
+The defaults then serve a cookie session: the API sees the browser's
+`Host`, so the cross-origin check passes a same-origin login with no
+trusted origin, and the `__Host-session` cookie, with no `Domain`, is the
+site's host's alone. Leave `trustedOrigins` and `cookie.domain` unset,
+and give `loadApis()`'s client `credentials: 'include'` or
+`'same-origin'`. Without an origin, a site on `app.example.com` calling an
+API on `api.example.com` needs `trustedOrigins: ["https://app.example.com"]`
+set per environment, and both hosts under one registrable domain for the
+`SameSite=Lax` cookie to travel with its calls.
+
 Every failed login is 401 `invalid_credentials`, whether the login is
 unknown, the password wrong or the user disabled, and an unknown login
 takes as long to refuse as a wrong password. The one exception is a user

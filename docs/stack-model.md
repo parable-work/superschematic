@@ -433,7 +433,13 @@ export abstract class Preview extends Staging {}
 - **`expose`** names what is reachable from outside the environment, an
   API's handle or an `@server` class. Everything else is internal, and
   reachable only along its edges. A site is always exposed, named here or
-  not, and every API a site calls must be (D55, section 8.10).
+  not, and every API a site calls must be (D55, section 8.10), unless the
+  site serves it on its own origin.
+- **`origins`** put a site and APIs it calls on one origin in every
+  environment (D91, section 8.10): `{ site: ShopWeb, apis: [ShopApi] }`
+  serves shop-api under `/api/shop-api` on shop-web's address, as `stack
+  dev`'s proxy serves it, and `apis` left out serves every API the site
+  calls.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
@@ -3863,6 +3869,30 @@ config may leave `outputs` out.
   under `/api/<service>`, so the page, its hot reload and its APIs share
   one origin and a cookie session needs no CORS; the deploy still builds
   the site.
+- **One origin** (D91). A stack's `origins` (section 4.1) put a site and
+  APIs it calls on one origin in every environment, not under `stack dev`
+  alone. The site's platform, which must serve origins
+  (`PlatformSpec.ServesOrigin`), serves each such API under
+  `/api/<service>` on the site's public address, forwarded to its server
+  with that prefix taken off, the query kept, the browser's `Host` passed
+  on and `X-Forwarded-Prefix` set, as `stack dev`'s proxy forwards it
+  (D82); every other path is the site's. The site edge derives the API's
+  URL there, `ir.SiteOriginURL`, the site's public address and the path,
+  which resolution checks and the site's config hands the page, so the
+  SDK's code is the same in development and on a deploy. The resolved
+  site lists the APIs of its origin (`ResolvedSite.Origin`), and each
+  server of one names the site (`ResolvedDeployable.Origins`). An API of
+  an origin needs no `expose` when its server runs on the site's
+  provider, whose site platform reaches it; on another provider the
+  generic connector derives its public address as the upstream the site
+  forwards to (`SiteEndpoint.Upstream`), so it must be exposed. The API's
+  CORS field leaves the site out. A cookie session then needs no CORS, no
+  trusted origin and no `cookie.domain`: the identity runtime's
+  cross-origin check sees `Sec-Fetch-Site: same-origin`, or an `Origin`
+  whose host is the request's `Host`, and its default `__Host-` cookie is
+  the site's host's alone. `stack dev` serves such a site from its proxy
+  whether it runs a dev server or its build, with the origin's APIs under
+  their paths and every other API the site calls at its own address.
 - **gcp.** The site platform, `gcp.site`, gives each site a bucket of its
   own, `<project>-<site>`, and the publisher puts each build's files in it
   under the hex of their digest, `<hex>/index.html`, with a marker object
@@ -3893,7 +3923,21 @@ config may leave `outputs` out.
   readable by `allUsers`: a backend bucket reads only public objects for a
   browser's unsigned requests, so a project whose organization policy
   forbids public buckets cannot serve a site. With no domain, the site is
-  served over HTTP at its load balancer's address (D55, amended).
+  served over HTTP at its load balancer's address (D55, amended). A site
+  with an origin (D91) routes each API of it on the same load balancer: a
+  serverless network endpoint group of the API's Cloud Run service and a
+  backend service over it without Cloud CDN, so no answer of an API is
+  cached, both in the site's rollout step, and two URL map rules ahead of
+  the files' rule, `fullPathMatch: /api/<service>` and `prefixMatch:
+  /api/<service>/`, with `pathPrefixRewrite: /` and `X-Forwarded-Prefix`
+  added; the fallback then sits on the files' two rules, since the path
+  matcher's would answer an API's 404 with the site's page. The page and
+  its APIs share one host and one certificate. A server that only an
+  origin serves takes load balancers' traffic, with its invoker check
+  off, and has no load balancer of its own; an API of another provider is
+  refused, since a serverless network endpoint group reaches Cloud Run
+  alone. Without a domain the origin is HTTP, where a browser keeps no
+  `Secure` cookie, so a cookie session there needs a domain.
 
 ### 8.11 Trace export
 
@@ -6473,8 +6517,28 @@ assets. Its version holds:
   every release, inline as the module's `contentBase64`: a few hundred
   bytes need no placement beside the program.
 
+A site with an origin (D91) also holds:
+- `SITE_ORIGIN`, a `plain_text` binding with a JSON list of the APIs of
+  its origin, each with its path and either `binding`, the name of a
+  service binding to the API's Worker, `SITE_API_<API>`, which the
+  version holds beside it and the site edge derives, or, for a server of
+  another provider, `url`, its public address;
+- each API's path, and every path under it, in `runWorkerFirst`;
+- a `worker` node that depends on each Worker it binds, so a destroy
+  removes the site first.
+
+For a request under an API's path, with any method, the script forwards
+it, the path with the prefix taken off and the query kept, through the
+binding on a URL with the browser's host, or to the public address, with
+`X-Forwarded-Host`, `-Proto`, `-Prefix` and `-For` set, and puts the
+prefix back on a redirect within the API's routes, as `stack dev`'s proxy
+does. The API's Worker needs no workers.dev or custom domain of its own:
+the binding admits the site's Worker, which carries the browser's request
+and no service credential. A Workers route on the zone was not taken: it
+needs a zone, so no workers.dev, and the API would see its prefix.
+
 Cloudflare runs the script only when no file matches, and first under
-`/__superschematic/`. For a GET or a HEAD it answers
+`/__superschematic/` and each API's path. For a GET or a HEAD it answers
 `/__superschematic/config.json` with `SITE_CONFIG`, `application/json`
 and `no-store`; a directory with its `index.html`, which it asks `ASSETS`
 for, since `htmlHandling: "none"` serves `/` nothing; and any other path
@@ -6706,6 +6770,10 @@ runtime tests run fixture bundles under the `workerd` binary.
   off.
 - A collector header from a secret for trace export, as on gcp.
 - Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
+  A site's Worker forwards an API of its origin on another provider to
+  its public address (D91), which resolves and renders, but no
+  environment gives two targets' values, and a mixed deploy is D63's to
+  build.
 - An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
   an identity store over SQLite for a TypeScript API.
 - A D1 deploy that has reached Cloudflare: the platform, the runner and

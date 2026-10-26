@@ -13,13 +13,16 @@ A site is a service of the core kind `Site`. Its config names the APIs its
 browser code calls and how it builds; its code is a package of your own.
 In a stack, a site is always exposed, each API it calls must be exposed
 too, and each of those APIs answers CORS for the site's origin, beside
-the origins its identity config trusts. One build of the site serves
-every environment: the site reads each API's address from a config the
+the origins its identity config trusts. Or the stack puts the site and
+its APIs on [one origin](#one-origin), each API under `/api/<service>` on
+the site's own address, as `stack dev` serves them, so a cookie session
+needs no CORS and no trusted origin. One build of the site serves every
+environment: the site reads each API's address from a config the
 environment serves beside its files.
 
 The design is section 8.10 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
-and D55 in `docs/DECISIONS.md` records the decisions.
+and D55, D82 and D91 in `docs/DECISIONS.md` record the decisions.
 
 ## What is built
 
@@ -31,6 +34,7 @@ and D55 in `docs/DECISIONS.md` records the decisions.
 | the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
 | the gcp target: a bucket per site, a backend bucket with Cloud CDN behind a load balancer, the URL map's switch to each build and its fallback, and a year's caching for files whose names hold a hex hash of their content | a run against Google Cloud |
 | the cloudflare target: a Worker per site serving the build as static assets, the config and the fallback from a script the extension embeds, and the build's files kept in R2 by their digest | a run against Cloudflare; a year's caching for hashed names |
+| one origin for a site and its APIs (`origins`): `stack dev`'s proxy in front of a dev server or a build, gcp's load balancer routing each API to its Cloud Run service, and the site's Worker forwarding each API through a service binding | a run against either cloud; a site on Cloudflare in front of an API on gcp, which resolves but no environment deploys |
 
 ## Declare a site
 
@@ -143,8 +147,9 @@ the package's root imports superscalar.
 ## Deploy it in a stack
 
 Name the site in `deploy`. It is exposed whether `expose` names it or
-not, and every API it calls must be exposed, or the stack does not
-resolve (`site-calls-unexposed`):
+not, and every API it calls must be exposed, unless the site serves it on
+its [origin](#one-origin), or the stack does not resolve
+(`site-calls-unexposed`):
 
 ```ts
 @stack({ deploy: [ShopApi, ShopOrders, ShopWeb], expose: [ShopApi, ShopOrders] })
@@ -181,6 +186,54 @@ so the browser refuses the answer.
 
 On a server that serves several APIs, a request is the API's whose routes
 take it, so each API answers only the sites that call it.
+
+## One origin
+
+A stack's `origins` put a site and the APIs it calls on one origin in
+every environment, the way `stack dev`'s proxy puts a dev server and its
+APIs on one ([With a dev server](#with-a-dev-server)): each API under
+`/api/<service>` on the site's own address.
+
+```ts
+@stack({
+  deploy: [ShopApi, ShopWeb],
+  origins: [{ site: ShopWeb, apis: [ShopApi] }],
+})
+export abstract class Shop {}
+```
+
+- **`site`** is the Site service whose origin it is. A site has one.
+- **`apis`** are the APIs the origin serves, each one the site calls.
+  Left out, it serves every API the site calls.
+
+| Path on the site's address | What answers it |
+| --- | --- |
+| `/__superschematic/config.json` | the site's config, each API of the origin at `<site's address>/api/<service>` |
+| `/api/<service>`, and every path under it, for each API of the origin | the API's server, with `/api/<service>` taken off and the query kept: `/api/shop-api/api/products` is shop-api's `/api/products`. The server sees the browser's `Host`, with `X-Forwarded-Prefix: /api/<service>` and `X-Forwarded-Proto` |
+| every other path | the site's files and its fallback |
+
+`loadApis()` hands each SDK its API's path on the page's own origin, in
+`stack dev` and on a deploy alike, so the SDK's code does not change
+between them. A cookie session
+([users and sessions](/superschematic/guides/users-and-sessions/#a-site-on-the-apis-origin))
+needs nothing set: the identity runtime's cross-origin check sees a
+same-origin request, its default `__Host-session` cookie is the site's
+host's alone, and no CORS answers, so `trustedOrigins` and
+`cookie.domain` stay unset.
+
+- **Exposure.** An API of an origin needs no `expose` when its server
+  runs on the site's provider: the browser reaches it through the site.
+  Name it in `expose` too when other clients need an address of its own.
+  A server on another provider is reached at its public address, so it
+  must be exposed (`cross-provider-unexposed`).
+- **CORS.** The API's CORS field leaves the site out. Another site that
+  calls the API from its own origin stays in it.
+- **The server.** The origin forwards to the API's server, which answers
+  every API it serves, as an exposed server does.
+- **Refusals.** A site the stack does not deploy, a site in two origins,
+  an API the site does not call or listed twice (`origin`), and a site on
+  a platform that serves no origin (`unrealizable`). The local, gcp and
+  cloudflare targets serve one.
 
 ## Run it locally
 
@@ -253,6 +306,16 @@ site: { build: "build", output: "dist", fallback: "index.html", dev: { command: 
 instead, as a deploy does, with each API at its own address and CORS
 between them.
 
+A site with an [origin](#one-origin) is served from the same proxy
+whether it runs a dev server or, with `--build-sites` or no `site.dev`,
+its build: the APIs of its origin under their paths, and every other API
+it calls at its own address, which answers CORS for the site, as a
+deploy serves them.
+
+```
+  site     shop-web                 http://127.0.0.1:22638, its build and shop-api under /api/<service>
+```
+
 ## Deploy it
 
 `stack deploy` builds each site after a frozen install of the workspace,
@@ -315,6 +378,24 @@ which creates the bucket and publishes its files. The bucket comes with
 the first deploy's infrastructure step, so run `stack deploy` once before
 `stack build` uploads a site's files.
 
+A site with an [origin](#one-origin) serves the APIs of it from the same
+load balancer, host and certificate. For each API, a serverless network
+endpoint group of its Cloud Run service sits behind a backend service
+without Cloud CDN, so no API answer is cached, and the URL map sends
+`/api/<service>` and every path under it there, ahead of the files' rule,
+with the prefix rewritten to `/` and `X-Forwarded-Prefix` added; Google's
+load balancer passes the browser's `Host` on and sets
+`X-Forwarded-Proto`. The fallback then answers only the files' 404s, so
+an API's 404 reaches the page as the API wrote it. An API that only the
+origin serves has no load balancer of its own: its Cloud Run service
+takes load balancers' traffic alone, with its invoker check off. A site
+with no domain serves its origin over HTTP, where a browser keeps no
+`Secure` cookie: give the environment a domain for a cookie session. The
+load balancer rewrites no answer's header, so a redirect an API answers
+with a path of its own routes does not get the prefix back, as `stack
+dev`'s proxy and the Worker do; no route the runtimes generate
+redirects.
+
 ### On Cloudflare
 
 The cloudflare target serves each site from a Worker of its own, named
@@ -347,3 +428,15 @@ name is not given here.
 Each API a site calls must be a TypeScript server on Workers in the same
 environment, exposed, and answers CORS for the site's origin, its
 address above.
+
+A site with an [origin](#one-origin) runs the script first for each API
+of it, which forwards the API's paths to the API's Worker through a
+service binding of the site's version, `SITE_API_<API>`
+(`SITE_API_SHOP_API`), on a URL with the browser's host, the prefix
+taken off and the query kept, with `X-Forwarded-Host`, `-Proto`,
+`-Prefix` and `-For` set, and puts the prefix back on a redirect within
+the API's routes. Every method reaches the API; the site's own paths
+still take `GET` and `HEAD` alone. The API's Worker then needs no
+workers.dev address or custom domain: the binding admits the site's
+Worker, as a caller's admits it. It works at workers.dev and under a
+domain alike, since it needs no route on a zone.
