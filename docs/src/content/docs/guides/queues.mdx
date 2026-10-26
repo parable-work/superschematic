@@ -162,9 +162,10 @@ its field, and each field of the message takes a table's field of its
 type, or of a relation's key. A required field of the message takes a
 value the row always has, so one from a nullable field needs a `notNull`
 condition on it, and every required field it leaves out has its
-column's default: a list, a time, or an enum's schema default, which the
-trigger writes. `when` names fields rather than SQL, since the trigger is
-written for Postgres and SQLite alike.
+column's default: a list, a time, a `Default<T, V>` the column carries
+([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
+schema default, which the trigger writes. `when` names fields rather
+than SQL, since the trigger is written for Postgres and SQLite alike.
 
 On Postgres the trigger is a function, `<table>_enqueue_<queue>`, and the
 trigger that runs it after each write, as a

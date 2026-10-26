@@ -96,3 +96,31 @@ func TestEnqueueTriggerNamesFitPostgres(t *testing.T) {
 		t.Errorf("Generate = %v, want the long name refused", err)
 	}
 }
+
+// TestEnqueueTriggerLeavesADefaultedFieldToItsColumn: a required field of
+// the message the declaration does not map, with a Default<T, V> its column
+// carries (D83), is left out of the trigger's insert, and the queue's
+// column has the DEFAULT that fills it (D80).
+func TestEnqueueTriggerLeavesADefaultedFieldToItsColumn(t *testing.T) {
+	s := enqueueSchema("Task")
+	zero := "0"
+	s.Types["TaskGone"].Fields = append(s.Types["TaskGone"].Fields, &ir.FieldDef{Name: "retries", TypeRef: ir.TypeRef{Name: "number"}, Required: true, Default: &zero})
+	out, err := Generate(s, Options{SchemaName: "tasks-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := out.EnqueueTriggers[0]
+	if strings.Join(e.Columns, ",") != "task_id,title" {
+		t.Errorf("the insert sets %v, want task_id and title", e.Columns)
+	}
+	for _, table := range out.Tables {
+		if table.Name != "task_gone_queue" {
+			continue
+		}
+		for _, c := range table.Columns {
+			if c.Name == "retries" && c.DefaultValue != "0" {
+				t.Errorf("retries defaults to %q, want 0", c.DefaultValue)
+			}
+		}
+	}
+}

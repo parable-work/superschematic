@@ -134,3 +134,37 @@ func TestEnqueueOnChangeRefusedInIR(t *testing.T) {
 		t.Errorf("errors =\n%q\nwant\n%q", got, wantMissing)
 	}
 }
+
+// TestEnqueueOnChangeLeavesADefaultedFieldToItsColumn: a required field of
+// the message that the trigger leaves out takes the DEFAULT its column
+// carries for a Default<T, V> (D83), so verification accepts it, as sqlgen
+// writes the insert without it; with no default it must be mapped (D80).
+func TestEnqueueOnChangeLeavesADefaultedFieldToItsColumn(t *testing.T) {
+	str := ir.TypeRef{Name: "string"}
+	check := func(def *string) []string {
+		schema := ir.NewSchema("orders-db", ir.SchemaKindDB)
+		schema.Types["Counted"] = &ir.TypeDef{Name: "Counted", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{Key: "lineId", OnDuplicate: "replace"}, Fields: []*ir.FieldDef{
+			{Name: "lineId", TypeRef: str, Required: true},
+			{Name: "count", TypeRef: ir.TypeRef{Name: "number"}, Required: true, Default: def},
+		}}
+		schema.Types["Line"] = &ir.TypeDef{Name: "Line", Role: ir.RoleDBTable,
+			Fields:          []*ir.FieldDef{{Name: "id", TypeRef: str, Required: true, Key: true}},
+			EnqueueOnChange: []*ir.EnqueueOnChange{{Queue: "Counted", On: []string{"insert"}, Message: map[string]string{"lineId": "id"}}},
+		}
+		r := &Result{}
+		checkEnqueueOnChange(schema, r)
+		var got []string
+		for _, d := range r.Errors {
+			got = append(got, d.Msg)
+		}
+		return got
+	}
+	zero := "0"
+	if got := check(&zero); len(got) != 0 {
+		t.Errorf("a field whose column defaults to 0: errors = %q, want none", got)
+	}
+	want := []string{"@enqueueOnChange(Counted) on Line: Counted's field count is required and its column has no default, so the message maps it to a field of Line"}
+	if got := check(nil); !slices.Equal(got, want) {
+		t.Errorf("a field with no default: errors = %q, want %q", got, want)
+	}
+}
