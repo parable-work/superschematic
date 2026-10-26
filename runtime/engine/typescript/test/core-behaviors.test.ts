@@ -91,7 +91,7 @@ for (const driver of drivers) {
       assert.deepEqual(created.data, { title: 'Launch plan' });
       assert.deepEqual(created.behaviors, {
         Workflow: { status: 'draft', enteredAt: created.createdAt },
-        Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] },
+        Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 1, pendingProposals: 0 },
       });
 
@@ -111,7 +111,7 @@ for (const driver of drivers) {
       // event; the posts are beside the instance, and took no sequence.
       assert.deepEqual(read?.behaviors, {
         Workflow: { status: 'published', enteredAt: events[6].at },
-        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [] },
+        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 2, pendingProposals: 0 },
       });
       assert.equal(read?.seq, 5);
@@ -134,7 +134,7 @@ for (const driver of drivers) {
               data: { title: 'Launch plan' },
               behaviors: {
                 Workflow: { status: 'draft', enteredAt: events[0].at },
-                Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] },
+                Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 },
                 Revisions: { revision: 1, pendingProposals: 0 },
               },
             },
@@ -153,7 +153,7 @@ for (const driver of drivers) {
       for (const event of events.filter((one) => !one.beside)) {
         replayed = mergePatch(replayed, event.kind === 'create' ? event.change : (event.change as { patch: unknown }).patch);
       }
-      assert.deepEqual(replayed, { data: read?.data, behaviors: { ...read?.behaviors, Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] } } });
+      assert.deepEqual(replayed, { data: read?.data, behaviors: { ...read?.behaviors, Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 } } });
 
       const revisions = engine.instances.invoke(alice, 'documents', 'doc-1', 'listRevisions') as { items: Array<{ revision: number; data: unknown; proposal?: number }> };
       assert.deepEqual(
@@ -187,7 +187,7 @@ for (const driver of drivers) {
       assert.deepEqual(retracted?.data, { title: 'Launch plan', body: 'The plan, in full.', summary: 'Withdrawn.' });
       assert.deepEqual(retracted?.behaviors, {
         Workflow: { status: 'retracted', enteredAt: engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events[7].at },
-        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [] },
+        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 3, pendingProposals: 0 },
       });
     });

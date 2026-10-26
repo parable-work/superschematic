@@ -87,13 +87,14 @@ test('an author creates a note; a reader may not', async () => {
   assert.equal(created.status, 201);
   assert.equal(created.etag, '"1"');
   // data holds the note's own fields, and behaviors each behavior's under
-  // its name: Workflow's status, Comments' messages, threads and who is
-  // composing, and Revisions' revision and pendingProposals.
+  // its name: Workflow's status, Comments' messages, threads, who is
+  // composing and the reader's unread, and Revisions' revision and
+  // pendingProposals.
   assert.deepEqual(created.body.data, { title: 'Launch', tags: ['launch'] });
   // Workflow's enteredAt is when the status last changed: here, the create.
   assert.deepEqual(created.body.behaviors, {
     Workflow: { status: 'draft', enteredAt: created.body.createdAt },
-    Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] },
+    Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 },
     Revisions: { revision: 1, pendingProposals: 0 },
   });
 });
@@ -150,7 +151,7 @@ test('a reader comments and proposes a change; an editor approves it', async () 
   const publishedAt = log.find((event) => (event.change as { params?: { to?: string } } | null)?.params?.to === 'published')?.at;
   assert.deepEqual(note.body.behaviors, {
     Workflow: { status: 'published', enteredAt: publishedAt },
-    Comments: { messages: 1, lastMessageAt: comment.body.postedAt, threads: { open: 1, resolved: 0 }, composing: [] },
+    Comments: { messages: 1, lastMessageAt: comment.body.postedAt, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 },
     Revisions: { revision: 2, pendingProposals: 0 },
   });
   const revisions = await operation('carol-token', 'listRevisions', {});

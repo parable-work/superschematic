@@ -404,6 +404,36 @@ describe('namespace operations', () => {
   });
 });
 
+describe("Comments' namespace operations", () => {
+  test('comments_inbox lists a reader its mentions across the schemas, and comments_claim_deliveries is a writer\'s tool', async () => {
+    const { url } = await served({ clock: () => 7000 }, {}, (engine) => {
+      const document = schemaDocument('Review', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+      document.types.Review!.behaviors = [{ name: 'Comments' }];
+      engine.schemas.define(everything, document);
+      engine.schemas.publish(everything, 'Review');
+      engine.instances.create(everything, 'Review', { title: 'Q3 plan' }, { id: 'r1' });
+      engine.instances.invoke(everything, 'Review', 'r1', 'post', { body: 'Reader, a look?', mentions: ['reader'] });
+    });
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const tools = new Map((await reader.listTools()).tools.map((tool) => [tool.name, tool]));
+    const inbox = tools.get('comments_inbox');
+    assert.ok(inbox);
+    assert.deepEqual([inbox.title, inbox.annotations], ['Comments: inbox', { readOnlyHint: true }]);
+    assert.ok(!tools.has('comments_claim_deliveries') && !tools.has('comments_settle_deliveries'), JSON.stringify([...tools.keys()]));
+    const listed = (await reader.callTool({ name: 'comments_inbox', arguments: { params: { unread: true } } })) as CallToolResult;
+    assert.deepEqual(listed.structuredContent, {
+      items: [{ kind: 'mention', schema: 'Review', instanceId: 'r1', message: 1, author: 'alice', postedAt: 7000, excerpt: 'Reader, a look?', unread: 1 }],
+      next: null,
+    });
+    const { client } = await connect(endpoint(url));
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('comments_claim_deliveries') && names.includes('comments_settle_deliveries'), JSON.stringify(names));
+    // Review names no deliverPermission: nobody claims its deliveries.
+    const refused = (await client.callTool({ name: 'comments_claim_deliveries', arguments: { params: {} } })) as CallToolResult;
+    assert.equal(problemOf(refused).status, 409);
+  });
+});
+
 describe('tools/call', () => {
   test('runs the operation and returns its result as text and, for an object, structured content', async () => {
     const { url, engine } = await served();
@@ -660,6 +690,8 @@ describe("the core's behaviors", () => {
         ['documents_unpin', false, 'auto'],
         ['documents_resolve', false, 'auto'],
         ['documents_reopen', false, 'auto'],
+        ['documents_mark_read', false, 'auto'],
+        ['documents_follow', false, 'auto'],
         ['documents_list_messages', true, 'auto'],
         ['documents_get_message', true, 'auto'],
         ['documents_list_edits', true, 'auto'],
@@ -672,13 +704,16 @@ describe("the core's behaviors", () => {
         ['documents_list_proposals', true, 'auto'],
       ]
     );
-    // A reader is listed only the tools that read.
+    // A reader is listed only the tools that read, and markRead and
+    // follow, which ask read.
     const { client: reader } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await reader.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('documents_')),
       [
         'documents_get',
         'documents_list',
+        'documents_mark_read',
+        'documents_follow',
         'documents_list_messages',
         'documents_get_message',
         'documents_list_edits',
