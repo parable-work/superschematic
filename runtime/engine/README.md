@@ -4950,7 +4950,7 @@ a schema's live version:
   "namespace": "default", "name": "Item", "schemaNamespace": "default",
   "version": 1, "hash": "9f2c...", "instanceType": "Item",
   "display": {"noun": "Item", "plural": "Items", "titleField": "title", "summaryFields": ["test.Counter.count"]},
-  "fields": [{"name": "title", "title": "Title", "icon": "text"}],
+  "fields": [{"name": "title", "title": "Title", "icon": "text", "display": {"multiline": false}}],
   "instance": {
     "type": "object", "additionalProperties": false,
     "properties": {
@@ -4992,8 +4992,14 @@ a schema's live version:
   declares none.
 - `fields` lists the instance type's own fields in declaration order, each
   by its key in an instance's `data`, with its `title` (`@docs({ title
-  })`) and its `icon` (`@icon`) where it declares them. A behavior's
-  fields are under `behaviors`.
+  })`), its `icon` (`@icon`) and its `display` (`@display`) where it
+  declares them. `display` is the field's as the schema holds it:
+  `multiline`, and `currency`, an ISO 4217 code or `{ field }` naming the
+  own field that holds one, by its key in `data` (D48, amended). The
+  engine applies no rule of its own: a reader that takes a
+  `Finance.Money` field without a currency in the type's one
+  `Finance.Currency` field reads each field's scalar from `instance`. A
+  behavior's fields are under `behaviors`.
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields. Under `allOf` it carries what its behaviors' `validate` holds
   the own fields to, as their `instanceSchema` writes it: `Variants`'
@@ -5097,7 +5103,23 @@ which name their schema or namespace only when called, ask a listing
 question ("Access"). So is, in an archived namespace, every tool that
 writes there, the namespace tools aside: the namespace refuses the
 write; and every tool a mount's `tools` filter leaves out of the
-caller's set ("MCP"). `requiresAuth` is
+caller's set ("MCP").
+
+A hidden tool's `mcp` is `{ hidden: true, hiddenReason, hiddenBy }`.
+`hiddenBy` lists each cause, in this order: `deployment` (the tool
+options' `hidden`), `archived`, `policy`, `handle` and `filter`; and
+`hiddenReason` is the first one's, so a tool the deployment hides keeps
+the deployment's reason when its handle is refused too, and one the
+policy refuses gives the policy's. The policy is asked of every tool the
+deployment does not hide, one hidden for its handle included, since the
+operation is still offered through `instances` and the HTTP routes: a
+reader of the document learns whether the principal may run it. A tool
+the deployment hides is offered to no one, and the filter is asked only
+of a tool nothing else hides.
+
+```json
+{"hidden": true, "hiddenReason": "the access policy refuses reader write on Item", "hiddenBy": ["policy", "handle"]}
+``` `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance

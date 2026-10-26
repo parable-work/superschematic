@@ -566,7 +566,32 @@ a policy for each of `Payments.openPayment`, `capturePayment`,
 calls them through the API or in-process, and no agent is offered them.
 A hidden tool reads `hidden: true` with its reason, and a call by its
 MCP handle is a tool the namespace does not have; the operation itself
-still runs through the engine's API. The build refuses a name no
+still runs through the engine's API.
+
+The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
+the generators' `tools/schema.json` does not write: each cause the
+engine found, in this order, and `hiddenReason` is the first one's.
+
+| `hiddenBy` | The engine hides the tool because |
+| --- | --- |
+| `deployment` | `tools.hidden` names its operation; the policy is not asked |
+| `archived` | it writes in an archived namespace |
+| `policy` | the access policy refuses the caller what its call asks |
+| `handle` | `@mcp` would refuse its handle: not snake case, longer than 48 characters, an engine tool's, or another tool's too; the policy is asked all the same, since the API still offers the operation |
+| `filter` | the mount's `tools` filter leaves it out; asked only of a tool nothing else hides |
+
+```json
+"mcp": {
+  "hidden": true,
+  "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)",
+  "hiddenBy": ["policy", "handle"]
+}
+```
+
+A tool hidden by `deployment` and `handle` keeps the deployment's reason.
+A client that shows the engine's operations outside MCP, as the Topcoat
+console does, offers one hidden by `handle` alone and refuses one hidden
+by `policy` or `archived`. The build refuses a name no
 composed behavior declares, and the engine document adds, wherever
 `Payments` is composed, its service operations: `listPaymentActions` and
 `recordPaymentEvent`, which a provider's adapter calls, and
