@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/parable-work/superschematic/ir"
@@ -248,6 +249,37 @@ func TestParseType_StrictRejectsUnknown(t *testing.T) {
 	fieldErrs := v.([]ValidationError)
 	require.NotEmpty(t, fieldErrs)
 	assert.Equal(t, "unknown_field", fieldErrs[0].Validator)
+}
+
+// TestParseType_StrictAllowsUnknownOfAnAllowingType holds D87: a type that
+// is @allowUnknownFields accepts and drops the keys it does not declare in
+// strict mode, while a nested type that is not keeps refusing its own and
+// a declared key is still checked.
+func TestParseType_StrictAllowsUnknownOfAnAllowingType(t *testing.T) {
+	schema := testParserSchema()
+	schema.Types["Hook"] = &ir.TypeDef{
+		Name:               "Hook",
+		Kind:               ir.TypeKindObject,
+		AllowUnknownFields: true,
+		Fields: []*ir.FieldDef{
+			{Name: "item_id", TypeRef: ir.TypeRef{Name: "String"}, Required: true},
+			{Name: "address", TypeRef: ir.TypeRef{Name: "Address"}},
+		},
+	}
+	p := New(schema, WithParseRegistry(DefaultParseRegistry()), WithNormalizeRegistry(DefaultNormalizeRegistry()))
+
+	out, errs := p.ParseTypeStrict("Hook", map[string]any{"item_id": "a", "environment": "sandbox"})
+	require.False(t, errs.HasErrors(), "errs=%v", errs)
+	assert.Equal(t, map[string]any{"item_id": "a"}, out)
+
+	_, errs = p.ParseTypeStrict("Hook", map[string]any{"item_id": "a", "address": map[string]any{"street": "s", "city": "c", "zip": "z"}})
+	require.True(t, errs.HasErrors())
+	assert.Contains(t, fmt.Sprint(errs), "unknown_field")
+
+	_, errs = p.ParseTypeStrict("Hook", map[string]any{"item_id": 7, "environment": "sandbox"})
+	require.True(t, errs.HasErrors())
+	_, unknown := errs["environment"]
+	assert.False(t, unknown, "the undeclared key is not an error: %v", errs)
 }
 
 func TestParseType_StrictRejectsCoercion(t *testing.T) {

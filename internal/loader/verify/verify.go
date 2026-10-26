@@ -218,6 +218,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkImports(schema, in, r)
 	checkClassRefs(schema, r)
 	checkEncryptedFields(schema, r)
+	checkUnknownFields(schema, r)
 	checkSQLNames(schema, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)

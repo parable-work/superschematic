@@ -111,6 +111,11 @@ export interface TypeDef {
   fields: FieldDef[];
   indexes: IndexDef[];
   envVars: boolean;
+  /**
+   * @allowUnknownFields (D87): a strict parse or serialize accepts a key
+   * the type does not declare, and drops it.
+   */
+  allowUnknownFields?: boolean;
 }
 
 export interface EnumValueDef {

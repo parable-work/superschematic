@@ -147,6 +147,9 @@ type TypeInfo struct {
 	IsInput     bool
 	IsJsonField bool
 	StrictJSON  bool
+	// AllowUnknownFields is @allowUnknownFields (D87): UnmarshalJSON drops
+	// each key the type does not declare, as spelled, before it decodes.
+	AllowUnknownFields bool
 	// OpenAPISchemaJSON is the quoted standalone OpenAPI schema of a
 	// @strictJSON type in a General schema; the template emits a
 	// <Type>OpenAPISchema() accessor for it. Empty emits none.
@@ -819,15 +822,16 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput
 			}
 		}
 		types[i] = TypeInfo{
-			Name:        ct.Name,
-			Owner:       ct.Owner,
-			Role:        ct.Role,
-			Doc:         ct.Doc(),
-			Fields:      fields,
-			IsInput:     isInput,
-			IsJsonField: ct.JsonField,
-			StrictJSON:  ct.StrictJSON,
-			HasDefaults: hasDefaults,
+			Name:               ct.Name,
+			Owner:              ct.Owner,
+			Role:               ct.Role,
+			Doc:                ct.Doc(),
+			Fields:             fields,
+			IsInput:            isInput,
+			IsJsonField:        ct.JsonField,
+			StrictJSON:         ct.StrictJSON,
+			AllowUnknownFields: ct.AllowUnknownFields,
+			HasDefaults:        hasDefaults,
 		}
 	}
 	return types

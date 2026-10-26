@@ -143,6 +143,11 @@ type TypeInfo struct {
 	// the strict JSON parser.
 	StrictJSON bool
 
+	// AllowUnknownFields is set by @allowUnknownFields (D87): every parser
+	// of the type drops the keys it does not declare, where parse<Type>Json
+	// would refuse them.
+	AllowUnknownFields bool
+
 	// HasDefaults is true when at least one field has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
 	// make<Type>() factory and merge defaults during JSON parsing.
@@ -726,13 +731,14 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 			}
 		}
 		types[i] = TypeInfo{
-			Name:        t.Name,
-			Owner:       t.Owner,
-			Role:        t.Role,
-			Doc:         t.Doc(),
-			Fields:      fields,
-			StrictJSON:  t.StrictJSON,
-			HasDefaults: hasDefaults,
+			Name:               t.Name,
+			Owner:              t.Owner,
+			Role:               t.Role,
+			Doc:                t.Doc(),
+			Fields:             fields,
+			StrictJSON:         t.StrictJSON,
+			AllowUnknownFields: t.AllowUnknownFields,
+			HasDefaults:        hasDefaults,
 		}
 	}
 	return types

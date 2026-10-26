@@ -5700,6 +5700,10 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "allowUnknownFields": {
+          "default": false,
+          "type": "boolean"
+        },
         "behaviors": {
           "default": [],
           "items": {

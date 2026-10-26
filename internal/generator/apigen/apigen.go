@@ -163,6 +163,12 @@ type EndpointInfo struct {
 	HasInput      bool
 	// InputRequired reports whether the input argument is non-null.
 	InputRequired bool
+	// InputAllowsUnknownFields reports whether every server decodes the
+	// input accepting a top-level key its type does not declare and
+	// dropping it (D87): its type is @allowUnknownFields, or the operation
+	// is a @webhook and its type is neither @strictJSON nor
+	// @denyUnknownFields. Every other input refuses such a key (D42).
+	InputAllowsUnknownFields bool
 
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
@@ -1164,6 +1170,13 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		}
 	}
 
+	inputAllowsUnknownFields := false
+	if inputType != "" {
+		if typeDef, ok := types.findTypeDef(inputType); ok {
+			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+		}
+	}
+
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0
 
 	rateLimit, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
@@ -1195,6 +1208,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		InputTypeFields:              inputTypeFields,
 		HasInput:                     hasInput,
 		InputRequired:                inputRequired,
+		InputAllowsUnknownFields:     inputAllowsUnknownFields,
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
@@ -1254,6 +1268,21 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	return endpoint, nil
+}
+
+// InputAllowsUnknownFields reports whether the servers decode op's input,
+// of type input, accepting and dropping a top-level key the type does not
+// declare (D87): a type that is @allowUnknownFields does so wherever it is
+// decoded, and a @webhook's input does so unless its type is @strictJSON or
+// @denyUnknownFields, since a provider adds keys to its payloads over time.
+func InputAllowsUnknownFields(op *ir.FieldDef, input *ir.TypeDef) bool {
+	if input == nil {
+		return false
+	}
+	if input.AllowUnknownFields {
+		return true
+	}
+	return op != nil && op.Webhook && !input.StrictJSON && !input.DenyUnknownFields
 }
 
 // buildPath assembles the full route path. An explicit @rest path wins;

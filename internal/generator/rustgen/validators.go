@@ -149,6 +149,10 @@ type TypeValidator struct {
 	Fields    []FieldValidator
 	Defaults  []FieldDefault
 	Patterns  []PatternStatic
+	// AllowsUnknownFields is @allowUnknownFields (D87): prepare_<type>
+	// drops the keys the type does not declare, whatever its caller's
+	// policy.
+	AllowsUnknownFields bool
 }
 
 // UnionValidator is validate_<union>, prepare_<union> and parse_<union>:
@@ -310,13 +314,14 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 
 	for _, t := range in.types {
 		tv := TypeValidator{
-			Name:      t.Name,
-			Fn:        validatorFnName(t.Name),
-			PrepareFn: "prepare_" + codegen.ToSnakeCase(t.Name),
-			ParseFn:   "parse_" + codegen.ToSnakeCase(t.Name),
-			FieldsID:  constName(t.Name) + "_FIELDS",
-			RustPath:  "crate::types::" + t.Name,
-			Strict:    t.StrictJSON,
+			Name:                t.Name,
+			Fn:                  validatorFnName(t.Name),
+			PrepareFn:           "prepare_" + codegen.ToSnakeCase(t.Name),
+			ParseFn:             "parse_" + codegen.ToSnakeCase(t.Name),
+			FieldsID:            constName(t.Name) + "_FIELDS",
+			RustPath:            "crate::types::" + t.Name,
+			Strict:              t.StrictJSON,
+			AllowsUnknownFields: t.AllowUnknownFields,
 		}
 		rulesIDs := map[string]bool{}
 		for _, f := range t.Fields {

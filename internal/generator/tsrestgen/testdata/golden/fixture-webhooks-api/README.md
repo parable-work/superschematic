@@ -44,6 +44,8 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `GET` | `/api/events/{id}` | `event.getEvent` | none |
 | `POST` | `/api/webhooks/github` | `webhook.receiveGithubEvent` (signed: github) | webhooks.receive |
 | `POST` | `/api/webhooks/github/raw` | `webhook.receiveRawGithubEvent` (manual) (signed: github) | none |
+| `POST` | `/api/webhooks/ledger` | `webhook.receiveLedgerEvent` | public |
+| `POST` | `/api/webhooks/plaid` | `webhook.receivePlaidEvent` | public |
 | `POST` | `/api/webhooks/stripe` | `webhook.receiveStripeEvent` (signed: stripe) | public |
 
 ## Usage

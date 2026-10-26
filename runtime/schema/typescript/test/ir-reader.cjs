@@ -327,6 +327,39 @@ test('x-temporal-format survives the legacy JSON reader/writer round trip', () =
   );
 });
 
+test('a type that allows unknown fields drops them in a strict parse (D87)', () => {
+  const schema = parseSchemaIR({
+    name: 'hooks',
+    kind: 'API',
+    types: {
+      Hook: {
+        name: 'Hook',
+        role: 'APIView',
+        allowUnknownFields: true,
+        fields: [
+          { name: 'item_id', typeRef: { name: 'String' }, required: true },
+          { name: 'address', typeRef: { name: 'Address' } },
+        ],
+      },
+      Address: {
+        name: 'Address',
+        role: 'APIView',
+        fields: [{ name: 'street', typeRef: { name: 'String' }, required: true }],
+      },
+    },
+  });
+  assert.strictEqual(schema.types.Hook.allowUnknownFields, true);
+  assert.strictEqual(schema.types.Address.allowUnknownFields, undefined);
+  const accepted = parseType(schema, 'Hook', { item_id: 'a', environment: 'sandbox' }, { strict: true });
+  assert.deepStrictEqual(accepted.errors, {});
+  assert.deepStrictEqual(accepted.data, { item_id: 'a' });
+  const nested = parseType(schema, 'Hook', { item_id: 'a', address: { street: 's', zip: 'z' } }, { strict: true });
+  assert.ok(JSON.stringify(nested.errors).includes('unknown_field'), JSON.stringify(nested.errors));
+  const document = JSON.parse(writeSchemaJson(schema));
+  assert.strictEqual(document.definitions.Hook['x-allowUnknownFields'], true);
+  assert.strictEqual(parseSchema(document).types.Hook.allowUnknownFields, true);
+});
+
 if (failures > 0) {
   console.error(`${failures} test(s) failed`);
   process.exit(1);

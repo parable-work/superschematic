@@ -363,6 +363,7 @@ def _parse_type_definition(
         fields=fields,
         indexes=_parse_indexes(definition),
         env_vars=_as_bool(definition.get("x-envVars")),
+        allow_unknown_fields=_as_bool(definition.get("x-allowUnknownFields")),
     )
 
 

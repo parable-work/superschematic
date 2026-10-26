@@ -44,6 +44,8 @@ var corpus = []roundtripFixture{
 	// Type-level decode decorators: the TS writer emits both.
 	{name: "fixture-deny-unknown-fields", dir: tsFixtures + "/fixture-deny-unknown-fields", native: FormatTS},
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
+	// @allowUnknownFields, and @webhook inputs (D87).
+	{name: "fixture-webhooks-api", dir: tsFixtures + "/fixture-webhooks-api", native: FormatTS},
 	// Operation @docs records in the data forms.
 	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
 	// An API's @job classes (D52), which every form writes as the
