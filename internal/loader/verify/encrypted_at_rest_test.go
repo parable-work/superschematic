@@ -67,7 +67,9 @@ func TestEncryptedFieldsRefusals(t *testing.T) {
 		edit func(td *ir.TypeDef, token *ir.FieldDef)
 		want string
 	}{
-		{"@index", func(td *ir.TypeDef, _ *ir.FieldDef) { td.Indexes = []ir.IndexDef{{Keys: []string{"itemId", "accessToken"}}} },
+		{"@index", func(td *ir.TypeDef, _ *ir.FieldDef) {
+			td.Indexes = []ir.IndexDef{{Keys: []string{"itemId", "accessToken"}}}
+		},
 			"PlaidItem.accessToken: an Encrypted<T> field cannot be an @index key: each write's ciphertext differs, so an index finds nothing by it; drop it from @index([itemId, accessToken])"},
 		{"@unique", func(_ *ir.TypeDef, f *ir.FieldDef) { f.Unique = true },
 			"cannot be @unique: each write's ciphertext differs, so the database cannot compare two; drop @unique, or keep a hash of the value in a field of its own"},

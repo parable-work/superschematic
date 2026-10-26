@@ -132,6 +132,26 @@ func TestDescribeVariants(t *testing.T) {
 			t.Fatalf("session user %q, grant user %q; want user_id", d.Session.Columns.User, d.RoleGrant.Columns.User)
 		}
 	})
+	t.Run("named tables", func(t *testing.T) {
+		// @table and @column name the user model's own tables and their
+		// columns (D85), and the identity stores, which quote every name
+		// the descriptor gives, read them there.
+		schema := identitytest.Schema(t, identitytest.Options{Roles: true, Name: "displayName"})
+		user, role := schema.UserTable(), schema.UserRoleTable()
+		user.SQLName, role.SQLName = "appAccount", "appRole"
+		for _, fd := range user.Fields {
+			switch fd.Name {
+			case "id":
+				fd.SQLName = "accountId"
+			case "displayName":
+				fd.SQLName = "displayName"
+			}
+		}
+		d := describe(t, schema)
+		if d.User.Table != "appAccount" || d.User.Columns.Key != "accountId" || d.User.Columns.Name != "displayName" || d.Role.Table != "appRole" {
+			t.Fatalf("user %+v, role %+v", d.User, d.Role)
+		}
+	})
 	t.Run("login column", func(t *testing.T) {
 		d := describe(t, identitytest.Schema(t, identitytest.Options{Login: "emailAddress"}))
 		if d.User.Columns.Login != "email_address" || d.User.Columns.Name != "email_address" {

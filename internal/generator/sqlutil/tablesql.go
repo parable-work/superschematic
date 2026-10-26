@@ -237,25 +237,27 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		VersionFence:     " AND " + VersionColumn + " = $%d",
 		Returning:        " RETURNING " + list,
 		UpdateMany:       "UPDATE " + t + " SET %s%s",
-		UpdatedAt:        strings.Replace(PostgresClauses().Set, "%s", QuoteIdentifier("updated_at"), 1),
-		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", QuoteIdentifier("updated_by"), 1),
+		UpdatedAt:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedAt), 1),
+		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
 		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = $1",
 	}
 	upsertGuard := ""
 	if table.SoftDelete {
-		s.Live = " AND deleted_at IS NULL"
-		s.LiveWhere = " WHERE deleted_at IS NULL"
-		s.LiveCondition = t + ".deleted_at IS NULL"
+		// The audit columns are the fields', as @column names them (D85).
+		deletedAt, deletedBy := table.AuditQuoted(AuditDeletedAt), table.AuditQuoted(AuditDeletedBy)
+		s.Live = " AND " + deletedAt + " IS NULL"
+		s.LiveWhere = " WHERE " + deletedAt + " IS NULL"
+		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
 		upsertGuard = " WHERE " + s.LiveCondition
 		if table.DeletedBy {
-			s.SoftDelete = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2 WHERE " + key + " = $3 AND deleted_at IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2 WHERE " + key + " = $3 AND _version = $4 AND deleted_at IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND _version = $4 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2%s"
 		} else {
-			s.SoftDelete = "UPDATE " + t + " SET deleted_at = $1 WHERE " + key + " = $2 AND deleted_at IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET deleted_at = $1 WHERE " + key + " = $2 AND _version = $3 AND deleted_at IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET deleted_at = $1%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND _version = $3 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1%s"
 		}
 	}
 	s.Upsert = "INSERT INTO " + t + " (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s" + upsertGuard + " RETURNING " + list
@@ -337,7 +339,7 @@ func ReferenceProbeOf(table *TableModel, ref Reference) ReferenceProbe {
 		NotExists: PostgresClauses().NotExists,
 	}
 	if ref.SourceSoftDelete {
-		p.Live = " AND " + ref.SourceTable + ".deleted_at IS NULL"
+		p.Live = " AND " + ref.SourceTable + "." + ref.SourceDeletedAt + " IS NULL"
 	}
 	return p
 }

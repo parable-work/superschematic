@@ -115,7 +115,7 @@ var symbolPackages = map[string]string{
 	"Default": "@superschematic/schema", "Nullable": "@superschematic/schema",
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
-	"decrypted": "@superschematic/schema",
+	"decrypted":         "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
 	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
 	"uiControl": "@superschematic/schema",

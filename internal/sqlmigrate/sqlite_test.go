@@ -195,6 +195,9 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "drop-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
 		{plan: "drop-tables-in-cycle", op: "dropTable", phase: Contract, want: []HazardClass{destructive}, reason: "Dropping table warehouse"},
 		{plan: "rename-table", op: "renameTable", phase: Expand, want: []HazardClass{compat}},
+		{plan: "rename-table-by-override", op: "renameTable", subject: "table/purchaseOrder", phase: Expand, want: []HazardClass{compat, apiBreaking}},
+		{plan: "rename-column-by-override", op: "renameColumn", phase: Expand, want: []HazardClass{compat}},
+		{plan: "rename-column-by-override", op: "renameIndex", phase: Expand, want: []HazardClass{blockingClass}},
 
 		{plan: "add-index", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass}},
 		{plan: "add-unique-index", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass, compat, dataDependent}},

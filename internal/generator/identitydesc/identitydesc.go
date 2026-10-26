@@ -17,6 +17,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -166,7 +167,7 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 		Version: Version,
 		User: User{
 			Type:  userTable.Name,
-			Table: codegen.ToSnakeCase(userTable.Name),
+			Table: sqlutil.TableName(userTable),
 			Columns: UserColumns{
 				Key:   user.column(key),
 				Login: user.column(login),
@@ -226,7 +227,7 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 	roleKey := role.key()
 	d.Role = &Role{
 		Type:  roleTable.Name,
-		Table: codegen.ToSnakeCase(roleTable.Name),
+		Table: sqlutil.TableName(roleTable),
 		Columns: RoleColumns{
 			Key:         role.column(roleKey),
 			Name:        role.column(role.field(ir.IdentityRoleNameField)),

@@ -754,7 +754,7 @@ FROM (
   ORDER BY {{ .HistoryRecordedAtCol }} DESC, _version DESC
   LIMIT 1
 ) latest
-WHERE {{ .HistoryOperationCol }} <> 'DELETE'{{ if .HasSoftDelete }} AND ({{ .HistoryDataCol }}->>'deleted_at') IS NULL{{ end }}`
+WHERE {{ .HistoryOperationCol }} <> 'DELETE'{{ if .HasSoftDelete }} AND ({{ .HistoryDataCol }}->>'{{ $.DeletedAtCol }}') IS NULL{{ end }}`
 
 	var data []byte
 	var row pgx.Row
@@ -849,7 +849,7 @@ func (r *{{ $.Name }}) ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context
 )
 SELECT _version, {{ $.HistoryOperationCol }}, {{ $.HistoryRecordedAtCol }}, {{ $.HistoryDataCol }}
 FROM latest
-WHERE {{ $.HistoryOperationCol }} <> 'DELETE'{{ if $.HasSoftDelete }} AND ({{ $.HistoryDataCol }}->>'deleted_at') IS NULL{{ end }} AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
+WHERE {{ $.HistoryOperationCol }} <> 'DELETE'{{ if $.HasSoftDelete }} AND ({{ $.HistoryDataCol }}->>'{{ $.DeletedAtCol }}') IS NULL{{ end }} AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
 ORDER BY {{ $.HistoryRecordedAtCol }} ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -2409,7 +2409,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 		var zeroId {{ $.UUIDGoType }}
 		{{- if $rel.IsRequired }}
 		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2417,7 +2417,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 		{{- else }}
 		if input.{{ toGoName $rel.FieldName }} != nil {
 			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2679,7 +2679,7 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 		var zeroId {{ $.UUIDGoType }}
 		{{- if $rel.IsRequired }}
 		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2687,7 +2687,7 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 		{{- else }}
 		if input.{{ toGoName $rel.FieldName }} != nil {
 			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -3019,7 +3019,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		{{- if not $rel.IsArray }}
 		// Relationship: {{ $rel.FieldName }} (FK: {{ $rel.DBColumnName }})
 		{
-			cell := batchInsertCell{column: "{{ $rel.DBColumnName }}"}
+			cell := batchInsertCell{column: `{{ $rel.QuotedDBColumn }}`}
 			var zeroId {{ $.UUIDGoType }}
 			{{- if $rel.IsRequired }}
 			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {

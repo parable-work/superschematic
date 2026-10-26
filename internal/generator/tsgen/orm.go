@@ -115,7 +115,7 @@ type ORMColumn struct {
 	// as a SecretValue and a write takes as a string or a SecretValue.
 	Encrypted bool
 	Audit     string
-	Relation                      string
+	Relation  string
 	// Default is the JSON of the schema's default, which a create that
 	// leaves the member unset writes; empty without one.
 	Default string

@@ -121,7 +121,12 @@ func rawSQLDowns(pieces []sqlutil.RawSQL) []sqlutil.RawSQL {
 
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"searchTextExpr":    SearchTextExpr,
+		"searchTextExpr": SearchTextExpr,
+		// quote spells a derived name, an index's, a constraint's, a
+		// function's or a trigger's, as a statement must: quoted when a
+		// mixed-case @table or @column puts capitals in it (D85).
+		"quote":             sqlutil.QuoteIdentifier,
+		"searchIndexName":   SearchIndexName,
 		"projectionViewDDL": projectionViewDDL,
 		"rawSQLAt":          rawSQLAt,
 		"rawSQLDowns":       rawSQLDowns,

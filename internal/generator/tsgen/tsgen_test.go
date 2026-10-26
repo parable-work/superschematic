@@ -51,6 +51,8 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-ledger-db"},
 		// Encrypted<T> fields (D85): rows hold them as SecretValues.
 		{service: "fixture-vault-db"},
+		// Tables and columns @table and @column name (D85).
+		{service: "fixture-naming-db"},
 	}
 
 	for _, tc := range cases {

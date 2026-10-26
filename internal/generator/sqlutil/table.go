@@ -21,10 +21,13 @@ import (
 // writes and a filter's search text compares (D62).
 const SearchTextColumn = "search_text"
 
-// TableName is the table a table type is stored in: its name in snake case.
-// Every generator that names a table names it here, so an override of a
-// table's name changes one function (D79).
+// TableName is the table a table type is stored in: the name @table gives
+// it (D85), else its name in snake case. Every generator that names a
+// table names it here (D79).
 func TableName(td *ir.TypeDef) string {
+	if td.SQLName != "" {
+		return td.SQLName
+	}
 	return codegen.ToSnakeCase(td.Name)
 }
 
@@ -39,26 +42,97 @@ func TableNameOf(schema *ir.Schema, typeName string) string {
 	return codegen.ToSnakeCase(typeName)
 }
 
-// ColumnName is the column a field is stored in: its name in snake case.
-// Like TableName, it is the one place a column is named, through
-// ColumnNameOf, which names an @index key's column too.
+// ColumnName is the column a field is stored in: the name @column gives it
+// (D85), else its name in snake case. Like TableName, it is the one place a
+// column is named; a CHECK's name (CheckName) and an @index key's column
+// (KeyColumnIn) follow from it, so the DDL's names (D83) and the ORMs'
+// columns come from one place.
 func ColumnName(f *ir.FieldDef) string {
+	if f.SQLName != "" {
+		return f.SQLName
+	}
 	return ColumnNameOf(f.Name)
 }
 
-// ColumnNameOf is the column of the field named field: what ColumnName
-// gives its definition. An @index's default name (IndexName) and the
-// column an @index key resolves to (IndexKeyMatches) are spelled by it,
-// as a CHECK's (CheckName) is by the column ColumnName gives, so the
-// DDL's names (D83) and the ORMs' columns come from one place.
+// ColumnNameOf is the column of a field named field with no @column: its
+// name in snake case.
 func ColumnNameOf(field string) string {
 	return codegen.ToSnakeCase(field)
 }
 
 // ForeignKeyColumn is the column a to-one relation field stores its
-// target's key in: the field's column with _id.
+// target's key in: the name @column gives it (D85), else the field's
+// column with _id.
 func ForeignKeyColumn(f *ir.FieldDef) string {
-	return ColumnName(f) + "_id"
+	if f.SQLName != "" {
+		return f.SQLName
+	}
+	return ColumnNameOf(f.Name) + "_id"
+}
+
+// IsTableRelation reports whether f is a to-one or list relation to a
+// table of schema, which holds a foreign key and no value of its own.
+func IsTableRelation(schema *ir.Schema, f *ir.FieldDef) bool {
+	return !f.JsonField && !f.TypeRef.IsMap && relationalTarget(schema, f.TypeRef.Name)
+}
+
+// ColumnOf is the column that holds f, a field of a table of schema: a
+// to-one relation's foreign key (ForeignKeyColumn), any other field's
+// column (ColumnName).
+func ColumnOf(schema *ir.Schema, f *ir.FieldDef) string {
+	if IsTableRelation(schema, f) && !f.TypeRef.IsArray {
+		return ForeignKeyColumn(f)
+	}
+	return ColumnName(f)
+}
+
+// FieldNamed is td's field named name, or nil.
+func FieldNamed(td *ir.TypeDef, name string) *ir.FieldDef {
+	if td == nil {
+		return nil
+	}
+	for _, f := range td.Fields {
+		if f != nil && f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// KeyColumnIn is the column an @index key of td, a table of schema, names:
+// its field's column (ColumnOf), or the key in snake case when td has no
+// field of its name.
+func KeyColumnIn(schema *ir.Schema, td *ir.TypeDef, key string) string {
+	if f := FieldNamed(td, key); f != nil {
+		return ColumnOf(schema, f)
+	}
+	return ColumnNameOf(key)
+}
+
+// AuditColumnIn is the column of td's audit field name (AuditCreatedAt,
+// ...): its field's column, or the field's name in snake case when td
+// has no such field.
+func AuditColumnIn(td *ir.TypeDef, name string) string {
+	if f := FieldNamed(td, name); f != nil {
+		return ColumnName(f)
+	}
+	return ColumnNameOf(name)
+}
+
+// KeyColumnOf is the column of td's primary key: its @key field's, else
+// its field named id's, else id, the column the generator adds.
+func KeyColumnOf(td *ir.TypeDef) string {
+	if td != nil {
+		for _, f := range td.Fields {
+			if f != nil && f.Key {
+				return ColumnName(f)
+			}
+		}
+	}
+	if f := FieldNamed(td, "id"); f != nil {
+		return ColumnName(f)
+	}
+	return "id"
 }
 
 // Qualify is column of table as a condition names it: each quoted where it
@@ -464,8 +538,10 @@ type Reference struct {
 	SourceTable  string
 	SourceColumn string
 	// SourceSoftDelete is a source table with deletedAt: a probe counts its
-	// live rows alone unless it asks for deleted ones too.
+	// live rows alone unless it asks for deleted ones too. SourceDeletedAt
+	// is its deletedAt column, quoted where it must be.
 	SourceSoftDelete bool
+	SourceDeletedAt  string
 }
 
 // TableTypes are the types of schema the ORMs keep tables of, sorted by
@@ -681,7 +757,7 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 		})
 	}
 	if table.Versioned {
-		table.HistoryActor = VersionedHistory(td.VersionedConfig, func(column string) bool { return table.Column(column) != nil }).Actor
+		table.HistoryActor = VersionedHistory(td, func(column string) bool { return table.Column(column) != nil }).Actor
 	}
 	keys, err := uniqueKeys(td, &table)
 	if err != nil {
@@ -714,6 +790,16 @@ func (t *TableModel) Column(name string) *ColumnModel {
 		}
 	}
 	return nil
+}
+
+// AuditQuoted is the column of the audit field name as a statement names
+// it: the table's, as @column names it (D85), else the field's name in
+// snake case.
+func (t *TableModel) AuditQuoted(name string) string {
+	if c := t.AuditColumn(name); c != nil {
+		return c.Quoted
+	}
+	return QuoteIdentifier(ColumnNameOf(name))
 }
 
 // KeyColumn returns the primary key's column.
@@ -793,7 +879,7 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 			}
 			live := ""
 			if table.SoftDelete && !deletedAt {
-				live = "deleted_at IS NULL"
+				live = table.AuditQuoted(AuditDeletedAt) + " IS NULL"
 			}
 			if predicate := IndexPredicate(idx.Where, live); predicate != "" {
 				key.Conflict += " WHERE " + predicate
@@ -871,6 +957,7 @@ func attachReferences(tables []TableModel) {
 				SourceTable:      source.Quoted,
 				SourceColumn:     c.Quoted,
 				SourceSoftDelete: source.SoftDelete,
+				SourceDeletedAt:  source.AuditQuoted(AuditDeletedAt),
 			})
 		}
 	}

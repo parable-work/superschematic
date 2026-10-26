@@ -81,6 +81,8 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
 		// Encrypted<T> fields (D85): encrypted.go seals and opens them.
 		{"fixture-vault-db", []string{"repository_api_credential.go", "repository_plaid_item.go", "encrypted.go", "search.go"}},
+		// Tables and columns @table and @column name (D85).
+		{"fixture-naming-db", []string{"repository_category.go", "repository_line_item.go", "repository_note.go", "search.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

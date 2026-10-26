@@ -44,7 +44,7 @@ func checkProjections(schema *ir.Schema, r *Result) {
 			}
 			for _, fd := range td.Fields {
 				if fd.ProjectedFrom != "" || fd.ProjectedFunction != nil {
-					r.errorf(td.Owner, "%s.%s: @column is only valid on a @projection class", td.Name, fd.Name)
+					r.errorf(td.Owner, "%s.%s: @column of an alias.field or a function is only valid on a @projection class; a table's field takes a column name, a SQL identifier with no dot", td.Name, fd.Name)
 				}
 			}
 			continue

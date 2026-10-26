@@ -190,6 +190,7 @@ type Repository struct {
 	PrimaryKeyField        string // schema field name, e.g. "id" or "orderId"
 	LookupKeyType          string // GetManyByIDs key: UUIDGoType for a UUID key, else PrimaryKeyType
 	HasSoftDelete          bool   // deletedAt field present
+	DeletedAtCol           string // deletedAt's column, as @column names it (D85), which a history image keys
 	HasDeletedBy           bool   // deletedBy field present (soft deletes stamp it)
 	Versioned              bool   // history table/read methods should be generated
 	HasVersion             bool   // _version column and the fenced UpdateOneIfVersion/DeleteOneIfVersion (@versioned or @optimistic)
@@ -1139,6 +1140,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	for _, field := range typeDef.Fields {
 		if field.Name == "deletedAt" {
 			repo.HasSoftDelete = true
+			repo.DeletedAtCol = sqlutil.ColumnName(field)
 		}
 		if field.Name == "deletedBy" {
 			repo.HasDeletedBy = true
@@ -1262,7 +1264,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		appendVersionField(&repo)
 	}
 	if repo.Versioned {
-		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef.VersionedConfig)
+		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef)
 	}
 
 	repo.SortFields = sortFields(repo.Fields)
@@ -1582,6 +1584,7 @@ func attachInboundReferences(repositories []Repository) {
 					SourceTable:      source.QuotedTableName,
 					SourceColumn:     rel.QuotedDBColumn,
 					SourceSoftDelete: source.HasSoftDelete,
+					SourceDeletedAt:  source.Table.AuditQuoted(sqlutil.AuditDeletedAt),
 				}),
 			})
 		}
@@ -1662,11 +1665,11 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 
 // historyActorColumn returns the column a versioned table's delete
 // tombstone records its actor in, as sqlgen's history trigger picks it
-// (sqlutil.VersionedHistory): deleted_by when the table has one, else
-// updated_by, else "". An actor column @versioned({ exclude }) leaves out
-// of history records none.
-func historyActorColumn(fields []Field, cfg *ir.VersionedConfig) string {
-	return sqlutil.VersionedHistory(cfg, func(column string) bool {
+// (sqlutil.VersionedHistory): deletedBy's column when the table has one,
+// else updatedBy's, else "". An actor column @versioned({ exclude }) leaves
+// out of history records none.
+func historyActorColumn(fields []Field, td *ir.TypeDef) string {
+	return sqlutil.VersionedHistory(td, func(column string) bool {
 		return slices.ContainsFunc(fields, func(field Field) bool { return field.DBName == column })
 	}).Actor
 }

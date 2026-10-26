@@ -1428,7 +1428,7 @@ func (r *UtensilRepository) CreateOne(ctx context.Context, input *types.Utensil)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := utensilUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1438,7 +1438,7 @@ func (r *UtensilRepository) CreateOne(ctx context.Context, input *types.Utensil)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := utensilUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1567,7 +1567,7 @@ func (r *UtensilRepository) UpsertOne(ctx context.Context, input *types.Utensil,
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := utensilUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1577,7 +1577,7 @@ func (r *UtensilRepository) UpsertOne(ctx context.Context, input *types.Utensil,
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := utensilUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1737,7 +1737,7 @@ func (r *UtensilRepository) CreateMany(ctx context.Context, inputs []*types.Uten
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := utensilUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1746,7 +1746,7 @@ func (r *UtensilRepository) CreateMany(ctx context.Context, inputs []*types.Uten
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := utensilUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
