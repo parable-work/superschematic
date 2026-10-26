@@ -237,11 +237,19 @@ export interface DisplayState {
 /** What a state means to a reader, which a UI maps onto its own colors. */
 export type DisplayTone = 'muted' | 'active' | 'success' | 'warning' | 'danger';
 
-/** One of the instance type's own fields: its key in an instance's data, with its title and icon where declared. */
+/** One of the instance type's own fields: its key in an instance's data, with its title, icon and display where declared. */
 export interface DescribedField {
   name: string;
   title?: string;
   icon?: string;
+  /** Its @display: `multiline`, and `currency`, a code or the own field that holds one, by its key. */
+  display?: FieldDisplay;
+}
+
+/** An own field's @display (D48), its currency's field by its key in an instance's data. */
+export interface FieldDisplay {
+  multiline?: boolean;
+  currency?: string | { field: string };
 }
 
 /** A behavior a schema composes, with its config as the schema holds it. */
@@ -290,10 +298,17 @@ export interface ToolManifest {
   tools: ToolDefinition[];
 }
 
-/** A visible tool's MCP record, or a hidden one's; the invocation policy sits under the policy's key. */
+/** Why the engine hides a tool from a caller, in the order `hiddenBy` lists them. */
+export type ToolHiddenBy = 'deployment' | 'archived' | 'policy' | 'handle' | 'filter';
+
+/**
+ * A visible tool's MCP record, or a hidden one's; the invocation policy sits
+ * under the policy's key. A hidden one's `hiddenBy` names every cause, and
+ * `hiddenReason` is the first one's.
+ */
 export type ToolMCPRecord =
   | { hidden: false; name: string; handle: string; description: string; _meta?: Record<string, unknown>; [policyKey: string]: unknown }
-  | { hidden: true; hiddenReason: string };
+  | { hidden: true; hiddenReason: string; hiddenBy: ToolHiddenBy[] };
 
 /** One tool of the tools document. */
 export interface ToolDefinition {

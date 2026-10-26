@@ -383,7 +383,7 @@ fn a_schema_level_operation_takes_params_and_no_id_and_says_where_it_is_served()
         );
         assert_eq!(
             tool(&engine, "item.releaseAll", &reader())["mcp"],
-            json!({"hidden": true, "hiddenReason": "the access policy refuses reader write on Item (releaseAll)"})
+            json!({"hidden": true, "hiddenReason": "the access policy refuses reader write on Item (releaseAll)", "hiddenBy": ["policy"]})
         );
     }
 }
@@ -680,6 +680,7 @@ fn hides_a_tool_whose_handle_mcp_refuses_or_another_tool_derives_too_with_the_re
         let hidden = |name: &str| {
             let entry = tool(&engine, name, &alice());
             assert_eq!(entry["mcp"]["hidden"], json!(true), "{name}");
+            assert_eq!(entry["mcp"]["hiddenBy"], json!(["handle"]), "{name}");
             entry["mcp"]["hiddenReason"].as_str().unwrap().to_owned()
         };
         assert_eq!(
@@ -864,8 +865,12 @@ fn a_mounts_filter_narrows_a_callers_tools_and_its_call_is_a_tool_the_namespace_
             tools
                 .iter()
                 .find(|entry| entry["name"] == "other.get")
-                .unwrap()["mcp"]["hiddenReason"],
-            json!("this mount's tool filter leaves it out of agent's tools")
+                .unwrap()["mcp"],
+            json!({
+                "hidden": true,
+                "hiddenReason": "this mount's tool filter leaves it out of agent's tools",
+                "hiddenBy": ["filter"]
+            })
         );
         let seen = filter.seen.lock().unwrap().clone();
         assert_eq!(
@@ -1905,5 +1910,127 @@ fn the_engine_merges_what_a_behavior_says_and_refuses_what_its_declaration_does_
                 }
             }
         }
+    }
+}
+
+// A hidden tool names each cause in hiddenBy, in a fixed order, and gives
+// the first one's reason: the deployment's before the handle's, and the
+// policy's before the handle's, since the policy is asked of a tool MCP
+// refuses the handle of, whose operation the API still offers. A tool the
+// deployment hides is asked of no policy.
+#[test]
+fn a_hidden_tool_names_each_cause_in_hidden_by_and_the_first_ones_reason() {
+    for target in targets("hidden_by") {
+        let engine = target.open_with(fixtures(), |options| {
+            options.policy = Some(policy());
+            options.tools = ToolOptions {
+                hidden: vec!["test.Counter.increment".into()],
+                ..ToolOptions::default()
+            };
+        });
+        publish_item(&engine, json!([{"name": "test.Counter"}]));
+        let long = format!("A{}", "b".repeat(42));
+        let mut document = schema_document(
+            &long,
+            json!([{"name": "title", "typeRef": {"name": "string"}}]),
+            json!({}),
+        );
+        document["types"][long.as_str()]["behaviors"] = json!([{"name": "test.Counter"}]);
+        publish(&engine, &document, None);
+        let kebab = long.to_lowercase();
+        let snake = long.to_lowercase();
+        let hidden = |name: &str, principal: &Principal| {
+            let mcp = tool(&engine, name, principal)["mcp"].clone();
+            assert_eq!(mcp["hidden"], json!(true), "{name}");
+            assert_eq!(
+                keys(&mcp),
+                vec!["hidden", "hiddenReason", "hiddenBy"],
+                "{name}"
+            );
+            (mcp["hiddenBy"].clone(), mcp["hiddenReason"].clone())
+        };
+        let deployment = json!("the deployment's tool options hide test.Counter.increment (tools.hidden): a service calls it through the API, and no agent is offered it");
+        assert_eq!(
+            hidden("item.increment", &alice()),
+            (json!(["deployment"]), deployment.clone())
+        );
+        assert_eq!(
+            hidden("item.increment", &reader()),
+            (json!(["deployment"]), deployment.clone())
+        );
+        assert_eq!(
+            hidden(&format!("{kebab}.increment"), &alice()),
+            (json!(["deployment", "handle"]), deployment.clone())
+        );
+        assert_eq!(
+            hidden(&format!("{kebab}.history"), &alice()),
+            (
+                json!(["handle"]),
+                json!(format!(
+                    "its MCP handle {snake}_history is longer than 48 characters"
+                ))
+            )
+        );
+        assert_eq!(
+            hidden(&format!("{kebab}.history"), &reader()),
+            (
+                json!(["handle"]),
+                json!(format!(
+                    "its MCP handle {snake}_history is longer than 48 characters"
+                ))
+            )
+        );
+        assert_eq!(
+            hidden(&format!("{kebab}.delete"), &reader()),
+            (
+                json!(["policy", "handle"]),
+                json!(format!("the access policy refuses reader write on {long}"))
+            )
+        );
+        assert_eq!(
+            hidden("item.create", &reader()),
+            (
+                json!(["policy"]),
+                json!("the access policy refuses reader write on Item")
+            )
+        );
+        assert_eq!(
+            tool(&engine, &format!("{kebab}.get"), &reader())["mcp"]["hidden"],
+            json!(false)
+        );
+    }
+}
+
+// The describe document gives each own field's display as the schema
+// holds it, a currency's field by its key in an instance's data.
+#[test]
+fn describes_each_fields_display_its_currency_field_by_its_key() {
+    for target in targets("describes_each_fields_display") {
+        let engine = open(&target, BehaviorSet::new());
+        publish(
+            &engine,
+            &schema_document(
+                "Invoice",
+                json!([
+                    {"name": "note", "typeRef": {"name": "string"}, "display": {"multiline": true}},
+                    {"name": "total", "typeRef": {"name": "Generic.Int64"}, "title": "Total", "display": {"currency": "GBP"}},
+                    {"name": "code", "jsonTag": "currencyCode", "typeRef": {"name": "string"}},
+                    {"name": "due", "typeRef": {"name": "Generic.Int64"}, "display": {"currency": {"field": "code"}}},
+                    {"name": "paid", "typeRef": {"name": "Generic.Int64"}, "display": {"currency": {"field": "currencyCode"}}}
+                ]),
+                json!({}),
+            ),
+            None,
+        );
+        assert_eq!(
+            describe(&engine, "Invoice")["fields"],
+            json!([
+                {"name": "note", "display": {"multiline": true}},
+                {"name": "total", "title": "Total", "display": {"currency": "GBP"}},
+                {"name": "currencyCode"},
+                {"name": "due", "display": {"currency": {"field": "currencyCode"}}},
+                {"name": "paid", "display": {"currency": {"field": "currencyCode"}}}
+            ])
+        );
     }
 }
