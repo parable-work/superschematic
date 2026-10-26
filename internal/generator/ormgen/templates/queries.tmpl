@@ -72,7 +72,7 @@ func (q *Queries) run(ctx context.Context, name, sql string, args []any) (pgx.Ro
 const {{ .Const }} = {{ .SQL }}
 {{- with .Order }}
 
-// {{ .Const }} are the query {{ $q.Name }}'s orders, its parameter's values and their fragments.
+// {{ .Const }} are the orders of the query {{ $q.Name }}: each value of its parameter and its fragment.
 var {{ .Const }} = map[string]string{
 {{- range .Options }}
 	{{ printf "%q" .Value }}: {{ printf "%q" .SQL }},
@@ -87,14 +87,14 @@ const (
 	{{ .AfterConst }} = {{ .After }}
 )
 
-// {{ .KeyType }} is a row's position in the order of the query {{ $q.Name }}'s pages.
+// {{ .KeyType }} is the position of a row of the query {{ $q.Name }} in its order: the fields its pages are keyed by.
 type {{ .KeyType }} struct {
 {{- range .Key }}
 	{{ .GoName }} {{ .GoType }}
 {{- end }}
 }
 
-// {{ $q.Method }}Page is a page of the query {{ $q.Name }}'s rows, and the key of its last row when more follow.
+// {{ $q.Method }}Page is a page of the rows of the query {{ $q.Name }}, and the key of its last row when more follow.
 type {{ $q.Method }}Page struct {
 	Rows []{{ $q.Row }}
 	Next *{{ .KeyType }}
@@ -163,7 +163,7 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ([]{{
 {{- end }}
 }
 
-// scan{{ .Method }} reads the query {{ .Name }}'s rows, each column into the field named after it.
+// scan{{ .Method }} reads the rows of the query {{ .Name }}, each column into the field it is named after.
 func scan{{ .Method }}(rows pgx.Rows) ([]{{ .Row }}, error) {
 	defer rows.Close()
 	var fields []pgconn.FieldDescription

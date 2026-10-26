@@ -85,6 +85,8 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-naming-db", []string{"queues.go", "repository_category.go", "repository_line_item.go", "repository_note.go", "search.go"}},
 		// Vectors and decimals, and Nearest (D84).
 		{"fixture-vectors-db", []string{"repository_chunk.go", "repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go", "encrypted.go"}},
+		// Declared queries (D86): queries.go runs them.
+		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "queries.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
