@@ -15,8 +15,14 @@ in CI and before a release.
 ## Build every service
 
 ```sh
-superschematic build-all schemas/services
+superschematic-topcoat build-all schemas/services
 ```
+
+The example builds with `superschematic-topcoat`, the installed binary
+with the [Topcoat](/superschematic/guides/topcoat/) extension linked
+beside the official ones, since `shop-stack`'s app `Backoffice` needs
+it ([Apps](/superschematic/guides/stacks/#apps)): `superschematic` refuses
+to build that stack, and builds a tree with no such app the same way.
 
 <Snippet file="testdata/generated/logs/build-all.txt" />
 
@@ -67,7 +73,7 @@ the binary. A service whose inputs have not changed is skipped, and one
 whose outputs are missing is restored:
 
 ```sh
-superschematic build-all --cache schemas/services
+superschematic-topcoat build-all --cache schemas/services
 ```
 
 <Snippet file="testdata/generated/logs/build-all-cache.txt" />
@@ -104,7 +110,7 @@ project like this one:
 4. the Go services' tests, which call the generated server through the
    generated Go SDK, then run the TypeScript, Python and Rust clients
    against the same server and compare what they print; with Docker,
-   one runs `superschematic stack dev` and calls both APIs on the
+   one runs `superschematic-topcoat stack dev` and calls both APIs on the
    generated entrypoints, over Postgres;
 5. a build of `shop-orders` with its server in Rust
    (`build --api-language RUST --out schemas/dist-rust`), and the same four

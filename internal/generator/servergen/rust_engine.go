@@ -228,7 +228,9 @@ func (s *RustServer) planRustEngines(in RustInput, taken rustNames) error {
 			}
 		}
 		api.Engine = e
-		if s.Background() || e.API != nil {
+		// An app mounts no engine's routes: its program serves what it
+		// serves of the engine (D78).
+		if s.Background() || s.App != nil || e.API != nil {
 			continue
 		}
 		for _, reserved := range reservedMounts {
@@ -294,7 +296,7 @@ func (s *RustServer) engineDependencies(in RustInput, pathDep func(string, ...st
 		return nil, fmt.Errorf("stack %s: %s %s opens the engine of %s (D58), whose crate the naming file's [paths] engine_rust names, and it is unset; set it to a checkout's runtime/engine/rust/engine", in.Stack, s.Kind, in.Server, s.Engines[0].Service)
 	}
 	features := rustServerEngineFeatures
-	if s.Background() {
+	if s.Background() || s.App != nil {
 		features = rustBackgroundEngineFeatures
 	}
 	deps := map[string]string{}

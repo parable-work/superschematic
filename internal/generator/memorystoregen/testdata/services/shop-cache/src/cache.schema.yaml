@@ -1,0 +1,50 @@
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+imports:
+  - package: "@schemas/shop-cache-common"
+    types: [Region, StockLevel]
+memoryStoreDeclarations:
+  - name: stock-changed
+    symbol: StockChanged
+    kind: channel
+    doc: A product's stock changed; a waiter rereads it.
+    parts:
+      - name: productId
+        type: { name: Identity.UUID }
+  - name: stock-samples
+    symbol: StockSamples
+    kind: channel
+    doc: Stock samples for a product page.
+    payload: { name: StockLevel }
+    parts:
+      - name: productId
+        type: { name: Identity.UUID }
+  - name: receipt-sent
+    symbol: ReceiptSent
+    kind: claim
+    doc: One receipt email per order.
+    ttlSeconds: 600
+    parts:
+      - name: orderId
+        type: { name: Identity.UUID }
+  - name: views
+    symbol: ProductViews
+    kind: counter
+    doc: Views of a product a day, by region, device and label.
+    maxTtlSeconds: 86400
+    parts:
+      - name: productId
+        type: { name: Identity.UUID }
+      - name: day
+        type: { name: Generic.Int64 }
+      - name: region
+        type: { name: Region }
+      - name: mobile
+        type: { name: boolean }
+      - name: label
+        type: { name: string }

@@ -11,7 +11,12 @@
 // callers field. Every bucket deployable shares one storage emulator,
 // fake-gcs-server, in a container of its own, with a bucket per Bucket
 // service, and a bucket edge derives the bucket's name and the emulator's
-// endpoint (D54).
+// endpoint (D54). Every memoryStore deployable shares one Valkey server, in
+// a container of its own with no persistence, and a memoryStore edge
+// derives the store's name and the server's redis URL, with no
+// authentication (D75).
+// An app (D78) is a process as a Rust server is, on a port of its own,
+// ready once it listens there.
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
@@ -72,6 +77,10 @@ const (
 	// fake-gcs-server, which speaks GCS's API (D54).
 	BucketPlatform = "local.gcs"
 
+	// MemoryStorePlatform keeps a memory store on the environment's Valkey
+	// container, which every store of the environment shares (D75).
+	MemoryStorePlatform = "local.valkey"
+
 	// WorkerPlatform runs a worker as a process with no port, ready once it
 	// starts, beside the servers (D53).
 	WorkerPlatform = "local.worker"
@@ -85,6 +94,11 @@ const (
 	// DeriverPlatform runs a deriver as a process with no port, ready once
 	// it starts, as a worker is (D74).
 	DeriverPlatform = "local.deriver"
+
+	// AppPlatform runs an app as a process listening on its port, as a
+	// Rust server is (D78): the project's own HTTP program, built from the
+	// entrypoint crate the build writes, ready once it listens.
+	AppPlatform = "local.app"
 
 	// SQLConnector connects a process to a database on the container;
 	// HTTPConnector connects a process to one it calls. JobSQLConnector
@@ -116,6 +130,15 @@ const (
 	WorkerHTTPConnector   = "local.worker-process"
 	WorkerBucketConnector = "local.worker-gcs"
 
+	// MemoryStoreConnector, JobMemoryStoreConnector,
+	// WorkerMemoryStoreConnector and DeriverMemoryStoreConnector connect a
+	// process, a job, a worker and a deriver, in any language, to a memory
+	// store on the Valkey container: the field is the same for each (D75).
+	MemoryStoreConnector        = "local.process-valkey"
+	JobMemoryStoreConnector     = "local.job-valkey"
+	WorkerMemoryStoreConnector  = "local.worker-valkey"
+	DeriverMemoryStoreConnector = "local.deriver-valkey"
+
 	// RunnerSQLConnector connects an engine's runner to its engine
 	// database, its one edge (D58).
 	RunnerSQLConnector = "local.runner-postgres"
@@ -127,6 +150,14 @@ const (
 	DeriverSQLiteConnector = "local.deriver-sqlite"
 	DeriverHTTPConnector   = "local.deriver-process"
 	DeriverBucketConnector = "local.deriver-gcs"
+
+	// AppSQLConnector, AppSQLiteConnector, AppHTTPConnector and
+	// AppBucketConnector connect an app, whose edges are its API's, as a
+	// server's connectors do (D78).
+	AppSQLConnector    = "local.app-postgres"
+	AppSQLiteConnector = "local.app-sqlite"
+	AppHTTPConnector   = "local.app-process"
+	AppBucketConnector = "local.app-gcs"
 
 	// ProvisionerName is the provisioner the target names.
 	ProvisionerName = "local"
@@ -147,8 +178,8 @@ const (
 
 // The resource types the target's platforms emit: the `local` provider's.
 const (
-	// TypeContainer is a Docker container: the environment's Postgres, and
-	// its storage emulator (D54). It may give the image a command and its
+	// TypeContainer is a Docker container: the environment's Postgres, its
+	// storage emulator (D54) and its memory store (D75). It may give the image a command and its
 	// arguments, and says how the provisioner knows it is ready: a command
 	// run inside it, or a path it answers over HTTP.
 	TypeContainer = "local:docker/container:Container"
@@ -172,7 +203,9 @@ const (
 	// module or its crate, or run by Bun. A server's listens on its port
 	// and is ready once its readiness path answers; a worker's, an
 	// engine's runner's and a deriver's have no port and are ready once
-	// they start (ReadinessStarted, D53, D58, D74).
+	// they start (ReadinessStarted, D53, D58, D74); an app's listens on
+	// its port and is ready once it accepts a connection there
+	// (ReadinessListening, D78).
 	TypeProcess = "local:process/process:Process"
 
 	// TypeJob is a job built from its entrypoint module, which the
@@ -207,7 +240,7 @@ const (
 	LanguageRust = "rust"
 )
 
-// Register adds the local target, its four platforms and six connectors,
+// Register adds the local target, its platforms and connectors,
 // the schema of each resource type they emit, and its provisioner. The
 // provisioner is a new Provisioner with its defaults.
 func Register(r *registry.Registry) error {
@@ -275,6 +308,23 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerDeriver,
 		},
 		{
+			Name: AppPlatform,
+			Kind: ir.DeployableApp,
+			// An app runs on a Rust API (D78).
+			Languages: []string{registry.APILanguageRust},
+			// A port, as a server's.
+			Settings: json.RawMessage(serverSettings),
+			// The app serves its API's pages over plain HTTP, as the API's
+			// server does, so its session cookie goes without Secure.
+			IdentityConfig: identityConfig,
+			NameOf:         processName,
+			// An app the environment turns off runs no process, so it has
+			// no address.
+			AddressOf:       appAddress,
+			PublicAddressOf: appAddress,
+			Lower:           lowerApp,
+		},
+		{
 			Name:      DatabasePlatform,
 			Kind:      ir.DeployableDatabase,
 			Dialects:  []string{registry.SQLDialectPostgres},
@@ -297,6 +347,13 @@ func Register(r *registry.Registry) error {
 			NameOf:    bucketDeployableName,
 			AddressOf: bucketAddress,
 			Lower:     lowerBucket,
+		},
+		{
+			Name:      MemoryStorePlatform,
+			Kind:      ir.DeployableMemoryStore,
+			NameOf:    memoryStoreDeployableName,
+			AddressOf: memoryStoreAddress,
+			Lower:     lowerMemoryStore,
 		},
 	} {
 		spec.Provider = Provider
@@ -323,6 +380,14 @@ func Register(r *registry.Registry) error {
 		{Name: DeriverSQLiteConnector, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: DeriverHTTPConnector, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: AppSQLConnector, Edge: ir.EdgeSQL, From: AppPlatform, To: DatabasePlatform, Connect: connectSQL},
+		{Name: AppSQLiteConnector, Edge: ir.EdgeSQL, From: AppPlatform, To: SQLitePlatform, Connect: connectSQLite},
+		{Name: AppHTTPConnector, Edge: ir.EdgeHTTP, From: AppPlatform, To: ServerPlatform, Connect: connectHTTP},
+		{Name: AppBucketConnector, Edge: ir.EdgeBucket, From: AppPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: MemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: ServerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: JobMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: JobPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: WorkerMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: WorkerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: DeriverMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: DeriverPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -338,14 +403,16 @@ func Register(r *registry.Registry) error {
 	return r.RegisterTarget(registry.TargetSpec{
 		Name: Target,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   ServerPlatform,
-			ir.DeployableDatabase: DatabasePlatform,
-			ir.DeployableJob:      JobPlatform,
-			ir.DeployableSite:     SitePlatform,
-			ir.DeployableBucket:   BucketPlatform,
-			ir.DeployableWorker:   WorkerPlatform,
-			ir.DeployableRunner:   RunnerPlatform,
-			ir.DeployableDeriver:  DeriverPlatform,
+			ir.DeployableServer:      ServerPlatform,
+			ir.DeployableDatabase:    DatabasePlatform,
+			ir.DeployableJob:         JobPlatform,
+			ir.DeployableSite:        SitePlatform,
+			ir.DeployableBucket:      BucketPlatform,
+			ir.DeployableMemoryStore: MemoryStorePlatform,
+			ir.DeployableWorker:      WorkerPlatform,
+			ir.DeployableRunner:      RunnerPlatform,
+			ir.DeployableDeriver:     DeriverPlatform,
+			ir.DeployableApp:         AppPlatform,
 		},
 		DatabasePlatforms: map[string]string{registry.SQLDialectSQLite: SQLitePlatform},
 		Values:            json.RawMessage(targetValues),
@@ -360,15 +427,17 @@ func Register(r *registry.Registry) error {
 }
 
 // targetValues is the schema of a local environment's values: the
-// Postgres image and the host port its container publishes, and the
-// storage emulator's (D54).
+// Postgres image and the host port its container publishes, the storage
+// emulator's (D54), and the memory store's (D75).
 const targetValues = `{
   "type": "object",
   "properties": {
     "postgresImage": {"type": "string", "minLength": 1},
     "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535},
     "storageImage": {"type": "string", "minLength": 1},
-    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "memoryStoreImage": {"type": "string", "minLength": 1},
+    "memoryStorePort": {"type": "integer", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`
@@ -462,9 +531,9 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript", "rust"]},
-	    "kind": {"enum": ["worker", "runner", "deriver"]},
+	    "kind": {"enum": ["worker", "runner", "deriver", "app"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-	    "readiness": {"type": "string", "pattern": "^(/|started$)"},
+	    "readiness": {"type": "string", "pattern": "^(/|started$|listening$)"},
 	    "env": {"type": "array", "items": {
 	      "type": "object",
 	      "required": ["name"],

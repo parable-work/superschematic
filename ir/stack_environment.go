@@ -45,6 +45,13 @@ type ResolvedEnvironment struct {
 	// Deployables are sorted by name.
 	Deployables []*ResolvedDeployable `json:"deployables"`
 
+	// Disabled are the deployables the environment's settings turn off
+	// and so places nowhere, sorted by name: a memory store with `enabled:
+	// false`, which no platform realizes and no edge reaches, so the field
+	// of every workload that lists it is unset and each opens it disabled
+	// (D75).
+	Disabled []*DisabledDeployable `json:"disabled,omitempty"`
+
 	// Edges are sorted by ID.
 	Edges []*Edge `json:"edges,omitempty"`
 
@@ -100,6 +107,12 @@ type ResolvedDeployable struct {
 	// API's (D54).
 	Buckets []ServiceRef `json:"buckets,omitempty"`
 
+	// MemoryStores are the MemoryStore services a server, a job or a
+	// worker reaches: the union of the `memoryStores` of the APIs it
+	// serves, a rateLimitStore among them, sorted by name, less those the
+	// environment turns off (D75).
+	MemoryStores []ServiceRef `json:"memoryStores,omitempty"`
+
 	// Language is a server's, a job's or a worker's language; Dialect is the SQL
 	// dialect a database runs, the first of its platform's dialects every
 	// hosted schema supports.
@@ -130,8 +143,12 @@ type ResolvedDeployable struct {
 	// every other kind (D74).
 	Deriver *ResolvedDeriver `json:"deriver,omitempty"`
 
-	// Exposed is true for a server reachable from outside the environment,
-	// and for every site.
+	// App is the app an API declares and whether it runs; nil for every
+	// other kind (D78).
+	App *ResolvedApp `json:"app,omitempty"`
+
+	// Exposed is true for a server or an app reachable from outside the
+	// environment, and for every site.
 	Exposed bool `json:"exposed,omitempty"`
 
 	// Settings are the platform settings, the parent environment's merged
@@ -293,6 +310,43 @@ type ResolvedDeriver struct {
 	BatchSize   int `json:"batchSize"`
 }
 
+// DisabledDeployable is a deployable an environment's settings turn off,
+// which no platform places (D75): a memory store with `enabled: false`.
+type DisabledDeployable struct {
+	// Name is the deployable's name: the MemoryStore service's.
+	Name string `json:"name"`
+
+	// Kind is the deployable's kind, memoryStore.
+	Kind DeployableKind `json:"kind"`
+
+	// Services are the services it would host: the MemoryStore service.
+	Services []ServiceRef `json:"services"`
+
+	// From names the environment of the chain whose settings turned it
+	// off.
+	From string `json:"from"`
+}
+
+// ResolvedApp is an app's run in one environment (D78): the API that
+// declares it, its `@app` class, the extensions its build needs, and
+// whether it runs.
+type ResolvedApp struct {
+	// API is the API service that declares the app; Name is its `@app`
+	// class's name.
+	API  string `json:"api"`
+	Name string `json:"name"`
+
+	// Extensions name the extensions the app's build needs, as the
+	// decorator names them. A binary that links none of them refuses to
+	// build the app, and resolves it as usual.
+	Extensions []string `json:"extensions,omitempty"`
+
+	// Enabled is false when the environment's settings turn the app off:
+	// it is in the environment, with its edges, and its target runs
+	// nothing for it.
+	Enabled bool `json:"enabled"`
+}
+
 // UnmarshalJSON decodes a deployable and turns the references in its name
 // and address back into Output, Parameter and Concat values.
 func (d *ResolvedDeployable) UnmarshalJSON(data []byte) error {
@@ -320,7 +374,7 @@ type Edge struct {
 	// ID is `<kind>:<from>-><service>`, unique in the environment.
 	ID string `json:"id"`
 
-	// Kind is sql, http, site or bucket.
+	// Kind is sql, http, site, bucket or memoryStore.
 	Kind EdgeKind `json:"kind"`
 
 	// From is the server, job or site with the need; To is the deployable
@@ -329,8 +383,8 @@ type Edge struct {
 	To   string `json:"to"`
 
 	// Service is the DB service the sql edge connects to, the API service
-	// the http or site edge calls, or the Bucket service the bucket edge
-	// reaches.
+	// the http or site edge calls, the Bucket service the bucket edge
+	// reaches, or the MemoryStore service the memoryStore edge reaches.
 	Service ServiceRef `json:"service"`
 
 	// Connector is the registered connector that realizes the edge.

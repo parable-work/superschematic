@@ -10,6 +10,8 @@
 # Worker {{ .Name }} of stack {{ .Stack }}: worker {{ .Worker.Name }} of {{ $api.Service }} (D65;
 {{- else if .Deriver }}
 # Deriver {{ .Name }} of stack {{ .Stack }}: deriver {{ .Deriver.Name }} of {{ $api.Service }} (D74;
+{{- else if .App }}
+# App {{ .Name }} of stack {{ .Stack }}: app {{ .App.Name }} of {{ $api.Service }} (D78;
 {{- else }}
 # Server {{ .Name }} of stack {{ .Stack }}, which serves {{ rustServiceList .APIs }} (D57;
 {{- end }}

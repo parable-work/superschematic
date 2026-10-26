@@ -350,6 +350,13 @@ func TestTypeScriptWorkersEntrypointCompilesAndBundles(t *testing.T) {
 			t.Errorf("main.js does not hold %s", want)
 		}
 	}
+	// ts-pricing lists the memory store ts-cache, which a Worker holds
+	// disabled: the bundle holds no Redis client (D75).
+	for _, refused := range []string{"@redis/client", "node-redis", "openRedisMemoryStore"} {
+		if bytes.Contains(main, []byte(refused)) {
+			t.Errorf("main.js holds %s, the Redis client a Worker never reaches", refused)
+		}
+	}
 	if output := run(pkg, bun, "bundle.ts", "--check"); !strings.Contains(output, "bundle (checked): main.js") {
 		t.Errorf("bundle.ts --check printed %s", output)
 	}

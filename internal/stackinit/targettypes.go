@@ -24,6 +24,8 @@ var deployableKinds = []ir.DeployableKind{
 	ir.DeployableWorker,
 	ir.DeployableRunner,
 	ir.DeployableDeriver,
+	ir.DeployableMemoryStore,
+	ir.DeployableApp,
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)

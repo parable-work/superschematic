@@ -301,8 +301,9 @@ user's cache, and the Go builds take CGO_LDFLAGS pointing at them, after
 any set; superschematic env prints the same for a go build by hand. Dev stays in the foreground until Ctrl-C, then
 stops the servers and the containers, which keep their data for the next
 run: the databases, and the buckets' objects, as the SQLite files stay.
---remove-data removes the containers and their data, and the SQLite
-files, instead.
+A memory store's container keeps no data: its Valkey saves nothing to
+disk, so every run starts it empty. --remove-data removes the containers
+and their data, and the SQLite files, instead.
 
 Each checkout of the repository runs the environment in containers of its
 own, named for a hash of its state directory, on ports shifted by it, so
@@ -336,7 +337,7 @@ Examples:
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
-	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them")
+	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way)")
 	// The flag's name before the storage emulator's container joined
 	// Postgres's (D54): it removes both.
 	cmd.Flags().BoolVar(&flags.removeData, "remove-database", false, "")
@@ -543,6 +544,13 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  deriver  %-24s off: the derived fields of %s wait", d.Name, strings.Join(d.Deriver.Schemas, ", ")))
 		case d.Kind == ir.DeployableDeriver && d.Deriver != nil:
 			lines = append(lines, fmt.Sprintf("  deriver  %-24s fills the derived fields of %s, %d at a time", d.Name, strings.Join(d.Deriver.Schemas, ", "), d.Deriver.Concurrency))
+		case d.Kind == ir.DeployableApp && d.App != nil && !d.App.Enabled:
+			lines = append(lines, fmt.Sprintf("  app      %-24s off", d.Name))
+		case d.Kind == ir.DeployableApp && d.App != nil:
+			// An app is its API's own HTTP program (D78), at its address.
+			if address, ok := d.Address.(string); ok {
+				lines = append(lines, fmt.Sprintf("  app      %-24s %s, %s of %s", d.Name, address, d.App.Name, d.App.API))
+			}
 		case d.Kind == ir.DeployableRunner && d.Runner != nil && d.Runner.Instances > 0:
 			lines = append(lines, fmt.Sprintf("  runner   %-24s runs the engine's reactions, schedules and deadlines of %s", d.Name, d.Runner.Database))
 		}

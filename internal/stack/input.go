@@ -83,6 +83,11 @@ type Service struct {
 	// services its server's and jobs' code use (D54).
 	Buckets []ir.ServiceRef
 
+	// MemoryStores are the MemoryStore services an API service uses: the
+	// handles in its `memoryStores`, with its `rateLimitStore` (D75), as
+	// ir.Schema.MemoryStores holds them.
+	MemoryStores []ir.ServiceRef
+
 	// Language is an API service's `outputs.api.language`
 	// (registry.APILanguageGo, ...). Empty means Go.
 	Language string
@@ -123,6 +128,10 @@ type Service struct {
 	// (D74), as ir.Schema.Derivers holds them. Each is a deployable of the
 	// stack.
 	Derivers []ir.Deriver
+
+	// Apps are an API service's apps, its `@app` classes (D78), as
+	// ir.Schema.Apps holds them. Each is a deployable of the stack.
+	Apps []ir.App
 
 	// Queues are the names of a DB service's queues, its `@queue` classes
 	// (D53), sorted. A worker's queue is one of its API's database.

@@ -411,6 +411,21 @@ func TestWorkersRefusals(t *testing.T) {
 		refusedWith(t, errs, stack.CodeUnrealizable, "deriver shop-orders-triage-tickets: target cloudflare places no deriver: a deriver fills Derived fields in a loop that lasts as long as its process, "+
 			"over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target")
 	})
+	t.Run("an app", func(t *testing.T) {
+		// D78: the refusal says why and where an app runs.
+		s := storefrontStack()
+		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
+		s.Expose = nil
+		services := stacktest.InRust(stacktest.AcmeShop(), stacktest.ShopOrders.Name)
+		for i := range services {
+			if services[i].Name == stacktest.ShopOrders.Name {
+				services[i].Apps = []ir.App{{Name: "Backoffice", Extensions: []string{"topcoat"}}}
+			}
+		}
+		_, errs := resolveOver(t, reg, s, services, "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "app shop-orders-backoffice: target cloudflare places no app: an app is the project's own Rust program, which serves HTTP until it is stopped, "+
+			"and cloudflare runs TypeScript Workers only; run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target")
+	})
 	t.Run("a name over 63 characters", func(t *testing.T) {
 		s := storefrontStack()
 		long := strings.Repeat("storefront", 6) + "-edge"

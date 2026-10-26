@@ -1,0 +1,9 @@
+kind: MemoryStore
+memoryStoreDeclarations:
+  - name: cart-changed
+    symbol: CartChanged
+    kind: channel
+    doc: A cart changed; a waiter rereads it.
+    parts:
+      - name: cartId
+        type: { name: string }

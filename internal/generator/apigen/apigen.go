@@ -1031,6 +1031,13 @@ func extractNamespace(setName string) string {
 	return codegen.ToKebabCase(name)
 }
 
+// RateLimitOperation names the operation in the shared rate limit's keys
+// (D75): its namespace and its name, `product.getProduct`, as every
+// language's server names it.
+func (e EndpointInfo) RateLimitOperation() string {
+	return e.Namespace + "." + e.Name
+}
+
 // defaultMethodForSet returns the HTTP method for operations that omit an
 // explicit method. Mutation- and action-style sets default to POST.
 func defaultMethodForSet(setName string) string {

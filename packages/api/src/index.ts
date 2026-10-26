@@ -1,6 +1,7 @@
 export { Authenticated, Encrypted } from "./bases";
 export {
   allowService,
+  app,
   auth,
   bodyLimit,
   deriver,
@@ -28,6 +29,7 @@ export {
   worker
 } from "./decorators";
 export type {
+  AppOptions,
   BodyLimitConfig,
   DeriverOptions,
   DocsConfig,

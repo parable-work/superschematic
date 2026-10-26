@@ -137,6 +137,7 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
 {{- end }}
 {{- end }}
+{{- template "ts-workers-memory-stores" . }}
 {{- if or .ReadsBindings .Clients .Buckets .SQLiteDatabases }}
 {{ end }}
   const app = new Hono();

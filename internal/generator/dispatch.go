@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -751,7 +752,7 @@ func (r run) databaseDialect() (string, error) {
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its
 // config and logger (D51): a pg Pool for the API's database, its authDb or
 // its one DB-kind dependency, a client of each calls entry's TypeScript
-// SDK, and the HTTP runtime's Bucket per buckets entry (D54). A callee whose config the build has must generate that
+// SDK, the HTTP runtime's Bucket per buckets entry (D54), and its MemoryStore per memory store it lists (D75). A callee whose config the build has must generate that
 // SDK; the database needs nothing generated, since the pool is pg's.
 func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
@@ -786,6 +787,12 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	}
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
+	}
+	for _, m := range r.Schema.MemoryStores {
+		deps.MemoryStores = append(deps.MemoryStores, tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)})
+	}
+	if r.Schema.RateLimitStore != nil {
+		deps.RateLimitStore = r.Schema.RateLimitStore.Name
 	}
 	return deps, nil
 }
@@ -1164,7 +1171,58 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, apigen.DepsBucket{Service: b.Name, Field: goutil.GoPublicIdentifier(b.Name)})
 	}
+	stores, err := r.goMemoryStores()
+	if err != nil {
+		return deps, nil, err
+	}
+	deps.MemoryStores = stores
+	if ref := r.Schema.RateLimitStore; ref != nil {
+		deps.RateLimitStore = ref.Name
+	}
 	return deps, roots, nil
+}
+
+// goMemoryStores are the memory stores the API lists, its rateLimitStore
+// among them, each a memorystore.Store in Deps (D75), with the module of
+// the store's Go definitions when its outputs write them, and the Go types
+// modules those reach.
+func (r run) goMemoryStores() ([]apigen.DepsMemoryStore, error) {
+	var stores []apigen.DepsMemoryStore
+	seen := map[string]bool{}
+	refs := slices.Clone(r.Schema.MemoryStores)
+	if ref := r.Schema.RateLimitStore; ref != nil {
+		refs = append(refs, *ref)
+	}
+	for _, ref := range refs {
+		if seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		m := apigen.DepsMemoryStore{Service: ref.Name, Field: goutil.GoPublicIdentifier(ref.Name)}
+		definitions := true
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(ref.Name); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return nil, fmt.Errorf("generator: schema config for %s: %w", ref.Name, err)
+				}
+				definitions = outputs.TypesEnabled(LangGo)
+			}
+		}
+		if definitions && r.Options.LoadDependency != nil {
+			schema, err := r.LoadDependency(ref.Name)
+			if err != nil {
+				return nil, fmt.Errorf("generator: load %s, a memory store %s lists: %w", ref.Name, r.Config.Name, err)
+			}
+			if m.Modules, err = r.goTypesClosure(schema); err != nil {
+				return nil, err
+			}
+			m.Definitions = r.Options.Naming.GoTypesModule(ref.Name)
+		}
+		stores = append(stores, m)
+	}
+	slices.SortFunc(stores, func(a, b apigen.DepsMemoryStore) int { return strings.Compare(a.Service, b.Service) })
+	return stores, nil
 }
 
 // checkWorkerQueues refuses a worker of api whose queue is no @queue class
@@ -1350,6 +1408,12 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 	var deps rustrestgen.DepsInfo
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
+	}
+	for _, m := range r.Schema.MemoryStores {
+		deps.MemoryStores = append(deps.MemoryStores, rustrestgen.DepsMemoryStore{Service: m.Name, Field: rustrestgen.DepsField(m.Name)})
+	}
+	if r.Schema.RateLimitStore != nil {
+		deps.RateLimitStore = r.Schema.RateLimitStore.Name
 	}
 	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if db, _, ok := r.Schema.Database(); ok {

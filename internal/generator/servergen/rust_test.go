@@ -39,8 +39,9 @@ const (
 	// server rs-stock, on rs-db, its authDb, with the bucket rs-media
 	// (D54), calls rs-pricing's Rust server, which admits only calling
 	// services; rs-orders' Go server calls rs-stock, whose reservations
-	// only it may make; and the site rs-web calls rs-stock. Its one
-	// environment is local. Beside it, rs-merged-stack's declared Rust
+	// only it may make; and the site rs-web calls rs-stock. Both its
+	// environments are local: Local runs the memory store rs-cache, and
+	// Offline turns it off (D75). Beside it, rs-merged-stack's declared Rust
 	// server Warehouse serves rs-catalog and rs-pricing, and rs-catalog's
 	// calls of rs-pricing stay within it (docs/stack-model.md, section
 	// 9.9).
@@ -66,8 +67,8 @@ const (
 // rustOrder is the order a build-all builds the Rust fixture in: rs-stock
 // calls rs-pricing, so it builds after rs-pricing's SDK, and rs-orders
 // calls rs-stock. rs-media, the bucket rs-stock lists, builds nothing
-// (D54). rs-web, the site, is loaded, not built.
-var rustOrder = []string{"rs-db", "rs-media", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
+// (D54), nor does rs-cache, its memory store (D75). rs-web, the site, is loaded, not built.
+var rustOrder = []string{"rs-db", "rs-media", "rs-cache", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
 
 // rustMediaVariables are the variables of rs-stock's bucket field holding
 // rs-media on an emulator at port 9, which discards: opening the bucket

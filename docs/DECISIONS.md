@@ -10184,30 +10184,129 @@ This entry adds that store. Three rules hold throughout.
 | An environment can run without a store: `settings: [{ of: ShopCache, enabled: false }]` creates nothing and leaves the field unset, so every workload opens a disabled store and takes its fallback paths. A platform that cannot realize a store refuses it unless the environment turns it off (D64, amended). The cloudflare target has no store platform, so it refuses a stack that places a store there with it on. | Deploying the store as disabled wherever a target has no platform for it, which turns a missing piece of infrastructure into a quiet change of behavior. A KV namespace or a Durable Object on cloudflare, whose counts and claims are not the store's (KV has no atomic increment), and which is a platform of its own to design. |
 | The engine does not use the store. Its runner and sweepers keep the database's polls and locks. | Waking the runner through a channel now. The engine runs on SQLite and on D1 too, where no store is, and its guarantees come from its database; an amendment can add a wake-up beside the poll once a store is built. |
 
-Status: proposed. Nothing is built.
+Status: built, as amended below. Nothing has run on Google Cloud.
+- **The core.** The `MemoryStore` kind and its sentinel, `@channel` and
+  `@key` in `@superschematic/memory-store`, and `new service --kind
+  MemoryStore` (`internal/registry/core_memorystore.go`, `cli/new.go`).
+  The IR is `ir/memorystore.go`: `MemoryStoreDeclaration` and its parts,
+  each with the `Format` the loader fills (`string`, `integer`,
+  `boolean` or `enum`), the segment rule, `MemoryStoreName`, and the
+  reserved `rate-limit` counter the core adds to every store
+  (`service`, `operation`, `window`, `client`, `maxTtlSeconds` 86405).
+  An API's config takes `memoryStores` and `rateLimitStore`, which the
+  IR records as `Schema.MemoryStores`, the rate limit's store among
+  them, and `Schema.RateLimitStore`. The verification pass
+  (`internal/loader/verify/memorystore.go`) holds the rules above, and a
+  MemoryStore builds before each API that lists it.
+- **The stack.** The `memoryStore` deployable and edge,
+  `ir.MemoryStoreConnection` and its contract (`ir/derived_value.go`),
+  `[derived_fields] memory_store`, the settings element with `enabled`,
+  and `enabled: false`, which takes the store out of the environment and
+  lists it under `environment.json`'s `disabled`
+  (`internal/stack/memorystores.go`). A target registers a memoryStore
+  platform and a connector from each workload platform; one with none
+  refuses a store that is on, naming `enabled: false`.
+- **The readers and the vectors.** Go's `stackconfig.LoadMemoryStore`,
+  TypeScript's `loadMemoryStore` and Rust's
+  `stackconfig::load_memory_store`, held by `stackconfig_parity.json`'s
+  `memoryStore` vectors; `runtime/http/testdata/memorystore_parity.json`
+  holds the names and the rate limit, written by `ir`'s
+  `TestWriteMemoryStoreParityVectors`.
+- **The definitions.** `internal/generator/memorystoregen` writes each
+  store's Go module, TypeScript package and Rust crate under
+  `types/<language>/<store>`, and `memorystore/<store>/inventory.json`.
+- **The runtimes.** Go's `runtime/http/go/memorystore` (no Redis client:
+  servergen writes the go-redis store into `memorystores.go` beside an
+  entrypoint whose APIs list a store); TypeScript's `memorystore.ts` in
+  the main entry, Workers-safe, and `./redis` over `@redis/client`;
+  Rust's `memorystore` module, and the `memorystore-redis` feature over
+  the `redis` crate. Each has `Disabled`, an in-process store, the typed
+  `Channel` and `Key`, and the shared rate limit: Go's
+  `RateLimiter`, which the middleware runs before httprate's in-process
+  limiter, TypeScript's `MemoryStoreRateLimitStore` and Rust's
+  `RateLimits::with_store`.
+- **Deps and the entrypoints.** apigen, tsrestgen and rustrestgen give
+  `Deps` a store per listed store, and each Go, TypeScript and Rust
+  server, job and worker entrypoint, and each TypeScript and Rust deriver's, opens each store once,
+  hands it to every API that lists it and closes it on shutdown. A
+  TypeScript Worker holds a disabled store and imports no Redis client.
+- **Local.** `local.valkey`: one Valkey container per environment and
+  checkout, with no persistence, on ports from 26000, with
+  `memoryStoreImage` and `memoryStorePort`, and its connectors from every
+  workload (`internal/stack/local`).
+- **gcp.** `gcp.memorystore` and its four connectors, the network's
+  subnet and service connection policy, the policy rule
+  `memory-stores-tls-and-iam`, bootstrap's APIs and `deployer`'s roles,
+  and `stack init`'s types for `nodeType` and `replicas`
+  (`extensions/gcp/memorystore.go`, `network.go`, `bootstrap.go`).
+- **acme-shop.** `shop-cache` declares `ProductChanged` and
+  `ImageUploadSigning`. `shop-api` lists it and names it its
+  `rateLimitStore`: `waitForProductImage` waits on the channel,
+  `createProductImageUpload` claims the product's upload and publishes
+  after its commit, and `getProduct`'s limit, 120 a minute, counts in
+  the store.
 
-The build is three pull requests:
-1. The core, Go and the local target: the `MemoryStore` kind, its
-   sentinel and `superschematic new service --kind MemoryStore`; the
-   decorators in a `@superschematic/memory-store` package; the
-   verification rules; `memoryStores` and `rateLimitStore` on an API's
-   config; the deployable, the edge and `ir.MemoryStoreConnection`; the
-   Go runtime, its definitions generator and the inventory; the rate
-   limit's shared counter through httprate's `LimitCounter`; `stack dev`'s
-   Valkey container; `enabled: false`; and acme-shop, where `shop-api`
-   lists a store, counts its rate limits there, and wakes a waiter on
-   another replica.
-2. The TypeScript and Rust runtimes and generators, held to the Go ones
-   by the shared vectors, and the rate limit's shared store in each.
-3. The `gcp.memorystore` platform, its connector and network nodes, the
-   bootstrap roles and a policy rule that refuses a store without
-   transit encryption; then a live run.
+The tests that hold it:
+- the kind, the loader and the config: `internal/registry/core_memorystore_test.go`,
+  `internal/loader/memorystore_test.go`, the schema config's
+  `TestMemoryStoresAndTheMemoryStoreKind`, `internal/writer/memorystore_test.go`'s
+  round trip, buildplan's `TestMemoryStoresOrderTheBuild` and
+  `ir/memorystore_test.go`;
+- the stack: `internal/stack/memorystores_test.go` and its goldens
+  `internal/stack/testdata/golden/memorystore/`;
+- the definitions: memorystoregen's goldens and inventory golden,
+  `TestGoDefinitionsRunOnTheInProcessStore`,
+  `TestTypeScriptDefinitionsCompileAndRun` and `TestRustDefinitionsBuild`;
+- the runtimes: each passes both vector files; Go's
+  `runtime/http/go/memorystore` tests and the middleware's
+  `TestRateLimitWithStore` and `TestRateLimitWithStoreIsNotSerialized`;
+  TypeScript's `memorystore.test.ts` and
+  `redis.test.ts`; Rust's `memorystore` tests and
+  `tests/memorystore_redis.rs`;
+- the Redis stores against Valkey, a server that refuses `CLIENT`, a
+  server that is down and comes back, and TLS with `auth: iam` against a
+  fake metadata server: servergen's `TestMemoryStoresOnRedis`, the
+  TypeScript `redis.test.ts` and the Rust `memorystore_redis.rs`, each
+  where `SUPERSCHEMATIC_TEST_MEMORY_STORE` or Docker gives a server;
+  `TestTypeScriptMemoryStoreWiring` and the servergen goldens for the
+  entrypoints;
+- the targets: `internal/stack/local/memorystore_test.go`, which runs the
+  container under Docker; `extensions/gcp/memorystore_test.go`, the
+  pulumi renders of the gcp shop with its store
+  (`gcp-shop-staging`, `-production`, `-preview`), and `stack init`'s
+  typed settings; `extensions/cloudflare/memorystore_test.go`'s refusal
+  and its deploy with the store off;
+- acme-shop: `TestStackDevRunsTheShop` wakes a waiter through the channel,
+  sees an upload that another replica's claim holds refused 409, and
+  sees counts other replicas add to `getProduct`'s limit refuse it 429,
+  writing to the Valkey container directly as another replica would.
 
-To check on the first live run: that Cloud Run reaches the Private
-Service Connect endpoint through the environment's egress, that a
-`SHARED_CORE_NANO` node accepts cluster mode disabled with one replica,
-and whether a long-lived connection, such as the subscriber's, must
-authenticate again before its access token expires.
+Not built:
+- No live run on Google Cloud. The first one checks that Cloud Run
+  reaches the Private Service Connect endpoint through the egress
+  subnet; that `endpoints[0].connections[0]` is the primary's connection
+  with one replica or more, since a reader endpoint would answer every
+  write with READONLY, which the clients count as a failed call and not
+  as an outage; that `SHARED_CORE_NANO` takes cluster mode
+  disabled with one replica, and `STANDARD_SMALL` two; that the IAM
+  condition on the instance holds for this resource type, or else the
+  grant is an unconditioned project grant, and that the condition's
+  `resource.name` takes the project's id rather than its number; that
+  `deployer`'s roles are enough, and that Private Service Connect needs
+  no API beyond Memorystore's and Network Connectivity's (such as
+  `serviceconsumermanagement.googleapis.com`); the length and order of the managed CA chain; and whether the
+  subscriber's long-lived connection must authenticate again before its
+  access token expires.
+- Metrics. The TypeScript and Rust runtimes have no meter and record
+  none; Rust logs a decode failure at debug. Go records the metrics this
+  entry names through OpenTelemetry's global meter, which
+  `telemetry.Start` does not export yet.
+- The scaffolded implementations do not depend on the definitions
+  package; an implementation adds it by hand, as acme-shop's does.
+- A store on cloudflare.
+
+A project bootstrapped before this needs `stack bootstrap` again for
+`deployer`'s new roles.
 
 The rule is reversible until the first release.
 
@@ -10577,6 +10676,207 @@ Status: built.
 Left: Go derivers, a deriver over an HTTP engine, a model-label
 construct, a cost cap, and evaluating every `{ rules }` policy rule in
 order at build. The rule is reversible until the first release.
+
+## D78. An app is a deployable an API declares: the project's own HTTP program over the API's parts, run beside its servers
+
+A Topcoat app (D44) runs the project's pages beside an API's
+implementations in one process. Every deployable a stack knew was a
+generated program: a server, a job, a worker, a runner or a deriver
+(D74). So acme's app ran only under `cargo run`, outside the stack, on
+SQLite, and its engine console never saw a checkout that `stack dev`
+took. The app needs what the API's server builds: `Deps`, the
+implementations, identity and the engine on the stack's database. Its
+routes are the project's.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API service declares an app with `@app` on a class of its schema, as `@job` declares a job (D52). The class's name is the app's, and the class holds no fields. `extensions` names the extensions the app's build needs: `@app({ extensions: ["topcoat"] })`. An app runs on a Rust API. A Go or TypeScript API's app is refused: `app Backoffice of shop-orders: shop-orders is a GO API, and an app runs on a Rust API; Go and TypeScript follow; write the API in Rust`. | A Topcoat kind in the core, which D44 keeps out; the app as a `server` variant, which would move the API under `/api` for every caller, since the Topcoat crate mounts it there; a Site-like kind that runs the project's binary, which would restate the wiring of `Deps` |
+| A binary that does not link an app's extension still resolves, plans and inits the stack, so `stack init` and `TestStackInitOverAcmeShop` keep the core binary. It refuses the whole stack in every command that builds: the stack's build (`build-all` and `stack dev`), `stack build`, and `stack deploy` and `stack prepare` unless `--no-build`, a deploy with `--prepared` included, since it still builds images. `--no-build` builds nothing and is not refused. The message is `app Backoffice of shop-stock needs the topcoat extension, which this superschematic binary does not link; run superschematic-topcoat`. | Refusing at resolve, which would break `stack init` and plans for a binary that never builds the app; skipping only the app's entrypoint, which leaves `stack deploy` to ship whatever the previous build wrote |
+| Each app of an API in the stack is a deployable of kind `app`, named after its API and its class as a job is (`shop-stock-backoffice`). It runs code and rolls out. Its edges are its API's, and it is a caller of its own in a callee's callers field, as a job is. It binds its API's config, with its API's server's env inherited, its API's callers field, which has no issuers since nothing calls an app, and its API's identity field. It binds no CORS field. `expose` lists it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`. A settings element names it the same way and takes `enabled`, `platform`, `env` and the platform's settings. `schedule`, `timeZone`, `onDeploy`, `instances`, `maxInstances` and `concurrency` are refused on it. | Edges of its own, which would restate its API's |
+| The app's program is a library crate the project writes, at `[implementation_paths] rust_app`: by default `apps/{app}` from the repository root, `{app}` being the class in kebab case, with `{service}` allowed. It exports `pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>`. `rustrestgen` writes `apps.rs` in the API crate. `<App>Parts` holds the API's `deps`, its `implementations` (with its authenticator and service authenticator, as `build_router` takes them), the `engine` once it is open, for an engine database, and `addr`, which is every interface at `PORT`, or 8080 when `PORT` is unset. The build scaffolds a missing crate once. The scaffold's `serve` listens on `parts.addr` and answers every request with 501 Not Implemented and `app <App> of <api> does not serve yet: write its serve`, so `stack dev` and a rollout run it, ready, before the project writes it. The build refuses a crate whose `src/lib.rs` declares no `serve`. | Apps in the API's implementation crate, which would compile the app's framework into the API's server; a generated `main` that knows Topcoat; a scaffold whose `serve` fails, which stops `stack dev` for every deployable and fails a rollout |
+| The entrypoint is `<output-root>/server/<stack>/<app>/`. Its `main` builds `Deps` and the implementations as the server's `wiring.rs` does, waits for the engine to open, then calls `serve` once. It exits 0 when `serve` returns `Ok` and 1 on an error, and shuts the engine down after. It installs no signal handler: `serve` chooses its own. Each build copies the app's crate into the output root's mirror, `<out>/impl/<api>.<app>/`, which the entrypoint depends on. The entrypoint uses the server's Dockerfile, and its image context also takes in, whole, every crate the app's crate reaches by path, then theirs in turn: the Topcoat crate under `<out>/topcoat/<api>`, the crates beside it, and the project's own. A crate outside the repository root makes the build write no Dockerfile, with the reason. The Topcoat crate is a member of the output root's Cargo workspace, not excluded from it. | A subcommand of the server's image, which ties the app's rollout to the server's; the server's include list alone, which leaves the Topcoat crate out of the context, so the image build fails where `stack dev`, which builds from the tree, passes |
+| The app deploys no engine document. Its engine opens once every schema of the database's engine document has a live version with the hash of the one the app was built with, which its API's server deploys (D58, amended below). Until then it retries, a second apart and doubling to thirty, logs `engine not open` with `the live version of <schemas> in the engine of <db> is not the one this app was built with; the API's server deploys it`, and does not listen. So a stale app image fails its startup probe rather than republish an old document. | Deploying the document as a server does, which lets an image from an older build publish its document again on each cold start, so the live version flips between the server's and the app's; waiting for any live version, which lets a stale app serve over a newer document |
+| An app rolls out in the wave after each server of its API, as well as after its callees, so its first attempt normally finds its document live. An app the environment turns off runs no image: a deploy, a build and a prepare neither need, build nor pin one, and the manifest keeps the image it last ran, for when it is turned on again. `--image` for it is refused (`--image names app <name>, which environment <env> turns off, so it runs no image; turn it on in the environment's settings, or leave its image out`), and so is `stack build --deployable` (`environment <env> turns app <name> off, so it runs no image to build; turn it on in the environment's settings`). | Building and pinning an image for an app that is off, which no resource holds on gcp, so every deploy failed at pinning |
+| `stack dev` runs the app as a process, built with cargo as a Rust server is, with `PORT` its `port` setting or a hashed port. It is ready once a TCP connection to its port succeeds, a dial alone, and never a GET of `/readyz`; `stack run`'s check of a running environment dials it the same way (`local: environment <env> is not running: app <name> does not listen at <url>`). gcp runs it as a Cloud Run service, `gcp.cloudrunapp`, with its own account, its API's Cloud SQL and egress, a TCP startup probe and a TCP liveness probe on its port, and public ingress when exposed. An app that is not exposed is internal-only with the invoker check on, and nothing grants `run.invoker`, so no one reaches it: expose an app that people use. An app turned off on gcp is its account, grants and secrets, with no service and no address. | HTTP probes, which the project's program would have to answer, since it owns every route; a local readiness that listens on the port to test it, which can take the port from the app as it binds |
+| cloudflare refuses an app the environment runs, through `TargetSpec.Unplaced`: `app shop-stock-backoffice: target cloudflare places no app: an app is the project's own Rust program, which serves HTTP until it is stopped, and cloudflare runs TypeScript Workers only; run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target`. An app turned off there is left out of the environment. | Cloudflare Containers, a platform D64 does not have; placing the app with another provider than its environment's, which mixed deploys will settle; refusing an app that is off, which would make every cloudflare environment of a stack unresolvable once one API declares an app |
+| `stack init` exposes every app of an API it deploys, as `{ of: <Api>, app: "<Class>" }` after the services, with `--expose` too, and its summary says `An app is always exposed: Backoffice of notes-api.` | Leaving it unexposed, where no one reaches it |
+| The Topcoat crate of an API that declares an app gains `RouterBuilder<Service>Ext::<service>_with_parts(parts)` and `<service>_with_parts_and_api(parts)`. Each takes any app's parts through `AppParts`, which each `<App>Parts` converts into, and sets the crate up from them: the implementations, the engine the entrypoint opened on the stack's database as `Setup.engine`, and, for an API on the identity runtime, `IdentityPageAuthenticator::of(&parts.implementations)`. An API with an authenticator of its own passes its `PageAuthenticator` after the parts. `_with_parts` serves the pages alone, as `<service>_without_api` does: they call the API and the engine in-process, and neither the JSON API nor the engine's routes are on the app's address, since a stack exposes an app apart from its API, and an app's address must not serve what the stack keeps internal. `_with_parts_and_api` mounts the JSON API at `/api` and the engine's routes at `/engine` too, as `<service>` does, for an app whose API the stack exposes as well, or which it keeps internal. `Setup` is unchanged. An app's `serve` binds `parts.addr` with tokio's `TcpListener` and calls `topcoat::serve(listener, router)`, never `topcoat::start`, which binds `HOST` and `PORT`, by default `127.0.0.1:3000`, so on Cloud Run it would listen on the container's loopback. The image carries no Topcoat asset bundle yet, so a live list is a GET form. | Mounting the JSON API and the engine's routes by default, which serves an API the stack keeps internal from the app's public address, its operations that need no caller and the engine's routes among them; `topcoat::start`, which passes under `stack dev`, whose readiness dials loopback, and fails every gcp revision; bundling Topcoat's runtime in the image, which needs Topcoat's CLI in the build |
+
+Status: built. Tests:
+- `internal/stack/apps_test.go` holds the kind, its edges, waves,
+  settings, exposure, callers and identity fields, and its refusals: an
+  unknown app, a schedule, instances, an app and a job in one element, a
+  Go and a TypeScript API, a name clash, an extension named twice, a
+  target with no app platform and one that places none
+  (`TestAppTurnedOffWhereNoAppIsPlaced` leaves an app turned off out).
+  `TestCheckAppExtensions` holds the build's refusal, and
+  `cli`'s `TestStackCommandsRefuseAnAppsMissingExtension` the commands'.
+- `internal/registry`'s `TestAppDecorator` and the loaders'
+  `TestAppsRefusedInIR`, `TestAppsAreNoTypes` and `TestStackReadsAnApp`
+  hold the declaration.
+- `servergen`'s `TestAppEntrypointGolden` holds the entrypoint, its
+  engine's wait, the parts and the scaffold. `TestAppEntrypointCompiles`
+  runs `cargo clippy -- -D warnings` over the output root, with an app
+  crate that depends on a Topcoat-shaped crate under `<out>/topcoat`,
+  and `TestAppImageContextHoldsItsCrates` the image's context.
+- The local target's `TestAppProcess`, `TestAppTurnedOff`,
+  `TestApplyRunsAnApp` and `TestRunJobWithAnApp`, gcp's
+  `TestAppPlatform`, `TestAppExposed` and `TestAppTurnedOff`, and
+  cloudflare's `TestWorkersRefusals/an_app` hold the process, the Cloud
+  Run service and the refusal.
+- `internal/stackdeploy`'s `TestDeployPinsAnAppsImage` and
+  `TestDeployOfAnAppTurnedOff` hold the image and the manifest. The
+  fake target's image repository is now `images.fake.test/<name>`, which
+  no other property equals, so a pin that finds no resource fails there
+  too.
+- `stackinit`'s `TestTheSchemaExposesEveryApp` and `cli`'s
+  `TestStackInitExposesEveryApp` hold the exposure.
+- `extensions/topcoat`'s `TestTheCrateServesAStackApp` builds the crate
+  of `fixture-app-api`, whose users are the core model's and whose
+  database is an engine database, and runs `cargo clippy` and `cargo
+  test` over the real `BackofficeParts`. With `_with_parts`, `/api` and
+  `/engine` answer 404, and a user who signs in through the sign-in page
+  reads the engine console. With `_with_parts_and_api`, the parts set up
+  the pages, the JSON API and the engine, and a note created through
+  `/engine` is on the parts' engine and its page. `serve` answers on
+  `parts.addr`, its pages and no `/api`. An API with no app gets no
+  `_with_parts`. `TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild`
+  compiles both methods for an API with an authenticator of its own,
+  which takes a `PageAuthenticator`, and for one without auth, neither
+  with an engine.
+
+acme:
+- shop-stock declares `Backoffice`, a Topcoat app over shop-stock's
+  crate at `apps/backoffice`, the default `rust_app` path. Its pages are
+  under `/stock`, with the engine console over shop-db at
+  `/stock/engine` and the sign-in, account, user and role pages beside
+  them. `pages_prefix` becomes `{ "shop-orders" = "/console",
+  "shop-stock" = "/stock" }`, and shop-stack exposes the app.
+- `scripts/check.sh` builds the tree and runs `stack dev` with
+  `superschematic-topcoat`. `TestStackDevRunsTheShop`, through it, sees
+  the Inventory page refuse a caller who is not signed in (401), signs a
+  member of staff who holds `stock.write` in at `/stock/sign-in`,
+  receives five units through the Stock panel's `receiveStock` form on
+  `/stock/engine/Inventory/{id}`, sees the page list the delivery, and
+  reads the five more through shop-stock's `GetStock`. The Backoffice
+  serves its pages alone (`shop_stock_with_parts`): `/api/stock` and the
+  engine's routes answer 404 on its address.
+- `TestStackInitOverAcmeShop` inits the stack, app included, with the
+  installed `superschematic`, and every environment resolves.
+
+Left: Go and TypeScript apps, the Topcoat asset bundle in the image, an
+app on Cloudflare, and a readiness deeper than a TCP connection. The rule
+is reversible until the first release.
+
+### D58, amended: an app's engine opens on the document its API's server deployed, and deploys none
+
+A server's setup deploys its database's engine document when the engine
+opens, and a job, a worker, a runner and a deriver deploy nothing. An
+app (D78, above) runs from an image of its own, which a deploy can keep
+while it takes a newer one for the API's server. Deploying from the app
+would publish whatever document the app was built with, an older one
+included, on each cold start.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Engine::undeployed(documents, namespace)` lists the names of the documents whose live version is missing or has another hash than the given document's. It reads as the system principal and writes nothing. It is in the Rust engine alone: no C ABI or TypeScript surface changed. | Comparing hashes in the generated code, which cannot compute them: the hash is the sha256 of the document's canonical JSON, which only the engine writes |
+| An app's `src/engine.rs` opens the engine in the background as a server's does, and its setup is `deployed`, not `deploy`: an attempt fails while `undeployed` names any schema of the engine document, in its namespace, so the background retries and logs it. The app's `main` waits for the engine before it calls `serve`. | Opening the engine with no check, which lets an app of another build serve over a document it does not know |
+
+Status: built. `deploy::tests::undeployed_names_the_documents_whose_live_version_has_another_hash`
+deploys a document, then a newer one, and sees each named while it is
+not the live version. `servergen`'s app goldens hold `engine.rs` and
+`main.rs`. The rule is reversible until the first release.
+
+### D47, amended: the release ships `superschematic-topcoat`, which a stack's CI installs when an app of its services root needs Topcoat
+
+The installed `superschematic` refuses to build a stack whose app names
+an extension it does not link (D78, above). A workflow that installed it
+would fail on every run: in its check job's build, in its prepare job
+and in a deploy with `--prepared`, which builds images too. Every job
+builds the whole services root (`build-all`), so a stack with no app of
+its own fails the same way when another stack of its root has one: acme's
+`storefront-stack` builds `shop-stack`, whose Backoffice needs Topcoat.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The release ships `superschematic-topcoat` as it ships `superschematic`. `release.yml`'s build job builds both on each of the four runners, from their modules (`cmd/superschematic` and `extensions/topcoat/cmd/superschematic-topcoat`), with the same flags, against the same archives and with every platform's archive digest linked in. Each must run, report `<binary> version <version>` and hold the digests' string, which the step reads from the binary: `go version -m` records no `-ldflags` under `-trimpath`, so the check it made before never passed. Each is packed as `<binary>_<version>_<platform>.tar.gz` with its `BUILD_COMMIT`, `LICENSE` and README. `assemble` counts four of each, refuses a set built from more than one commit and lists them all in one `SHA256SUMS`. `internal/release` names the extensions the release ships a binary of (`ExtensionCLIs`) and the tarball's name (`CLIName`), and a test holds `release.yml` to them. | Building it from source in every CI job, which spends minutes per job, needs a commit the workflow reads from a file on the release page, and leaves the release never building the binary every topcoat stack's CI runs; leaving it out of the release, so that no binary a user can get writes a working workflow |
+| The renderer reads the extensions the apps need: the stack's own, over every environment, an app that is off included, since the build refuses it in any environment, and those of every other stack of the services root (`registry.CIRequest.RootApps`). The ci generator lists the root's directories that hold a schema config, loads each Stack among them and resolves its apps. With no extension, every job installs `superschematic` as before. With one the release ships a binary of, `topcoat`, every job (check, prepare, plan, preview and deploy) installs `superschematic-topcoat` the same way and runs it for the build, `stack prepare` and every stack command, and the header says why: `Every job runs superschematic-topcoat, the release's superschematic with the topcoat extension linked too: its build of the services root builds app Backoffice of shop-stock in stack shop-stack, which needs it.` | Building only the stack's closure (`build --with-deps`), which leaves the output root's Cargo and Bun workspaces, whose members are every stack's deployables, short of the other stacks', so their committed lockfiles no longer match; reading the stack's own apps alone, which gives a sibling stack the binary that refuses the root |
+| Each job's install downloads `<binary>_<version>_linux-x64.tar.gz` and the release's `SHA256SUMS`, checks one against the other, unpacks it, checks that the binary reports `<binary> version <version>` (`--version`, which both binaries have), and puts it on the `PATH`. The release is the version of the binary that rendered the workflow, whichever of the two did: both are built from one commit. The trust root is the core's: the release page and its `SHA256SUMS`. A workflow rendered by a binary built from a checkout names no release, and its install step fails, saying to render it again with a released `superschematic-topcoat`. One built from a tag's tree without the release's digests installs the release's binary, and the check job's archives step fails, as `superschematic`'s does. | Pinning each binary's digest in the workflow, which the rendering binary cannot know for the other binary |
+| A stack whose apps need two extensions between them, or an extension the release ships no binary of, is refused at render time, with the reason, since the workflow's build would refuse the root on every run: `stack <stack>: app <App> of <api> needs the <ext> extension, and superschematic's release ships no binary that links it, so the workflow's build would refuse the services root; build the stack's CI yourself with a binary that links it`, and `stack <stack>: app ... needs ..., ...; one binary builds the services root in CI, and no superschematic-<extension> links more than one extension: give the apps one extension between them`. | Writing a workflow that fails on its first run |
+| A stack with CI keys its build-cache entry on the root's other stacks too: each one's sources and those of the services its references depfile names, with what they reach through their configs. An app added to another stack's API then renders the stack's workflow again. | Keying it on its own inputs alone, which keeps a cached workflow that installs the binary the root's build refuses |
+| The workflow's messages name the binary it runs: the header's "build it again with", a local environment's note (`stack dev`), the bootstrap note, and the Rust lockfile's fix (`build-all`). | Naming `superschematic` everywhere, which refuses the build |
+
+Status: built. `cigen`'s `TestAnAppsExtensionInstallsTheBinaryThatLinksIt`
+renders a stack with a Topcoat app, runs actionlint over the workflow and
+holds the install, the header, a checkout build's failing install and a
+digestless release's failing archives step.
+`TestTheRootsAppsChooseTheBinary` holds another stack's app choosing the
+binary and refusing a second extension, and
+`TestAnotherStacksAppChoosesTheBinary` builds a stack with no app in a
+root whose other stack's API declares a Topcoat app, through the ci
+generator. `TestAppsWhoseExtensionsNoBinaryLinksAreRefused` holds the two
+refusals. `buildcache`'s `TestACIStacksKeyIsTheRootsStacks` holds the
+key. `internal/release`'s `TestTheReleaseLinksTheDigests` holds
+`release.yml`'s build of both binaries, their version and digest checks,
+and their count in `assemble`; `cli`'s
+`TestVersionNamesTheBinaryAndItsRelease` holds `--version`. The rule is
+reversible until the first release.
+
+### D44, amended: `superschematic-topcoat` is the installed binary with Topcoat linked beside the official extensions
+
+D44's binary was the core with the extension linked and nothing else.
+A stack whose app names `topcoat` (D78, above) builds only with a binary
+that links it, wherever the stack deploys, so that binary must also
+place gcp's and cloudflare's environments. acme's `build-all` builds
+`storefront-stack`, on cloudflare, beside `shop-stack`, whose Backoffice
+needs Topcoat.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The installed binary's extensions are listed by a package of their own, `cmd/superschematic/official` (`official.Extensions()`: gcp, cloudflare, and pulumi with each provider's pinned version). `cmd/superschematic` links that list, and `extensions/topcoat/cmd/superschematic-topcoat` links it with `topcoat.Extension{}` after it, so the two binaries never differ in what else they link. A project's own binary does the same: `cli.New(cli.Config{Name: ...}, append(official.Extensions(), topcoat.Extension{})...)`. | The core with Topcoat alone, which knows neither the gcp nor the cloudflare target, so it cannot build a tree with a stack on either; a copy of the list in the topcoat command, which drifts from the installed binary's |
+| `extensions/topcoat`'s module requires `cmd/superschematic`, and through it the official extensions, each replaced by its directory in the repository. `scripts/bump_version.py` sets those requires at a release, keeps the replaces, so `go install` refuses the command, and tags `extensions/topcoat` after `cmd/superschematic`. The release ships `superschematic-topcoat` beside `superschematic` (D47, amended above). The installed `superschematic` still links no Topcoat. | Linking Topcoat into the installed binary, which D44 keeps out while Topcoat is before 1.0 |
+
+Status: built. `cmd/superschematic`'s tests are unchanged and pass;
+acme's `check.sh` builds every service, `storefront-stack`'s cloudflare
+environments among them, with `superschematic-topcoat`, and
+`python3 scripts/bump_version.py check` passes. The rule is reversible
+until the first release.
+
+### D75, amended: the field is a variable per member, the rate limit keeps httprate's rule, a part is its wire string, and a claim reads its own token back
+
+Building D75 showed where the entry's words and the code had to part.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The memory store field is one variable per member of `ir.MemoryStoreConnection`, as every derived field is (`ir.DerivedVariables`): `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL`, `_CA`, `_AUTH` and `_MEMBER`. None set is a disabled store. A reader refuses a URL that holds a user or a password. | One JSON value in one variable, which no other derived field is, and whose members a platform could not each set from an output reference, such as the CA on gcp. |
+| A field that is set and malformed fails the config's load, as every refused field does, and the workload does not start. Only a connection the Redis client refuses when it opens, such as a CA that holds no certificate, runs the workload with a disabled store, after one log line. | Running disabled whenever the field is malformed, which turns a broken deploy into a quiet change of behavior, the outcome D75 refuses for a target with no platform. |
+| The shared rate limit is httprate's own rule, which the Go runtime's in-process limiter already applies: a request is allowed when `round(estimate) + 1 <= limit`, rounding half away from zero, and then increments the current window's counter with a TTL of two windows and five seconds; it is refused with `Retry-After` the window's length in whole seconds. The TypeScript and Rust limiters, and the vectors, hold the same. Go's route with a store runs the runtime's own limiter, not an httprate `LimitCounter`: httprate holds one lock per route across its counter's calls, which would put every request's round trips to the store in a line. The limiter reads both windows in one `MGET`, holds no lock, and leaves a request to httprate's in-process limiter while the store is unavailable or a call fails. | `estimate < limit`, with `Retry-After` the rest of the window, which D75 wrote: a Go route would then answer differently from httprate's own limiter, so its answers would change whenever its store went away. |
+| The `operation` part of a rate-limit key is the operation's kebab namespace and its name, `product.getProduct` or `order-item.addItem`, as apigen names it: Go's `RateLimitOperation()`, TypeScript's `operationSpecs` and Rust's `OperationInfo` already carry it, so no runtime needs more. `TestRateLimitOperationIsTheGoServers` in tsrestgen and rustrestgen holds the three to one spelling, and the key vectors use it. | The operation set's class and method, `ProductQueries.getProduct`, which the vectors first wrote and no runtime has at a route. |
+| A part's string is its wire string: the string its value takes in the API's JSON. A string part is itself, so an `Identity.UUID` is its compact base62 form; an integer is base 10, a boolean `true` or `false`, an enum its wire value. A name built from a value read off the wire in any language is the same name. | A UUID's canonical lowercase hex form, which the contract first named: a TypeScript or Rust caller that holds the wire string would convert it first, and one that forgot would key another name. |
+| A claim is `SET <name> <token> PX <ttl> NX GET`, with a random token per call: it is the caller's when no value was there, or when the value read back is its own token, which happens when the client retries a call whose first reply was lost. `GET` beside `NX` needs Valkey or Redis 7.0 or later, which every target runs. | `SET <name> 1 PX <ttl> NX`, whose retry finds the key its own first try set and answers false, so the call that made the claim reports it lost. |
+| A subscribe made while the store is down is held, in every language: it returns at once, dials nothing, and subscribes when the store reconnects, as the client's own reconnect does for a subscription already open. Only a disabled or closed store refuses it. Every other call still fails at once. | Refusing it with `ErrUnavailable`, under which a waiter that subscribes at start-up during an outage never hears a wake-up once the store is back. |
+| On gcp, a member of a parameterized environment is named as the target suffixes its other names: each parameter's name and value, `pr123`, joined by `-` under two parameters. Its names start `<store>@pr123:`. | The parameter's value alone, `123`, which reads unlike the member's other names (`shop-api-pr123`). |
+
+Status: built with D75 (`ir/derived_value.go`, `ir/memorystore.go`, the
+runtimes' `memorystore` modules, servergen's `memorystores.go.tmpl`,
+`extensions/gcp/memorystore.go`). The rule is reversible until the first
+release.
+
+### D75, amended: on gcp the connection role is a conditioned project grant, the endpoints take a subnet of their own, the field's CA is its chain's first certificate, and TypeScript connects with @redis/client
+
+D75 granted the role on the instance and left the endpoints' addresses,
+the CA's form and the TypeScript client open.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The connector grants the workload's account `roles/memorystore.dbConnectionUser` on the project, with an IAM condition that holds it to the edge's instance: `resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/<project>/locations/<region>/instances/<name>"`. `deployer`'s `resourcemanager.projectIamAdmin` already sets such a grant, as it does a Cloud SQL edge's. | A grant on the instance, which D75 wrote: pulumi-gcp has no IAM resource for a Memorystore instance, which has no IAM policy of its own. An unconditioned project grant, which reaches every store of the project. |
+| The service connection policy (`gcp-memorystore`) takes the endpoints' addresses from a subnet of its own, `<stack>-memorystore`, `10.8.16.0/24`, one per network and region, which every store of the environment and its members share. | The Direct VPC egress subnet, whose addresses Cloud Run's instances take. |
+| The field's CA is one PEM, the first certificate of the instance's first managed server CA chain (`managedServerCas[0].caCerts[0].certificates[0]`): the CA that issues the server's certificate. Go and rustls trust it as an anchor though it may be an intermediate; the TypeScript store passes `allowPartialTrustChain` with it, which Bun 1.4.2 honours. | The whole chain joined into one member, which the resource graph cannot write, since no value of it joins a list. |
+| The TypeScript store's client is `@redis/client` (node-redis) 5.12.1, from the runtime's `./redis` entry, an optional peer a server installs only when its APIs list a store. It takes a password per connection, so each new connection sends a fresh access token, and it subscribes again on reconnect. | Bun's `RedisClient`, which D75 leaned toward: it takes the password only in its URL and reuses it on every reconnect, so it cannot send the fresh IAM token each connection needs. |
+
+Status: built with D75; none of it has run on Google Cloud (D75's
+Status lists the first live run's checks). The rule is reversible until
+the first release.
 
 ## D81. A generated server covers what an app wrote by hand: approval-gated registration, files up and down, its OpenAPI document and an MCP endpoint, and a JWT body-hash webhook verifier
 

@@ -1093,7 +1093,7 @@ resources:
           value: ${shop-orders-ship-orders-calls-shop-pricing-key.publicKeyPem}
         - name: SHOP_PRICING_CALLERS_ISSUERS_1_MAX_LIFETIME_SECONDS
           value: "300"
-      image: shop-pricing
+      image: images.fake.test/shop-pricing
       language: typescript
       name: shop-pricing
       public: true
@@ -1172,7 +1172,7 @@ resources:
           value: signed-token
         - name: SHOP_API_SERVICE_URL
           value: https://shop-api.staging.acme.dev
-      image: shop-storefront
+      image: images.fake.test/shop-storefront
       language: typescript
       name: shop-storefront
       public: true

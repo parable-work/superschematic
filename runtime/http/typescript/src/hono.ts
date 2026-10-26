@@ -241,7 +241,9 @@ function rateLimitStoreOf(options: RouterRuntimeOptions): RateLimitStore {
 async function admit(ctx: RequestContext, limitPerMinute: number, options: RouterRuntimeOptions): Promise<void> {
   const keyOf = options.rateLimit?.keyOf ?? remoteAddressKey;
   const now = options.rateLimit?.now ?? Date.now;
-  const key = `${ctx.operation.name}:${keyOf(ctx)}`;
+  // `<namespace>.<name>`, the operation's name across the runtimes, which
+  // the shared rate limit counts under (D75); neither holds a ':'.
+  const key = `${ctx.operation.namespace}.${ctx.operation.name}:${keyOf(ctx)}`;
   const decision = await rateLimitStoreOf(options).take(key, limitPerMinute, now());
   if (!decision.allowed) throw tooManyRequests(decision.retryAfterSeconds);
 }
