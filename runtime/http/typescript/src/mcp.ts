@@ -1,8 +1,40 @@
 import type { Context, Env, Hono } from 'hono';
 import { authorize } from './auth.js';
 import { mountManualOperation, type RouterRuntimeOptions } from './hono.js';
+import {
+  MCP_CONFIRMATION_ARGUMENT,
+  MCP_CONFIRMATION_DECLINED,
+  MCP_CONFIRMATION_INPUT,
+  MCP_CONFIRMATION_REQUIRED,
+  McpConfirmations,
+  canonicalJson,
+  type McpConfirmationBinding,
+  type McpConfirmationRefusal,
+  type McpConfirmationStore,
+} from './mcpconfirm.js';
 import type { OperationSpec, RequestContext } from './operation.js';
 import { ErrorCode, HttpProblem, problemBody, type ProblemBody } from './problem.js';
+import type { Revealable } from './secret.js';
+
+export {
+  DEFAULT_MCP_CONFIRMATION_TTL_SECONDS,
+  MCP_CONFIRMATION_ARGUMENT,
+  MCP_CONFIRMATION_DECLINED,
+  MCP_CONFIRMATION_INPUT,
+  MCP_CONFIRMATION_REQUIRED,
+  MIN_MCP_CONFIRMATION_KEY_BYTES,
+  McpConfirmations,
+  MemoryMcpConfirmationStore,
+  canonicalJson,
+} from './mcpconfirm.js';
+export type {
+  McpConfirmationBinding,
+  McpConfirmationMode,
+  McpConfirmationOptions,
+  McpConfirmationRefusal,
+  McpConfirmationStore,
+  McpConfirmationToken,
+} from './mcpconfirm.js';
 
 /*
 The MCP endpoint of a generated API (D81): POST /api/mcp serves the API's
@@ -34,6 +66,29 @@ service step, permission check, validation and timeout apply unchanged. A
 call the route refuses returns a tool error (isError) whose structured
 content is the problem document the route answered; a tool the caller has
 not got is a JSON-RPC invalid-params error.
+
+A tool whose invocation policy is ask runs only once the person confirms
+the call (D93; McpToolSet.confirms, mcpconfirm.ts):
+
+- A 2026-07-28 client whose envelope's capabilities elicit forms is asked
+  in band: the call answers input_required with one elicitation/create,
+  whose message is the call's summary, and its requestState a confirmation
+  the client sends back with the person's answer. accept runs the call;
+  decline and cancel are a tool error, confirmation_declined, and run
+  nothing.
+- Any other client, every client of the 2025 revisions among them, gets a
+  two-step confirmation: the call answers a tool error,
+  confirmation_required, whose details hold the summary and a
+  confirmationToken, and runs nothing; the same call with that token in
+  its confirmationToken argument runs. A stateless 2025 server keeps no
+  session, so it neither remembers the capabilities a client declared at
+  initialize nor routes the answer to a request it sent mid-call back to
+  the call that waits for it, which may be on another replica; 2026-07-28
+  carries the request and the answer in the call itself.
+
+A token binds the tool, the caller and the exact arguments, expires, is
+claimed once, and is an HMAC under the endpoint's confirmation key; one
+that does not redeem asks again, saying why.
 */
 
 /** The 2025 revisions initialize negotiates, the newest first: the one a client asks for when it is here, else the first. */
@@ -78,6 +133,16 @@ export interface McpServerOptions {
   readonly serverInfo: McpServerInfo;
   /** Instructions initialize gives the client; none when absent or empty. */
   readonly instructions?: string;
+  /**
+   * Mints and redeems the confirmations of the tools the tool set's
+   * confirms names (D93). Without it a call of such a tool is refused and
+   * runs nothing.
+   */
+  readonly confirmations?: McpConfirmations;
+  /** Who is calling, which a confirmation is bound to: empty for no one. */
+  readonly caller?: string;
+  /** The request id a confirmation's problem carries; a fresh one unless given. */
+  readonly requestId?: string;
 }
 
 /** A tool as tools/list answers it. */
@@ -117,6 +182,14 @@ export class McpUnknownToolError extends Error {
 export interface McpToolSet {
   list(): readonly McpTool[] | Promise<readonly McpTool[]>;
   call(name: string, args: Readonly<Record<string, unknown>>): Promise<McpCallOutcome>;
+  /**
+   * The tool name names when a call of it runs only once the person
+   * confirms it, its invocation policy being ask (D93); undefined for a
+   * tool that runs as called, or one the set has not got, whose call
+   * refuses it. The endpoint confirms the call before it calls call, which
+   * never sees the confirmationToken argument.
+   */
+  confirms?(name: string): McpTool | undefined | Promise<McpTool | undefined>;
 }
 
 // A JSON-RPC error: its code, message and data.
@@ -272,7 +345,8 @@ class Server {
       const result = await this.dispatch(message, true);
       if (isObject(result)) {
         const { _meta, ...rest } = result;
-        const out: Record<string, unknown> = { ...rest, resultType: 'complete' };
+        // A call that asks the person first is input_required (D93).
+        const out: Record<string, unknown> = { ...rest, resultType: typeof rest.resultType === 'string' ? rest.resultType : 'complete' };
         if (method === 'server/discover' || method === 'tools/list') {
           // Cache hints: none, and for this caller alone.
           out.ttlMs = 0;
@@ -297,7 +371,7 @@ class Server {
     if (method === 'server/discover' && modern) return this.discover();
     if (method === 'ping') return {};
     if (method === 'tools/list') return this.list();
-    if (method === 'tools/call') return this.call(params);
+    if (method === 'tools/call') return this.call(params, modern);
     throw rpcError(METHOD_NOT_FOUND, 'Method not found');
   }
 
@@ -332,32 +406,153 @@ class Server {
   }
 
   // call runs a tool: its result as text and, for an object, structured
-  // content; a refusal as a tool error carrying the problem document.
-  async call(params: unknown): Promise<Record<string, unknown>> {
+  // content; a refusal as a tool error carrying the problem document. A
+  // tool that asks the person first runs only once they confirm the call.
+  async call(params: unknown, modern: boolean): Promise<Record<string, unknown>> {
     const name = isObject(params) ? params.name : undefined;
     if (typeof name !== 'string') {
       throw rpcError(INVALID_PARAMS, 'Invalid params for tools/call: name must be a string');
     }
-    const args = (params as Record<string, unknown>).arguments;
+    const message = params as Record<string, unknown>;
+    const args = message.arguments;
     if (!(args === undefined || args === null || isObject(args))) {
       throw rpcError(INVALID_PARAMS, 'Invalid params for tools/call: arguments must be an object');
     }
+    let callArgs: Readonly<Record<string, unknown>> = isObject(args) ? args : {};
     let outcome: McpCallOutcome;
     try {
-      outcome = await this.tools.call(name, isObject(args) ? args : {});
+      const asks = await this.tools.confirms?.(name);
+      if (asks) {
+        const gate = await this.confirm(asks, callArgs, message, modern);
+        if ('result' in gate) return gate.result;
+        callArgs = gate.args;
+      }
+      outcome = await this.tools.call(name, callArgs);
     } catch (error) {
       if (error instanceof McpUnknownToolError) throw rpcError(INVALID_PARAMS, error.message);
       throw failure(error);
     }
-    if ('problem' in outcome) {
-      return { content: [{ type: 'text', text: JSON.stringify(outcome.problem) }], structuredContent: outcome.problem, isError: true };
-    }
+    if ('problem' in outcome) return toolError(outcome.problem);
     if ('content' in outcome) return { content: outcome.content };
     const result = outcome.result ?? null;
     return isObject(result)
       ? { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result }
       : { content: [{ type: 'text', text: JSON.stringify(result) }] };
   }
+
+  // confirm is the confirmation of a call of tool, which asks the person
+  // first (D93): the arguments it runs with, the token's taken out, once
+  // the call carries a confirmation that redeems, else what the call
+  // answers instead, a confirmation to ask for or the person's refusal.
+  async confirm(
+    tool: McpTool,
+    args: Readonly<Record<string, unknown>>,
+    params: Record<string, unknown>,
+    modern: boolean
+  ): Promise<{ readonly args: Readonly<Record<string, unknown>> } | { readonly result: Record<string, unknown> }> {
+    const confirmations = this.options.confirmations;
+    if (!confirmations) {
+      const problem = new HttpProblem(500, `${tool.name} runs only once the person confirms it, and this endpoint has no confirmation key`, {
+        code: ErrorCode.INTERNAL_ERROR,
+      });
+      return { result: toolError(problemBody(problem, this.requestId())) };
+    }
+    const { [MCP_CONFIRMATION_ARGUMENT]: token, ...rest } = args;
+    const binding: McpConfirmationBinding = { tool: tool.name, caller: this.options.caller ?? '', args: rest };
+    const elicits = modern && elicitsForms(clientCapabilities(params));
+    let refused: McpConfirmationRefusal | undefined;
+    if (token !== undefined) {
+      refused = await confirmations.redeem(token, 'token', binding);
+      if (!refused) return { args: rest };
+    } else if (elicits && params.requestState !== undefined) {
+      const answer = isObject(params.inputResponses) ? params.inputResponses[MCP_CONFIRMATION_INPUT] : undefined;
+      const action = isObject(answer) ? answer.action : undefined;
+      if (action === 'accept' || action === 'decline' || action === 'cancel') {
+        refused = await confirmations.redeem(params.requestState, 'elicit', binding);
+        if (!refused && action === 'accept') return { args: rest };
+        if (!refused) {
+          const what = action === 'decline' ? 'declined' : 'dismissed the confirmation of';
+          const problem = new HttpProblem(403, `The person ${what} ${tool.name}, which did not run`, {
+            code: MCP_CONFIRMATION_DECLINED,
+            details: { tool: tool.name, action },
+          });
+          return { result: toolError(problemBody(problem, this.requestId())) };
+        }
+      }
+    }
+    const summary = confirmationSummary(tool, rest);
+    const why = refused ? `${REFUSALS[refused]} ` : '';
+    if (elicits) {
+      const { token: requestState } = await confirmations.mint('elicit', binding);
+      const ask = {
+        method: 'elicitation/create',
+        params: { mode: 'form', message: `${why}Run ${summary}?`, requestedSchema: { type: 'object', properties: {} } },
+      };
+      return { result: { resultType: 'input_required', inputRequests: { [MCP_CONFIRMATION_INPUT]: ask }, requestState } };
+    }
+    const minted = await confirmations.mint('token', binding);
+    const detail =
+      `${why}${tool.name} runs only once the person confirms it: ${summary}. Show them the call, and once they confirm, ` +
+      `call ${tool.name} again with the same arguments and ${MCP_CONFIRMATION_ARGUMENT} set to details.${MCP_CONFIRMATION_ARGUMENT}, before ${minted.expiresAt}`;
+    const problem = new HttpProblem(428, detail, {
+      code: MCP_CONFIRMATION_REQUIRED,
+      details: {
+        tool: tool.name,
+        summary,
+        [MCP_CONFIRMATION_ARGUMENT]: minted.token,
+        expiresAt: minted.expiresAt,
+        ...(refused ? { refused } : {}),
+      },
+    });
+    return { result: toolError(problemBody(problem, this.requestId())) };
+  }
+
+  requestId(): string {
+    return this.options.requestId ?? crypto.randomUUID();
+  }
+}
+
+// What the person, or the agent, reads of a confirmation that did not
+// redeem, before the call is asked about again.
+const REFUSALS: Readonly<Record<McpConfirmationRefusal, string>> = {
+  invalid: 'The confirmation sent is not one this endpoint gave.',
+  expired: 'The confirmation sent has expired.',
+  mismatch: 'The confirmation sent is for another call.',
+  used: 'The confirmation sent was used already.',
+};
+
+// The longest arguments' text a confirmation's summary shows.
+const SUMMARY_ARGUMENTS = 2000;
+
+// confirmationSummary is what the person confirms: the tool's title and
+// handle, and its arguments as JSON with sorted keys, the part past
+// SUMMARY_ARGUMENTS characters counted rather than shown. The token binds
+// every argument, whatever the summary shows.
+function confirmationSummary(tool: McpTool, args: Readonly<Record<string, unknown>>): string {
+  const name = tool.title && tool.title !== tool.name ? `${tool.title} (${tool.name})` : tool.name;
+  if (Object.keys(args).length === 0) return `${name} with no arguments`;
+  const text = canonicalJson(args);
+  if (text.length <= SUMMARY_ARGUMENTS) return `${name} with ${text}`;
+  return `${name} with ${text.slice(0, SUMMARY_ARGUMENTS)}… (${text.length - SUMMARY_ARGUMENTS} more characters)`;
+}
+
+// clientCapabilities is the capabilities a 2026-07-28 request's envelope
+// declares.
+function clientCapabilities(params: Record<string, unknown>): unknown {
+  return isObject(params._meta) ? params._meta[CLIENT_CAPABILITIES_KEY] : undefined;
+}
+
+// elicitsForms is whether capabilities let the server elicit a form: an
+// elicitation capability that names form, or, as the 2025 revisions
+// declared it, one that names neither form nor url.
+function elicitsForms(capabilities: unknown): boolean {
+  if (!isObject(capabilities) || !isObject(capabilities.elicitation)) return false;
+  const elicitation = capabilities.elicitation;
+  return 'form' in elicitation ? isObject(elicitation.form) : !('url' in elicitation);
+}
+
+function toolError(problem: ProblemBody): Record<string, unknown> {
+  return { content: [{ type: 'text', text: JSON.stringify(problem) }], structuredContent: problem, isError: true };
 }
 
 function capabilities(): Record<string, unknown> {
@@ -626,6 +821,12 @@ export interface McpRouteTool extends McpTool {
   /** The operation's key in the router's operation table. */
   readonly operation: string;
   readonly arguments: readonly McpToolArgument[];
+  /**
+   * Whether a call runs only once the person confirms it: true for a tool
+   * whose invocation policy is one the build's policy confirms, ask in the
+   * core's (D93).
+   */
+  readonly confirm?: boolean;
 }
 
 /** The router options of an API's MCP endpoint. */
@@ -638,6 +839,21 @@ export interface McpOptions {
   readonly rateLimitPerMinute?: number;
   /** Seconds a request to the endpoint may take before it answers 504; absent or 0 for none. Each call's route keeps its own @timeout. */
   readonly timeoutSeconds?: number;
+  /**
+   * The key the endpoint signs its confirmations with (D93): at least 32
+   * bytes, random, the same on every replica. Required when a tool
+   * confirms; the generated entrypoint passes the @envVars secret
+   * outputs.api.mcpConfirmationKey names.
+   */
+  readonly confirmationKey?: string | Revealable<string>;
+  /** Seconds a confirmation is good for; 600 unless set. */
+  readonly confirmationTtlSeconds?: number;
+  /**
+   * Where a confirmation is claimed so it redeems once; a store in process
+   * memory unless given, so a token is single-use per replica. A
+   * deployment with several replicas passes one they share.
+   */
+  readonly confirmationStore?: McpConfirmationStore;
 }
 
 /** What the generated router says about its endpoint. */
@@ -693,6 +909,9 @@ function toolOperations(operations: Readonly<Record<string, OperationSpec>>, too
     const spec = Object.hasOwn(operations, tool.operation) ? operations[tool.operation] : undefined;
     if (!spec) throw new Error(`mountMcp: tool ${tool.name} names operation ${tool.operation}, which the router does not have`);
     if (byName.has(tool.name)) throw new Error(`mountMcp: two tools are named ${tool.name}`);
+    if (tool.confirm && tool.arguments.some(argument => argument.key === MCP_CONFIRMATION_ARGUMENT)) {
+      throw new Error(`mountMcp: tool ${tool.name} asks the person before it runs, and takes an argument ${MCP_CONFIRMATION_ARGUMENT}, which carries its confirmation`);
+    }
     byName.set(tool.name, { tool, spec });
   }
   return byName;
@@ -704,8 +923,10 @@ function toolOperations(operations: Readonly<Record<string, OperationSpec>>, too
  * answer 405, each behind the runtime's auth gate with runtime, the
  * router's options. Each request lists the tools whose routes its caller
  * may call, by the route's auth requirement and the router's permission
- * matcher, and runs a call through app in process. Throws when a tool
- * names an operation the router does not have.
+ * matcher, and runs a call through app in process, a call of a tool that
+ * confirms once the person confirms it, bound to the caller (D93). Throws
+ * when a tool names an operation the router does not have, and when a
+ * tool confirms and options.confirmationKey is absent or short.
  */
 export function mountMcp<E extends Env>(
   app: Hono<E>,
@@ -716,10 +937,28 @@ export function mountMcp<E extends Env>(
   options: McpOptions = {}
 ): void {
   const byName = toolOperations(operations, tools);
+  const confirming = tools.find(tool => tool.confirm);
+  if (confirming && options.confirmationKey === undefined) {
+    throw new Error(
+      `mountMcp: tool ${confirming.name} runs only once the person confirms it, so options.mcp.confirmationKey is required: a random secret of at least 32 bytes, the same on every replica (D93)`
+    );
+  }
+  const confirmations = confirming
+    ? new McpConfirmations({
+        key: options.confirmationKey as string | Revealable<string>,
+        scope: mount.api,
+        ...(options.confirmationTtlSeconds !== undefined ? { ttlSeconds: options.confirmationTtlSeconds } : {}),
+        ...(options.confirmationStore ? { store: options.confirmationStore } : {}),
+      })
+    : undefined;
   const server: McpServerOptions = {
     serverInfo: options.serverInfo ?? { name: mount.api, version: mount.version },
     ...(options.instructions ? { instructions: options.instructions } : {}),
+    ...(confirmations ? { confirmations } : {}),
   };
+  // Each request is served as its caller, whom a confirmation is bound to.
+  const serve = (c: Context<E>, ctx: RequestContext) =>
+    serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
     const spec: OperationSpec = {
       name: '$mcp',
@@ -732,7 +971,7 @@ export function mountMcp<E extends Env>(
       auth: { public: !mount.requiresAuth, required: mount.requiresAuth, permissions: [] },
       manual: true,
     };
-    mountManualOperation(app, spec, (c, ctx) => serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx), server), runtime, {
+    mountManualOperation(app, spec, serve, runtime, {
       rateLimitPerMinute: options.rateLimitPerMinute,
       timeoutSeconds: options.timeoutSeconds,
     });
@@ -766,16 +1005,49 @@ function routerTools<E extends Env>(
           name: tool.name,
           ...(tool.title !== undefined ? { title: tool.title } : {}),
           ...(tool.description !== undefined ? { description: tool.description } : {}),
-          inputSchema: tool.inputSchema,
+          inputSchema: tool.confirm ? withConfirmationArgument(tool.inputSchema) : tool.inputSchema,
           ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {}),
           ...(tool._meta !== undefined ? { _meta: tool._meta } : {}),
         })),
+    confirms: name => {
+      const entry = byName.get(name);
+      return entry?.tool.confirm && offered(entry.spec) ? entry.tool : undefined;
+    },
     call: async (name, args) => {
       const entry = byName.get(name);
       if (!entry || !offered(entry.spec)) throw new McpUnknownToolError(`${mount.api} has no tool ${JSON.stringify(name)}`);
       const request = toolRequest(entry.tool, entry.spec, args, c.req.raw, ctx);
       if (request instanceof HttpProblem) return { problem: problemBody(request, ctx.requestId) };
       return outcomeOf(await app.fetch(request, c.env), ctx.requestId, new URL(request.url).pathname);
+    },
+  };
+}
+
+/**
+ * Who is calling, which a confirmation is bound to (D93): the principal's
+ * subject and the calling service's deployable the gate established, as
+ * JSON, null for each it did not.
+ */
+function callerOf(ctx: RequestContext): string {
+  return JSON.stringify([ctx.principal?.subject ?? null, ctx.serviceCaller?.deployable ?? null]);
+}
+
+/**
+ * The input schema of a tool that confirms (D93), with the optional
+ * argument a confirmation token comes back in, so a client that checks
+ * arguments against it sends the token, and a model reads where it goes.
+ */
+function withConfirmationArgument(inputSchema: unknown): unknown {
+  if (!isObject(inputSchema)) return inputSchema;
+  const properties = isObject(inputSchema.properties) ? inputSchema.properties : {};
+  return {
+    ...inputSchema,
+    properties: {
+      ...properties,
+      [MCP_CONFIRMATION_ARGUMENT]: {
+        type: 'string',
+        description: 'The confirmation token a call of this tool answered with confirmation_required, sent once the person confirms the call; leave it out to ask for one.',
+      },
     },
   };
 }
