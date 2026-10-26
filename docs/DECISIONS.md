@@ -11716,3 +11716,116 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D86. A DB service declares its reports as named SQL, checked against Postgres into a lock and run by both ORMs as typed functions
+
+The largest block of hand-written code left in a real application was
+reporting SQL: a dashboard's totals rolled up to a parent category, its
+`generate_series` time buckets, its transaction list, a transfer
+matcher's candidates. Repositories express no `GROUP BY` or aggregate, and
+projections (`reference/projections.md`) are views for external readers,
+with no language type. So the SQL was raw strings on `Deps.db`: nothing
+checked it against the schema, so a renamed column broke it at run time;
+each row needed a hand-picked `decodeRow` descriptor; and an optional
+filter or a sort column was spliced in by hand.
+
+This entry adds:
+- `@query<Params, Row>({ name, sql, notNull, orderBy, page, dialects })`
+  from `@superschematic/db`, carried in the IR as a `RoleQuery` type;
+- the `:name` rewrite to positional parameters, written once in
+  `sqlutil.QueriesOf`, which `orm.queries` in TypeScript and `Queries` in
+  Go both run;
+- `superschematic queries verify`, which prepares each statement on
+  Postgres through `superschematic-migrate describe` and writes
+  `queries.lock`, which `check` and `build` hold the queries to with no
+  database;
+- the re-verification of a Postgres `migrate plan`.
+
+### The declaration
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@query<Params, Row>(options)` sits on a class of its own with no field, as the requirement's draft has it. The class is a `RoleQuery` type, which no generator makes a table or a language type of, as a projection is none (`ir.RoleQuery`, `TypeDef.Query`). `name` is the class's in lower camel case unless set. | The declaration on the row class, `@query<Params>` on `CategoryTotalsRow`, one class fewer, which ties a row type to one query and reads as a table to an author who knows that every class of a DB schema is one. |
+| `Params` and `Row` are a class or an object type alias of the schema (`DecoratorSpec.typeArgAliases`). A class `@query` names becomes an embedded struct after the walk (`tsreader.finishQueries`), so every language's types declare it, with its validators; verification refuses one that carries a table's declarations (`@key`, `@index`, `@table`, a relation), which a table named by mistake would. The writer writes them back as object type aliases, the form a DB schema reads an embedded struct in. | A decorator of their own (`@queryParams`), a declaration per type of what the query already says. Leaving them tables, two tables per query. |
+| A field holds a scalar, an enum, a list of either, a JSON value or a vector (`sqlutil.QueryValueProblem`); a map, a list of lists, a union, an object type, a relation, an `Encrypted<T>` field, a POINT and an INTERVAL fail the load, naming the fix. | Every field kind a table holds, which the Go side would need the repositories' per-kind scan machinery for; the kinds left are rare in a report. |
+| Verification (`verify.checkQueries`) checks what holds with no database: the name, the types, every `:name` a params field and every params field used, the hints, the order and the page, and a query's dialects listing postgres. The SQLite model refuses a query that runs on sqlite, naming the fix, as it refuses a vector column (D84). | Checking the SQL's text against the model in the compiler, which needs a Postgres parser and type system the compiler does not hold. |
+
+### Parameters
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil.ScanQuery` reads `:name` outside strings (`E''` escapes among them), quoted identifiers, dollar-quoted bodies and comments, skipping a `::` cast, with the tokenizer `@rawSql` splits statements with (D83). A positional `$1` and a second statement are refused; one trailing semicolon is allowed. | A Postgres parser (`pg_query`), a cgo dependency for one rewrite. `$1` positionals as written, which a reader matches to fields by count. |
+| A name is one parameter however often it is written, numbered by first use: `(:ids::uuid[] IS NULL OR id = ANY(:ids))` binds one list, so an optional filter is one field. | A parameter per use, which binds a list twice. |
+| The statement is a format string, as a table's are (D79): `%%` a literal `%`, `%s` an order's fragment, `%d` a page's rows. TypeScript fills it with `fill`, Go with `fmt.Sprintf`, or holds it as a constant when there is no order. | |
+| TypeScript binds each parameter through `encodeParam` with the codec flags of a column of its type, so a base62 UUID binds hyphenated and a list as an array. Go binds as its repositories do (`ToUUID`, `time.Time`), and a nil pointer, a nil list and the empty text of a `Nullable<string>`, whose Go type holds no null, as SQL NULL. | |
+
+### Rows and nullability
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A result column is the row field whose column it is: its name in snake case, or its `@column`, which a row field takes. TypeScript decodes a row through `decodeRow` and the fields' flags; Go maps each column by name at run time (`rows.FieldDescriptions`), so the generated code needs no database to know the order. | The described column order recorded in the lock and generated into Go, which ties the build to a verify. `pgx.RowToStructByName`, which needs `db` tags the types do not carry. |
+| A row field that is not `Nullable<T>` must read a column that comes straight from a `NOT NULL` column (the field's table OID and attribute number pgconn describes, then `attnotnull`), unless the query vouches for it with `notNull` or a `-- @notNull a, b` comment. Postgres reports a column of a `LEFT JOIN`ed table as its table's, so a column of a table after `LEFT JOIN`, and of any table of a query with a `RIGHT` or `FULL JOIN`, counts as nullable. | Trusting the table column alone, which lets a missing category through a `LEFT JOIN` as a non-null name. Parsing the join tree, for the rare query that joins one table both ways. |
+| Types compare by family (`queryverify.compatible`), as the codec reads each: text (`text`, `varchar`, `citext`, an enum), integers, floats, `numeric`, `uuid`, `timestamptz`, `date`, `bool`, JSON and `vector`, a list or not. A `SUM` of a `BIGINT` is a `NUMERIC`, which a `Finance.SignedMoney` is not, so the query casts it. | The exact type, which would refuse an `int4` count under a `Generic.Int64`. Any type, leaving the codec to decode a `NUMERIC` sum as text under a number. |
+
+### Order and pages
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `orderBy: { param, options, default? }`: the parameter, an enum of the schema whose values are exactly the options, stands in the SQL where `ORDER BY`'s terms go, and its value's fixed fragment takes its place. A value no option names is refused before a statement is sent; a null one picks `default`. Verification prepares every option. | Appending `ORDER BY` to the SQL, which cannot sit before a `LIMIT` and hides where the order goes. A string parameter, which leaves the set of orders to the runtime. |
+| `page: { key, desc? }` runs the query as a subquery ordered by its key, its after predicate a row comparison over the key's columns, bound after the query's own parameters, and a page of `limit + 1` rows telling whether another follows, as `findPage` reads one (D60). The key is required row fields of one value each; a paged query takes no `orderBy`. | Splicing the predicate into the author's `WHERE`, which needs a parser. A sort parameter with the page, which `findPage` keys by a row's id and a report's row has none. |
+
+### Verification and the lock
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic queries verify <db-service-dir>` generates the service's `create.sql`, applies it to a database of its own on Postgres, prepares each statement (every order's, both of a page's) and judges what Postgres described (`queryverify.Judge`). Each problem names its query. | Checking the statements against the model without Postgres, which would reimplement Postgres's resolution of names, operators and types. |
+| The migration runner prepares the statements (`superschematic-migrate describe`, `postgres.Describe`): the compiler writes a describe document, the runner creates a database, applies the DDL, prepares, describes each parameter and column with `format_type` and `pg_attribute`, drops the database and prints the result, and the compiler judges it. The two JSON forms are written in each module and held together by `runtime/migrate/testdata/describe`. | pgx in the compiler's module, which keeps the drivers out of its module graph (D27, Apply). |
+| The Postgres is `--database-url`, a server whose role may create a database, else `SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else one `verify` runs in Docker for the run: the image `stack dev` runs, pgvector's when a table has a vector column (`queryverify.StartPostgres`), ready once `pg_isready` answers on TCP. | Docker alone, which CI and the tests would have to provide. A database of the user's to apply the DDL in, which a verify would leave changed. |
+| `queries.lock` beside the schema config holds, per query, the SHA-256 of what was verified and what Postgres described of its parameters and columns. The hash covers its statements, the SQL types of its parameters and row fields, which fields may be null, what it vouches for, and the shape of each table of the schema its SQL names (`QueryModel.Tables`: each column's name, type and nullability). `check` and `build` (`generator.generateSQL`) fail, naming the query and the command, for a query the lock holds no entry for, one whose hash differs and an entry for a query gone, so renaming `line_item.amount` makes every query that names `line_item` stale with no database. | The statement alone, which a rename of a column it reads leaves current. The whole `create.sql`, which would make every DB change, a default's among them, re-verify every query. The described types alone, which need a database to compare. |
+| A Postgres `migrate plan` of a service with queries verifies them on the new version's `create.sql` before it prints, reaching Postgres as `verify` does, and fails naming each query that no longer holds; it writes no lock, and `--print-model` verifies nothing. | Reading which columns each query depends on (`pg_depend` of a SQL-standard function body) into the lock and checking a plan's drops and renames offline, which a function's type rules make fragile. A step in the plan, which runs at deploy, after the servers it would have caught were built. |
+
+### What both ORMs carry
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| TypeScript: `orm.ts` declares `<Db>Queries`, a typed function per query over the params and row types of `./types`, `<Name>QueryPageKey` for a paged one, and the queries as data (`<db>Queries`: the statement, the codec's descriptor of each parameter and row field, the order, the page). `<Db>Repositories` holds them as `queries`, so `deps.orm.queries` and `tx.queries` are typed through `Orm<R>` and `OrmTx<R>` unchanged. The runtime's `queriesOf` (`./postgres`) runs them over the ORM's runner, with its type parsers, in the transaction when there is one. `queries` joins `ORM_MEMBERS`. | A member of `Orm` itself, a type parameter on every ORM type. Generated code per query, beside a runtime that already runs a table's statements as data (D79). |
+| Go: `queries.go` gives `Queries` a method per query, `db.Queries` and `tx.Queries` (and `GetQueries()` on both interfaces, the no-op ones answering no rows), and `<Name>PageKey`, `<Name>Page` and `QueryPageOptions[K]` for a paged one. | |
+| `TestQueriesParityOfGoAndTypeScriptOnPostgres` holds the two to the same statements, call by call. | |
+
+Status: built.
+- **The acceptance:** fixture-queries-db declares the dashboard's category
+  totals, its `generate_series` time buckets and its paged transaction
+  list, an enum-ordered list, budgets with decimals and dates, and the
+  transfer candidates as `@query`. `TestRepositoriesOnPostgres/fixture-queries-db`
+  (`queries.test.ts`) runs each from TypeScript with typed params and
+  rows, on the pool and in a transaction, and refuses an order no option
+  names before a statement is sent; `TestDeclaredQueriesOnPostgres`
+  (ormgen) runs each from Go; `TestQueriesParityOfGoAndTypeScriptOnPostgres`
+  holds the two to one set of statements.
+  `TestQueriesVerifyAndARenamedColumn` (cli) verifies the fixture into the
+  lock it commits, then renames `line_item.amount`: `check` and `build`
+  fail on the stale lock, and `queries verify` and `migrate plan` fail
+  naming `categoryTotals`, `transactionList` and `transferCandidates`.
+- **Verification:** `TestCheckQueries` and `TestColumnOnARowField` hold
+  the load's refusals; `TestScanQuery` and `TestQueriesOf` the scanner and
+  the statements; `TestJudge`, `TestCompatible`, `TestCheckLock` and
+  `TestFixtureLockIsCurrent` the judgement and the lock;
+  `TestQueriesVerifyNamesWhatDoesNotHold` an outer join's column under a
+  required field, a computed column no hint vouches for, a type of another
+  family and an extra column, on Postgres; `TestDescribeOnPostgres` and
+  `TestDescribeDocumentForm` (runtime/migrate/go) and
+  `TestDescribeDocumentMatchesTheRunner` the runner's side and the two
+  JSON forms; `TestVerifyFixtureOnPostgres -update` writes the fixture's
+  lock.
+- **The forms:** `TestQueriesRoundTrip` writes the fixture to TypeScript,
+  JSON and YAML and reads back the same IR; the goldens of
+  fixture-queries-db's DDL, Go ORM and TypeScript types;
+  `TestSQLiteRefusals`' declared query.
+
+Left: queries on SQLite and D1; the field kinds no query codec reads
+(maps, lists of lists, unions, POINT, INTERVAL, encrypted fields); a sort
+parameter on a paged query; a raw SQL piece or a view a query reads, whose
+change the lock does not see; nullability finer than an outer join's
+table; queries in Rust and Python; `queries verify` in a generated CI
+workflow, which a project adds itself for now (the command, then `git diff
+--exit-code`).

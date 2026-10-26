@@ -21,9 +21,9 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+The core has fifteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
-`new`, `stack` and `identity` groups, beside cobra's own `help` and
+`new`, `queries`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. `--version` prints the binary's name and release,
 `superschematic version 1.2.3`, or `0.0.0` for a binary built from a
 checkout; a generated workflow checks the binary it installs with it. The
@@ -132,7 +132,11 @@ edit's verdict comes back in tens of milliseconds instead of a build's
 seconds (D72). Check reads each service through the loader every build
 command uses: the TypeScript compiler's diagnostics, the data forms' schema
 checks, the config rules (D34), the registry's kind, decorator and check
-rules, and the verification pass, warnings included. It writes nothing
+rules, and the verification pass, warnings included. A DB service's
+declared queries are held to its `queries.lock`, which
+[`queries verify`](#queries-verify-service-dir) writes; a query the lock
+does not hold, as it is now, is an error on the lock, as it fails `build`
+too. It writes nothing
 under the output root. Like a build it writes each service's sentinel,
 `src/service.generated.ts`, the handle other services' configs import,
 when it is missing or stale.
@@ -538,6 +542,13 @@ version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
 
+A Postgres plan of a service that declares queries (`@query`) prepares
+each of them on the new version's `create.sql` before it prints, as
+[`queries verify`](#queries-verify-service-dir) does, and fails naming
+each query that no longer prepares or no longer returns its row. It
+reaches Postgres through `--database-url`, else
+`SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Docker, and writes no lock.
+
 After a rollout that failed between a plan's phases, the database holds
 the model between them. Plan from that model (`--from <model.json>`, as
 `superschematic-migrate status --model` prints it): the new plan supersedes
@@ -569,6 +580,35 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
 | `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+
+## `queries verify <service-dir>`
+
+Prepare each declared query (`@query`) of the DB service on Postgres and
+write its `queries.lock` ([Declared queries](/superschematic/reference/declared-queries/#verification)).
+It applies the service's `create.sql` to a database of its own, prepares
+each statement of each query, every order's and both of a page's, and
+compares what Postgres describes with the declared types: each
+parameter's type, each result column's name and type, and that a row
+field that is not `Nullable<T>` reads a column that is never null. Each
+problem names its query; a statement Postgres refuses is reported with
+its message. With none it writes `queries.lock` beside the schema config,
+which `check` and `build` then hold the queries to with no database; a
+service with no queries has its lock removed.
+
+The statements are prepared by the migration runner,
+`superschematic-migrate describe`, on `PATH` or where
+`SUPERSCHEMATIC_MIGRATE` names it.
+
+```
+superschematic queries verify ./schemas/services/finances-db
+superschematic queries verify ./schemas/services/finances-db --database-url postgres://postgres:secret@localhost:5432/postgres
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database: verify creates one there and drops it. Without either, it runs the image `stack dev` runs, pgvector's when a table has a vector column |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## `json-schema`
