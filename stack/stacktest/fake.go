@@ -123,6 +123,21 @@ const (
 	// as BundlePlatform's, for a job. CronD1Connector reaches from it.
 	CronPlatform = "fake.cron"
 
+	// DrainPlatform runs TypeScript workers whose artifact is a bundle, as
+	// the cloudflare target runs a worker's Worker under a Cron Trigger
+	// that drains its queue (D92): the same script as BundlePlatform's,
+	// for a worker. DrainHyperdriveConnector reaches from it.
+	DrainPlatform = "fake.drain"
+
+	// BundleHyperdriveConnector, CronHyperdriveConnector and
+	// DrainHyperdriveConnector connect a server on BundlePlatform, a job
+	// on CronPlatform and a worker on DrainPlatform to a database on
+	// SQLPlatform as a Worker reaches Postgres through Hyperdrive (D92):
+	// through a binding named after the field, of a config's id.
+	BundleHyperdriveConnector = "fake.bundle-hyperdrive"
+	CronHyperdriveConnector   = "fake.cron-hyperdrive"
+	DrainHyperdriveConnector  = "fake.drain-hyperdrive"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -336,6 +351,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerBundle,
 		},
+		{
+			Name:      DrainPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerBundle,
+		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
 		{
@@ -457,6 +482,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: WorkerLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
+		{Name: BundleHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: CronHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: DrainHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: DrainPlatform, To: SQLPlatform, Connect: connectHyperdrive},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
@@ -1051,6 +1079,16 @@ func connectD1(ctx registry.ConnectorContext) (registry.Connected, error) {
 	return registry.Connected{Value: ir.DatabaseConnection{D1: &ir.D1Connection{
 		Binding:  ctx.Edge.Field,
 		Database: ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
+	}}}, nil
+}
+
+// connectHyperdrive derives the Hyperdrive binding a Worker reaches a
+// Postgres database through (D92): named after the field, of a config's
+// id, an output of the schema's database.
+func connectHyperdrive(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{Hyperdrive: &ir.HyperdriveConnection{
+		Binding: ctx.Edge.Field,
+		Config:  ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
 	}}}, nil
 }
 

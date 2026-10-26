@@ -1,0 +1,140 @@
+name: ts-ledger
+kind: API
+imports:
+  - package: "@schemas/ts-ledger-db"
+    types: [EmbedLineItem, SyncRequested]
+types:
+  CategoryView:
+    name: CategoryView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: slug
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+  LineItemView:
+    name: LineItemView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: category
+        typeRef: { name: string }
+  NeighboursView:
+    name: NeighboursView
+    role: APIView
+    fields:
+      - name: names
+        typeRef: { name: string, isArray: true }
+        required: true
+  SyncView:
+    name: SyncView
+    role: APIView
+    fields:
+      - name: itemId
+        typeRef: { name: string }
+        required: true
+      - name: enqueued
+        typeRef: { name: boolean }
+        required: true
+  # What the tester reads of the database: its queues' rows, the
+  # embeddings and the sync runs, as JSON.
+  StateView:
+    name: StateView
+    role: APIView
+    fields:
+      - name: json
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Ledger
+    operations:
+      - name: createCategory
+        typeRef: { name: CategoryView }
+        required: true
+        httpMethod: POST
+        restPath: categories
+        arguments:
+          - name: slug
+            typeRef: { name: string }
+            required: true
+          - name: name
+            typeRef: { name: string }
+            required: true
+      # A line item with a category enqueues its embedding through
+      # LineItem's trigger, whatever writes it.
+      - name: createLineItem
+        typeRef: { name: LineItemView }
+        required: true
+        httpMethod: POST
+        restPath: line-items
+        arguments:
+          - name: name
+            typeRef: { name: string }
+            required: true
+          - name: category
+            typeRef: { name: string }
+      - name: setCategory
+        typeRef: { name: LineItemView }
+        required: true
+        httpMethod: PUT
+        restPath: line-items/{id}/category
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: category
+            typeRef: { name: string }
+            required: true
+      # The line items whose embeddings are nearest a vector, nearest
+      # first: nearest, through the HNSW index (D84).
+      - name: neighbours
+        typeRef: { name: NeighboursView }
+        required: true
+        httpMethod: POST
+        restPath: neighbours
+        arguments:
+          - name: vector
+            typeRef: { name: string }
+            required: true
+      # Enqueues a sync in a transaction that writes nothing else, or with
+      # rollback in one that rolls back, which leaves no message.
+      - name: requestSync
+        typeRef: { name: SyncView }
+        required: true
+        httpMethod: POST
+        restPath: syncs
+        arguments:
+          - name: itemId
+            typeRef: { name: string }
+            required: true
+          - name: reason
+            typeRef: { name: string }
+            required: true
+          - name: rollback
+            typeRef: { name: boolean }
+      - name: state
+        typeRef: { name: StateView }
+        required: true
+        httpMethod: GET
+        restPath: state
+# The embedding worker drains EmbedLineItem; the sync worker drains
+# SyncRequested, one claim per item at a time, two items at once.
+workers:
+  - name: EmbedLineItems
+    queue: EmbedLineItem
+    concurrency: 2
+    grace: 2s
+  - name: SyncItems
+    queue: SyncRequested
+    concurrency: 2
+    grace: 2s

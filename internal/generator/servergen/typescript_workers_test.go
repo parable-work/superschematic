@@ -108,8 +108,17 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		o.Deps.Dialect = "sqlite"
 		c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
 	}
-	if s, err := servergen.PlanTypeScript(input(sqliteDB)); err != nil || len(s.SQLiteDatabases()) != 1 {
+	if s, err := servergen.PlanTypeScript(input(sqliteDB)); err != nil || len(s.SQLiteDatabases()) != 1 || s.NodeCompat() {
 		t.Fatalf("a server on Workers over a D1 database = %+v, %v", s, err)
+	}
+	// A database that lists postgres first, which a Worker reaches through
+	// its Hyperdrive binding, with Node's modules (D92).
+	postgresDB := func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+		o.Deps.Database = "shop-db"
+		c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
+	}
+	if s, err := servergen.PlanTypeScript(input(postgresDB)); err != nil || len(s.PostgresDatabases()) != 1 || !s.NodeCompat() {
+		t.Fatalf("a server on Workers over a Postgres database = %+v, %v", s, err)
 	}
 	for _, tc := range []struct {
 		name   string
@@ -118,17 +127,9 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		want   string
 		engine bool
 	}{
-		{"a Postgres database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
-			o.Deps.Database = "shop-db"
-			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, false, "server shop-api serves shop-api, whose database shop-db lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone", false},
 		{"the identity runtime", func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
 		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run", false},
-		{"a job's Postgres database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
-			o.Deps.Database = "shop-db"
-			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, true, "job shop-api of shop-api, whose database shop-db lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone", false},
 		{"an engine database", sqliteDB, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the server on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the server on a platform that builds an image", true},
 		{"a job's engine database", sqliteDB, true, "job shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the job on a platform whose artifact is a bundle", true},
 		{"an engine database that lists postgres first", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {

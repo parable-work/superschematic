@@ -1,0 +1,10 @@
+# The database of ts-ledger, on Postgres alone, which a Worker reaches
+# through Hyperdrive (D92): its TypeScript types export the repositories
+# ts-ledger's Deps.orm holds and the queues its workers claim.
+name: ts-ledger-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+  sql: { dialects: [postgres] }

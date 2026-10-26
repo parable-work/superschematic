@@ -74,27 +74,47 @@ const scopes = new AsyncLocalStorage<Map<HyperdrivePool, Pool>>();
 const ending = new WeakSet<Pool>();
 
 /**
+ * How long a scope's end waits for its pools: pg ends a pool once each
+ * connection is given back, and one that a handler which ignored its
+ * signal still holds would keep the scope from ending. The invocation's
+ * end closes such a connection's socket.
+ */
+export const END_WAIT_MS = 5_000;
+
+/**
  * Runs run in a scope of its own: each Hyperdrive pool it queries opens a
  * pool for it, which every query, connect and transaction of the scope
- * shares, and which the scope ends when run settles. waitUntil, a Worker's
- * ctx.waitUntil, takes the ending, so the response does not wait for it;
- * without one the scope awaits it. A scope within a scope has pools of its
- * own.
+ * shares, and which the scope ends when run settles, waiting at most
+ * END_WAIT_MS. waitUntil, a Worker's ctx.waitUntil, takes the ending, so
+ * the response does not wait for it; without one the scope awaits it. A
+ * scope within a scope has pools of its own.
  */
 export async function withHyperdrive<T>(run: () => T | Promise<T>, waitUntil?: (promise: Promise<unknown>) => void): Promise<T> {
   const pools = new Map<HyperdrivePool, Pool>();
   try {
     return await scopes.run(pools, run);
   } finally {
-    const ended = Promise.all(
-      [...pools.values()].map(pool => {
-        ending.add(pool);
-        return pool.end().catch(() => undefined);
-      })
-    ).then(() => undefined);
+    const ended = endPools([...pools.values()]);
     if (waitUntil) waitUntil(ended);
     else await ended;
   }
+}
+
+/** Ends pools, waiting for them at most END_WAIT_MS; never rejects. */
+async function endPools(pools: readonly Pool[]): Promise<void> {
+  if (pools.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, END_WAIT_MS);
+  });
+  const all = Promise.all(
+    pools.map(pool => {
+      ending.add(pool);
+      return pool.end().catch(() => undefined);
+    })
+  );
+  await Promise.race([all, waited]);
+  clearTimeout(timer);
 }
 
 /** A pg Pool whose connections each scope opens and ends (hyperdrivePool). */

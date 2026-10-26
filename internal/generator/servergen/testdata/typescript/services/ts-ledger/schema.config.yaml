@@ -1,0 +1,11 @@
+# A finance-like TypeScript API over ts-ledger-db, a Postgres database, on
+# Cloudflare Workers (D92): its server and its two workers reach the
+# database through Hyperdrive.
+name: ts-ledger
+kind: API
+dependencies:
+  - { name: ts-ledger-db, kind: DB }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

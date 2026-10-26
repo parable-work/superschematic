@@ -4,7 +4,11 @@
 // {{ tsServiceList .APIs }} (docs/stack-model.md, section 18.5). superschematic writes
 // it beside main.ts, which stack dev runs on Bun, because an environment of
 // the stack places the server on Cloudflare Workers; bundle.ts bundles it
+{{- if .NodeCompat }}
+// for workerd, with Node's modules, which node-postgres needs (D92).
+{{- else }}
 // for workerd, with no Node API but AsyncLocalStorage, under nodejs_als.
+{{- end }}
 //
 // When Cloudflare loads the version, fetch.ts reads each API's config from
 // the Worker's string bindings, so a refused config fails the version's
@@ -15,6 +19,14 @@
 // every API's router on one Hono app beside /healthz and /readyz. Each
 // request goes to that app with the client's address, which Cloudflare
 // gives in CF-Connecting-IP.
+{{- if .PostgresDatabases }}
+//
+// A database whose DB service lists postgres first is reached through the
+// Hyperdrive config its connection names (D92): Deps.db is a pg Pool over
+// the Worker's hyperdrive binding, which connects within a request alone, so
+// each request opens its connections through Hyperdrive and ends them after
+// its response.
+{{- end }}
 //
 // Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
 // when the Worker's OTEL_ bindings name an endpoint, it makes each request
@@ -34,7 +46,7 @@
 
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
-import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
+import { {{ join .WorkersRuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 import { startWorkersTelemetry } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers-telemetry';
@@ -44,6 +56,12 @@ import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- if .SQLiteDatabases }}
 import { ping, type SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
 {{- end }}
+{{- if .PostgresDatabases }}
+import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hyperdrive';
+import { ping as pingPool } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import type { Pool } from 'pg';
+{{- end }}
+{{- template "ts-orm-imports" . }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
@@ -128,6 +146,15 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
 {{- end }}
 {{- end }}
+{{- if .PostgresDatabases }}
+
+  // One pool per Postgres database, shared by every API on it, over the
+  // hyperdrive binding its connection names (D92): it connects within a
+  // request alone, and the request's end ends its connections.
+{{- range .PostgresDatabases }}
+  const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
 {{- if .SQLiteDatabases }}
 
   // One D1 database per database, shared by every API on it, through the
@@ -138,18 +165,23 @@ async function build(): Promise<Handle> {
 {{- end }}
 {{- end }}
 {{- template "ts-workers-memory-stores" . }}
-{{- if or .ReadsBindings .Clients .Buckets .SQLiteDatabases }}
+{{- if or .ReadsBindings .Clients .Buckets .Databases }}
 {{ end }}
   const app = new Hono();
   app.use(telemetry.middleware());
   app.get('/healthz', c => c.json({ status: 'ok' }));
-{{- if .SQLiteDatabases }}
+{{- if .Databases }}
+{{- if .PostgresDatabases }}
+  // Ready while each database answers SELECT 1 within two seconds: a
+  // Postgres one through Hyperdrive{{ if .SQLiteDatabases }}, a D1 one through its binding{{ end }}.
+{{- else }}
   // Ready while each D1 database answers SELECT 1 within two seconds.
+{{- end }}
   app.get('/readyz', async c => {
     const unavailable: string[] = [];
     await Promise.all([
-{{- range .SQLiteDatabases }}
-      ping({{ .Var }}).catch((error: unknown) => {
+{{- range .Databases }}
+      {{ if .SQLite }}ping({{ .Var }}){{ else }}pingPool({{ .Var }}, 2000){{ end }}.catch((error: unknown) => {
         logger.warn('not ready', { dependency: {{ tsQuote .Service }}, error });
         unavailable.push({{ tsQuote .Service }});
       }),
@@ -212,6 +244,34 @@ async function build(): Promise<Handle> {
 
 /** The server, built on an isolate's first request, and again after a failure. */
 const server = perIsolate(build);
+{{- if .PostgresDatabases }}
+
+export default {
+  async fetch(request: Request, _env: unknown, ctx: ExecutionContext): Promise<Response> {
+    // The request opens its database connections through Hyperdrive and
+    // ends them after its response: a Worker may not use one request's
+    // socket in another (D92).
+    return withHyperdrive(() => respond(request, ctx), promise => ctx.waitUntil(promise));
+  },
+};
+
+/** Answers a request with the server the isolate built, building it first when it has not. */
+async function respond(request: Request, ctx: ExecutionContext): Promise<Response> {
+  let handle: Handle;
+  try {
+    handle = await server();
+  } catch (error) {
+    logger.error('server did not start', { error });
+    return new Response(JSON.stringify({ status: 'unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } });
+  }
+  try {
+    return await handle(request);
+  } finally {
+    // The spans the request ended go out after its response.
+    ctx.waitUntil(telemetry.flush());
+  }
+}
+{{- else }}
 
 export default {
   async fetch(request: Request, _env: unknown, ctx: ExecutionContext): Promise<Response> {
@@ -230,10 +290,15 @@ export default {
     }
   },
 };
+{{- end }}
 
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .PostgresDatabases }}
+
+{{ template "ts-hyperdrive" . }}
+{{- end }}
 {{- if .SQLiteDatabases }}
 
 /**
