@@ -19,6 +19,7 @@ type AgentRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *AgentFilter, opts *AgentPageOptions) (*AgentPage, error)
 	CreateOne(ctx context.Context, input *types.Agent) (*types.Agent, error)
 	CreateMany(ctx context.Context, inputs []*types.Agent) ([]*types.Agent, error)
+	UpsertOne(ctx context.Context, input *types.Agent, on AgentUniqueKey, update *AgentUpdate) (*types.Agent, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *AgentUpdate) (*types.Agent, error)
 	UpdateMany(ctx context.Context, filter *AgentFilter, update *AgentUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -34,6 +35,7 @@ type CustomerRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *CustomerFilter, opts *CustomerPageOptions) (*CustomerPage, error)
 	CreateOne(ctx context.Context, input *types.Customer) (*types.Customer, error)
 	CreateMany(ctx context.Context, inputs []*types.Customer) ([]*types.Customer, error)
+	UpsertOne(ctx context.Context, input *types.Customer, on CustomerUniqueKey, update *CustomerUpdate) (*types.Customer, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CustomerUpdate) (*types.Customer, error)
 	UpdateMany(ctx context.Context, filter *CustomerFilter, update *CustomerUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -156,6 +158,10 @@ func (r *NoOpAgentRepository) CreateMany(_ context.Context, inputs []*types.Agen
 	return inputs, nil
 }
 
+func (r *NoOpAgentRepository) UpsertOne(_ context.Context, input *types.Agent, _ AgentUniqueKey, _ *AgentUpdate) (*types.Agent, error) {
+	return input, nil
+}
+
 func (r *NoOpAgentRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *AgentUpdate) (*types.Agent, error) {
 	return nil, ErrNotFound
 }
@@ -212,6 +218,10 @@ func (r *NoOpCustomerRepository) CreateMany(_ context.Context, inputs []*types.C
 		return []*types.Customer{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpCustomerRepository) UpsertOne(_ context.Context, input *types.Customer, _ CustomerUniqueKey, _ *CustomerUpdate) (*types.Customer, error) {
+	return input, nil
 }
 
 func (r *NoOpCustomerRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CustomerUpdate) (*types.Customer, error) {

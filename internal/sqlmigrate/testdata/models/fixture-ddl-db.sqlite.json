@@ -90,7 +90,8 @@
           ],
           "expression": "lower(label)",
           "method": "BTREE",
-          "name": "idx_category_label_lower"
+          "name": "uq_category_label_lower",
+          "unique": true
         }
       ],
       "kind": "entity",
@@ -147,6 +148,19 @@
           "name": "posted_at",
           "origin": "LineItem.postedAt",
           "type": "TEXT"
+        },
+        {
+          "name": "external_id",
+          "nullable": true,
+          "origin": "LineItem.externalId",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "merchant",
+          "nullable": true,
+          "origin": "LineItem.merchant",
+          "type": "TEXT"
         }
       ],
       "foreignKeys": [
@@ -170,6 +184,15 @@
           "inTransaction": true,
           "method": "BTREE",
           "name": "idx_line_item_posted_at"
+        },
+        {
+          "columns": [
+            "external_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_line_item_external",
+          "unique": true,
+          "where": "external_id IS NOT NULL"
         }
       ],
       "kind": "entity",

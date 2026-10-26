@@ -618,7 +618,7 @@ var {{ .TypeName }}QuotedFields = map[string]string{
 // are the only text of a sort that reaches its SQL (D60, amended).
 var {{ lowerFirst .TypeName }}SortColumns = map[{{ .TypeName }}SortField]struct{ sql, key string }{
 	{{- range .SortFields }}
-	{{ $.TypeName }}SortBy{{ toGoName .Name }}: {`{{ $.QuotedTableName }}.{{ .QuotedDBName }}`, `page_key.{{ .QuotedDBName }}`},
+	{{ $.TypeName }}SortBy{{ toGoName .Name }}: { {{- goRawString .SQL.Qualified }}, {{ goRawString .SQL.PageKey -}} },
 	{{- end }}
 }
 
@@ -1012,14 +1012,14 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 			return nil, err
 		}
 		selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
-		query = fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`, selectFields)
+		query = fmt.Sprintf({{ goRawString .SQL.GetOneFields }}, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }} FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+		query = {{ goRawString .SQL.GetOne }}
 	}
 
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Execute query
@@ -1342,10 +1342,10 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }} FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf({{ goRawString .SQL.GetMany }}, strings.Join(placeholders, ", "))
 
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Execute query
@@ -1469,7 +1469,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		selectFields = buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+		selectFields = {{ goRawString .SQL.Columns }}
 		if opts == nil {
 			opts = &{{ .TypeName }}FindOptions{}
 		}
@@ -1483,9 +1483,9 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
-			whereClause = " WHERE deleted_at IS NULL"
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
 		} else {
-			whereClause += " AND deleted_at IS NULL"
+			whereClause += {{ printf "%q" .SQL.Live }}
 		}
 	}
 	{{- end }}
@@ -1494,7 +1494,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	orderByClause := build{{ .TypeName }}OrderByClause(opts.OrderBy, `{{ .QuotedTableName }}`)
 
 	// Build query
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
+	query := fmt.Sprintf({{ goRawString .SQL.FindOne }}, selectFields, whereClause, orderByClause)
 
 	// Execute query
 	var row pgx.Row
@@ -1683,9 +1683,9 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
-			whereClause = " WHERE deleted_at IS NULL"
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
 		} else {
-			whereClause += " AND deleted_at IS NULL"
+			whereClause += {{ printf "%q" .SQL.Live }}
 		}
 	}
 	{{- end }}
@@ -1697,10 +1697,10 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
 	// Build query
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	query := fmt.Sprintf({{ goRawString .SQL.FindMany }}, selectFields, whereClause, orderByClause, limitOffsetClause)
 
 	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM {{ .QuotedTableName }}%s`, whereClause)
+	countQuery := fmt.Sprintf({{ goRawString .SQL.Count }}, whereClause)
 
 	var totalCount int
 	var countRow pgx.Row
@@ -2145,7 +2145,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	conditions := filter.conditions(&args, 0)
 	{{- if .HasSoftDelete }}
 	if !opts.IncludeDeleted {
-		conditions = append(conditions, `{{ .QuotedTableName }}.deleted_at IS NULL`)
+		conditions = append(conditions, {{ goRawString .SQL.LiveCondition }})
 	}
 	{{- end }}
 	comparison, direction := ">", "ASC"
@@ -2161,12 +2161,12 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`{{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} %s %s`, comparison, placeholder))
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfterKey }}, comparison, placeholder))
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }}) %s ((SELECT %s FROM {{ .QuotedTableName }} AS page_key WHERE page_key.{{ .QuotedPrimaryKey }} = %s), %s)`,
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfter }},
 				column.sql, comparison, column.key, placeholder, placeholder))
 		}
 	}
@@ -2174,11 +2174,11 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
-	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	orderByClause := fmt.Sprintf({{ printf "%q" .SQL.PageOrder }}, column.sql, direction)
 	if !byKey {
-		orderByClause += fmt.Sprintf(`, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} %s`, direction)
+		orderByClause += fmt.Sprintf({{ goRawString .SQL.PageTiebreak }}, direction)
 	}
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+	query := fmt.Sprintf({{ goRawString .SQL.Page }}, selectFields, whereClause, orderByClause, limit+1)
 
 	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
 	if err != nil {
@@ -2203,7 +2203,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 // pageKeyExists is nil when the table holds a row whose primary key is key,
 // soft-deleted or not, and ErrPageKey when it holds none.
 func (r *{{ .Name }}) pageKeyExists(ctx context.Context, key any) error {
-	query := `SELECT EXISTS (SELECT 1 FROM {{ .QuotedTableName }} WHERE {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} = $1)`
+	query := {{ goRawString .SQL.PageKeyExists }}
 	var row pgx.Row
 	if r.tx != nil {
 		row = r.tx.QueryRow(ctx, query, key)
@@ -2374,9 +2374,9 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	{{- end }}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	returningClause := {{ goRawString .SQL.Columns }}
 	query := fmt.Sprintf(
-		`INSERT INTO {{ .QuotedTableName }} (%s) VALUES (%s) RETURNING %s`,
+		{{ goRawString .SQL.Insert }},
 		strings.Join(fields, ", "),
 		strings.Join(placeholders, ", "),
 		returningClause,
@@ -2411,6 +2411,348 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 		{{ template "scanArgForMember" $member }}
 		{{- end }}
 	); err != nil {
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+	{{ template "nullablePostCopyMembers" .OrderedMembers }}
+
+	// Set relationship IDs from scanned FK values
+	{{- range $i, $rel := .Relationships }}
+	{{- if not $rel.IsArray }}
+	if tempRel{{ toGoName $rel.FieldName }} != nil {
+		{{- if $rel.IsRequired }}
+		result.{{ toGoName $rel.FieldName }}.Id = {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}
+		{{- else }}
+		// Initialize pointer for optional relationship before setting ID
+		result.{{ toGoName $rel.FieldName }} = &types.{{ $rel.TargetType }}{Id: {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}}
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+
+	return result, nil
+	{{- end }}
+}
+
+
+// {{ lowerFirst .TypeName }}UniqueKeys are the conflict targets of {{ .TypeName }}'s unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var {{ lowerFirst .TypeName }}UniqueKeys = map[{{ .TypeName }}UniqueKey]struct{ conflict, keep string }{
+	{{- range .UniqueKeys }}
+	{{ .Const }}: { {{- goRawString .Conflict }}, {{ goRawString .Keep -}} },
+	{{- end }}
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.{{ if .HasSoftDelete }} A soft-deleted row that holds the key is
+// left as it is, and UpsertOne returns ErrNotFound.{{ end }}
+func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &{{ .TypeName }}Update{}
+	}
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}GenericJSONElements(input); err != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	// Set audit fields
+	{{- range .Fields }}
+	{{- if eq .Name "createdBy" }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+	{{- end }}
+	{{- if eq .Name "updatedBy" }}
+	input.UpdatedBy = GetUserID(ctx)
+	{{- end }}
+	{{- end }}
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+
+	{{- range .Fields }}
+	{{- if and .IsPrimaryKey $.PrimaryKeyIsUUID }}
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey {{ $.UUIDGoType }}
+		if primaryKey, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName .Name }}); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `{{ .QuotedDBName }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	{{- end }}
+	{{- end }}
+
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsInternalMetadata) (ne .Name "createdAt") (ne .Name "updatedAt") }}
+	{{- if and .IsRequired (not .IsAutoGenerated) }}
+	// Required field: {{ .Name }}
+	fields = append(fields, `{{ .QuotedDBName }}`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	{{- if .IsJSONField }}
+	jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+	}
+	values = append(values, jsonValue{{ toGoName .Name }})
+	{{- else if .IsUUIDScalar }}
+	values = append(values, input.{{ toGoName .Name }}.ToUUID())
+	{{- else if .IsDateTimeScalar }}
+	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsGeoPoint }}
+	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsGeoPointList }}
+	values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsInterval }}
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.{{ toGoName .Name }}))
+	{{- else if .IsIntervalList }}
+	values = append(values, intervalList(input.{{ toGoName .Name }}))
+	{{- else if .EnumDefault }}
+	// An unset enum takes its schema default; "" is never a member.
+	if input.{{ toGoName .Name }} == "" {
+		values = append(values, {{ .GoType }}({{ printf "%q" .EnumDefault }}))
+	} else {
+		values = append(values, input.{{ toGoName .Name }})
+	}
+	{{- else }}
+	values = append(values, input.{{ toGoName .Name }})
+	{{- end }}
+	{{- else }}
+	// {{ if .IsAutoGenerated }}Auto-generated{{ else }}Optional{{ end }} field: {{ .Name }} - only add if set
+	{
+		{{- if .OptionalNilCheck }}
+		if input.{{ toGoName .Name }} != nil {
+		{{- else }}
+		if !reflect.ValueOf(input.{{ toGoName .Name }}).IsZero() {
+		{{- end }}
+			fields = append(fields, `{{ .QuotedDBName }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			{{- if .IsJSONField }}
+			jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+			}
+			values = append(values, jsonValue{{ toGoName .Name }})
+			{{- else if .IsUUIDScalar }}
+			values = append(values, input.{{ toGoName .Name }}.ToUUID())
+			{{- else if .IsDateTimeScalar }}
+			{{- if .DerefValue }}
+			values = append(values, time.Time(*input.{{ toGoName .Name }}))
+			{{- else }}
+			values = append(values, time.Time(input.{{ toGoName .Name }}))
+			{{- end }}
+			{{- else if .IsGeoPoint }}
+			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+			{{- else if .IsGeoPointList }}
+			values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+			{{- else if and .IsInterval .DerefValue }}
+			values = append(values, time.Duration(*input.{{ toGoName .Name }}))
+			{{- else if .IsInterval }}
+			values = append(values, time.Duration(input.{{ toGoName .Name }}))
+			{{- else if .IsIntervalList }}
+			values = append(values, intervalList(input.{{ toGoName .Name }}))
+			{{- else if .DerefValue }}
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.{{ toGoName .Name }})
+			{{- else }}
+			values = append(values, input.{{ toGoName .Name }})
+			{{- end }}
+		}
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	// Handle relationship foreign key columns
+	{{- range $i, $rel := .Relationships }}
+	{{- if not $rel.IsArray }}
+	// Relationship: {{ $rel.FieldName }} (FK: {{ $rel.DBColumnName }})
+	{
+		var zeroId {{ $.UUIDGoType }}
+		{{- if $rel.IsRequired }}
+		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+			fields = append(fields, "{{ $rel.DBColumnName }}")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+		{{- else }}
+		if input.{{ toGoName $rel.FieldName }} != nil {
+			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+			fields = append(fields, "{{ $rel.DBColumnName }}")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+			}
+		}
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .Name }} != nil && update.{{ toGoName .Name }}SetNull {
+		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .Name }}SetNull {
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
+	} else if update.{{ toGoName .Name }} != nil {
+	{{- else }}
+	if update.{{ toGoName .Name }} != nil {
+	{{- end }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
+		{{- if .IsJSONField }}
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+		}
+		values = append(values, jsonValue{{ toGoName .Name }})
+		{{- else if .IsUUIDScalar }}
+		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
+		{{- else if .IsDateTimeScalar }}
+		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsGeoPoint }}
+		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
+		{{- else if .IsGeoPointList }}
+		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
+		{{- else if .IsInterval }}
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.{{ toGoName .Name }}))
+		{{- else if .IsIntervalList }}
+		values = append(values, intervalList(*update.{{ toGoName .Name }}))
+		{{- else }}
+		values = append(values, *update.{{ toGoName .Name }})
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+
+	{{- range .Relationships }}
+	{{- if not .IsArray }}
+	// Handle relationship foreign key: {{ .FieldName }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .FieldName }}ID != nil && update.{{ toGoName .FieldName }}IDSetNull {
+		return nil, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .FieldName }}IDSetNull {
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
+	} else if update.{{ toGoName .FieldName }}ID != nil {
+	{{- else }}
+	if update.{{ toGoName .FieldName }}ID != nil {
+	{{- end }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
+		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
+	}
+	{{- end }}
+	{{- end }}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+		{{- range .Fields }}
+		{{- if eq .Name "updatedAt" }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
+		values = append(values, time.Now())
+		{{- end }}
+		{{- end }}
+
+		// Set updated_by
+		{{- range .Fields }}
+		{{- if eq .Name "updatedBy" }}
+		if update.UpdatedBy != nil {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
+			values = append(values, *update.UpdatedBy)
+		} else if HasUserID(ctx) {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
+			values = append(values, GetUserID(ctx))
+		}
+		{{- end }}
+		{{- end }}
+
+
+	}
+
+	query := fmt.Sprintf(
+		{{ goRawString .SQL.Upsert }},
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.{{ .TypeName }}{}
+	{{- if eq (len .OrderedMembers) 0 }}
+	return result, nil
+	{{- else }}
+	// Create temporary variables for nullable fields that need pointer scanning
+	{{ template "nullableTempVarsMembers" .OrderedMembers }}
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	{{- range $i, $member := .OrderedMembers }}
+	{{- if $member.IsRelationship }}
+	var tempRel{{ toGoName $member.Relationship.FieldName }} *{{ $.UUIDGoType }}
+	{{- end }}
+	{{- end }}
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+		{{- range $i, $member := .OrderedMembers }}
+		{{ template "scanArgForMember" $member }}
+		{{- end }}
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
 	}
 
@@ -2594,9 +2936,9 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	returningClauseMany := {{ goRawString .SQL.Columns }}
 	query := fmt.Sprintf(
-		`INSERT INTO {{ .QuotedTableName }} (%s) VALUES %s RETURNING %s`,
+		{{ goRawString .SQL.InsertMany }},
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
 		returningClauseMany,
@@ -2687,7 +3029,7 @@ func (r *{{ .Name }}) UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyT
 // ErrVersionConflict when the row exists at another version, ErrNotFound when
 // it does not exist{{ if .HasSoftDelete }} or is soft-deleted{{ end }}.
 func (r *{{ .Name }}) versionMiss(ctx context.Context, id {{ .PrimaryKeyType }}) error {
-	query := `SELECT _version FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1{{ if .HasSoftDelete }} AND deleted_at IS NULL{{ end }}`
+	query := {{ goRawString .SQL.Version }}
 
 	var version int64
 	var row pgx.Row
@@ -2724,13 +3066,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .Name }}SetNull {
-		setClauses = append(setClauses, `{{ .QuotedDBName }} = NULL`)
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
 	} else if update.{{ toGoName .Name }} != nil {
 	{{- else }}
 	if update.{{ toGoName .Name }} != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
 		{{- if .IsJSONField }}
 		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
@@ -2766,13 +3108,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		return nil, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .FieldName }}IDSetNull {
-		setClauses = append(setClauses, "{{ .DBColumnName }} = NULL")
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
 	} else if update.{{ toGoName .FieldName }}ID != nil {
 	{{- else }}
 	if update.{{ toGoName .FieldName }}ID != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("{{ .DBColumnName }} = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
 		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
 	}
 	{{- end }}
@@ -2782,7 +3124,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
 	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
 	values = append(values, time.Now())
 	{{- end }}
 	{{- end }}
@@ -2792,11 +3134,11 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	{{- if eq .Name "updatedBy" }}
 	if update.UpdatedBy != nil {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, *update.UpdatedBy)
 	} else if HasUserID(ctx) {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
 	}
 	{{- end }}
@@ -2810,7 +3152,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	values = append(values, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
 
 	query := fmt.Sprintf(
-		`UPDATE {{ .QuotedTableName }} SET %s WHERE {{ .QuotedPrimaryKey }} = $%d`,
+		{{ goRawString .SQL.Update }},
 		strings.Join(setClauses, ", "),
 		paramNum,
 	)
@@ -2819,16 +3161,16 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	if expectedVersion != nil {
 		paramNum++
 		values = append(values, *expectedVersion)
-		query += fmt.Sprintf(" AND _version = $%d", paramNum)
+		query += fmt.Sprintf({{ printf "%q" .SQL.VersionFence }}, paramNum)
 	}
 
 	{{- end }}
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	query += {{ goRawString .SQL.Returning }}
 
 	// Execute query
 	var row pgx.Row
@@ -2910,13 +3252,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		return 0, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .Name }}SetNull {
-		setClauses = append(setClauses, `{{ .QuotedDBName }} = NULL`)
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
 	} else if update.{{ toGoName .Name }} != nil {
 	{{- else }}
 	if update.{{ toGoName .Name }} != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
 		{{- if .IsJSONField }}
 		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
@@ -2952,13 +3294,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		return 0, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .FieldName }}IDSetNull {
-		setClauses = append(setClauses, "{{ .DBColumnName }} = NULL")
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
 	} else if update.{{ toGoName .FieldName }}ID != nil {
 	{{- else }}
 	if update.{{ toGoName .FieldName }}ID != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("{{ .DBColumnName }} = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
 		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
 	}
 	{{- end }}
@@ -2968,7 +3310,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
 	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
 	values = append(values, time.Now())
 	{{- end }}
 	{{- end }}
@@ -2978,11 +3320,11 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- if eq .Name "updatedBy" }}
 	if update.UpdatedBy != nil {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, *update.UpdatedBy)
 	} else if HasUserID(ctx) {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
 	}
 	{{- end }}
@@ -2997,14 +3339,14 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 
 	{{- if .HasSoftDelete }}
 	if whereClause == "" {
-		whereClause = " WHERE deleted_at IS NULL"
+		whereClause = {{ printf "%q" .SQL.LiveWhere }}
 	} else {
-		whereClause += " AND deleted_at IS NULL"
+		whereClause += {{ printf "%q" .SQL.Live }}
 	}
 	{{- end }}
 
 	query := fmt.Sprintf(
-		`UPDATE {{ .QuotedTableName }} SET %s%s`,
+		{{ goRawString .SQL.UpdateMany }},
 		strings.Join(setClauses, ", "),
 		whereClause,
 	)
@@ -3032,11 +3374,11 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 		return ErrNoUserInContext
 	}
 
+	{{- /* sqlutil's statement (D79) */}}
+	query := {{ goRawString .SQL.SoftDelete }}
 	{{- if .HasDeletedBy }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2 WHERE {{ .QuotedPrimaryKey }} = $3 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- else }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1 WHERE {{ .QuotedPrimaryKey }} = $2 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- end }}
 
@@ -3068,11 +3410,11 @@ func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyT
 		return ErrNoUserInContext
 	}
 
+	{{- /* sqlutil's statement (D79) */}}
+	query := {{ goRawString .SQL.SoftDeleteIfVersion }}
 	{{- if .HasDeletedBy }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2 WHERE {{ .QuotedPrimaryKey }} = $3 AND _version = $4 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- else }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1 WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- end }}
 
@@ -3111,16 +3453,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- end }}
 
 	if whereClause == "" {
-		whereClause = " WHERE deleted_at IS NULL"
+		whereClause = {{ printf "%q" .SQL.LiveWhere }}
 	} else {
-		whereClause += " AND deleted_at IS NULL"
+		whereClause += {{ printf "%q" .SQL.Live }}
 	}
 
-	{{- if .HasDeletedBy }}
-	query := fmt.Sprintf(`UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2%s`, whereClause)
-	{{- else }}
-	query := fmt.Sprintf(`UPDATE {{ .QuotedTableName }} SET deleted_at = $1%s`, whereClause)
-	{{- end }}
+	{{- /* sqlutil's statement (D79) */}}
+	query := fmt.Sprintf({{ goRawString .SQL.SoftDeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
@@ -3140,10 +3479,10 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+	query := {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- end }}
 
@@ -3176,7 +3515,7 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 
 	var result pgconn.CommandTag
@@ -3190,7 +3529,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+	query := {{ goRawString .SQL.Delete }}
 
 	var result pgconn.CommandTag
 	var err error
@@ -3218,10 +3557,10 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3`
+	query := historyActorCTE + {{ goRawString .SQL.DeleteIfVersion }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2`
+	query := {{ goRawString .SQL.DeleteIfVersion }}
 	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- end }}
 
@@ -3257,7 +3596,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	values := []interface{}{historyActor(ctx)}
 	whereClause := filter.buildWhereClause(&values, 1)
 
-	query := historyActorCTE + fmt.Sprintf(`DELETE FROM {{ .QuotedTableName }} USING history_actor%s`, whereClause)
+	query := historyActorCTE + fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
@@ -3272,7 +3611,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	var values []interface{}
 	whereClause := filter.buildWhereClause(&values, 0)
 
-	query := fmt.Sprintf(`DELETE FROM {{ .QuotedTableName }}%s`, whereClause)
+	query := fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error

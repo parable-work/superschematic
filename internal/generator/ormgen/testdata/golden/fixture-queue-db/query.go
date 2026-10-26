@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -280,6 +299,15 @@ func ParseOrderSort(text string) (OrderSort, error) {
 	}
 	return OrderSort{}, fmt.Errorf("orm: Order sorts by id and placedAt, not %q", text)
 }
+
+// OrderUniqueKey names a unique key of Order that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type OrderUniqueKey string
+
+const (
+	OrderUniqueById OrderUniqueKey = "id"
+)
 
 // OrderPageKey is the position of a Order row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -472,6 +500,15 @@ func ParseOrderLineSort(text string) (OrderLineSort, error) {
 	return OrderLineSort{}, fmt.Errorf("orm: OrderLine sorts by id and quantity, not %q", text)
 }
 
+// OrderLineUniqueKey names a unique key of OrderLine that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type OrderLineUniqueKey string
+
+const (
+	OrderLineUniqueById OrderLineUniqueKey = "id"
+)
+
 // OrderLinePageKey is the position of a OrderLine row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -634,6 +671,15 @@ func ParseProductSort(text string) (ProductSort, error) {
 	}
 	return ProductSort{}, fmt.Errorf("orm: Product sorts by id and name, not %q", text)
 }
+
+// ProductUniqueKey names a unique key of Product that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type ProductUniqueKey string
+
+const (
+	ProductUniqueById ProductUniqueKey = "id"
+)
 
 // ProductPageKey is the position of a Product row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -822,9 +868,9 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 	if f.ReferencedByOrderLineOrder != nil {
 		probe := `SELECT 1 FROM order_line WHERE order_line.order_id = "order".id`
 		if f.ReferencedByOrderLineOrder.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -986,6 +1032,22 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`order_line.quantity <= $%d`, paramNum))
 			*args = append(*args, f.Quantity.Between.Max)
 		}
+		if len(f.Quantity.In) > 0 {
+			placeholders := make([]string, len(f.Quantity.In))
+			for i, value := range f.Quantity.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Quantity.IsNull != nil {
+			if *f.Quantity.IsNull {
+				conditions = append(conditions, `order_line.quantity IS NULL`)
+			} else {
+				conditions = append(conditions, `order_line.quantity IS NOT NULL`)
+			}
+		}
 	}
 	if f.Note != nil {
 		if f.Note.Eq != nil {
@@ -1006,6 +1068,13 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`order_line.note ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Note.ILike+"%")
+		}
+		if f.Note.IsNull != nil {
+			if *f.Note.IsNull {
+				conditions = append(conditions, `order_line.note IS NULL`)
+			} else {
+				conditions = append(conditions, `order_line.note IS NOT NULL`)
+			}
 		}
 	}
 	if f.OrderID != nil {
@@ -1167,13 +1236,20 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`product."name" ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Name.ILike+"%")
 		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `product."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `product."name" IS NOT NULL`)
+			}
+		}
 	}
 	if f.ReferencedByOrderLineProduct != nil {
 		probe := `SELECT 1 FROM order_line WHERE order_line.product_id = product.id`
 		if f.ReferencedByOrderLineProduct.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 

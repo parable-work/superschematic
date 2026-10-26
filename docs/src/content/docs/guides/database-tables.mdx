@@ -1,6 +1,6 @@
 ---
 title: Database tables
-description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns and soft delete in a DB schema, what the SQL and the Go ORM make of them, and how a database that holds data changes.
+description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns, upserts and soft delete in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
 sidebar:
   order: 2
 ---
@@ -8,8 +8,11 @@ sidebar:
 import Snippet from '../../../components/Snippet.astro';
 
 A DB schema declares tables. Its build writes Postgres DDL
-(`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, and the row
-types in the languages `outputs.types` lists. A service whose
+(`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, the row
+types in the languages `outputs.types` lists, and, in its TypeScript
+types, repositories over `pg` ([TypeScript](#typescript)). The Go ORM and
+the TypeScript repositories run the same statements, which the compiler
+writes once. A service whose
 `outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
 (`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
@@ -109,7 +112,10 @@ adds the foreign keys once every table exists:
 
 In the row types a relation holds the related row (`Order.Customer` is a
 `User` in Go). To write one, give it the related row's id:
-`Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`.
+`Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`. A
+TypeScript repository's row holds the related row's key instead,
+`customerId`, which its create, update and filter take too; the related
+rows load in one read through the target's `getManyByIds`.
 
 ## One-to-many
 
@@ -167,6 +173,9 @@ extension.
 
 The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
 SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
+
+The TypeScript repositories' filter has `searchText`, which keeps the
+same rows with the same conditions.
 
 An API's search argument, a `SearchQuery`, is what reads it
 ([References and search](/superschematic/reference/references-and-search/)):
@@ -248,6 +257,13 @@ the filter compares for equality, then the sort's column, then the key
 ([Indexes](#indexes)): without one, each page sorts every row the filter
 finds.
 
+A TypeScript repository's `findPage` runs the same query, its options a
+`sort`, `{ field: 'placedAt', desc: true }`, `after`, the key of the page
+before, `limit` and `includeDeleted`, and answers `{ rows, next }`, `next`
+a key such as `{ id }`, which the HTTP runtime's `encodeCursor` and
+`decodeCursor` turn into a cursor and back. A key that names no row is
+`PageKeyError`.
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
@@ -267,7 +283,27 @@ optional column takes its database default. `CreateMany` writes the batch
 as one multi-row `INSERT` by the same rule: its rows may set different
 optional fields, and some may supply an id while others take the generated
 one. A row that leaves unset a column another row sets writes `DEFAULT`
-for it, not `NULL`.
+for it, not `NULL`. The TypeScript `createOne` and `createMany` do the
+same, and write a field's schema default, `Default<T, V>`, when the input
+leaves the field unset.
+
+## Upserts
+
+`UpsertOne(ctx, input, on, update)` inserts `input`, or, when a row
+already holds its value of the unique key `on`, applies `update` to that
+row instead, and returns the row: an import that inserts or updates by a
+natural key in one statement, `INSERT ... ON CONFLICT ... DO UPDATE`. A
+key is the primary key, a `@unique` field or a unique `@index`, named by
+its fields: `orm.ReviewUniqueByProductAuthor` in Go, and
+`['product', 'author']` in TypeScript (`upsertOne(input, on, update)`).
+The update writes what `UpdateOne` writes, `updatedAt` among it, but an
+update that sets no field leaves the row as it is and returns it. An
+upsert by a unique `@index` names the index's own target: its
+`expression`, `ON CONFLICT ((lower(label)))`, and its `where`, so Postgres
+infers a partial index. On a soft-deletable table a unique `@index` covers
+the live rows alone, so a deleted row never conflicts; a conflict with a
+deleted row on a full key, such as the primary key, is not updated, and
+the upsert fails with `ErrNotFound` (`NotFoundError`).
 
 ## Soft delete
 
@@ -284,7 +320,10 @@ soft-deletable:
 
 `DeleteOne` records who deleted the row, so it needs the acting user on the
 context, set with `orm.WithUserID`; without one it returns
-`ErrNoUserInContext`. The generated API server authenticates callers but
+`ErrNoUserInContext`, as `CreateOne` does on a table with `createdBy`. In
+TypeScript the acting user is the ORM's: `deps.orm.as(ctx.principal)` or
+`deps.orm.withUser(id)`, and a write that needs one throws `NoUserError`
+without it. The generated API server authenticates callers but
 does not tell the ORM who they are, so each method of the orders service
 that writes rows hands the caller over:
 
@@ -306,6 +345,67 @@ no-op transaction returns none.
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
+
+In TypeScript, `deps.orm.transaction(async tx => ...)` runs a function
+with repositories bound to one transaction, `tx.query(sql, values)` and
+`tx.exec(sql, values)` for raw SQL on it, and rolls it back when the
+function throws. The queue client's `enqueue` takes the transaction, so a
+message commits with the rows ([Queues and workers](/superschematic/guides/queues/#from-typescript)).
+
+## TypeScript
+
+A DB service whose `outputs.types` lists TypeScript, and whose
+`outputs.sql.dialects` lists postgres, gets its tables' repositories in
+its types package's `./orm` entry (`@acme/shop-db-types/orm`), with the
+statements the Go ORM runs (D79). For each table it declares the row
+(`ReviewRow`), what a create and an update set (`ReviewCreate`,
+`ReviewUpdate`), the filter (`ReviewFilter`), the members a read orders by
+and a page sorts by, the unique keys, and the repository
+(`ReviewRepository`): `getOne`, `getManyByIds`, `findOne`, `findMany`,
+`findPage`, `createOne`, `createMany`, `updateOne`, `updateMany`,
+`upsertOne`, `deleteOne`, `deleteMany`, and `hardDeleteOne` on a
+soft-deletable table.
+
+<Snippet file="testdata/generated/types/typescript/shop-db/orm.ts" symbol="ReviewFilter" />
+
+An API whose database lists postgres first and has a table gets the
+repositories in its `Deps` as `orm`, beside the pool, `db`, which stays for
+the SQL they do not express: a report's aggregates, a CTE. `shop-cart`, on
+Bun, keeps a shopper's reviews and reorders through them, with no SQL of
+its own:
+
+<Snippet file="typescript/shop-cart/index.ts" symbol={['myReviews', 'reorders']} />
+
+A row holds each column by its member, in the form the TypeScript types
+hold it: a UUID in base62, the wire form, a `Generic.Int64` a number, a
+`Temporal.DateTime` a `Date`, a `Temporal.Date` its `YYYY-MM-DD` text, a
+JSON column the JSON value it holds, a JSON string staying a string and
+`null` the JSON null in a column that may not be null. The HTTP runtime's
+value codec converts each, by the column's type and never by the value's,
+and a
+raw query's rows go through it too: `decodeRow(row, reviewTable.columns)`
+reads a row of the review table's columns, and `uuidToDb(id)` turns a
+base62 id, `ctx.principal.subject` among them, into the hyphenated text a
+`UUID` column compares. `connectPostgres`, which opens `Deps.db`, reads a
+BIGINT as a number, refusing one past 2^53 - 1, a NUMERIC as its exact
+text and a DATE as its text, through parsers of the pool's own;
+`typeParsers: false` keeps pg's.
+
+A filter member per column holds its conditions, by the column's kind, as
+the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
+condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
+a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
+compare JSON values as JSONB does, an object whatever the order of its
+keys and the string `"1"` apart from the number 1, `isNull` on a column
+that may be null, and a relation's key by `<field>Id`. The Go filters take
+the same: `Int64Filter`, `FloatFilter` and `DateFilter` have `In`, and the
+filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
+alike, and whose `ILike` Postgres refuses on JSONB.
+
+The repositories do not select fields, load one-to-many relations or read
+a `@versioned` table's history yet; the Go ORM does. SQLite repositories
+are not built.
 
 ## Raw SQL
 

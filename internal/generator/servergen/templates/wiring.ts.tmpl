@@ -14,6 +14,9 @@ APIs.
 {{- if .Database }}
     db: {{ .Database.Var }},
 {{- end }}
+{{- if .ORM }}
+    orm: {{ .Database.ORM }}({{ .Database.Var }}),
+{{- end }}
 {{- range .Calls }}
     {{ .Field }}: {{ .Client.Var }},
 {{- end }}
@@ -28,6 +31,14 @@ APIs.
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- end }}
+
+{{- define "ts-orm-imports" -}}
+{{- range .Databases }}
+{{- if .ORM }}
+import { createOrm as {{ .ORM }} } from '{{ .ORMModule }}';
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- define "ts-memory-stores" }}

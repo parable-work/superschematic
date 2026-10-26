@@ -49,6 +49,10 @@
     "./queues": {
       "types": "./queues.ts",
       "import": "./queues.ts"
+    }{{end}}{{if .ORM}},
+    "./orm": {
+      "types": "./orm.ts",
+      "import": "./orm.ts"
     }{{end}}{{if .HasEnvConfig}},
     "./config": {
       "types": "./config.ts",
@@ -70,11 +74,21 @@
   "dependencies": {
     "{{.Naming.ScalarNpmPackage}}": "{{if .ScalarLibSpec}}{{.ScalarLibSpec}}{{else}}*{{end}}",
     "js-yaml": "4.1.1"{{if .VersionGraphs}},
-    "{{.Naming.VersionGraphNpmPackage}}": "{{if .VersionGraphLibSpec}}{{.VersionGraphLibSpec}}{{else}}*{{end}}"{{end}}{{range .PackageDependencies}},
+    "{{.Naming.VersionGraphNpmPackage}}": "{{if .VersionGraphLibSpec}}{{.VersionGraphLibSpec}}{{else}}*{{end}}"{{end}}{{if .ORM}},
+    "{{.Naming.HTTPRuntimeNpmPackage}}": "*"{{end}}{{range .PackageDependencies}},
     "{{.Name}}": "{{.Spec}}"{{end}}
+  },{{if .ORM}}
+  "peerDependencies": {
+    "pg": "{{ormPGPeerRange}}"
   },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
+  },{{end}}
   "devDependencies": {
-    "@types/js-yaml": "4.0.9",
+    "@types/js-yaml": "4.0.9",{{if .ORM}}
+    "@types/pg": "{{ormPGTypesVersion}}",{{end}}
     "typescript": "5.9.3"
   }
 }

@@ -1247,6 +1247,194 @@ func (r *OrderLineRepository) CreateOne(ctx context.Context, input *types.OrderL
 	return result, nil
 }
 
+// orderLineUniqueKeys are the conflict targets of OrderLine's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var orderLineUniqueKeys = map[OrderLineUniqueKey]struct{ conflict, keep string }{
+	OrderLineUniqueById: {`(id)`, `id = EXCLUDED.id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *OrderLineRepository) UpsertOne(ctx context.Context, input *types.OrderLine, on OrderLineUniqueKey, update *OrderLineUpdate) (*types.OrderLine, error) {
+	key, ok := orderLineUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: OrderLine has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &OrderLineUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := orderLineUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: quantity
+	fields = append(fields, `quantity`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Quantity)
+	// Optional field: note - only add if set
+	{
+		if !reflect.ValueOf(input.Note).IsZero() {
+			fields = append(fields, `note`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.Note)
+		}
+	}
+
+	// Handle relationship foreign key columns
+	// Relationship: order (FK: order_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := orderLineUUIDValue(input.Order.Id); ok && relID != zeroId {
+			fields = append(fields, "order_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: product (FK: product_id)
+	{
+		var zeroId types.IdentityUUID
+		if input.Product != nil {
+			if relID, ok := orderLineUUIDValue(input.Product.Id); ok && relID != zeroId {
+				fields = append(fields, "product_id")
+				paramNum++
+				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+				values = append(values, relID.ToUUID())
+			}
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Quantity != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`quantity = $%d`, paramNum))
+		values = append(values, *update.Quantity)
+	}
+	if update.Note != nil && update.NoteSetNull {
+		return nil, fmt.Errorf("note cannot be updated with both value and null assignment")
+	}
+	if update.NoteSetNull {
+		setClauses = append(setClauses, `note = NULL`)
+	} else if update.Note != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`note = $%d`, paramNum))
+		values = append(values, *update.Note)
+	}
+	// Handle relationship foreign key: order
+	if update.OrderID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("order_id = $%d", paramNum))
+		values = append(values, update.OrderID.ToUUID())
+	}
+	// Handle relationship foreign key: product
+	if update.ProductID != nil && update.ProductIDSetNull {
+		return nil, fmt.Errorf("product_id cannot be updated with both value and null assignment")
+	}
+	if update.ProductIDSetNull {
+		setClauses = append(setClauses, "product_id = NULL")
+	} else if update.ProductID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("product_id = $%d", paramNum))
+		values = append(values, update.ProductID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO order_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "order_id", "product_id", "quantity", "note"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.OrderLine{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempNote sql.NullString
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelOrder *types.IdentityUUID
+	var tempRelProduct *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelOrder,
+
+		&tempRelProduct,
+
+		&result.Quantity,
+
+		&tempNote,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if tempNote.Valid {
+		result.Note = tempNote.String
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelOrder != nil {
+		result.Order.Id = orderLineUUIDPtr(*tempRelOrder)
+	}
+	if tempRelProduct != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.Product = &types.Product{Id: orderLineUUIDPtr(*tempRelProduct)}
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple OrderLine records in a single statement
 func (r *OrderLineRepository) CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error) {
 	if len(inputs) == 0 {

@@ -19,6 +19,7 @@ type ShelfRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *ShelfFilter, opts *ShelfPageOptions) (*ShelfPage, error)
 	CreateOne(ctx context.Context, input *types.Shelf) (*types.Shelf, error)
 	CreateMany(ctx context.Context, inputs []*types.Shelf) ([]*types.Shelf, error)
+	UpsertOne(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate) (*types.Shelf, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ShelfUpdate) (*types.Shelf, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *ShelfUpdate) (*types.Shelf, error)
 	UpdateMany(ctx context.Context, filter *ShelfFilter, update *ShelfUpdate) (int, error)
@@ -37,6 +38,7 @@ type StockRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *StockFilter, opts *StockPageOptions) (*StockPage, error)
 	CreateOne(ctx context.Context, input *types.Stock) (*types.Stock, error)
 	CreateMany(ctx context.Context, inputs []*types.Stock) ([]*types.Stock, error)
+	UpsertOne(ctx context.Context, input *types.Stock, on StockUniqueKey, update *StockUpdate) (*types.Stock, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StockUpdate) (*types.Stock, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *StockUpdate) (*types.Stock, error)
 	UpdateMany(ctx context.Context, filter *StockFilter, update *StockUpdate) (int, error)
@@ -161,6 +163,10 @@ func (r *NoOpShelfRepository) CreateMany(_ context.Context, inputs []*types.Shel
 	return inputs, nil
 }
 
+func (r *NoOpShelfRepository) UpsertOne(_ context.Context, input *types.Shelf, _ ShelfUniqueKey, _ *ShelfUpdate) (*types.Shelf, error) {
+	return input, nil
+}
+
 func (r *NoOpShelfRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ShelfUpdate) (*types.Shelf, error) {
 	return nil, ErrNotFound
 }
@@ -229,6 +235,10 @@ func (r *NoOpStockRepository) CreateMany(_ context.Context, inputs []*types.Stoc
 		return []*types.Stock{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpStockRepository) UpsertOne(_ context.Context, input *types.Stock, _ StockUniqueKey, _ *StockUpdate) (*types.Stock, error) {
+	return input, nil
 }
 
 func (r *NoOpStockRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *StockUpdate) (*types.Stock, error) {

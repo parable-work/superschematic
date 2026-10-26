@@ -40,6 +40,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
 	CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error)
+	UpsertOne(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
 	UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
 	{{- if .HasVersion }}
 	UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
@@ -211,6 +212,10 @@ func (r *NoOp{{ .Name }}) CreateMany(_ context.Context, inputs []*types.{{ .Type
 		return []*types.{{ .TypeName }}{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertOne(_ context.Context, input *types.{{ .TypeName }}, _ {{ .TypeName }}UniqueKey, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	return input, nil
 }
 
 func (r *NoOp{{ .Name }}) UpdateOne(_ context.Context, _ {{ .PrimaryKeyType }}, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {

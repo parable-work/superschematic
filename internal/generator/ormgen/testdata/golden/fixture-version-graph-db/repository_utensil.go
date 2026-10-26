@@ -1503,6 +1503,190 @@ func (r *UtensilRepository) CreateOne(ctx context.Context, input *types.Utensil)
 	return result, nil
 }
 
+// utensilUniqueKeys are the conflict targets of Utensil's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var utensilUniqueKeys = map[UtensilUniqueKey]struct{ conflict, keep string }{
+	UtensilUniqueById:           {`(id)`, `id = EXCLUDED.id`},
+	UtensilUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *UtensilRepository) UpsertOne(ctx context.Context, input *types.Utensil, on UtensilUniqueKey, update *UtensilUpdate) (*types.Utensil, error) {
+	key, ok := utensilUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Utensil has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &UtensilUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := utensilUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: name
+	fields = append(fields, `"name"`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Name)
+	// Auto-generated field: entityKey - only add if set
+	{
+		if !reflect.ValueOf(input.EntityKey).IsZero() {
+			fields = append(fields, `entity_key`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.EntityKey.ToUUID())
+		}
+	}
+	// Required field: deletedOnRef
+	fields = append(fields, `deleted_on_ref`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.DeletedOnRef)
+
+	// Handle relationship foreign key columns
+	// Relationship: recipe (FK: recipe_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := utensilUUIDValue(input.Recipe.Id); ok && relID != zeroId {
+			fields = append(fields, "recipe_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: ref (FK: ref_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := utensilUUIDValue(input.Ref.Id); ok && relID != zeroId {
+			fields = append(fields, "ref_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Name != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`"name" = $%d`, paramNum))
+		values = append(values, *update.Name)
+	}
+	if update.EntityKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		values = append(values, (*update.EntityKey).ToUUID())
+	}
+	if update.DeletedOnRef != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`deleted_on_ref = $%d`, paramNum))
+		values = append(values, *update.DeletedOnRef)
+	}
+	// Handle relationship foreign key: recipe
+	if update.RecipeID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("recipe_id = $%d", paramNum))
+		values = append(values, update.RecipeID.ToUUID())
+	}
+	// Handle relationship foreign key: ref
+	if update.RefID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("ref_id = $%d", paramNum))
+		values = append(values, update.RefID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO utensil (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Utensil{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRecipe *types.IdentityUUID
+	var tempRelRef *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelRecipe,
+
+		&result.Name,
+
+		&result.EntityKey,
+
+		&tempRelRef,
+
+		&result.DeletedOnRef,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRecipe != nil {
+		result.Recipe.Id = utensilUUIDPtr(*tempRelRecipe)
+	}
+	if tempRelRef != nil {
+		result.Ref.Id = utensilUUIDPtr(*tempRelRef)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Utensil records in a single statement
 func (r *UtensilRepository) CreateMany(ctx context.Context, inputs []*types.Utensil) ([]*types.Utensil, error) {
 	if len(inputs) == 0 {

@@ -33,6 +33,7 @@ import { openRedisMemoryStore } from '@superschematic/http-runtime/redis';
 import { cartAbandonedQueue } from '@schemas/ts-db-types/queues';
 import * as tsShopApi from '@schemas/ts-shop-api';
 import * as tsShopImpl from '@schemas/ts-shop-implementation';
+import { createOrm as createTsDbOrm } from '@schemas/ts-db-types/orm';
 import * as tsPricingSdk from '@schemas/ts-pricing-sdk';
 
 /** How long a stopping worker lets its running handlers finish. */
@@ -75,6 +76,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   const tsShopDeps: tsShopApi.Deps = {
     config: tsShopConfig,
     db: tsDbPool,
+    orm: createTsDbOrm(tsDbPool),
     tsPricing: tsPricingClient,
     tsMedia: tsMediaBucket,
     tsCache: tsCacheStore,

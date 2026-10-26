@@ -965,6 +965,218 @@ func (r *BoardRepository) CreateOne(ctx context.Context, input *types.Board) (*t
 	return result, nil
 }
 
+// boardUniqueKeys are the conflict targets of Board's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var boardUniqueKeys = map[BoardUniqueKey]struct{ conflict, keep string }{
+	BoardUniqueById: {`(id)`, `id = EXCLUDED.id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *BoardRepository) UpsertOne(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate) (*types.Board, error) {
+	key, ok := boardUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Board has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &BoardUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := boardUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: labels
+	fields = append(fields, `labels`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueLabels, err := marshalArrayOfArraysFieldValue(input.Labels)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+	}
+	values = append(values, jsonValueLabels)
+	// Required field: states
+	fields = append(fields, `states`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueStates, err := marshalArrayOfArraysFieldValue(input.States)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+	}
+	values = append(values, jsonValueStates)
+	// Required field: walls
+	fields = append(fields, `walls`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueWalls, err := marshalArrayOfArraysFieldValue(input.Walls)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+	}
+	values = append(values, jsonValueWalls)
+	// Optional field: scores - only add if set
+	{
+		if !reflect.ValueOf(input.Scores).IsZero() {
+			fields = append(fields, `scores`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			jsonValueScores, err := marshalArrayOfArraysFieldValue(input.Scores)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
+			}
+			values = append(values, jsonValueScores)
+		}
+	}
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Labels != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`labels = $%d`, paramNum))
+		jsonValueLabels, err := marshalArrayOfArraysFieldValue(*update.Labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+		}
+		values = append(values, jsonValueLabels)
+	}
+	if update.States != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`states = $%d`, paramNum))
+		jsonValueStates, err := marshalArrayOfArraysFieldValue(*update.States)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+		}
+		values = append(values, jsonValueStates)
+	}
+	if update.Walls != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`walls = $%d`, paramNum))
+		jsonValueWalls, err := marshalArrayOfArraysFieldValue(*update.Walls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+		}
+		values = append(values, jsonValueWalls)
+	}
+	if update.Scores != nil && update.ScoresSetNull {
+		return nil, fmt.Errorf("scores cannot be updated with both value and null assignment")
+	}
+	if update.ScoresSetNull {
+		setClauses = append(setClauses, `scores = NULL`)
+	} else if update.Scores != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`scores = $%d`, paramNum))
+		jsonValueScores, err := marshalArrayOfArraysFieldValue(*update.Scores)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
+		}
+		values = append(values, jsonValueScores)
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO board (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "labels", "states", "walls", "scores"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Board{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempLabels []byte
+	var tempStates []byte
+	var tempWalls []byte
+	var tempScores []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempLabels,
+
+		&tempStates,
+
+		&tempWalls,
+
+		&tempScores,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if len(tempLabels) > 0 {
+		if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
+		}
+	}
+	if len(tempStates) > 0 {
+		if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
+		}
+	}
+	if len(tempWalls) > 0 {
+		if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
+		}
+	}
+	if len(tempScores) > 0 {
+		if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Board records in a single statement
 func (r *BoardRepository) CreateMany(ctx context.Context, inputs []*types.Board) ([]*types.Board, error) {
 	if len(inputs) == 0 {

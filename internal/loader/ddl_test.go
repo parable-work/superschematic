@@ -37,11 +37,12 @@ func TestLoadDDLFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	category := schema.Types["Category"]
-	if len(category.Indexes) != 2 || category.Indexes[0].Expression != "lower(label)" || category.Indexes[1].Where != "active" {
+	if len(category.Indexes) != 2 || category.Indexes[0].Expression != "lower(label)" || !category.Indexes[0].Unique || category.Indexes[1].Where != "active" {
 		t.Errorf("Category's indexes = %+v", category.Indexes)
 	}
 	line := schema.Types["LineItem"]
-	if len(line.Indexes) != 1 || line.Indexes[0].Method != ir.IndexMethodBTree || line.Indexes[0].Concurrently == nil || *line.Indexes[0].Concurrently {
+	if len(line.Indexes) != 2 || line.Indexes[0].Method != ir.IndexMethodBTree || line.Indexes[0].Concurrently == nil || *line.Indexes[0].Concurrently ||
+		!line.Indexes[1].Unique || line.Indexes[1].Where != "external_id IS NOT NULL" {
 		t.Errorf("LineItem's index = %+v", line.Indexes)
 	}
 	if len(line.RawSQL) != 2 || line.RawSQL[0].ID != "category_totals" || !strings.Contains(line.RawSQL[0].Up, "\n") ||

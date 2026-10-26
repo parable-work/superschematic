@@ -19,6 +19,7 @@ type OrderRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
+	UpsertOne(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
 	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -34,6 +35,7 @@ type OrderLineRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *OrderLineFilter, opts *OrderLinePageOptions) (*OrderLinePage, error)
 	CreateOne(ctx context.Context, input *types.OrderLine) (*types.OrderLine, error)
 	CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error)
+	UpsertOne(ctx context.Context, input *types.OrderLine, on OrderLineUniqueKey, update *OrderLineUpdate) (*types.OrderLine, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderLineUpdate) (*types.OrderLine, error)
 	UpdateMany(ctx context.Context, filter *OrderLineFilter, update *OrderLineUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -49,6 +51,7 @@ type ProductRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *ProductFilter, opts *ProductPageOptions) (*ProductPage, error)
 	CreateOne(ctx context.Context, input *types.Product) (*types.Product, error)
 	CreateMany(ctx context.Context, inputs []*types.Product) ([]*types.Product, error)
+	UpsertOne(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate) (*types.Product, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ProductUpdate) (*types.Product, error)
 	UpdateMany(ctx context.Context, filter *ProductFilter, update *ProductUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -177,6 +180,10 @@ func (r *NoOpOrderRepository) CreateMany(_ context.Context, inputs []*types.Orde
 	return inputs, nil
 }
 
+func (r *NoOpOrderRepository) UpsertOne(_ context.Context, input *types.Order, _ OrderUniqueKey, _ *OrderUpdate) (*types.Order, error) {
+	return input, nil
+}
+
 func (r *NoOpOrderRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderUpdate) (*types.Order, error) {
 	return nil, ErrNotFound
 }
@@ -235,6 +242,10 @@ func (r *NoOpOrderLineRepository) CreateMany(_ context.Context, inputs []*types.
 	return inputs, nil
 }
 
+func (r *NoOpOrderLineRepository) UpsertOne(_ context.Context, input *types.OrderLine, _ OrderLineUniqueKey, _ *OrderLineUpdate) (*types.OrderLine, error) {
+	return input, nil
+}
+
 func (r *NoOpOrderLineRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineUpdate) (*types.OrderLine, error) {
 	return nil, ErrNotFound
 }
@@ -291,6 +302,10 @@ func (r *NoOpProductRepository) CreateMany(_ context.Context, inputs []*types.Pr
 		return []*types.Product{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpProductRepository) UpsertOne(_ context.Context, input *types.Product, _ ProductUniqueKey, _ *ProductUpdate) (*types.Product, error) {
+	return input, nil
 }
 
 func (r *NoOpProductRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ProductUpdate) (*types.Product, error) {

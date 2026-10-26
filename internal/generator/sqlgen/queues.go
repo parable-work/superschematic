@@ -3,7 +3,6 @@ package sqlgen
 import (
 	"fmt"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -25,11 +24,10 @@ import (
 // the service lists: the SQLite model reads it from this output, as it
 // reads every table.
 
-// QueueTableName is the table of the queue whose class is name: the name
-// in snake case, as a table's, and ir.QueueTableSuffix
-// (`order_placed_queue`).
+// QueueTableName is the table of the queue whose class is name
+// (sqlutil.QueueTableName, `order_placed_queue`).
 func QueueTableName(name string) string {
-	return codegen.ToSnakeCase(name) + ir.QueueTableSuffix
+	return sqlutil.QueueTableName(name)
 }
 
 // convertQueueToTable builds the table of the queue typeDef declares.
@@ -89,7 +87,7 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string
 			Where:   sqlutil.QuoteIdentifier(ir.QueueColumnState) + " = '" + idx.state + "'",
 		})
 	}
-	keyIndexes, err := queueKeyIndexes(name, typeDef.Queue)
+	keyIndexes, err := queueKeyIndexes(name, typeDef)
 	if err != nil {
 		return Table{}, fmt.Errorf("queue %s: %w", typeDef.Name, err)
 	}
@@ -129,11 +127,12 @@ func QueueReadyKeyIndex(table string) string {
 // queueKeyIndexes are the indexes a queue's key adds to its table: the
 // ready messages' by key, unique when the queue keeps one per key, and the
 // claimed messages', unique, when it serializes its keys.
-func queueKeyIndexes(table string, def *ir.QueueDef) ([]Index, error) {
-	key := sqlutil.QueueKeyColumn(def)
+func queueKeyIndexes(table string, td *ir.TypeDef) ([]Index, error) {
+	key := sqlutil.QueueKeyColumn(td)
 	if key == "" {
 		return nil, nil
 	}
+	def := td.Queue
 	state := func(s string) string { return sqlutil.QuoteIdentifier(ir.QueueColumnState) + " = '" + s + "'" }
 	var out []Index
 	add := func(purpose string, unique bool, where string) error {

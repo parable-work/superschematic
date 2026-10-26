@@ -7,7 +7,8 @@ DROP MATERIALIZED VIEW IF EXISTS category_totals;
 
 -- Drop indexes
 DROP INDEX IF EXISTS idx_line_item_posted_at CASCADE;
-DROP INDEX IF EXISTS idx_category_label_lower CASCADE;
+DROP INDEX IF EXISTS uq_line_item_external CASCADE;
+DROP INDEX IF EXISTS uq_category_label_lower CASCADE;
 DROP INDEX IF EXISTS idx_category_active_kind CASCADE;
 
 -- Drop join tables first

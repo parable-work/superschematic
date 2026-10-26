@@ -42,6 +42,9 @@ import type { {{ .Client }} } from '{{ .Package }}';
 {{- if or .HasWorkers .HasDerivers }}
 import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
 {{- end }}
+{{- if .DepsORM }}
+import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
+{{- end }}
 {{- if .Deps.Engine }}
 import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
 {{- end }}
@@ -57,8 +60,21 @@ export interface Deps {
   readonly config: EnvConfig;
 {{- end }}
 {{- if .DepsPool }}
+{{- if .DepsORM }}
+  /** A pool of {{ .Deps.Database }}, the API's database, for the SQL the repositories do not express. */
+  readonly db: Pool;
+  /**
+   * The repositories of {{ .Deps.Database }}'s tables over db (D79), a table's rows
+   * read and written as its types' ./orm entry declares them, with no SQL of
+   * the implementation's. orm.as(ctx.principal) acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record; orm.transaction(fn) writes in
+   * one transaction, which enqueue takes.
+   */
+  readonly orm: {{ .Deps.ORM }};
+{{- else }}
   /** A pool of {{ .Deps.Database }}, the API's database. */
   readonly db: Pool;
+{{- end }}
 {{- else if .DepsSQLite }}
   /**
    * {{ .Deps.Database }}, the API's database, whose DB service lists sqlite first: D1's

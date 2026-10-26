@@ -1044,6 +1044,186 @@ func (r *RecipePatchRepository) CreateOne(ctx context.Context, input *types.Reci
 	return result, nil
 }
 
+// recipePatchUniqueKeys are the conflict targets of RecipePatch's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var recipePatchUniqueKeys = map[RecipePatchUniqueKey]struct{ conflict, keep string }{
+	RecipePatchUniqueById:                        {`(id)`, `id = EXCLUDED.id`},
+	RecipePatchUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = EXCLUDED.commit_id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *RecipePatchRepository) UpsertOne(ctx context.Context, input *types.RecipePatch, on RecipePatchUniqueKey, update *RecipePatchUpdate) (*types.RecipePatch, error) {
+	key, ok := recipePatchUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipePatch has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &RecipePatchUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := recipePatchUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: entityKind
+	fields = append(fields, `entity_kind`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.EntityKind)
+	// Required field: entityKey
+	fields = append(fields, `entity_key`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.EntityKey.ToUUID())
+	// Required field: entityId
+	fields = append(fields, `entity_id`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.EntityId.ToUUID())
+	// Required field: entityVersion
+	fields = append(fields, `entity_version`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.EntityVersion)
+	// Required field: operation
+	fields = append(fields, `operation`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Operation)
+
+	// Handle relationship foreign key columns
+	// Relationship: commit (FK: commit_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := recipePatchUUIDValue(input.Commit.Id); ok && relID != zeroId {
+			fields = append(fields, "commit_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.EntityKind != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_kind = $%d`, paramNum))
+		values = append(values, *update.EntityKind)
+	}
+	if update.EntityKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		values = append(values, (*update.EntityKey).ToUUID())
+	}
+	if update.EntityId != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_id = $%d`, paramNum))
+		values = append(values, (*update.EntityId).ToUUID())
+	}
+	if update.EntityVersion != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_version = $%d`, paramNum))
+		values = append(values, *update.EntityVersion)
+	}
+	if update.Operation != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`operation = $%d`, paramNum))
+		values = append(values, *update.Operation)
+	}
+	// Handle relationship foreign key: commit
+	if update.CommitID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("commit_id = $%d", paramNum))
+		values = append(values, update.CommitID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO recipe_patch (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", "operation"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.RecipePatch{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelCommit *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelCommit,
+
+		&result.EntityKind,
+
+		&result.EntityKey,
+
+		&result.EntityId,
+
+		&result.EntityVersion,
+
+		&result.Operation,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+	if tempRelCommit != nil {
+		result.Commit.Id = recipePatchUUIDPtr(*tempRelCommit)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple RecipePatch records in a single statement
 func (r *RecipePatchRepository) CreateMany(ctx context.Context, inputs []*types.RecipePatch) ([]*types.RecipePatch, error) {
 	if len(inputs) == 0 {

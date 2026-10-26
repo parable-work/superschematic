@@ -32,6 +32,7 @@ import { connectPostgres, ping } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import * as usersTsApiApi from '@schemas/users-ts-api-api';
 import * as usersTsApiImpl from '@schemas/users-ts-api-implementation';
+import { createOrm as createUsersDbOrm } from '@schemas/users-db-types/orm';
 import { identityDescriptor as usersDbIdentityDescriptor } from '@schemas/users-db-types/identity';
 
 /** The port the server listens on when $PORT is unset. */
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
   const usersTsApiDeps: usersTsApiApi.Deps = {
     config: usersTsApiConfig,
     db: usersDbPool,
+    orm: createUsersDbOrm(usersDbPool),
     logger: logger.child({ api: 'users-ts-api' }),
   };
   const usersTsApiImplementations = await construct('users-ts-api', 'implementation', () => usersTsApiImpl.create(usersTsApiDeps));

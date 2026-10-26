@@ -1498,6 +1498,218 @@ func (r *TenantRepository) CreateOne(ctx context.Context, input *types.Tenant) (
 	return result, nil
 }
 
+// tenantUniqueKeys are the conflict targets of Tenant's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var tenantUniqueKeys = map[TenantUniqueKey]struct{ conflict, keep string }{
+	TenantUniqueById:   {`(id)`, `id = EXCLUDED.id`},
+	TenantUniqueBySlug: {`(slug)`, `slug = EXCLUDED.slug`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *TenantRepository) UpsertOne(ctx context.Context, input *types.Tenant, on TenantUniqueKey, update *TenantUpdate) (*types.Tenant, error) {
+	key, ok := tenantUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Tenant has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &TenantUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := tenantUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: name
+	fields = append(fields, `"name"`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Name)
+	// Required field: slug
+	fields = append(fields, `slug`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Slug)
+	// Required field: email
+	fields = append(fields, `email`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Email)
+	// Required field: status
+	fields = append(fields, `status`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	// An unset enum takes its schema default; "" is never a member.
+	if input.Status == "" {
+		values = append(values, types.TenantStatus("active"))
+	} else {
+		values = append(values, input.Status)
+	}
+	// Required field: isActive
+	fields = append(fields, `is_active`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.IsActive)
+	// Required field: seatCount
+	fields = append(fields, `seat_count`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.SeatCount)
+	// Required field: metadata
+	fields = append(fields, `metadata`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueMetadata, err := marshalJSONFieldValue(input.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
+	}
+	values = append(values, jsonValueMetadata)
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Name != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`"name" = $%d`, paramNum))
+		values = append(values, *update.Name)
+	}
+	if update.Slug != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`slug = $%d`, paramNum))
+		values = append(values, *update.Slug)
+	}
+	if update.Email != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`email = $%d`, paramNum))
+		values = append(values, *update.Email)
+	}
+	if update.Status != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`status = $%d`, paramNum))
+		values = append(values, *update.Status)
+	}
+	if update.IsActive != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`is_active = $%d`, paramNum))
+		values = append(values, *update.IsActive)
+	}
+	if update.SeatCount != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`seat_count = $%d`, paramNum))
+		values = append(values, *update.SeatCount)
+	}
+	if update.Metadata != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`metadata = $%d`, paramNum))
+		jsonValueMetadata, err := marshalJSONFieldValue(*update.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
+		}
+		values = append(values, jsonValueMetadata)
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+		values = append(values, time.Now())
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO tenant (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Tenant{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempMetadata []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.CreatedAt,
+
+		&result.UpdatedAt,
+
+		&result.Id,
+
+		&result.Name,
+
+		&result.Slug,
+
+		&result.Email,
+
+		&result.Status,
+
+		&result.IsActive,
+
+		&result.SeatCount,
+
+		&tempMetadata,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	if len(tempMetadata) > 0 {
+		if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Tenant records in a single statement
 func (r *TenantRepository) CreateMany(ctx context.Context, inputs []*types.Tenant) ([]*types.Tenant, error) {
 	if len(inputs) == 0 {

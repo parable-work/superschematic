@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -126,20 +125,37 @@ type QueueSpec struct {
 func QueueSpecOf(td *ir.TypeDef, table string, columns []string, keepDone bool) QueueSpec {
 	spec := QueueSpec{Table: table, Columns: columns, KeepDone: keepDone}
 	if td != nil && td.Queue != nil {
-		spec.Key = QueueKeyColumn(td.Queue)
+		spec.Key = QueueKeyColumn(td)
 		spec.OnDuplicate = td.Queue.OnDuplicate
 		spec.Serialize = td.Queue.Serialize
 	}
 	return spec
 }
 
-// QueueKeyColumn is the quoted column of a queue's key, or "" for a queue
-// without one.
-func QueueKeyColumn(def *ir.QueueDef) string {
-	if def == nil || def.Key == "" {
+// QueueKeyColumn is the quoted column of the key of the queue td
+// declares, or "" for a queue without one.
+func QueueKeyColumn(td *ir.TypeDef) string {
+	name := QueueKeyColumnName(td)
+	if name == "" {
 		return ""
 	}
-	return QuoteIdentifier(codegen.ToSnakeCase(def.Key))
+	return QuoteIdentifier(name)
+}
+
+// QueueKeyColumnName is the column of the key of the queue td declares,
+// unquoted: the column of the message's field the key names, as
+// ColumnName names every column (D79), or "" for a queue without a key.
+func QueueKeyColumnName(td *ir.TypeDef) string {
+	if td == nil || td.Queue == nil || td.Queue.Key == "" {
+		return ""
+	}
+	for _, f := range td.Fields {
+		if f != nil && f.Name == td.Queue.Key {
+			return ColumnName(f)
+		}
+	}
+	// A key that names no field, which verification refuses.
+	return ColumnName(&ir.FieldDef{Name: td.Queue.Key})
 }
 
 // Dedupes reports whether the queue keeps one ready message per key.
