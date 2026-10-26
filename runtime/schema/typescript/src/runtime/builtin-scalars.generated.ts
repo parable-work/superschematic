@@ -342,6 +342,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "sql": "BIGINT"
     }
   },
+  "Finance_SignedMoney": {
+    "name": "Finance_SignedMoney",
+    "description": "Signed monetary amount in smallest currency unit (e.g., cents for USD)",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "example": "-1250",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "FinanceSignedMoney",
+      "json_schema": "integer",
+      "sql": "BIGINT"
+    }
+  },
   "Generic_Boolean": {
     "name": "Generic_Boolean",
     "description": "True or false",
@@ -366,6 +392,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "go": "GenericBoolean",
       "json_schema": "boolean",
       "sql": "BOOLEAN"
+    }
+  },
+  "Generic_Decimal": {
+    "name": "Generic_Decimal",
+    "description": "Exact decimal number in plain notation, carried as a string",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "19.99",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "GenericDecimal",
+      "json_schema": "string",
+      "sql": "NUMERIC"
     }
   },
   "Generic_Float64": {
@@ -1375,6 +1427,7 @@ export const BUILTIN_SCALAR_VALUE_CLASSES: Record<string, string> = {
   "File_SizeBytes": "integer",
   "Finance_Currency": "string",
   "Finance_Money": "integer",
+  "Finance_SignedMoney": "integer",
   "Generic_Boolean": "boolean",
   "Generic_Float64": "number",
   "Generic_Int64": "integer",

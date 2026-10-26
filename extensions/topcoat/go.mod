@@ -127,7 +127,7 @@ require (
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f // indirect
 	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0 // indirect

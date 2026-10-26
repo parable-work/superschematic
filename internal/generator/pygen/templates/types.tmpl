@@ -13,6 +13,9 @@ from typing import Optional, List, Any, Dict, TYPE_CHECKING{{if .NeedsLiteralImp
 {{- if .HasVersionedTypes}}
 from datetime import datetime
 {{- end}}
+{{- if .HasDecimal}}
+import decimal
+{{- end}}
 import json
 import re
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasUnionFieldReads}}, field_validator{{end}}{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
@@ -51,6 +54,61 @@ else:
 {{- end}}
 {{end}}
 from .validation_errors import ValidationErrors
+{{- if .HasDecimal}}
+
+
+def _decimal_text(value: Any) -> str:
+    """
+    The text a rule checks of a Generic.Decimal value (D84): a
+    decimal.Decimal in plain notation, as superscalar reads it, where str
+    would write 1E-7; any other value its str.
+    """
+    if isinstance(value, decimal.Decimal):
+        return format(value, "f")
+    return str(value)
+{{- end}}
+{{- if .HasDecimalDigits}}
+
+
+def _check_decimal_digits(errors: ValidationErrors, path: str, value: Any, integer_digits: int, scale: int) -> None:
+    """
+    Check the digit rules of a Generic.Decimal (D84) on one value at path:
+    its canonical form holds at most integer_digits digits before the point,
+    without leading zeros, and at most scale after it, without trailing
+    zeros. A value that is no decimal's text, nor a decimal.Decimal, is the
+    scalar's to report, and is not counted.
+    """
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            return
+        value = format(value, "f")
+    if not isinstance(value, str):
+        return
+    m = re.fullmatch(r"[+-]?([0-9]+)(?:\.([0-9]+))?", value.strip(), re.ASCII)
+    if m is None:
+        return
+    if len(m.group(1).lstrip("0")) > integer_digits:
+        errors.add_field_error(path, "precision", f"must have at most {integer_digits} digits before the decimal point")
+    if len((m.group(2) or "").rstrip("0")) > scale:
+        errors.add_field_error(path, "scale", f"must have at most {scale} digits after the decimal point")
+{{- end}}
+{{- if .HasVectorDimensions}}
+
+
+def _check_vector_dimensions(errors: ValidationErrors, path: str, value: Any, dimensions: int) -> None:
+    """
+    Check the dimensions of an Embedding.Vector (D84) on one value at path:
+    the list, or the list its JSON text holds, has exactly dimensions
+    numbers. Any other value is the scalar's to report.
+    """
+    if isinstance(value, str) and value != "":
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return
+    if isinstance(value, list) and len(value) != dimensions:
+        errors.add_field_error(path, "dimensions", f"must have exactly {dimensions} dimensions")
+{{- end}}
 
 
 def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
@@ -191,15 +249,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and len(str(item)) < {{.Value}}:
+                        if item is not None and len({{ruleText $field "item"}}) < {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "minLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and len(str(item)) < {{.Value}}:
+                    if item is not None and len({{ruleText $field "item"}}) < {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "minLength", "{{pythonString .Message}}")
 {{- else}}
-            if len(str(self.{{$fieldAttr}})) < {{.Value}}:
+            if len({{ruleText $field (printf "self.%s" $fieldAttr)}}) < {{.Value}}:
                 errors.add_field_error("{{$fieldName}}", "minLength", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "maxLength"}}
@@ -209,15 +267,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and len(str(item)) > {{.Value}}:
+                        if item is not None and len({{ruleText $field "item"}}) > {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "maxLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and len(str(item)) > {{.Value}}:
+                    if item is not None and len({{ruleText $field "item"}}) > {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "maxLength", "{{pythonString .Message}}")
 {{- else}}
-            if len(str(self.{{$fieldAttr}})) > {{.Value}}:
+            if len({{ruleText $field (printf "self.%s" $fieldAttr)}}) > {{.Value}}:
                 errors.add_field_error("{{$fieldName}}", "maxLength", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "pattern"}}
@@ -227,15 +285,15 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
+                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field "item"}}, re.ASCII) is None:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "pattern", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item), re.ASCII) is None:
+                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field "item"}}, re.ASCII) is None:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "pattern", "{{pythonString .Message}}")
 {{- else}}
-            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(self.{{$fieldAttr}}), re.ASCII) is None:
+            if re.search(r"{{pythonRawString (printf "%v" .Value)}}", {{ruleText $field (printf "self.%s" $fieldAttr)}}, re.ASCII) is None:
                 errors.add_field_error("{{$fieldName}}", "pattern", "{{pythonString .Message}}")
 {{- end}}
 {{- else if eq .Validator "min"}}
@@ -274,6 +332,26 @@ class HistoryRecord(BaseModel, Generic[_HistoryValue]):
             if float(self.{{$fieldAttr}}) > {{.Value}}:
                 errors.add_field_error("{{$fieldName}}", "max", "{{pythonString .Message}}")
 {{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- with .Digits}}
+            # The digit rules of {{$field.Name}} (D84).
+{{- if $field.IsArray}}
+            if isinstance(self.{{$fieldAttr}}, list):
+                for index, item in enumerate(self.{{$fieldAttr}}):
+{{- if .Decimal}}
+                    _check_decimal_digits(errors, f"{{$fieldName}}[{index}]", item, {{.IntegerDigits}}, {{.Scale}})
+{{- end}}
+{{- if .Dimensions}}
+                    _check_vector_dimensions(errors, f"{{$fieldName}}[{index}]", item, {{.Dimensions}})
+{{- end}}
+{{- else}}
+{{- if .Decimal}}
+            _check_decimal_digits(errors, "{{$fieldName}}", self.{{$fieldAttr}}, {{.IntegerDigits}}, {{.Scale}})
+{{- end}}
+{{- if .Dimensions}}
+            _check_vector_dimensions(errors, "{{$fieldName}}", self.{{$fieldAttr}}, {{.Dimensions}})
 {{- end}}
 {{- end}}
 {{- end}}

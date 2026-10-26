@@ -261,6 +261,40 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 
 	return result, nil
 }
+{{- if .NeedsDecimalDigits}}
+
+// checkDecimalDigits checks the digit rules of a Generic.Decimal (D84) on
+// one value at key: its canonical form holds at most integerDigits digits
+// before the point, without leading zeros, and at most scale after it,
+// without trailing zeros. Text that is no decimal is the scalar's to
+// report, and is not counted.
+func checkDecimalDigits(errors ValidationErrors, key, text string, integerDigits, scale int) {
+	text = strings.TrimSpace(text)
+	if text != "" && (text[0] == '+' || text[0] == '-') {
+		text = text[1:]
+	}
+	whole, fraction, hasPoint := strings.Cut(text, ".")
+	if whole == "" || (hasPoint && fraction == "") || strings.Trim(whole, "0123456789") != "" || strings.Trim(fraction, "0123456789") != "" {
+		return
+	}
+	if len(strings.TrimLeft(whole, "0")) > integerDigits {
+		errors.AddFieldError(key, "precision", fmt.Sprintf("must have at most %d digits before the decimal point", integerDigits))
+	}
+	if len(strings.TrimRight(fraction, "0")) > scale {
+		errors.AddFieldError(key, "scale", fmt.Sprintf("must have at most %d digits after the decimal point", scale))
+	}
+}
+{{- end}}
+{{- if .NeedsVectorDimensions}}
+
+// checkVectorDimensions checks the dimensions of an Embedding.Vector (D84)
+// on one value at key: it holds exactly dimensions numbers.
+func checkVectorDimensions(errors ValidationErrors, key string, length, dimensions int) {
+	if length != dimensions {
+		errors.AddFieldError(key, "dimensions", fmt.Sprintf("must have exactly %d dimensions", dimensions))
+	}
+}
+{{- end}}
 {{- if .NeedsJSONValueMissing}}
 
 // jsonValueMissing reports whether a required field of a scalar that holds
@@ -1815,6 +1849,9 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{end}}
 	{{end}}
 	{{end}}{{end}}
+	{{- with digitRulesCheck .}}
+{{.}}
+	{{- end}}
 	{{end}}
 {{- template "reportJSONObjects" .}}
 {{- template "reportDurations" .}}

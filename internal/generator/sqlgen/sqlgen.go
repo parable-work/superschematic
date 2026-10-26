@@ -36,6 +36,7 @@ var postgresTypeExtensions = map[string]string{
 	"ltree":     "ltree",
 	"geography": "postgis",
 	"geometry":  "postgis",
+	"vector":    "vector",
 }
 
 // opclassExtensions maps an operator class an @index names (ops) to the
@@ -87,6 +88,10 @@ type Index struct {
 	// InTransaction is set by @index's concurrently: false: a migration plan
 	// builds the index inside its step's transaction.
 	InTransaction bool
+	// With are a vector index's storage parameters (@index's m,
+	// efConstruction and lists, D84), "m = 16, ef_construction = 64", or
+	// empty for the method's defaults.
+	With string
 }
 
 // Elements is the index's element list as CREATE INDEX writes it inside its
@@ -812,6 +817,7 @@ func convertTypeToTable(
 				Opclass:       idx.Ops,
 				Expression:    idx.Expression,
 				InTransaction: idx.Concurrently != nil && !*idx.Concurrently,
+				With:          sqlutil.IndexWith(idx),
 			},
 			keys: indexKeys,
 			name: idx.Name,
@@ -1090,6 +1096,8 @@ func collectExtensions(tables []Table, historyTables []HistoryTable, usedScalars
 	sort.Strings(scalarTypes)
 	for _, pgType := range scalarTypes {
 		baseType := strings.ToLower(strings.TrimSuffix(pgType, "[]"))
+		// A type's modifiers, vector(1024)'s dimensions, name no extension.
+		baseType, _, _ = strings.Cut(baseType, "(")
 		if ext, ok := postgresTypeExtensions[baseType]; ok {
 			add(ext)
 		}

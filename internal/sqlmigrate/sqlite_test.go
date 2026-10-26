@@ -97,6 +97,11 @@ func refusedSchemas(t *testing.T) []struct {
 		{"POINT", typed("POINT"), "column label.place (Label.place) is POINT, which the sqlite dialect has no storage for"},
 		{"GEOGRAPHY", typed("GEOGRAPHY"), "column label.place (Label.place) is GEOGRAPHY, which the sqlite dialect has no storage for"},
 		{"GEOMETRY", typed("GEOMETRY"), "column label.place (Label.place) is GEOMETRY, which the sqlite dialect has no storage for"},
+		{"vector", shop(func(s *ir.Schema) {
+			s.Scalars[ir.VectorScalarName] = &ir.ScalarDef{Name: ir.VectorScalarName, LanguagePrimitive: ir.LanguageString}
+			dimensions := 3
+			addField(s, "Label", &ir.FieldDef{Name: "embedding", TypeRef: ir.TypeRef{Name: ir.VectorScalarName}, ValidateDimensions: &dimensions})
+		}), `column label.embedding (Label.embedding) is vector(3), an Embedding.Vector, which the sqlite dialect has no storage for: build the service for postgres alone (outputs.sql.dialects: ["postgres"])`},
 	}
 }
 

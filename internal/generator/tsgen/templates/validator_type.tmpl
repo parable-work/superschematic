@@ -691,6 +691,9 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   }
   {{end}}
   {{end}}
+  {{- with digitRulesCheck .}}
+{{.}}
+  {{- end}}
   {{if and .IsArray (not .IsMap)}}
   // A list element is never null: its one error is "required", in place of
   // whatever the element checks above made of it.

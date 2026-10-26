@@ -56,6 +56,11 @@ type StackEnvironment struct {
 	// its containers and derives its default ports per checkout (section
 	// 8.3). A cloud target's platforms ignore it.
 	SchemasRoot string
+
+	// Vectors reports that a DB service of the stack has a vector(n)
+	// column, which needs pgvector's vector extension (D84). A target that
+	// runs Postgres itself runs it on an image that has it.
+	Vectors bool
 }
 
 // PlatformContext is what a platform's NameOf, AddressOf and Lower

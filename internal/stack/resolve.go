@@ -1239,6 +1239,7 @@ func (r *resolver) stackEnvironment() registry.StackEnvironment {
 		Domain:      r.env.domain,
 		Parameters:  slices.Clone(r.env.parameters),
 		SchemasRoot: r.in.SchemasRoot,
+		Vectors:     slices.ContainsFunc(r.in.Services, func(svc Service) bool { return svc.Vectors }),
 	}
 }
 

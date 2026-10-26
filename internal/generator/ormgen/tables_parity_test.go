@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
@@ -52,6 +53,31 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Go and TypeScript repositories against one Postgres")
 	}
+	runTableParity(t, tableParityFixture, tableParityScript, tableParityORMTest, "TestTableParity", hydratingCalls)
+}
+
+// TestNearestParityOfGoAndTypeScriptOnPostgres runs nearestParityScript, a
+// script of Nearest calls over fixture-vectors-db (D84), through both ORMs
+// on the Postgres with pgvector that pgtest.VectorDatabaseURL names, and
+// requires the same statements, as TestTableParityOfGoAndTypeScriptOnPostgres
+// does: each metric, a filter, the live rows and deleted ones, an optional
+// vector field and the default k, and a table @table and @column name with
+// an Encrypted<T> field beside its vector (D85).
+func TestNearestParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	t.Setenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL", pgtest.VectorDatabaseURL(t))
+	runTableParity(t, vectorsFixture, nearestParityScript, nearestParityORMTest, "TestNearestParity", nil)
+}
+
+// runTableParity runs script, the TypeScript side, and goTest, the Go side
+// whose test is goTestName, over fixture, and requires the two to have sent
+// the same statements, call by call. A call hydrating names is one after
+// whose statements the Go ORM hydrates relations the TypeScript side does
+// not.
+func runTableParity(t *testing.T, fixture, script, goTest, goTestName string, hydrating map[string]bool) {
+	t.Helper()
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
@@ -59,8 +85,8 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	paths := testpaths.Local(t)
 	testpaths.BuildHTTPRuntime(t, bun, paths)
 
-	ormDir := generateORMModule(t, tableParityFixture)
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, tableParityFixture))
+	ormDir := generateORMModule(t, fixture)
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +94,8 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	typesDir := filepath.Join(root, "types", "typescript", tableParityFixture)
-	output, err := tsgen.Generate(schema, tsgen.Options{SchemaName: tableParityFixture, Clock: codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))})
+	typesDir := filepath.Join(root, "types", "typescript", fixture)
+	output, err := tsgen.Generate(schema, tsgen.Options{SchemaName: fixture, Clock: codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))})
 	if err != nil {
 		t.Fatalf("generate typescript types: %v", err)
 	}
@@ -87,12 +113,10 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if out, err := install.CombinedOutput(); err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, out))
 	}
-	script := strings.ReplaceAll(tableParityScript, "@TYPES@", naming.Default().NpmTypesPackage(tableParityFixture))
+	script = strings.ReplaceAll(script, "@TYPES@", naming.Default().NpmTypesPackage(fixture))
 	createSQL := filepath.Join(ormDir, "testdata", "create.sql")
-	for name, content := range map[string]string{"parity.ts": script} {
-		if err := os.WriteFile(filepath.Join(typesDir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(typesDir, "parity.ts"), []byte(script), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	tsOut := filepath.Join(root, "statements.ts.json")
@@ -104,10 +128,10 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 
 	goOut := filepath.Join(root, "statements.go.json")
 	t.Setenv("TABLE_PARITY_OUT", goOut)
-	if err := os.WriteFile(filepath.Join(ormDir, "table_parity_test.go"), []byte(tableParityORMTest), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ormDir, "table_parity_test.go"), []byte(goTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := runORMModule(t, ormDir); !strings.Contains(out, "--- PASS: TestTableParity ") {
+	if out := runORMModule(t, ormDir); !strings.Contains(out, "--- PASS: "+goTestName+" ") {
 		t.Fatalf("the Go side did not pass:\n%s", out)
 	}
 
@@ -147,7 +171,7 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 			t.Errorf("%s: TypeScript sent no statement", ts.Name)
 		}
 		want := g.Statements
-		if hydratingCalls[g.Name] && len(want) > len(ts.Statements) {
+		if hydrating[g.Name] && len(want) > len(ts.Statements) {
 			for _, extra := range want[len(ts.Statements):] {
 				if !strings.HasPrefix(extra, "SELECT ") {
 					t.Errorf("%s: Go hydrates with %q, which reads nothing", g.Name, extra)

@@ -307,6 +307,19 @@ export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATA
 export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
 ```
 
+The tests of vector columns (D84) need pgvector, which the alpine image
+lacks, so they run on a second Postgres that
+`SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL` names, and skip without it;
+CI sets `SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS=1`, which turns the skip into
+a failure. The other tests stay on the alpine image: the version-graph
+vectors hold date-times to its tzdata, which the pgvector image's Debian
+tzdata reads differently for an 1890 offset.
+
+```
+docker run -d --name superschematic-pgvector -e POSTGRES_PASSWORD=superschematic -p 55433:5432 pgvector/pgvector:0.8.7-pg16
+export SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable'
+```
+
 ### A deploy to Google Cloud
 
 No CI job deploys to Google Cloud. A maintainer proves the gcp target

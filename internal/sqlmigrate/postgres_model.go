@@ -233,7 +233,7 @@ func entityTable(t *sqlgen.Table, ns *pgNamespace) (*Table, error) {
 		}
 		table.Indexes = append(table.Indexes, &Index{
 			Name: idx.Name, Columns: columns, Method: idx.Type, Opclass: idx.Opclass, Unique: idx.Unique, Where: idx.Where,
-			Expression: idx.Expression, InTransaction: idx.InTransaction,
+			Expression: idx.Expression, InTransaction: idx.InTransaction, With: idx.With,
 		})
 	}
 	for _, check := range t.Checks {

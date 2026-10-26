@@ -7,7 +7,7 @@ require (
 	github.com/go-chi/httprate v0.16.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9
+	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0
 	github.com/stretchr/testify v1.12.1

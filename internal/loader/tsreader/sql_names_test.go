@@ -109,3 +109,22 @@ export abstract class LineItem {
 		})
 	}
 }
+
+// TestAnEncryptedVectorIsNoString: Encrypted<T> takes a string (D85), so
+// TypeScript refuses an Encrypted<T> Embedding.Vector, a number[], at its
+// own check (D84).
+func TestAnEncryptedVectorIsNoString(t *testing.T) {
+	dir := decoratorTestService(t, "DB", map[string]string{"src/a.schema.ts": `import { Embedding, Identity } from "superscalar";
+import { Validate } from "@superschematic/schema";
+import { AutoGenerate, Encrypted, key } from "@superschematic/db";
+export abstract class Sealed {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  embedding: Encrypted<Validate<Embedding.Vector, { dimensions: 3 }>>;
+}
+`})
+	_, _, err := LoadService(dir)
+	if err == nil || !strings.Contains(err.Error(), "does not satisfy the constraint 'string'") {
+		t.Fatalf("err = %v, want TypeScript to refuse an Encrypted<T> vector", err)
+	}
+}

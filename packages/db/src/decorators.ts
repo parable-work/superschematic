@@ -188,7 +188,12 @@ export function table(_name: string): ClassDecorator {
   return noopClassDecorator;
 }
 
-/** An index's access method. `hnsw` and `ivfflat` index vector columns. */
+/**
+ * An index's access method. `hnsw` and `ivfflat` index an `Embedding.Vector`
+ * column with `dimensions`, and name the metric its nearest-neighbour
+ * queries order by in `ops`: `vector_cosine_ops`, `vector_l2_ops` or
+ * `vector_ip_ops`.
+ */
 export type IndexMethod = "btree" | "gin" | "gist" | "brin" | "hnsw" | "ivfflat";
 
 export interface IndexOptions {
@@ -201,7 +206,11 @@ export interface IndexOptions {
    * BTREE.
    */
   readonly method?: IndexMethod;
-  /** The operator class every key is indexed with, such as `gin_trgm_ops`. */
+  /**
+   * The operator class every key is indexed with, such as `gin_trgm_ops`; on
+   * a vector index, the metric's: `vector_cosine_ops`, `vector_l2_ops` or
+   * `vector_ip_ops`.
+   */
   readonly ops?: string;
   /** Makes the index partial: a raw SQL predicate over the table's columns, without WHERE. */
   readonly where?: string;
@@ -217,6 +226,18 @@ export interface IndexOptions {
    * it inside the step's transaction, which blocks writes while it builds.
    */
   readonly concurrently?: boolean;
+  /**
+   * An `hnsw` index's links per vector, pgvector's `m`: more find closer
+   * neighbours and cost memory and build time. From 2 to 100; 16 unless set.
+   */
+  readonly m?: number;
+  /**
+   * An `hnsw` index's candidates per vector while it builds, pgvector's
+   * `ef_construction`: at least twice `m`, up to 1000; 64 unless set.
+   */
+  readonly efConstruction?: number;
+  /** An `ivfflat` index's lists, pgvector's `lists`: from 1 to 32768; 100 unless set. */
+  readonly lists?: number;
 }
 
 /**

@@ -73,6 +73,11 @@ export interface FieldDef {
   validateListMin: number | null;
   validateListMax: number | null;
   validatePattern: string;
+  // A Generic.Decimal's digits in all and after the point, and an
+  // Embedding.Vector's length (D84). Absent or null means unbounded.
+  validatePrecision?: number | null;
+  validateScale?: number | null;
+  validateDimensions?: number | null;
   arguments: ArgumentDef[];
   key: boolean;
   unique: boolean;

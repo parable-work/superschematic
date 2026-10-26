@@ -4,8 +4,8 @@ import { AutoGenerate, index, key, rawSql } from "@superschematic/db";
 
 // Each declaration below is one the loader refuses (D83).
 
-// A vector index over a column that is not a vector, which every column is
-// until vector columns arrive; a predicate of two statements.
+// A vector index over a column that is not a vector, an Embedding.Vector
+// with dimensions (D84); a predicate of two statements.
 @index<Note>(["body"], { method: "hnsw" })
 @index<Note>(["body"], { name: "two", where: "true; DROP TABLE note" })
 // A statement a plan cannot run again, a piece after one no piece is, and

@@ -12,6 +12,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -49,6 +50,9 @@ func TestConvergenceOnPostgres(t *testing.T) {
 		}
 	}
 	for _, dir := range modelFixtures {
+		if dir == vectorsFixture {
+			continue
+		}
 		schema, err := loader.LoadService(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -68,6 +72,51 @@ func TestConvergenceOnPostgres(t *testing.T) {
 		writeFile(t, filepath.Join(dir, "to.sql"), []byte(createSQL(t, run.schema, sqlgen.Options{SchemaName: "ledger-db"})))
 	}
 
+	module := t.TempDir()
+	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgconverge"))); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "test", "-count=1", "-v", "-run", "^TestConvergence$", "./...")
+	cmd.Dir = module
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "PGCONVERGE_DATABASE_URL="+dsn, "PGCONVERGE_CASES="+cases)
+	out, err := cmd.CombinedOutput()
+	t.Logf("pgconverge:\n%s", out)
+	if err != nil {
+		t.Fatalf("pgconverge failed: %v", err)
+	}
+	if !strings.Contains(string(out), "--- PASS: TestConvergence") {
+		t.Fatal("pgconverge did not run TestConvergence")
+	}
+}
+
+// TestVectorPlansOnPostgres applies the vector plan cases (D84), which the
+// convergence Postgres cannot (noPgvector), to the Postgres with pgvector
+// that pgtest.VectorDatabaseURL names, as TestConvergenceOnPostgres applies
+// the others: each from create.sql of the previous version, with its rows,
+// to create.sql of the new one; and fixture-vectors-db's plan from an empty
+// database.
+func TestVectorPlansOnPostgres(t *testing.T) {
+	dsn := pgtest.VectorDatabaseURL(t)
+	cases := t.TempDir()
+	applied := 0
+	for _, pc := range planCases {
+		if pc.noConverge != noPgvector {
+			continue
+		}
+		if plan := writePlanCase(t, filepath.Join(cases, pc.name), pc); plan.Expanded != "" {
+			fromSchema, _, fromOpts, _ := pc.versions(t)
+			writeExpandedCase(t, filepath.Join(cases, "expanded-"+pc.name), pc, plan, createSQL(t, fromSchema, fromOpts), postgresSeeds)
+		}
+		applied++
+	}
+	if applied == 0 {
+		t.Fatal("no plan case is a vector case")
+	}
+	schema, err := loader.LoadService(vectorsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeEmptyCase(t, filepath.Join(cases, "empty-"+filepath.Base(vectorsFixture)), schema, sqlgen.Options{SchemaName: filepath.Base(vectorsFixture)})
 	module := t.TempDir()
 	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgconverge"))); err != nil {
 		t.Fatal(err)

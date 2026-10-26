@@ -121,7 +121,7 @@ ALTER TABLE {{ $jt.QuotedName }}
 {{- if $table.Indexes }}
 {{- range $idx := $table.Indexes }}
 
-CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ quote $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ $idx.Elements }}){{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
+CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ quote $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ $idx.Elements }}){{ if $idx.With }} WITH ({{ $idx.With }}){{ end }}{{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
 {{- end }}
 {{- end }}
 {{- if $table.SearchFields }}

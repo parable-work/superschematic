@@ -306,7 +306,19 @@ export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, Que
 // it and a value bound as its column takes it, over the descriptors a DB's
 // types package carries, and the type parsers each pool reads with.
 export { uuidFromDb, uuidToDb } from './uuid.js';
-export { PG_TYPES, columnKey, decodeRow, decodeValue, encodeParam, parseInt8, postgresTypeParsers, withTypeParsers } from './pgcodec.js';
+export {
+  PG_TYPES,
+  canonicalDecimal,
+  columnKey,
+  decodeRow,
+  decodeValue,
+  encodeParam,
+  numericText,
+  parseInt8,
+  postgresTypeParsers,
+  vectorText,
+  withTypeParsers,
+} from './pgcodec.js';
 export type { RowField, TypeParsers, ValueCodec } from './pgcodec.js';
 
 // The envelopes of a table's Encrypted<T> fields (D85), which the
@@ -330,6 +342,9 @@ export type {
   DurationFilter,
   FindOptions,
   JsonFilter,
+  NearestDefinition,
+  NearestOptions,
+  Neighbour,
   NullFilter,
   NumberFilter,
   OrderBy,
@@ -356,4 +371,6 @@ export type {
   TableStatements,
   UniqueKeyDefinition,
   UuidFilter,
+  VectorMetric,
+  VectorRepository,
 } from './orm.js';
