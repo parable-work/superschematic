@@ -2,3 +2,4 @@
 export * from './account';
 export * from './entry';
 export * from './entryposted';
+export * from './mailingaddress';

@@ -30,6 +30,18 @@ connectPostgres opens its pools with postgresTypeParsers, per pool and
 never through pg's global types, so a raw query's BIGINT, NUMERIC and DATE
 come back as the types hold them; decodeRow reads pg's own forms too, for a
 pool opened without them.
+
+A JSON column is read and bound by its column's type, never by the
+JavaScript type of the value (D79). pg parses a JSON or JSONB column with
+its own parsers and with postgresTypeParsers alike, so the value arrives as
+the JSON value it holds, a string among them, and decodeRow takes it as it
+is: parsing it again would read the JSON string "1" as the number 1, and
+fail on "x". Only a TEXT column that holds JSON (jsonText), as SQLite keeps
+it and as the DDL types a field of a @jsonField type, arrives as its text,
+which decodeRow parses. encodeParam writes every
+JSON value as its JSON text, a string as its quoted text and a list as a
+JSON array, never as pg's array literal; null is SQL NULL, but in a column that
+may not be null (required), where it is the JSON null.
 */
 
 /** A field of a row and the column it reads: a table's column in ./orm, or a queue's field in ./queues. */
@@ -38,8 +50,12 @@ export interface RowField {
   readonly name: string;
   /** Its column, quoted for SQL where it must be, as a statement names it. */
   readonly column: string;
-  /** The column holds the value as JSON. */
+  /** The column is JSON or JSONB, which pg reads already parsed: the JSON value it holds, a string, a number, a boolean, null, a list or an object. */
   readonly json?: boolean;
+  /** The column is TEXT that holds a JSON value, as SQLite keeps one and the DDL a field of a @jsonField type, which decodeRow parses. */
+  readonly jsonText?: boolean;
+  /** The column is NOT NULL: a JSON column's null is the JSON null, where a nullable column's is SQL NULL. */
+  readonly required?: boolean;
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The column, or each element of its list, is a UUID: hyphenated in the database, base62 in the row. */
@@ -152,7 +168,10 @@ export function decodeRow<T>(row: Readonly<Record<string, unknown>>, fields: rea
 /** A column's value as the TypeScript types hold it, an SQL NULL null. */
 export function decodeValue(value: unknown, codec: ValueCodec): unknown {
   if (value === null || value === undefined) return null;
-  if (codec.json) return typeof value === 'string' ? JSON.parse(value) : value;
+  // pg parses a JSON or JSONB column itself: its value is the JSON value,
+  // which a string may be. Only a TEXT column holds JSON as its text.
+  if (codec.json) return value;
+  if (codec.jsonText) return typeof value === 'string' ? JSON.parse(value) : value;
   if (codec.point) return decodePoint(value);
   if (codec.interval) return decodeInterval(value);
   if (codec.list) {
@@ -234,14 +253,19 @@ function decodeInterval(value: unknown): string {
 
 /**
  * A value of a field as a statement binds it for its column: a UUID
- * hyphenated, from base62 or hyphenated; a JSON value its JSON text; a
- * location (lon,lat); a duration its whole microseconds; a list each
- * element alike; null and undefined SQL NULL; any other as it is, which pg
+ * hyphenated, from base62 or hyphenated; a JSON value, whatever it is, its
+ * JSON text, and null the JSON null in a required JSON column; a location
+ * (lon,lat); a duration its whole microseconds; a list each element alike;
+ * undefined, and null elsewhere, SQL NULL; any other as it is, which pg
  * writes for its column (a Date, a number, text, a boolean).
  */
 export function encodeParam(value: unknown, codec: ValueCodec): unknown {
-  if (value === null || value === undefined) return null;
-  if (codec.json) return JSON.stringify(value);
+  if (value === undefined) return null;
+  if (codec.json || codec.jsonText) {
+    if (value === null) return codec.required ? 'null' : null;
+    return JSON.stringify(value);
+  }
+  if (value === null) return null;
   if (codec.point) return pointText(value);
   if (codec.interval) return intervalText(value);
   if (codec.list && Array.isArray(value)) return value.map(element => (element === null || element === undefined ? null : encodeScalar(element, codec)));

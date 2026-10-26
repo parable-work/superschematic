@@ -189,14 +189,15 @@ var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // AccountFields specifies which Account fields to select
 type AccountFields struct {
-	Id        bool
-	Name      bool
-	Code      bool
-	OpenedOn  bool
-	CreatedAt bool
-	CreatedBy bool
-	UpdatedAt bool
-	UpdatedBy bool
+	Id             bool
+	Name           bool
+	Code           bool
+	OpenedOn       bool
+	MailingAddress bool
+	CreatedAt      bool
+	CreatedBy      bool
+	UpdatedAt      bool
+	UpdatedBy      bool
 }
 
 // ToStringSlice converts AccountFields to []string for internal use.
@@ -214,6 +215,9 @@ func (f AccountFields) ToStringSlice() []string {
 	}
 	if f.OpenedOn {
 		fields = append(fields, "opened_on")
+	}
+	if f.MailingAddress {
+		fields = append(fields, "mailing_address")
 	}
 	if f.CreatedAt {
 		fields = append(fields, "created_at")
@@ -241,14 +245,15 @@ func (f AccountFields) IsZero() bool {
 // All returns a AccountFields with all fields selected
 func (AccountFields) All() AccountFields {
 	return AccountFields{
-		Id:        true,
-		Name:      true,
-		Code:      true,
-		OpenedOn:  true,
-		CreatedAt: true,
-		CreatedBy: true,
-		UpdatedAt: true,
-		UpdatedBy: true,
+		Id:             true,
+		Name:           true,
+		Code:           true,
+		OpenedOn:       true,
+		MailingAddress: true,
+		CreatedAt:      true,
+		CreatedBy:      true,
+		UpdatedAt:      true,
+		UpdatedBy:      true,
 	}
 }
 
@@ -263,10 +268,11 @@ func (AccountFields) Minimal() AccountFields {
 // WithoutAudit returns all non-audit fields
 func (AccountFields) WithoutAudit() AccountFields {
 	return AccountFields{
-		Id:       true,
-		Name:     true,
-		Code:     true,
-		OpenedOn: true,
+		Id:             true,
+		Name:           true,
+		Code:           true,
+		OpenedOn:       true,
+		MailingAddress: true,
 	}
 }
 
@@ -274,14 +280,15 @@ func (AccountFields) WithoutAudit() AccountFields {
 type AccountOrderByField string
 
 const (
-	AccountOrderById        AccountOrderByField = "id"
-	AccountOrderByName      AccountOrderByField = "name"
-	AccountOrderByCode      AccountOrderByField = "code"
-	AccountOrderByOpenedOn  AccountOrderByField = "opened_on"
-	AccountOrderByCreatedAt AccountOrderByField = "created_at"
-	AccountOrderByCreatedBy AccountOrderByField = "created_by"
-	AccountOrderByUpdatedAt AccountOrderByField = "updated_at"
-	AccountOrderByUpdatedBy AccountOrderByField = "updated_by"
+	AccountOrderById             AccountOrderByField = "id"
+	AccountOrderByName           AccountOrderByField = "name"
+	AccountOrderByCode           AccountOrderByField = "code"
+	AccountOrderByOpenedOn       AccountOrderByField = "opened_on"
+	AccountOrderByMailingAddress AccountOrderByField = "mailing_address"
+	AccountOrderByCreatedAt      AccountOrderByField = "created_at"
+	AccountOrderByCreatedBy      AccountOrderByField = "created_by"
+	AccountOrderByUpdatedAt      AccountOrderByField = "updated_at"
+	AccountOrderByUpdatedBy      AccountOrderByField = "updated_by"
 )
 
 // AccountOrderBy specifies ordering for Account queries
@@ -689,12 +696,13 @@ type EntryPage struct {
 
 // AccountFilter provides filtering for Account queries
 type AccountFilter struct {
-	Id        *UUIDFilter
-	Name      *StringFilter
-	Code      *StringFilter
-	OpenedOn  *DateFilter
-	CreatedAt *DateTimeFilter
-	UpdatedAt *DateTimeFilter
+	Id             *UUIDFilter
+	Name           *StringFilter
+	Code           *StringFilter
+	OpenedOn       *DateFilter
+	MailingAddress *StringFilter
+	CreatedAt      *DateTimeFilter
+	UpdatedAt      *DateTimeFilter
 	// ReferencedByEntryAccount filters on the presence or absence of a
 	// Entry whose account points at this row.
 	ReferencedByEntryAccount *ReferencedByFilter
@@ -712,10 +720,12 @@ type AccountFilter struct {
 
 // AccountUpdate provides fields that can be updated
 type AccountUpdate struct {
-	Name            *types.IdentityName
-	Code            *string
-	OpenedOn        *types.TemporalDate
-	OpenedOnSetNull bool
+	Name                  *types.IdentityName
+	Code                  *string
+	OpenedOn              *types.TemporalDate
+	OpenedOnSetNull       bool
+	MailingAddress        *types.MailingAddress
+	MailingAddressSetNull bool
 	// UpdatedBy is automatically set if not provided and user is in context
 	UpdatedBy *types.IdentityUUID
 }
@@ -734,6 +744,11 @@ func NewAccountSnapshotUpdate(input *types.Account) *AccountUpdate {
 		update.OpenedOnSetNull = true
 	} else {
 		update.OpenedOn = input.OpenedOn
+	}
+	if input.MailingAddress == nil {
+		update.MailingAddressSetNull = true
+	} else {
+		update.MailingAddress = input.MailingAddress
 	}
 	return update
 }
@@ -754,6 +769,11 @@ func (u *AccountUpdate) ApplyTo(row *types.Account) {
 		row.OpenedOn = nil
 	} else if u.OpenedOn != nil {
 		row.OpenedOn = u.OpenedOn
+	}
+	if u.MailingAddressSetNull {
+		row.MailingAddress = nil
+	} else if u.MailingAddress != nil {
+		row.MailingAddress = u.MailingAddress
 	}
 	if u.UpdatedBy != nil {
 		row.UpdatedBy = *u.UpdatedBy

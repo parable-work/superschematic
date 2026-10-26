@@ -10908,6 +10908,7 @@ This entry adds:
 | One copy of a UUID's two forms, `runtime/http/typescript/src/uuid.ts`: `uuidToDb` writes either form hyphenated, `uuidFromDb` reads either as base62. The identity store and both queue clients convert through it. | The identity store's private copy, which each implementation re-implemented. |
 | `decodeRow(row, fields)` and `encodeParam(value, codec)` are driven by the per-field descriptors the types already carry: a queue's fields in `./queues`, and now a table's columns in `./orm`. A `RowField` is a `QueueField` with `date`, `int64` and `numeric` flags beside its own. A column the row does not hold is left out, so a query may select a few. | A codec keyed by scalar name, which would copy the compiler's scalar-to-SQL table into the runtime. |
 | `connectPostgres` gives each pool its own parsers, through pg's per-client `types`, never `pg.types`: BIGINT a number, refused past 2^53 - 1 with an error that names the cast; NUMERIC its exact text; DATE its `YYYY-MM-DD` text. Lists of each alike. | Global `pg.types`, which changes every pool in the process. A `bigint`, which the TypeScript types do not hold. |
+| A JSON column is read and bound by its column's type, never by the JavaScript type of its value. pg parses a JSON or JSONB column with its own parsers and with `postgresTypeParsers` alike, so the value arrives as the JSON value it holds, a string among them, and `decodeRow` takes it as it is; `jsonText` marks a TEXT column that holds JSON, as SQLite keeps one and as the DDL types a field of a `@jsonField` type, such as acme's `Order.shippingAddress`, whose text `decodeRow` parses; the generator reads which from the column's DDL type (`sqlutil.ColumnType`). `encodeParam` writes every JSON value as its JSON text, a list as a JSON array and never as pg's array literal, and `null` as SQL NULL but in a column that may not be null (`required`), where it is the JSON null. | Parsing a value that is a string, which read the JSON string `"1"` as the number 1 and failed on `"x"`. Parsing only when `typeParsers` is false, which keeps pg's parsers, and they parse JSON too. |
 | The parsers are on by default, and `typeParsers: false` keeps pg's. Of the callers in the repository, the identity store reads no BIGINT and no DATE, the queue claims and the repositories pass per-query types of their own, and the generated entrypoints open every pool through it; only an implementation's raw query of a BIGINT, NUMERIC or DATE sees a change, and it now sees the type its schema declares. | Opt-in, which every generated server would then turn on, leaving a raw pool that disagrees with the types. |
 
 `Identity.UUID` takes three forms. On the wire and in the TypeScript types
@@ -10966,7 +10967,10 @@ update that sets no field leaves the row as it is, stamps and all.
 Status: built.
 - **The codec:** `runtime/http/typescript/src/pgcodec.test.ts` covers the
   two forms, the parsers and their refusal, `decodeRow` over pg's forms
-  and text, and `encodeParam`. The acceptance is `TestRepositoriesOnPostgres`
+  and text, `encodeParam`, and a JSONB column holding a string, a number, a
+  list, an object, the JSON null and SQL NULL, with the parsers on and off,
+  as `TestRepositoriesOnPostgres`'s fixture-db `json.test.ts` does through
+  the repositories. The acceptance is `TestRepositoriesOnPostgres`
   (`internal/generator/tsgen`): a raw query on `connectPostgres`'s pool,
   through `decodeRow`, reads wire-form ids and numeric amounts, and a
   principal's base62 subject matches its user row through `uuidToDb`.

@@ -103,7 +103,8 @@ type ORMColumn struct {
 	Qualified string
 
 	// What the column holds, for the value codec (./pgcodec's RowField).
-	JSON, List, UUID, Timestamp, Date, Int64, Numeric, Point, Interval, Boolean bool
+	// JSON is a JSON or JSONB column, JSONText a TEXT one that holds JSON.
+	JSON, JSONText, List, UUID, Timestamp, Date, Int64, Numeric, Point, Interval, Boolean bool
 
 	Key, Auto, Required, Internal bool
 	Audit                         string
@@ -296,6 +297,11 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 	// A list of a JSON scalar is a native JSONB[]: each element JSON.
 	if cl.AnyJSON && c.IsArray() && !cl.JSON {
 		column.JSON = true
+	}
+	// A field of a @jsonField type is a TEXT column that holds its JSON as
+	// text, which the codec parses; pg parses a JSON or JSONB column itself.
+	if column.JSON && strings.EqualFold(c.Type, "TEXT") {
+		column.JSON, column.JSONText = false, true
 	}
 	switch {
 	case c.Relation != "":
@@ -559,6 +565,7 @@ func (c ORMColumn) Flags() string {
 		}
 	}
 	flag(c.JSON, "json")
+	flag(c.JSONText, "jsonText")
 	flag(c.List, "list")
 	flag(c.UUID, "uuid")
 	flag(c.Timestamp, "timestamp")

@@ -27,6 +27,7 @@ export interface AccountRow {
   name: T.IdentityName;
   code: string;
   openedOn: T.TemporalDate | null;
+  mailingAddress: T.MailingAddress | null;
   createdAt: T.TemporalDateTime;
   createdBy: T.IdentityUUID;
   updatedAt: T.TemporalDateTime;
@@ -39,6 +40,7 @@ export interface AccountCreate {
   name: T.IdentityName;
   code: string;
   openedOn?: T.TemporalDate | null;
+  mailingAddress?: T.MailingAddress | null;
 }
 
 /** What an update of a row of Account sets: each member set, null setting a column that may be null to NULL. */
@@ -46,6 +48,7 @@ export interface AccountUpdate {
   name?: T.IdentityName;
   code?: string;
   openedOn?: T.TemporalDate | null;
+  mailingAddress?: T.MailingAddress | null;
   /** Who made the update, the acting user unless set. */
   updatedBy?: T.IdentityUUID;
 }
@@ -67,7 +70,7 @@ export interface AccountFilter {
 }
 
 /** The members findOne and findMany order rows of Account by. */
-export type AccountOrderField = "id" | "name" | "code" | "openedOn" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy";
+export type AccountOrderField = "id" | "name" | "code" | "openedOn" | "mailingAddress" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy";
 
 /** The members findPage orders rows of Account by (D60, amended); ties break by id. */
 export type AccountSortField = "id" | "name" | "code" | "createdAt" | "updatedAt";
@@ -103,16 +106,17 @@ export const accountTable: TableDefinition = {
     { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "code", column: "code", field: "code", qualified: "account.code", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", jsonText: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy" },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy" },
   ],
   statements: {
-    columns: "\"id\", \"name\", \"code\", \"opened_on\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
-    qualifiedColumns: "\"account\".\"id\", \"account\".\"name\", \"account\".\"code\", \"account\".\"opened_on\", \"account\".\"created_at\", \"account\".\"created_by\", \"account\".\"updated_at\", \"account\".\"updated_by\"",
-    getOne: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id = $1",
-    getMany: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id IN (%s)",
+    columns: "\"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
+    qualifiedColumns: "\"account\".\"id\", \"account\".\"name\", \"account\".\"code\", \"account\".\"opened_on\", \"account\".\"mailing_address\", \"account\".\"created_at\", \"account\".\"created_by\", \"account\".\"updated_at\", \"account\".\"updated_by\"",
+    getOne: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id = $1",
+    getMany: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id IN (%s)",
     live: "",
     liveWhere: "",
     liveCondition: "",
@@ -128,11 +132,11 @@ export const accountTable: TableDefinition = {
     insert: "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
     insertMany: "INSERT INTO account (%s) VALUES %s RETURNING %s",
     update: "UPDATE account SET %s WHERE id = $%d",
-    returning: " RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
+    returning: " RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
     updateMany: "UPDATE account SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO account (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
+    upsert: "INSERT INTO account (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM account WHERE id = $1",

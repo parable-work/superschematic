@@ -371,6 +371,11 @@ type ColumnModel struct {
 	EnumDefault string
 
 	Class ColumnClass
+	// Type is the column's type as the DDL writes it (ColumnType): JSONB
+	// for a list of lists, a map or a field's @jsonField, and TEXT for a
+	// field of a @jsonField type, which holds its JSON as text. Empty for a
+	// column the generator adds.
+	Type string
 	// Filter is the kind of the column's filter: FilterNone for a column
 	// the filter holds no condition on, and for an audit field but
 	// createdAt and updatedAt, which the filter does not hold.
@@ -582,6 +587,7 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 			Secret:        f.Secret,
 			Default:       f.Default,
 			Class:         class,
+			Type:          ColumnType(f, sqlTypes),
 		}
 		if AuditField(f.Name) {
 			c.Audit = f.Name

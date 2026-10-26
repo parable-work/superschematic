@@ -48,8 +48,6 @@ export interface TableColumn extends RowField {
   readonly key?: boolean;
   /** A column the database fills unless a write sets it (AutoGenerate). */
   readonly auto?: boolean;
-  /** A column a row always holds. */
-  readonly required?: boolean;
   /** Internal metadata, such as _version, which no write sets. */
   readonly internal?: boolean;
   /** The audit field the column is. */
@@ -692,9 +690,14 @@ class TableRepository {
     return out;
   }
 
-  /** Whether a create writes the column, and what: the member when set, else its default, as Go writes an unset enum's. */
+  /**
+   * Whether a create writes the column, and what: the member when set, else
+   * its default, as Go writes an unset enum's. null sets a required JSON
+   * column to the JSON null.
+   */
   private insertValue(input: Values, column: TableColumn): { set: boolean; value?: unknown } {
     const value = input[column.name];
+    if (value === null && jsonNull(column)) return { set: true, value: this.encode(value, column, 'create') };
     if (value !== undefined && value !== null && !(column.default !== undefined && value === '')) {
       return { set: true, value: this.encode(value, column, 'create') };
     }
@@ -791,7 +794,7 @@ class TableRepository {
       if (!(column.name in update)) continue;
       const value = update[column.name];
       if (value === undefined) continue;
-      if (value === null) {
+      if (value === null && !jsonNull(column)) {
         if (column.required) throw new Error(`orm: update ${this.def.name}: ${column.name} cannot be null`);
         sets.push(fill(c.setNull, column.column));
         continue;
@@ -907,6 +910,11 @@ class TableRepository {
   private async clearActor(): Promise<void> {
     if (this.def.historyActor && this.runner.inTransaction) await run(this.runner, this.orm.clearHistoryActor, []);
   }
+}
+
+/** Whether null is a value of the column: the JSON null, in a JSON column that may not be SQL NULL. */
+function jsonNull(column: TableColumn): boolean {
+  return Boolean((column.json || column.jsonText) && column.required);
 }
 
 function repositories(orm: OrmDefinition, runner: Runner, user: string | undefined): Record<string, TableRepository> {

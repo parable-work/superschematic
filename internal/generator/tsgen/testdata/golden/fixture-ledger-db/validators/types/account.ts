@@ -4,12 +4,13 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
-import type { Account, JSDate } from '../../types';
+import type { Account, JSDate, MailingAddress } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
 
@@ -20,6 +21,8 @@ import { validateTemporalDateRequired, validateTemporalDate } from '../scalars/t
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
+
+import { parseMailingAddressFromJSON, validateMailingAddress } from './mailingaddress';
 
 /**
  * Validates a Account object
@@ -56,6 +59,28 @@ export function validateAccount(value: Account | null | undefined): ValidationRe
     if (!valid && fieldErrors) {
       setFieldErrors(errors, "openedOn", fieldErrors);
     }
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
+        return;
+      }
+      const nestedErrors = validateMailingAddress(nested as MailingAddress);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    validateNested(value.mailingAddress, "mailingAddress");
+
   }
 
   {
@@ -107,6 +132,7 @@ const AccountKnownFields = new Set<string>([
   'name',
   'code',
   'openedOn',
+  'mailingAddress',
   'createdAt',
   'createdBy',
   'updatedAt',
@@ -200,6 +226,10 @@ export function parseAccountFromJSON(input: unknown): Account {
   const obj = input as Record<string, unknown>;
   return {
     ...(obj as unknown as Account),
+
+    mailingAddress: obj.mailingAddress != null
+      ? parseMailingAddressFromJSON(obj.mailingAddress)
+      : (obj.mailingAddress as unknown as MailingAddress | null),
 
     createdAt: obj.createdAt != null
       ? (parseTemporalDateTimeFromLib(obj.createdAt as string) as JSDate)

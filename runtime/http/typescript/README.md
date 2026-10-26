@@ -375,7 +375,10 @@ column takes, and `uuidFromDb` reads one back as base62, the form
 `decodeRow(row, fields)` reads a raw query's row by the fields a DB's
 types package describes (a table's `columns` in its `./orm` entry, a
 queue's `fields` in its `./queues` entry), and `encodeParam(value, codec)`
-binds a value as its column takes it.
+binds a value as its column takes it. Both go by the column's type, never
+by the value's: a JSON or JSONB column is read as pg parses it, so a JSON
+string stays a string, and bound as its JSON text, `null` the JSON null in
+a column that may not be null.
 
 `ormOf(pool, definition, user?)` runs a DB's generated repositories, which
 its types' `./orm` entry describes and whose `createOrm(pool)` calls it

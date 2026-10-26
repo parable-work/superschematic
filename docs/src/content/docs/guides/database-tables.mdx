@@ -335,7 +335,10 @@ its own:
 A row holds each column by its member, in the form the TypeScript types
 hold it: a UUID in base62, the wire form, a `Generic.Int64` a number, a
 `Temporal.DateTime` a `Date`, a `Temporal.Date` its `YYYY-MM-DD` text, a
-JSON column its value. The HTTP runtime's value codec converts each, and a
+JSON column the JSON value it holds, a JSON string staying a string and
+`null` the JSON null in a column that may not be null. The HTTP runtime's
+value codec converts each, by the column's type and never by the value's,
+and a
 raw query's rows go through it too: `decodeRow(row, reviewTable.columns)`
 reads a row of the review table's columns, and `uuidToDb(id)` turns a
 base62 id, `ctx.principal.subject` among them, into the hyphenated text a

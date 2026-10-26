@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, EntryKind, Account, Entry, EntryPosted,  } from '@schemas/fixture-ledger-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, EntryKind, Account, Entry, EntryPosted, MailingAddress,  } from '@schemas/fixture-ledger-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-ledger-db-types';
@@ -122,7 +122,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (3)
+### Types (4)
 
 
 - **Account** - An account of the household, which a user opened.
@@ -130,6 +130,8 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Entry** - One line of an account: an amount in minor units, signed, on the day it was booked.
 
 - **EntryPosted** - Enqueued with each entry posted, in the transaction that writes it.
+
+- **MailingAddress** - Where an account's statements go, a @jsonField type: an account's column holds it as its JSON text.
 
 
 

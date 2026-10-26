@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
@@ -29,8 +30,9 @@ type repositoryCase struct {
 // search, pages, upsert, acting user, soft delete, transaction with a
 // queued message and raw rows through the codec; fixture-db's pages, the
 // counterpart of page_postgres_test.go; fixture-queue-db's order by on a
-// keyword table, order_by_postgres_test.go's; and fixture-user-model-db's
-// user model tables, user_model_postgres_test.go's.
+// keyword table, order_by_postgres_test.go's; fixture-db's JSON column
+// through the codec; and fixture-user-model-db's user model tables,
+// user_model_postgres_test.go's. A fixture may run more than one file.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", test: "ledger.test.ts", tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -44,6 +46,8 @@ var repositoryCases = []repositoryCase{
 		"upsertOne inserts, then updates the row that holds its unique key, and an empty update leaves it as it is",
 		"a soft delete stamps deletedAt and deletedBy, and reads leave the row out unless they include deleted rows",
 		"a transaction writes rows and enqueues their message together, and rolls both back when it throws",
+		"a nullable JSON column's null is SQL NULL, and a JSON string in it stays a string",
+		"a field of a @jsonField type, a TEXT column, holds its JSON text and reads back as its value",
 		"a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts",
 	}},
 	{fixture: "fixture-db", test: "page.test.ts", tests: []string{
@@ -51,6 +55,9 @@ var repositoryCases = []repositoryCase{
 		"a filter and a search sit beside the keyset, and a deleted member is out of every page unless included",
 		"a key is the row's id alone, which places a page however the row changed since",
 		"a page reads in a transaction",
+	}},
+	{fixture: "fixture-db", test: "json.test.ts", tests: []string{
+		"a JSON column holds a string, a number, a list, an object and the JSON null as they are, with the pool's parsers on and off",
 	}},
 	{fixture: "fixture-queue-db", test: "order_by.test.ts", tests: []string{
 		"findMany and findOne order a keyword-named table by a column, each way",
@@ -82,20 +89,22 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 	var packages []tsPackageCase
 	files := map[string]map[string]string{}
 	for _, rc := range repositoryCases {
-		schema, err := loader.LoadService(filepath.Join(fixturesDir, rc.fixture))
-		if err != nil {
-			t.Fatalf("load %s: %v", rc.fixture, err)
-		}
 		source, err := ormTests.ReadFile("testdata/orm/" + rc.test)
 		if err != nil {
 			t.Fatal(err)
 		}
-		packages = append(packages, tsPackageCase{name: rc.fixture, schema: schema})
-		files[rc.fixture] = map[string]string{
-			"harness.ts": string(harness),
-			rc.test:      string(source),
-			"create.sql": createSQLOf(t, schema, rc.fixture),
+		if files[rc.fixture] == nil {
+			schema, err := loader.LoadService(filepath.Join(fixturesDir, rc.fixture))
+			if err != nil {
+				t.Fatalf("load %s: %v", rc.fixture, err)
+			}
+			packages = append(packages, tsPackageCase{name: rc.fixture, schema: schema})
+			files[rc.fixture] = map[string]string{
+				"harness.ts": string(harness),
+				"create.sql": createSQLOf(t, schema, rc.fixture),
+			}
 		}
+		files[rc.fixture][rc.test] = string(source)
 	}
 	typesRoot, bunPath := buildTSPackages(t, packages)
 	// The tests are written once the packages type-check: bun runs them
@@ -108,9 +117,9 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 		}
 	}
 	for _, rc := range repositoryCases {
-		t.Run(rc.fixture, func(t *testing.T) {
+		t.Run(rc.fixture+"/"+rc.test, func(t *testing.T) {
 			dir := filepath.Join(typesRoot, rc.fixture)
-			report := filepath.Join(dir, "orm.junit.xml")
+			report := filepath.Join(dir, strings.TrimSuffix(rc.test, ".test.ts")+".junit.xml")
 			// A test and a hook, which creates a database and runs its DDL,
 			// may take longer than bun's 5s on a loaded machine.
 			run := exec.Command(bunPath, "test", "./"+rc.test, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)

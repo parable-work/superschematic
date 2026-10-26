@@ -23,26 +23,28 @@ type AccountRepository struct {
 
 // Allowed fields for Account (for validation and ordering)
 var AccountAllowedFields = map[string]bool{
-	"id":         true,
-	"name":       true,
-	"code":       true,
-	"opened_on":  true,
-	"created_at": true,
-	"created_by": true,
-	"updated_at": true,
-	"updated_by": true,
+	"id":              true,
+	"name":            true,
+	"code":            true,
+	"opened_on":       true,
+	"mailing_address": true,
+	"created_at":      true,
+	"created_by":      true,
+	"updated_at":      true,
+	"updated_by":      true,
 }
 
 // Quoted field names for Account (for SQL generation)
 var AccountQuotedFields = map[string]string{
-	"id":         `id`,
-	"name":       `"name"`,
-	"code":       `code`,
-	"opened_on":  `opened_on`,
-	"created_at": `created_at`,
-	"created_by": `created_by`,
-	"updated_at": `updated_at`,
-	"updated_by": `updated_by`,
+	"id":              `id`,
+	"name":            `"name"`,
+	"code":            `code`,
+	"opened_on":       `opened_on`,
+	"mailing_address": `mailing_address`,
+	"created_at":      `created_at`,
+	"created_by":      `created_by`,
+	"updated_at":      `updated_at`,
+	"updated_by":      `updated_by`,
 }
 
 // accountSortColumns are the columns of Account's sort fields, by
@@ -129,6 +131,9 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 		if opts.Fields.OpenedOn {
 			fieldStrings = append(fieldStrings, "opened_on")
 		}
+		if opts.Fields.MailingAddress {
+			fieldStrings = append(fieldStrings, "mailing_address")
+		}
 		if opts.Fields.CreatedAt {
 			fieldStrings = append(fieldStrings, "created_at")
 		}
@@ -149,7 +154,7 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 		query = fmt.Sprintf(`SELECT %s FROM account WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by" FROM account WHERE id = $1`
+		query = `SELECT "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by" FROM account WHERE id = $1`
 	}
 
 	// Execute query
@@ -165,6 +170,7 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempOpenedOn pgtype.Date
+	var tempMailingAddress []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -187,6 +193,8 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 			case "opened_on":
 				scanDest[i] = &tempOpenedOn
 				selectedOpenedOn = true
+			case "mailing_address":
+				scanDest[i] = &tempMailingAddress
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -210,6 +218,11 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 				tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 				result.OpenedOn = &tmpOpenedOn
 			}
+			if len(tempMailingAddress) > 0 {
+				if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+				}
+			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
 			}
@@ -227,6 +240,8 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 
 			&tempOpenedOn,
 
+			&tempMailingAddress,
+
 			&result.CreatedAt,
 
 			&result.CreatedBy,
@@ -243,6 +258,11 @@ func (r *AccountRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 				// Nullable date scalar: typegen emits *Scalar, take address of converted value
 				tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 				result.OpenedOn = &tmpOpenedOn
+			}
+			if len(tempMailingAddress) > 0 {
+				if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+					return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+				}
 			}
 		}
 	}
@@ -284,7 +304,7 @@ func (r *AccountRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by" FROM account WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by" FROM account WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 
 	// Execute query
 	var rows pgx.Rows
@@ -307,6 +327,7 @@ func (r *AccountRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempOpenedOn pgtype.Date
+		var tempMailingAddress []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -320,6 +341,8 @@ func (r *AccountRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 			&entity.Code,
 
 			&tempOpenedOn,
+
+			&tempMailingAddress,
 
 			&entity.CreatedAt,
 
@@ -339,6 +362,11 @@ func (r *AccountRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 			// Nullable date scalar: typegen emits *Scalar, take address of converted value
 			tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 			entity.OpenedOn = &tmpOpenedOn
+		}
+		if len(tempMailingAddress) > 0 {
+			if err := unmarshalJSONFieldValue(tempMailingAddress, &entity.MailingAddress); err != nil {
+				return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+			}
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -378,6 +406,9 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 		if opts.Fields.OpenedOn {
 			fieldStrings = append(fieldStrings, "opened_on")
 		}
+		if opts.Fields.MailingAddress {
+			fieldStrings = append(fieldStrings, "mailing_address")
+		}
 		if opts.Fields.CreatedAt {
 			fieldStrings = append(fieldStrings, "created_at")
 		}
@@ -397,7 +428,7 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 		selectFields = buildSelectFieldsTyped(fieldStrings, "account")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by"`
+		selectFields = `"id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`
 		if opts == nil {
 			opts = &AccountFindOptions{}
 		}
@@ -426,6 +457,7 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempOpenedOn pgtype.Date
+	var tempMailingAddress []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -448,6 +480,8 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 			case "opened_on":
 				scanDest[i] = &tempOpenedOn
 				selectedOpenedOn = true
+			case "mailing_address":
+				scanDest[i] = &tempMailingAddress
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -471,6 +505,11 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 				tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 				result.OpenedOn = &tmpOpenedOn
 			}
+			if len(tempMailingAddress) > 0 {
+				if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+				}
+			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
 			}
@@ -489,6 +528,8 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 
 			&tempOpenedOn,
 
+			&tempMailingAddress,
+
 			&result.CreatedAt,
 
 			&result.CreatedBy,
@@ -505,6 +546,11 @@ func (r *AccountRepository) FindOne(ctx context.Context, filter *AccountFilter, 
 				// Nullable date scalar: typegen emits *Scalar, take address of converted value
 				tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 				result.OpenedOn = &tmpOpenedOn
+			}
+			if len(tempMailingAddress) > 0 {
+				if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+					return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+				}
 			}
 		}
 	}
@@ -592,6 +638,9 @@ func accountFieldStrings(fields AccountFields) []string {
 	if fields.OpenedOn {
 		fieldStrings = append(fieldStrings, "opened_on")
 	}
+	if fields.MailingAddress {
+		fieldStrings = append(fieldStrings, "mailing_address")
+	}
 	if fields.CreatedAt {
 		fieldStrings = append(fieldStrings, "created_at")
 	}
@@ -632,6 +681,7 @@ func (r *AccountRepository) findRows(ctx context.Context, method, query string, 
 		// Create temporary variables for nullable fields that need pointer scanning (per-row)
 
 		var tempOpenedOn pgtype.Date
+		var tempMailingAddress []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these directly on the struct)
 
@@ -651,6 +701,8 @@ func (r *AccountRepository) findRows(ctx context.Context, method, query string, 
 			case "opened_on":
 				scanDest[i] = &tempOpenedOn
 				selectedOpenedOn = true
+			case "mailing_address":
+				scanDest[i] = &tempMailingAddress
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -675,6 +727,11 @@ func (r *AccountRepository) findRows(ctx context.Context, method, query string, 
 			// Nullable date scalar: typegen emits *Scalar, take address of converted value
 			tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 			result.OpenedOn = &tmpOpenedOn
+		}
+		if len(tempMailingAddress) > 0 {
+			if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+			}
 		}
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
@@ -856,6 +913,19 @@ func (r *AccountRepository) CreateOne(ctx context.Context, input *types.Account)
 			values = append(values, *input.OpenedOn)
 		}
 	}
+	// Optional field: mailingAddress - only add if set
+	{
+		if input.MailingAddress != nil {
+			fields = append(fields, `mailing_address`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			jsonValueMailingAddress, err := marshalJSONFieldValue(input.MailingAddress)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+			}
+			values = append(values, jsonValueMailingAddress)
+		}
+	}
 	// Required field: createdBy
 	fields = append(fields, `created_by`)
 	paramNum++
@@ -870,7 +940,7 @@ func (r *AccountRepository) CreateOne(ctx context.Context, input *types.Account)
 	// Handle relationship foreign key columns
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by"`
+	returningClause := `"id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`
 	query := fmt.Sprintf(
 		`INSERT INTO account (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -891,6 +961,7 @@ func (r *AccountRepository) CreateOne(ctx context.Context, input *types.Account)
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempOpenedOn pgtype.Date
+	var tempMailingAddress []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -904,6 +975,8 @@ func (r *AccountRepository) CreateOne(ctx context.Context, input *types.Account)
 		&result.Code,
 
 		&tempOpenedOn,
+
+		&tempMailingAddress,
 
 		&result.CreatedAt,
 
@@ -922,6 +995,11 @@ func (r *AccountRepository) CreateOne(ctx context.Context, input *types.Account)
 		// Nullable date scalar: typegen emits *Scalar, take address of converted value
 		tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 		result.OpenedOn = &tmpOpenedOn
+	}
+	if len(tempMailingAddress) > 0 {
+		if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+		}
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -993,6 +1071,19 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 			values = append(values, *input.OpenedOn)
 		}
 	}
+	// Optional field: mailingAddress - only add if set
+	{
+		if input.MailingAddress != nil {
+			fields = append(fields, `mailing_address`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			jsonValueMailingAddress, err := marshalJSONFieldValue(input.MailingAddress)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+			}
+			values = append(values, jsonValueMailingAddress)
+		}
+	}
 	// Required field: createdBy
 	fields = append(fields, `created_by`)
 	paramNum++
@@ -1029,6 +1120,20 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 		setClauses = append(setClauses, fmt.Sprintf(`opened_on = $%d`, paramNum))
 		values = append(values, *update.OpenedOn)
 	}
+	if update.MailingAddress != nil && update.MailingAddressSetNull {
+		return nil, fmt.Errorf("mailing_address cannot be updated with both value and null assignment")
+	}
+	if update.MailingAddressSetNull {
+		setClauses = append(setClauses, `mailing_address = NULL`)
+	} else if update.MailingAddress != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`mailing_address = $%d`, paramNum))
+		jsonValueMailingAddress, err := marshalJSONFieldValue(*update.MailingAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+		}
+		values = append(values, jsonValueMailingAddress)
+	}
 
 	if len(setClauses) == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
@@ -1054,7 +1159,7 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO account (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by"`,
+		`INSERT INTO account (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`,
 		strings.Join(fields, ", "),
 		strings.Join(placeholders, ", "),
 		key.conflict,
@@ -1074,6 +1179,7 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempOpenedOn pgtype.Date
+	var tempMailingAddress []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -1087,6 +1193,8 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 		&result.Code,
 
 		&tempOpenedOn,
+
+		&tempMailingAddress,
 
 		&result.CreatedAt,
 
@@ -1109,6 +1217,11 @@ func (r *AccountRepository) UpsertOne(ctx context.Context, input *types.Account,
 		// Nullable date scalar: typegen emits *Scalar, take address of converted value
 		tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 		result.OpenedOn = &tmpOpenedOn
+	}
+	if len(tempMailingAddress) > 0 {
+		if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+		}
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1172,6 +1285,19 @@ func (r *AccountRepository) CreateMany(ctx context.Context, inputs []*types.Acco
 			}
 			row = append(row, cell)
 		}
+		// Optional field: mailingAddress
+		{
+			cell := batchInsertCell{column: `mailing_address`}
+			if input.MailingAddress != nil {
+				jsonValue, err := marshalJSONFieldValue(input.MailingAddress)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+				}
+				cell.value = jsonValue
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
 		// Required field: createdBy
 		{
 			cell := batchInsertCell{column: `created_by`, set: true}
@@ -1191,7 +1317,7 @@ func (r *AccountRepository) CreateMany(ctx context.Context, inputs []*types.Acco
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by"`
+	returningClauseMany := `"id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`
 	query := fmt.Sprintf(
 		`INSERT INTO account (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
@@ -1219,6 +1345,7 @@ func (r *AccountRepository) CreateMany(ctx context.Context, inputs []*types.Acco
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempOpenedOn pgtype.Date
+		var tempMailingAddress []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -1232,6 +1359,8 @@ func (r *AccountRepository) CreateMany(ctx context.Context, inputs []*types.Acco
 			&result.Code,
 
 			&tempOpenedOn,
+
+			&tempMailingAddress,
 
 			&result.CreatedAt,
 
@@ -1251,6 +1380,11 @@ func (r *AccountRepository) CreateMany(ctx context.Context, inputs []*types.Acco
 			// Nullable date scalar: typegen emits *Scalar, take address of converted value
 			tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 			result.OpenedOn = &tmpOpenedOn
+		}
+		if len(tempMailingAddress) > 0 {
+			if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+				return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+			}
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -1290,6 +1424,20 @@ func (r *AccountRepository) UpdateOne(ctx context.Context, id types.IdentityUUID
 		setClauses = append(setClauses, fmt.Sprintf(`opened_on = $%d`, paramNum))
 		values = append(values, *update.OpenedOn)
 	}
+	if update.MailingAddress != nil && update.MailingAddressSetNull {
+		return nil, fmt.Errorf("mailing_address cannot be updated with both value and null assignment")
+	}
+	if update.MailingAddressSetNull {
+		setClauses = append(setClauses, `mailing_address = NULL`)
+	} else if update.MailingAddress != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`mailing_address = $%d`, paramNum))
+		jsonValueMailingAddress, err := marshalJSONFieldValue(*update.MailingAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+		}
+		values = append(values, jsonValueMailingAddress)
+	}
 
 	// Set updated_at
 	paramNum++
@@ -1321,7 +1469,7 @@ func (r *AccountRepository) UpdateOne(ctx context.Context, id types.IdentityUUID
 	)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "name", "code", "opened_on", "created_at", "created_by", "updated_at", "updated_by"`
+	query += ` RETURNING "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`
 
 	// Execute query
 	var row pgx.Row
@@ -1336,6 +1484,7 @@ func (r *AccountRepository) UpdateOne(ctx context.Context, id types.IdentityUUID
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempOpenedOn pgtype.Date
+	var tempMailingAddress []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 
@@ -1349,6 +1498,8 @@ func (r *AccountRepository) UpdateOne(ctx context.Context, id types.IdentityUUID
 		&result.Code,
 
 		&tempOpenedOn,
+
+		&tempMailingAddress,
 
 		&result.CreatedAt,
 
@@ -1370,6 +1521,11 @@ func (r *AccountRepository) UpdateOne(ctx context.Context, id types.IdentityUUID
 		// Nullable date scalar: typegen emits *Scalar, take address of converted value
 		tmpOpenedOn := types.TemporalDate(tempOpenedOn.Time.Format("2006-01-02"))
 		result.OpenedOn = &tmpOpenedOn
+	}
+	if len(tempMailingAddress) > 0 {
+		if err := unmarshalJSONFieldValue(tempMailingAddress, &result.MailingAddress); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field mailingAddress: %w", err)
+		}
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1402,6 +1558,20 @@ func (r *AccountRepository) UpdateMany(ctx context.Context, filter *AccountFilte
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`opened_on = $%d`, paramNum))
 		values = append(values, *update.OpenedOn)
+	}
+	if update.MailingAddress != nil && update.MailingAddressSetNull {
+		return 0, fmt.Errorf("mailing_address cannot be updated with both value and null assignment")
+	}
+	if update.MailingAddressSetNull {
+		setClauses = append(setClauses, `mailing_address = NULL`)
+	} else if update.MailingAddress != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`mailing_address = $%d`, paramNum))
+		jsonValueMailingAddress, err := marshalJSONFieldValue(*update.MailingAddress)
+		if err != nil {
+			return 0, fmt.Errorf("failed to marshal JSON field mailingAddress: %w", err)
+		}
+		values = append(values, jsonValueMailingAddress)
 	}
 
 	// Set updated_at

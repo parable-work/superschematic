@@ -2,7 +2,9 @@
 
 import type {
   Account,
+  MailingAddress,
 } from '../../types';
+import { maskSecretsMailingAddress } from './mailingaddress';
 
 /**
  * Returns a copy of Account with fields marked @secret cleared.
@@ -13,6 +15,7 @@ export function maskSecretsAccount(value: Account): Account {
     name: value.name,
     code: value.code,
     openedOn: value.openedOn,
+    mailingAddress: value.mailingAddress !== null && value.mailingAddress !== undefined ? maskSecretsMailingAddress(value.mailingAddress) : null,
     createdAt: value.createdAt,
     createdBy: value.createdBy,
     updatedAt: value.updatedAt,

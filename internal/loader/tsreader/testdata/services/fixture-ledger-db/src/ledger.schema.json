@@ -17,6 +17,16 @@
     }
   },
   "types": {
+    "MailingAddress": {
+      "name": "MailingAddress",
+      "comment": "Where an account's statements go, a @jsonField type: an account's column holds it as its JSON text.",
+      "role": "DBTable",
+      "jsonField": true,
+      "fields": [
+        { "name": "line1", "typeRef": { "name": "string" }, "required": true },
+        { "name": "city", "typeRef": { "name": "string" }, "required": true }
+      ]
+    },
     "Account": {
       "name": "Account",
       "comment": "An account of the household, which a user opened.",
@@ -26,6 +36,7 @@
         { "name": "name", "typeRef": { "name": "Identity.Name" }, "required": true, "searchField": true },
         { "name": "code", "typeRef": { "name": "string" }, "required": true, "unique": true },
         { "name": "openedOn", "typeRef": { "name": "Temporal.Date" } },
+        { "name": "mailingAddress", "typeRef": { "name": "MailingAddress" } },
         { "name": "createdAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true },
         { "name": "createdBy", "typeRef": { "name": "Identity.UUID" }, "required": true },
         { "name": "updatedAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true },

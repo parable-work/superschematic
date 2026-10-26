@@ -12,7 +12,7 @@ import {
   uuidFromDb,
   uuidToDb,
 } from '@superschematic/http-runtime/postgres';
-import { createOrm, entryTable, type EntryRow, type FixtureLedgerDbOrm } from './orm';
+import { accountTable, createOrm, entryTable, type EntryRow, type FixtureLedgerDbOrm } from './orm';
 import { entryPostedQueue } from './queues';
 import type { EntryKind, GenericInt64, IdentityName, TemporalDate } from './types';
 import { alice, aliceHyphenated, bob, database, dsn, recording, type TestDatabase } from './harness';
@@ -272,6 +272,29 @@ describe.skipIf(dsn === '')('the ledger', () => {
     // A transaction acts as the ORM's user, and as another with withUser.
     const byBob = await orm.transaction(tx => tx.withUser(bob).account.createOne({ name: name('Bob'), code: 'tx-bob' }));
     expect(byBob.createdBy).toBe(bob);
+  });
+
+  test("a nullable JSON column's null is SQL NULL, and a JSON string in it stays a string", async () => {
+    const owner = await account('json');
+    for (const metadata of [null, '1', 'x', { plaid: { pending: false } }] as const) {
+      const entry = await orm.entry.createOne({ accountId: owner.id, amountCents: cents(1), bookedOn: day('2026-10-11'), tags: [], metadata });
+      expect([metadata, (await orm.entry.getOne(entry.id)).metadata]).toEqual([metadata, metadata]);
+      const { rows } = await db.pool.query('SELECT metadata IS NULL AS sql_null FROM entry WHERE id = $1', [uuidToDb(entry.id)]);
+      expect([metadata, rows[0].sql_null]).toEqual([metadata, metadata === null]);
+    }
+  });
+
+  test('a field of a @jsonField type, a TEXT column, holds its JSON text and reads back as its value', async () => {
+    const address = { line1: '1 Tea St', city: 'Leeds' };
+    const posted = await orm.account.createOne({ name: name('Posted'), code: 'posted', mailingAddress: address });
+    expect(posted.mailingAddress).toEqual(address);
+    expect((await orm.account.getOne(posted.id)).mailingAddress).toEqual(address);
+    const moved = await orm.account.updateOne(posted.id, { mailingAddress: { line1: '2 Tea St', city: 'York' } });
+    expect(moved.mailingAddress).toEqual({ line1: '2 Tea St', city: 'York' });
+    const { rows } = await db.pool.query('SELECT mailing_address FROM account WHERE id = $1', [uuidToDb(posted.id)]);
+    expect(JSON.parse(rows[0].mailing_address)).toEqual({ line1: '2 Tea St', city: 'York' });
+    expect(decodeRow(rows[0], accountTable.columns)).toEqual({ mailingAddress: { line1: '2 Tea St', city: 'York' } });
+    expect((await orm.account.updateOne(posted.id, { mailingAddress: null })).mailingAddress).toBeNull();
   });
 
   test("a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts", async () => {

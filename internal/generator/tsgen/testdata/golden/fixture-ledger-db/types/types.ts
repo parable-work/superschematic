@@ -21,6 +21,7 @@ export interface Account {
   name: IdentityName;
   code: string;
   openedOn?: TemporalDate | null;
+  mailingAddress?: MailingAddress | null;
   createdAt: TemporalDateTime;
   createdBy: IdentityUUID;
   updatedAt: TemporalDateTime;
@@ -73,4 +74,12 @@ export function makeEntry(overrides?: Partial<Entry>): Entry {
 export interface EntryPosted {
   entryId: IdentityUUID;
   amountCents: GenericInt64;
+}
+
+/**
+ * MailingAddress - Where an account's statements go, a @jsonField type: an account's column holds it as its JSON text.
+ */
+export interface MailingAddress {
+  line1: string;
+  city: string;
 }

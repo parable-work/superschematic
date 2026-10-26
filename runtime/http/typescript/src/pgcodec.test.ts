@@ -78,7 +78,7 @@ describe('decodeRow', () => {
         category_id: null,
         tags: '{groceries,"weekly shop"}',
         owner_ids: [hyphenated],
-        metadata: '{"plaid":{"pending":false}}',
+        metadata: { plaid: { pending: false } },
         at: { x: -0.1276, y: 51.5072 },
         took: '01:30:00',
         order: 3,
@@ -113,6 +113,75 @@ describe('decodeRow', () => {
   test('names the field of a value it cannot read', () => {
     expect(() => decodeRow({ amount_cents: '9007199254740993' }, lineItem)).toThrow('column amount_cents, field amountCents');
     expect(() => decodeRow({ id: 'not-a-uuid' }, lineItem)).toThrow('column id, field id');
+  });
+});
+
+/** The JSON values a column may hold, each as pg reads it from JSONB and the jsonb_typeof Postgres gives it. */
+const jsonValues: readonly [unknown, string][] = [
+  ['x', 'string'],
+  ['1', 'string'],
+  [1, 'number'],
+  [true, 'boolean'],
+  [[1, 'a', null], 'array'],
+  [{ a: 1, b: ['c'] }, 'object'],
+];
+
+describe('a JSON column', () => {
+  test('reads JSON or JSONB as the value pg parsed, a string among them, and TEXT that holds JSON as its parsed text', () => {
+    for (const [value] of jsonValues) {
+      expect(decodeRow({ doc: value }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: value });
+      expect(decodeRow({ doc: JSON.stringify(value) }, [{ name: 'doc', column: 'doc', jsonText: true }])).toEqual({ doc: value });
+    }
+    // The JSON string "1" stays a string, and "x" is no JSON text to parse again.
+    expect(decodeRow({ doc: '1' }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: '1' });
+    expect(decodeRow({ doc: null }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: null });
+  });
+
+  test('binds every JSON value as its JSON text, and null as the JSON null only in a required column', () => {
+    expect(encodeParam('x', { json: true })).toBe('"x"');
+    expect(encodeParam('1', { json: true })).toBe('"1"');
+    expect(encodeParam(1, { json: true })).toBe('1');
+    expect(encodeParam([1, 'a'], { json: true })).toBe('[1,"a"]');
+    expect(encodeParam({ a: 1 }, { json: true })).toBe('{"a":1}');
+    expect(encodeParam(null, { json: true })).toBeNull();
+    expect(encodeParam(null, { json: true, required: true })).toBe('null');
+    expect(encodeParam(undefined, { json: true, required: true })).toBeNull();
+    expect(encodeParam('x', { jsonText: true })).toBe('"x"');
+  });
+
+  test.skipIf(dsn === '')('holds a string, a number, a list, an object, the JSON null and SQL NULL, read alike with the parsers on and off', async () => {
+    for (const typeParsers of [true, false]) {
+      const pool = await connectPostgres({ url: dsn }, { typeParsers });
+      const client = await pool.connect();
+      try {
+        await client.query('CREATE TEMPORARY TABLE codec_json (n int PRIMARY KEY, doc jsonb NOT NULL, maybe jsonb, text_doc text)');
+        const doc: RowField = { name: 'doc', column: 'doc', json: true, required: true };
+        const maybe: RowField = { name: 'maybe', column: 'maybe', json: true };
+        const textDoc: RowField = { name: 'textDoc', column: 'text_doc', jsonText: true };
+        const values: readonly [unknown, string][] = [...jsonValues, [null, 'null']];
+        for (const [i, [value]] of values.entries()) {
+          await client.query('INSERT INTO codec_json (n, doc, maybe, text_doc) VALUES ($1, $2, $3, $4)', [
+            i,
+            encodeParam(value, doc),
+            encodeParam(value, maybe),
+            encodeParam(value, textDoc),
+          ]);
+        }
+        const { rows } = await client.query(
+          'SELECT n, doc, jsonb_typeof(doc) AS doc_type, maybe, maybe IS NULL AS maybe_sql_null, text_doc FROM codec_json ORDER BY n'
+        );
+        for (const [i, [value, type]] of values.entries()) {
+          const row = rows[i];
+          expect([typeParsers, row.doc_type]).toEqual([typeParsers, type]);
+          expect(decodeRow(row, [doc, maybe, textDoc])).toEqual({ doc: value, maybe: value, textDoc: value });
+          // null in the required column is the JSON null; in the nullable one, SQL NULL.
+          expect(row.maybe_sql_null).toBe(value === null);
+        }
+      } finally {
+        client.release();
+        await pool.end();
+      }
+    }
   });
 });
 
