@@ -14,8 +14,9 @@
 //! it was sent from. An operation the deployment hides (`tools.hidden`),
 //! or the policy does not allow the caller, has no form: one the
 //! deployment hides is not there (404), and one the policy refuses is the
-//! policy's refusal (403). An operation the engine hides from MCP alone,
-//! for an MCP handle MCP would refuse (one too long, say), is offered.
+//! policy's refusal (403), as the tools document's `mcp.hiddenBy` says.
+//! An operation the engine hides from MCP alone, for an MCP handle MCP
+//! would refuse (one too long, say), is offered.
 //! A post another site sent is refused (403) before the engine is called,
 //! whatever the app's `PageAuthenticator` and origin policy let through.
 //!
@@ -32,10 +33,11 @@
 //! procedure hands it to the browser. An instance's own amount shows as
 //! money (`views::money_text`) in the currency its field's `@display`
 //! names, a code or a field of the type's, else in the type's one
-//! `Finance.Currency` field's, as the API's views show it (D48, amended).
+//! `Finance.Currency` field's, as the API's views show it (D48, amended);
+//! the describe document gives each field's display.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use crate::forms::{FormErrors, Refusal};
 use crate::pages::{Back, NavLink, current, decode, encode, pager, pager_query, refused};
@@ -48,8 +50,8 @@ use topcoat::router::request::{parts, uri};
 use topcoat::router::{StatusCode, page, path_param};
 use topcoat::view::{BoxView, View, ViewExt, component, view};
 use superschematic_engine::{
-    DEFAULT_PAGE_SIZE, Engine, EngineErrorCode, EngineErrorKind, Error, GetOptions, InstanceRecord, ListOptions,
-    MAX_PAGE_SIZE, Principal, SchemaTarget, ToolTarget, WriteOptions,
+    DEFAULT_PAGE_SIZE, Engine, EngineErrorCode, EngineErrorKind, Error, GetOptions, HiddenBy, InstanceRecord,
+    ListOptions, MAX_PAGE_SIZE, Principal, SchemaTarget, ToolTarget, WriteOptions,
 };
 
 /// Where the engine's pages are served: every one's path begins with it.
@@ -198,19 +200,18 @@ enum Offer {
     Refused(String),
 }
 
-/// How the engine's reason begins when it hides a tool for its MCP handle
-/// alone: one longer than MCP allows, not snake case, an engine tool's, or
-/// another tool's too. That is a limit of MCP's, not the deployment's, and
-/// the engine hides such a tool before it asks the policy.
-const HANDLE_HIDDEN: &str = "its MCP handle ";
-
 /// The namespace's tools as the caller sees them, by name (`note.comment`),
-/// from the namespace's tools document: offered, unless the engine hides it
-/// from the caller for a reason other than its MCP handle (the policy
-/// refuses it, or the namespace is archived), when it is refused with that
-/// reason. One hidden for its handle alone is offered, and the engine asks
-/// the policy when it is called. The request keeps them (`#[memoize]`), so
-/// a request builds the tools document once.
+/// from the namespace's tools document and why the engine hides each one
+/// (`mcp.hiddenBy`): none for a tool the deployment hides (`deployment`),
+/// which no caller is offered; refused, with the engine's reason, for one
+/// the policy refuses the caller (`policy`) or that writes in an archived
+/// namespace (`archived`); and offered otherwise. A tool hidden for its
+/// MCP handle alone (`handle`: one longer than MCP allows, not snake case,
+/// an engine tool's, or another tool's too) is a limit of MCP's, so it is
+/// offered: the engine asks the policy of it as of any other, so a refused
+/// one is refused here too, and `hiddenReason` is then the policy's. The
+/// request keeps them (`#[memoize]`), so a request builds the tools
+/// document once.
 #[memoize(as_ref)]
 async fn offers(cx: &Cx) -> Result<HashMap<String, Offer>, Refusal> {
     call(cx, |engine, principal| {
@@ -220,11 +221,15 @@ async fn offers(cx: &Cx) -> Result<HashMap<String, Offer>, Refusal> {
             .into_iter()
             .flatten()
             .filter_map(|tool| {
-                let reason = tool["mcp"]["hiddenReason"].as_str().unwrap_or_default();
-                let offer = if tool["mcp"]["hidden"] != Value::Bool(true) || reason.starts_with(HANDLE_HIDDEN) {
-                    Offer::Offered
+                let hidden_by = tool["mcp"]["hiddenBy"].as_array();
+                let by = |cause: HiddenBy| hidden_by.is_some_and(|by| by.iter().any(|each| each == cause.as_str()));
+                if by(HiddenBy::Deployment) {
+                    return None;
+                }
+                let offer = if by(HiddenBy::Policy) || by(HiddenBy::Archived) {
+                    Offer::Refused(tool["mcp"]["hiddenReason"].as_str().unwrap_or_default().to_owned())
                 } else {
-                    Offer::Refused(reason.to_owned())
+                    Offer::Offered
                 };
                 Some((tool["name"].as_str()?.to_owned(), offer))
             })
@@ -233,26 +238,9 @@ async fn offers(cx: &Cx) -> Result<HashMap<String, Offer>, Refusal> {
     .await
 }
 
-/// Whether the deployment hides `behavior`'s `operation` from every caller:
-/// the engine document the crate deploys lists it in `tools.hidden`
-/// (`<Behavior>.<operation>`), which the engine is opened with. The engine
-/// hides such a tool, but gives the reason of its MCP handle in place of
-/// this one when the handle is refused too, so the pages read the list
-/// where the engine does.
-fn deployment_hides(behavior: &str, operation: &str) -> bool {
-    static HIDDEN: LazyLock<Vec<String>> = LazyLock::new(|| {
-        let document: Value = serde_json::from_str(schemas_fixture_engine_db_types::ENGINE_DOCUMENT).unwrap_or_default();
-        document["tools"]["hidden"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
-    });
-    HIDDEN.iter().any(|hidden| hidden.rsplit_once('.') == Some((behavior, operation)))
-}
-
 /// What an operation of a describe document is to the caller (`offers`):
 /// none for one the deployment hides, or that the tools document lacks.
 fn offer_of<'o>(offers: &'o HashMap<String, Offer>, entry: &Value) -> Option<&'o Offer> {
-    if deployment_hides(entry["behavior"].as_str()?, entry["name"].as_str()?) {
-        return None;
-    }
     offers.get(entry["tool"].as_str()?)
 }
 
@@ -451,32 +439,23 @@ const MONEY: &str = "Finance.Money";
 const CURRENCY: &str = "Finance.Currency";
 
 /// The currencies of a type's own amounts, by field key, as the API's
-/// views find them: the currency its field's `@display` names, a code or
-/// another own field (by its name or its key), else, for a
-/// `Finance.Money` field, the type's one `Finance.Currency` field. The
-/// describe document gives each own field's scalar, in its `instance`
-/// schema under the tools' scalar key, but not its `@display`, which the
-/// type's live schema document holds; none when the caller may not read
-/// it.
-async fn currencies(cx: &Cx, schema: &str, describe: &Value) -> HashMap<String, Currency> {
-    let schema = schema.to_owned();
-    let read = call(cx, move |engine, principal| {
-        let live = engine.schemas().live(principal, &schema, SchemaTarget { namespace: Some(NAMESPACE) })?;
-        Ok(live.map(|live| (live.document["types"][live.instance_type.as_str()]["fields"].clone(), engine.tools().keys().scalar.clone())))
-    })
-    .await;
-    match read {
-        Ok(Some((fields, scalar_key))) => currencies_of(&fields, &describe["instance"]["properties"], &scalar_key),
-        _ => HashMap::new(),
-    }
+/// views find them, from its describe document: the currency its field's
+/// `display` names, a code or another own field (by its key), else, for a
+/// `Finance.Money` field, the type's one `Finance.Currency` field. Each
+/// own field's scalar is in the `instance` schema, under the tools' scalar
+/// key.
+fn currencies(cx: &Cx, describe: &Value) -> HashMap<String, Currency> {
+    let Ok(setup) = crate::setup(cx) else {
+        return HashMap::new();
+    };
+    currencies_of(&describe["fields"], &describe["instance"]["properties"], &setup.engine.tools().keys().scalar)
 }
 
-/// `currencies` of a type's own fields in its schema document, each
-/// field's scalar read from `properties`, its instance schema's, under
-/// `scalar_key`.
+/// `currencies` of a describe document's `fields`, each field's scalar
+/// read from `properties`, its instance schema's, under `scalar_key`.
 fn currencies_of(fields: &Value, properties: &Value, scalar_key: &str) -> HashMap<String, Currency> {
     let fields: Vec<&Value> = fields.as_array().into_iter().flatten().collect();
-    let key = |field: &Value| field["jsonTag"].as_str().filter(|tag| !tag.is_empty()).or_else(|| field["name"].as_str()).unwrap_or_default().to_owned();
+    let key = |field: &Value| field["name"].as_str().unwrap_or_default().to_owned();
     let scalar = |field: &Value| properties[key(field).as_str()][scalar_key].as_str().map(str::to_owned);
     let codes: Vec<String> = fields.iter().filter(|field| scalar(field).as_deref() == Some(CURRENCY)).map(|field| key(field)).collect();
     let mut out = HashMap::new();
@@ -486,8 +465,8 @@ fn currencies_of(fields: &Value, properties: &Value, scalar_key: &str) -> HashMa
             Value::Object(named) => named
                 .get("field")
                 .and_then(Value::as_str)
-                .and_then(|name| fields.iter().find(|other| other["name"] == name || key(other) == name))
-                .map(|other| Currency::Field(key(other))),
+                .filter(|name| fields.iter().any(|other| key(other) == *name))
+                .map(|name| Currency::Field(name.to_owned())),
             _ if scalar(field).as_deref() == Some(MONEY) && codes.len() == 1 => Some(Currency::Field(codes[0].clone())),
             _ => None,
         };
@@ -1396,7 +1375,7 @@ async fn engine_instance(cx: &Cx, schema: String, id: String, sent: Option<Sent>
             let mut own: Vec<String> =
                 describe["fields"].as_array().into_iter().flatten().filter_map(|field| field["name"].as_str()).map(str::to_owned).collect();
             own.extend(record.data.keys().filter(|key| !own.contains(key)).cloned().collect::<Vec<_>>());
-            let currencies = currencies(cx, &schema, &describe).await;
+            let currencies = currencies(cx, &describe);
             let fields: Vec<Field> =
                 own.iter().map(|field| (field.clone(), field_label(&describe, field), own_shown(&record.data, field, &currencies))).collect();
             let mut sent_alone = sent.as_ref().and_then(|sent| operations.iter().find(|operation| operation.name == sent.operation && !operation.schema_scope));

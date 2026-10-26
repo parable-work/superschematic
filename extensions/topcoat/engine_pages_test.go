@@ -194,15 +194,16 @@ mod panel_shows_tests {
 // with its pages on: the pages' caller is the API's, from the bearer token,
 // and ada holds Note, which the engine's permission policy asks of a
 // reader and a writer of notes, reader Note.read alone, clerk and boss
-// what a SupplierContractAmendmentRequest and a Request ask, and nobody
-// nothing.
+// what a SupplierContractAmendmentRequest and a Request ask, auditor
+// SupplierContractAmendmentRequest.read alone, and nobody nothing.
 // Each app's engine also holds SupplierContractAmendmentRequest, Request
 // under a name that makes the MCP handles of its Approvals tools too long,
 // and Invoice, whose amounts name their currencies (D48, amended); its
 // engine document hides Approvals.listSignOffs. A second test
 // checks that an operation the engine hides from MCP for its handle alone
 // is offered, one the deployment hides is not there (404), and one the
-// policy refuses is refused (403); a third, with the app's origin policy
+// policy refuses is refused (403), its handle too long or not, as the
+// tools document's hiddenBy says; a third, with the app's origin policy
 // off, that a write another site sent is refused (403); a fourth that an
 // instance's own amounts show as money in their currencies.
 const enginePagesAppTest = `use std::sync::Arc;
@@ -236,6 +237,7 @@ impl Authenticator for Bearer {
             let permissions: Vec<&str> = match subject {
                 "nobody" => vec![],
                 "reader" => vec!["Note.read"],
+                "auditor" => vec!["SupplierContractAmendmentRequest.read"],
                 "clerk" | "boss" => vec!["SupplierContractAmendmentRequest", "Request", "requests.approve", "Invoice"],
                 _ => vec!["Note"],
             };
@@ -529,6 +531,19 @@ async fn the_console_offers_what_the_deployment_and_the_policy_allow() {
         assert_eq!(answer.status, StatusCode::SEE_OTHER, "{operation}: {}", answer.body);
         assert_eq!(answer.location.as_deref(), Some(AMENDMENT));
     }
+
+    // The engine asks the policy of a tool it hides for its handle too, so
+    // a reader of amendments has no withdrawSignOff form, and is refused it
+    // with the policy's reason (403) before its method is looked at.
+    let audit = page(&router, AMENDMENT, Some("auditor"), StatusCode::OK).await;
+    assert!(!audit.contains("/operations/withdrawSignOff\""), "{audit}");
+    let answer = send(&router, "GET", &format!("{AMENDMENT}/operations/withdrawSignOff"), Some("auditor"), "").await;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN, "{}", answer.body);
+    assert!(
+        answer.body.contains("the access policy refuses auditor write on SupplierContractAmendmentRequest (withdrawSignOff)"),
+        "{}",
+        answer.body
+    );
 
     // listSignOffs, which the deployment hides, is not there: on a type
     // whose handle is too long too, and on Request, whose is not.
