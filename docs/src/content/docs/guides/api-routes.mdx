@@ -354,7 +354,9 @@ export class CartMutations {
   ```
 
   A body that is neither multipart nor JSON is "Request body is not
-  multipart/form-data".
+  multipart/form-data". So is one of more than 1000 parts, or whose part
+  headers run past 10000 lines of file parts or 10 MiB in all: both
+  servers read multipart under the limits of Go's `ReadForm`.
 - `@bodyLimit` caps the whole body, and a larger one answers 413. Without
   it, the TypeScript server caps it at its files' limits beside its JSON
   cap, and the Go server does not cap it.
@@ -590,7 +592,10 @@ The route then reads the body as usual.
 The keys come from a lookup by `kid`, or from a JWKS URL fetched whole. A
 key is held for an hour. An unknown `kid` is looked up at once, but the
 provider is asked at most once a minute, so a flood of made-up kids costs
-one lookup a minute, and a held key keeps verifying meanwhile.
+one lookup a minute, and a held key keeps verifying meanwhile. A lookup
+has 10 seconds, and a JWKS URL's answer at most 1 MiB; past either, the
+lookup has failed. A token whose `alg` is not `ES256`, `none` among them,
+is refused before any key is looked up.
 
 ```ts
 import { jwtBodyHashVerifier } from "@superschematic/http-runtime/hono";

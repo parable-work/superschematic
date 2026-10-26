@@ -1,10 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { jwtBodyHashVerifier, mountManualOperation, mountOperation, type JwtBodyHashVerifierOptions, type WebhookJwk, type WebhookVerifier } from './hono';
 import type { OperationSpec } from './operation';
-import { base64urlEncode } from './serviceauth';
+import { MAX_KEY_SET_BYTES, base64urlEncode } from './serviceauth';
 
 /*
 The JWT body-hash webhook verifier (D81). The parity vectors are
@@ -315,6 +315,65 @@ describe('jwtBodyHashVerifier', () => {
     now += 60_000;
     await status(app, await plaidToken(trusted, 'k3', now));
     expect(fetched.length).toBe(2);
+  });
+
+  test('a token whose header names another alg is refused before any key is looked up or fetched', async () => {
+    let lookups = 0;
+    let fetches = 0;
+    const byKid = echoApp(jwtBodyHashVerifier(plaidOptions({ jwks: async kid => (lookups++, trusted.jwk(kid)) })));
+    const bySet = echoApp(
+      jwtBodyHashVerifier(plaidOptions({ jwks: 'https://keys.example/jwks.json', fetchKeys: async () => (fetches++, { keys: [trusted.jwk('k1')] }) }))
+    );
+    const segment = (value: unknown) => base64urlEncode(new TextEncoder().encode(JSON.stringify(value)));
+    const claims = segment({ iat: Math.floor(NOW / 1000), request_body_sha256: await sha256Hex(PLAID_BODY) });
+    for (const alg of ['none', 'HS256', 'RS256', 'es256', undefined]) {
+      const input = `${segment({ alg, kid: 'k1', typ: 'JWT' })}.${claims}`;
+      // An ES256 signature by the trusted key, which would verify; none carries no signature.
+      const signature = alg === 'none' ? '' : base64urlEncode(await trusted.sign(input));
+      for (const app of [byKid, bySet]) expect([alg, await status(app, `${input}.${signature}`)]).toEqual([alg, 401]);
+    }
+    expect([lookups, fetches]).toEqual([0, 0]);
+  });
+
+  test('a lookup that takes longer than 10 seconds has failed, as in Go and Rust: 503 with no key held', async () => {
+    let asked: () => void = () => {};
+    const lookedUp = new Promise<void>(resolve => (asked = resolve));
+    const app = echoApp(jwtBodyHashVerifier(plaidOptions({ jwks: () => (asked(), new Promise<never>(() => {})) })));
+    const token = await plaidToken(trusted, 'k1', NOW);
+    jest.useFakeTimers();
+    try {
+      const answer = post(app, PLAID_BODY, { 'plaid-verification': token });
+      await lookedUp;
+      jest.advanceTimersByTime(9_999);
+      expect(await Promise.race([answer.then(response => response.status), Promise.resolve('waiting')])).toBe('waiting');
+      jest.advanceTimersByTime(1);
+      const response = await answer;
+      expect([response.status, (await response.json()).code]).toEqual([503, 'service_unavailable']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('a JWKS larger than 1 MiB is no key set, as in Go and Rust: 503 with no key held', async () => {
+    const set = JSON.stringify({ keys: [trusted.jwk('k1')] });
+    const large = JSON.stringify({ keys: [trusted.jwk('k1')], pad: 'x'.repeat(MAX_KEY_SET_BYTES) });
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname;
+        // Streamed, the body has no Content-Length, so its size is counted as it is read.
+        if (path === '/streamed') return new Response(new ReadableStream({ start: controller => (controller.enqueue(new TextEncoder().encode(large)), controller.close()) }));
+        return new Response(path === '/large' ? large : set, { headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      for (const [path, want] of [['/set', 200], ['/large', 503], ['/streamed', 503]] as const) {
+        const app = echoApp(jwtBodyHashVerifier(plaidOptions({ jwks: new URL(path, server.url) })));
+        expect([path, await status(app, await plaidToken(trusted, 'k1', NOW))]).toEqual([path, want]);
+      }
+    } finally {
+      await server.stop(true);
+    }
   });
 
   test('a key it cannot use is no key', async () => {

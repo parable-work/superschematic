@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MultipartError, multipartBoundary, parseMultipart } from './multipart';
+import { MAX_MULTIPART_HEADER_BYTES, MAX_MULTIPART_HEADER_LINES, MAX_MULTIPART_PARTS, MultipartError, multipartBoundary, parseMultipart } from './multipart';
 
 /*
 The multipart reader (D81) reads each part's name, filename and
@@ -51,5 +51,68 @@ describe('multipartBoundary', () => {
     expect(multipartBoundary('multipart/form-data; charset=utf-8; boundary="a b:c"')).toBe('a b:c');
     expect(() => multipartBoundary('multipart/form-data')).toThrow(MultipartError);
     expect(() => multipartBoundary(`multipart/form-data; boundary=${'b'.repeat(71)}`)).toThrow(MultipartError);
+  });
+});
+
+/*
+The reader's limits (D81) are Go's ReadForm's, so a body one router refuses
+the other refuses: 1000 parts, 10000 header lines of file parts, and 10 MiB
+of headers. Each search stays within its part, so a body costs its length:
+the bounds below are far above what the reads take (a few milliseconds),
+so that a loaded machine does not fail them.
+*/
+describe('parseMultipart limits', () => {
+  test('reads a body of many parts in time linear in its length', () => {
+    const lines = 'a\r\n'.repeat(360);
+    const headerless = encode(`--B\r\n\r\n${lines}`.repeat(MAX_MULTIPART_PARTS - 1) + '--B--');
+    const named = encode(`--B\r\nContent-Disposition: form-data; name="a"\r\n\r\n${lines}\r\n`.repeat(MAX_MULTIPART_PARTS - 1) + '--B--');
+    for (const body of [headerless, named]) {
+      expect(body.length).toBeGreaterThan(1 << 20);
+      const started = performance.now();
+      parseMultipart(body, 'B');
+      expect(performance.now() - started).toBeLessThan(500);
+    }
+    expect(parseMultipart(named, 'B')).toHaveLength(MAX_MULTIPART_PARTS - 1);
+  });
+
+  test('reads 1000 parts and refuses 1001, as Go does, without reading past the limit', () => {
+    const part = '--B\r\nContent-Disposition: form-data; name="a"\r\n\r\nx\r\n';
+    expect(parseMultipart(encode(part.repeat(MAX_MULTIPART_PARTS) + '--B--'), 'B')).toHaveLength(MAX_MULTIPART_PARTS);
+    expect(() => parseMultipart(encode(part.repeat(MAX_MULTIPART_PARTS + 1) + '--B--'), 'B')).toThrow(
+      new MultipartError(`multipart body of more than ${MAX_MULTIPART_PARTS} parts`)
+    );
+    const flood = encode('--B\r\n\r\nx\r\n'.repeat(100_000) + '--B--');
+    const started = performance.now();
+    expect(() => parseMultipart(flood, 'B')).toThrow(MultipartError);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test('counts the header lines of file parts against 10000, and refuses a part with more than are left', () => {
+    const extra = Array.from({ length: 10 }, (_, i) => `X-${i}: ${i}\r\n`).join('');
+    const filePart = `--B\r\nContent-Disposition: form-data; name="f"; filename="a.txt"\r\n${extra}\r\nx\r\n`;
+    const textPart = `--B\r\nContent-Disposition: form-data; name="a"\r\n${extra}\r\nx\r\n`;
+    // 11 lines each: 909 file parts hold 9999, and 910 more than 10000.
+    expect(parseMultipart(encode(filePart.repeat(909) + '--B--'), 'B')).toHaveLength(909);
+    expect(() => parseMultipart(encode(filePart.repeat(910) + '--B--'), 'B')).toThrow(
+      new MultipartError(`multipart headers of more than ${MAX_MULTIPART_HEADER_LINES} lines`)
+    );
+    // A text part's lines are not taken from what is left, as in Go.
+    expect(parseMultipart(encode(textPart.repeat(1000) + '--B--'), 'B')).toHaveLength(1000);
+    const long = `--B\r\nContent-Disposition: form-data; name="a"\r\n${'X: 1\r\n'.repeat(MAX_MULTIPART_HEADER_LINES)}\r\nx\r\n--B--`;
+    expect(() => parseMultipart(encode(long), 'B')).toThrow(new MultipartError(`multipart headers of more than ${MAX_MULTIPART_HEADER_LINES} lines`));
+  });
+
+  test('refuses more than 10 MiB of headers, in all, without looking past them', () => {
+    const half = `X-Big: ${'h'.repeat(MAX_MULTIPART_HEADER_BYTES / 2)}`;
+    const part = `--B\r\nContent-Disposition: form-data; name="a"\r\n${half}\r\n\r\nx\r\n`;
+    expect(() => parseMultipart(encode(part.repeat(2) + '--B--'), 'B')).toThrow(
+      new MultipartError(`multipart headers of more than ${MAX_MULTIPART_HEADER_BYTES} bytes`)
+    );
+    expect(parseMultipart(encode(part + '--B--'), 'B')).toHaveLength(1);
+    // Headers that never end, followed by a long part body.
+    const endless = encode(`--B\r\nX: ${'h'.repeat(MAX_MULTIPART_HEADER_BYTES)}\r\n${'y'.repeat(4 << 20)}\r\n--B--`);
+    const started = performance.now();
+    expect(() => parseMultipart(endless, 'B')).toThrow(new MultipartError(`multipart headers of more than ${MAX_MULTIPART_HEADER_BYTES} bytes`));
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });

@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { HttpProblem, badRequest, payloadTooLarge, serviceUnavailable } from './problem.js';
 import { parseDuration } from './queue-core.js';
-import { base64urlDecode } from './serviceauth.js';
+import { base64urlDecode, fetchKeySet } from './serviceauth.js';
 
 /*
 jwtBodyHashVerifier (D81): the webhook verifier of a provider that signs each
@@ -13,7 +13,7 @@ verifiers, in their order, so a request gets the same answer from each:
 
   1. The header holds a compact JWS: three base64url segments, the first two
      JSON objects. Its alg is the configured one (never none) and its kid a
-     non-empty string.
+     non-empty string, checked before any key is looked up.
   2. The key with that kid, held or looked up (below). One that cannot be
      looked up, with none held: 503 service_unavailable.
   3. The signature verifies with the key, a P-256 key whose use, when set,
@@ -33,8 +33,10 @@ that needs it looks it up again, and a lookup that fails keeps it. A kid not
 held is looked up at once, but the provider is asked at most once a minute,
 whatever prompts it, so a flood of random kids costs one lookup a minute.
 One lookup runs at a time: a request whose key is held does not wait for it,
-and one whose kid is not held waits, then looks again. A function answers
-for one kid; a JWKS URL's set replaces every key held.
+and one whose kid is not held waits, then looks again. A lookup has 10
+seconds, and a JWKS URL's answer at most 1 MiB; past either it has failed,
+as in Go and Rust. A function answers for one kid; a JWKS URL's set
+replaces every key held.
 
 It verifies with WebCrypto and imports nothing from node:, so it runs on
 Node.js, Bun and Cloudflare Workers.
@@ -80,7 +82,7 @@ export interface JwtBodyHashVerifierOptions {
   readonly maxBodyBytes?: number;
   /** Clock in milliseconds, for tests; Date.now by default. */
   readonly now?: () => number;
-  /** Fetches a JWKS URL and resolves its parsed JSON; the global fetch with a 10-second timeout by default. */
+  /** Fetches a JWKS URL and resolves its parsed JSON; fetchKeySet by default, within 10 seconds and at most 1 MiB. */
   readonly fetchKeys?: (url: string) => Promise<unknown>;
 }
 
@@ -94,7 +96,8 @@ const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const KEY_MAX_AGE_MS = 60 * 60_000;
 /** The provider is asked at most this often, whatever prompts it. */
 const LOOKUP_MIN_INTERVAL_MS = 60_000;
-const JWKS_FETCH_TIMEOUT_MS = 10_000;
+/** One lookup may take this long, as in Go and Rust; past it, it has failed. */
+const LOOKUP_TIMEOUT_MS = 10_000;
 
 function refused(reason: string): never {
   throw new HttpProblem(401, INVALID_SIGNATURE_DETAIL, { code: INVALID_SIGNATURE_CODE, cause: new Error(reason) });
@@ -209,7 +212,7 @@ function keyCacheOf(options: JwtBodyHashVerifierOptions, now: () => number): Key
   }
   if (typeof jwks === 'string' || jwks instanceof URL) {
     const url = String(jwks);
-    const fetchKeys = options.fetchKeys ?? fetchJwks;
+    const fetchKeys = options.fetchKeys ?? ((jwksUrl: string) => fetchKeySet(jwksUrl));
     return new KeyCache(async () => keySet(await fetchKeys(url), alg), true, now);
   }
   configError('jwks must be a key lookup by kid or the URL of a JWKS');
@@ -254,12 +257,6 @@ function keySet(document: unknown, alg: JwtWebhookAlgorithm): Map<string, Webhoo
     if (usable(jwk as unknown as WebhookJwk, alg)) keys.set(jwk.kid, jwk as unknown as WebhookJwk);
   }
   return keys;
-}
-
-async function fetchJwks(url: string): Promise<unknown> {
-  const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`GET ${url}: status ${response.status}`);
-  return response.json();
 }
 
 interface HeldKey {
@@ -318,7 +315,7 @@ class KeyCache {
       }
       this.attempted = now;
       let failure: { readonly error: unknown } | undefined;
-      this.inflight = this.lookup(kid)
+      this.inflight = withTimeout(this.lookup(kid), LOOKUP_TIMEOUT_MS)
         .then(
           found => this.store(kid, found, now),
           (error: unknown) => {
@@ -343,6 +340,15 @@ class KeyCache {
     if (jwk) this.held.set(kid, { jwk, fetchedAt });
     else this.held.delete(kid);
   }
+}
+
+/** What promise settles to, or a rejection once ms pass before it settles. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the key lookup took longer than ${ms / 1000} seconds`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** The body, read up to limit bytes; a 413 past it. */

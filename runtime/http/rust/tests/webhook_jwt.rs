@@ -523,3 +523,64 @@ async fn two_headers_are_refused() {
         .unwrap();
     assert_eq!(app.oneshot(request).await.unwrap().status().as_u16(), 401);
 }
+
+/// Tokens for `PLAID_BODY` under `kid` whose header names an alg other
+/// than ES256, or none: each signed by `key` with ES256 but `none`, which
+/// carries no signature.
+fn other_alg_tokens(key: &TestKey, kid: &str, now: u64) -> Vec<(&'static str, String)> {
+    let segment = |value: Value| URL_SAFE_NO_PAD.encode(value.to_string());
+    let claims = segment(json!({"iat": now, "request_body_sha256": hex_sha256(PLAID_BODY)}));
+    ["none", "HS256", "RS256", "es256", ""]
+        .into_iter()
+        .map(|alg| {
+            let header = if alg.is_empty() {
+                json!({"kid": kid, "typ": "JWT"})
+            } else {
+                json!({"alg": alg, "kid": kid, "typ": "JWT"})
+            };
+            let input = format!("{}.{claims}", segment(header));
+            let signature = if alg == "none" {
+                String::new()
+            } else {
+                URL_SAFE_NO_PAD.encode(key.sign(&input))
+            };
+            (alg, format!("{input}.{signature}"))
+        })
+        .collect()
+}
+
+/// A token whose header names another alg than the configured one, none
+/// among them, is refused before any key is looked up or fetched (D81).
+#[tokio::test]
+async fn a_token_naming_another_alg_is_refused_before_any_lookup() {
+    let key = Arc::new(TestKey::new());
+    let clock = Arc::new(AtomicU64::new(NOW));
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let by_kid = plaid_app(
+        lookup(
+            Arc::clone(&key),
+            vec!["k1".into()],
+            false,
+            Arc::clone(&asked),
+        ),
+        &clock,
+    );
+    let jwks = Arc::new(Jwks {
+        set: json!({"keys": [key.jwk("k1")]}),
+        fetches: AtomicUsize::new(0),
+    });
+    let by_set = plaid_app(
+        WebhookKeys::Jwks {
+            url: "https://keys.example/jwks.json".to_string(),
+            fetcher: Arc::clone(&jwks) as Arc<dyn KeyFetcher>,
+        },
+        &clock,
+    );
+    for (alg, token) in other_alg_tokens(&key, "k1", NOW) {
+        for app in [&by_kid, &by_set] {
+            assert_eq!(status(app, token.clone()).await, 401, "alg {alg:?}");
+        }
+    }
+    assert_eq!(*asked.lock().unwrap(), Vec::<String>::new());
+    assert_eq!(jwks.fetches.load(Ordering::SeqCst), 0);
+}

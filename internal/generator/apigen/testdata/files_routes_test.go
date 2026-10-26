@@ -294,3 +294,26 @@ func TestBodyLimit(t *testing.T) {
 		t.Errorf("over @bodyLimit: %d %s", resp.StatusCode, raw)
 	}
 }
+
+// TestPartLimit: a body of 1000 parts is read and one of 1001 refused as
+// no multipart body, as the TypeScript router refuses it (D81). Go's
+// ReadForm reads at most 1000 parts.
+func TestPartLimit(t *testing.T) {
+	server, impl := serve(t)
+	// The data part and the statement, then notes up to n parts.
+	parts := func(n int) []part {
+		out := []part{{"statement", "march.csv", "text/csv", "date,amount\n"}}
+		for len(out) < n-1 {
+			out = append(out, part{"note", "", "", "x"})
+		}
+		return out
+	}
+	body, contentType := multipartBody(t, `{"accountId":"`+account+`"}`, parts(1000)...)
+	if resp, raw := send(t, server, http.MethodPost, "/api/statements", body, contentType); resp.StatusCode != http.StatusOK {
+		t.Fatalf("1000 parts: %d %s", resp.StatusCode, raw)
+	}
+	body, contentType = multipartBody(t, `{"accountId":"`+account+`"}`, parts(1001)...)
+	if problem := refused(t, server, impl, body, contentType); problem["detail"] != "Request body is not multipart/form-data" {
+		t.Errorf("1001 parts: %v", problem)
+	}
+}

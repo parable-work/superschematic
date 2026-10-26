@@ -118,6 +118,20 @@ describe('generated fixture-files-api router and SDK', () => {
     expect(imported.size).toBe(before);
   });
 
+  test('reads a body of 1000 parts and refuses one of 1001 as no multipart body, as the Go router does', async () => {
+    // The data part and the statement, then notes up to parts.
+    const form = (parts: number) => {
+      const body = new FormData();
+      body.append('data', JSON.stringify({ accountId: ACCOUNT }));
+      body.append('statement', statementFile('date,amount\n'));
+      for (let part = 2; part < parts; part++) body.append('note', 'x');
+      return body;
+    };
+    expect(await sdk.statements.importStatementRaw(form(1000))).toMatchObject({ accountId: ACCOUNT, filename: 'march.csv' });
+    const refused = await refusal(sdk.statements.importStatementRaw(form(1001)));
+    expect([refused.status, refused.body.code, refused.body.detail]).toEqual([400, 'bad_request', 'Request body is not multipart/form-data']);
+  });
+
   test('caps the whole request at its @bodyLimit, and a download refusal is a problem', async () => {
     const receipt = new File(['x'.repeat(1024 * 1024 + 1)], 'receipt.pdf');
     const capped = await refusal(sdk.statements.importStatement({ accountId: ACCOUNT }, { statement: statementFile('date,amount\n'), receipt }));

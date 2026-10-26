@@ -331,3 +331,106 @@ func TestJWTBodyHashVerifierRefusesAKeyItCannotUse(t *testing.T) {
 		})
 	}
 }
+
+// otherAlgTokens are tokens for plaidBody under kid whose header names an
+// alg other than ES256, or none, each signed by key with ES256 but none,
+// which carries no signature.
+func otherAlgTokens(t testing.TB, key testKey, kid string, now time.Time) map[string]string {
+	t.Helper()
+	claims := b64(compact(t, object{{"iat", now.Unix()}, {"request_body_sha256", hexSHA256(plaidBody)}}))
+	tokens := map[string]string{}
+	for _, alg := range []string{"none", "HS256", "RS256", "es256", ""} {
+		header := object{{"alg", alg}, {"kid", kid}, {"typ", "JWT"}}
+		if alg == "" {
+			header = header.without("alg")
+		}
+		input := b64(compact(t, header)) + "." + claims
+		signature := ""
+		if alg != "none" {
+			signature = b64(key.sign(t, input))
+		}
+		tokens[alg] = input + "." + signature
+	}
+	return tokens
+}
+
+// A token whose header names another alg than the configured one, none
+// among them, is refused before any key is looked up or fetched (D81).
+func TestJWTBodyHashVerifierRefusesAnotherAlgBeforeAnyLookup(t *testing.T) {
+	key := newTestKey(t)
+	c := &clock{now: time.Unix(parityNow, 0)}
+	var lookups, fetches atomic.Int32
+	byKid, err := webhook.JWTBodyHashVerifier(options(func(_ context.Context, kid string) (*serviceauth.JWK, error) {
+		lookups.Add(1)
+		j := key.jwk(kid)
+		return &j, nil
+	}, c.Now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		_ = json.NewEncoder(w).Encode(serviceauth.JWKS{Keys: []serviceauth.JWK{key.jwk("k1")}})
+	}))
+	t.Cleanup(server.Close)
+	opts := options(nil, c.Now)
+	opts.JWKSURL = server.URL
+	bySet, err := webhook.JWTBodyHashVerifier(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for alg, tok := range otherAlgTokens(t, key, "k1", c.Now()) {
+		for name, verify := range map[string]func(http.Handler) http.Handler{"lookup": byKid, "key set": bySet} {
+			if rec := post(t, verify(echo(t)), tok); rec.Code != http.StatusUnauthorized {
+				t.Errorf("%s, alg %q: %d, want 401", name, alg, rec.Code)
+			}
+		}
+	}
+	if l, f := lookups.Load(), fetches.Load(); l != 0 || f != 0 {
+		t.Fatalf("%d lookups and %d fetches, want none", l, f)
+	}
+}
+
+// One lookup has 10 seconds, whatever the request's own context, as in
+// TypeScript and Rust.
+func TestJWTBodyHashVerifierBoundsALookupInTime(t *testing.T) {
+	key := newTestKey(t)
+	c := &clock{now: time.Unix(parityNow, 0)}
+	var left time.Duration
+	verify, err := webhook.JWTBodyHashVerifier(options(func(ctx context.Context, kid string) (*serviceauth.JWK, error) {
+		if deadline, ok := ctx.Deadline(); ok {
+			left = time.Until(deadline)
+		}
+		j := key.jwk(kid)
+		return &j, nil
+	}, c.Now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := post(t, verify(echo(t)), plaidToken(t, key, "k1", c.Now())); rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if left <= 9*time.Second || left > 10*time.Second {
+		t.Fatalf("the lookup had %s left, want 10s", left)
+	}
+}
+
+// A key set larger than 1 MiB is no key set: with no key held, 503, as in
+// TypeScript and Rust.
+func TestJWTBodyHashVerifierRefusesALargeKeySet(t *testing.T) {
+	key := newTestKey(t)
+	c := &clock{now: time.Unix(parityNow, 0)}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []serviceauth.JWK{key.jwk("k1")}, "pad": strings.Repeat("x", 1<<20)})
+	}))
+	t.Cleanup(server.Close)
+	opts := options(nil, c.Now)
+	opts.JWKSURL = server.URL
+	verify, err := webhook.JWTBodyHashVerifier(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := post(t, verify(echo(t)), plaidToken(t, key, "k1", c.Now())); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", rec.Code)
+	}
+}
