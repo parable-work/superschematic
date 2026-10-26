@@ -136,9 +136,10 @@ row types, the filters and the API.
 
 Two tables, or two columns of a table, a column the generator adds among
 them, may not take one name, and the load says which. A table the engine,
-a version graph, the user model or a projection view names itself takes
-no override, and neither does a list relation, whose foreign key is a
-column of the other table. Adding, changing or removing an override of a
+a version graph or a projection view names itself takes no override, nor
+do the tables the user model adds (`Session`, `UserCredential`,
+`UserRoleGrant`), though the `User` and `UserRole` tables do, and neither
+does a list relation, whose foreign key is a column of the other table. Adding, changing or removing an override of a
 table that holds rows is a rename to the migration planner
 ([Renames](/superschematic/reference/migrations/#renames)).
 
