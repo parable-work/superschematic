@@ -3070,24 +3070,29 @@ in the thread of a top-level one, one level deep, which their authors
 edit and delete, others react to and pin, and whose threads are resolved
 and reopened. A message may be streamed as it is written: `begin` holds
 its place, `appendDraft` adds to its draft and sends the `draft` signal,
-and `finish` posts it. `rust/behaviors/src/comments-contract.md` is the
-contract the behavior, the generators and the corpora implement: every
-record, parameter, check and refusal in its order.
+and `finish` posts it. Each caller has its own read markers and follows,
+each message that comes to stand records a delivery for each subject that
+should hear of it, and three namespace operations read and work them
+across a namespace: the caller's `inbox`, and `claimDeliveries` and
+`settleDeliveries` for a notifier or an agent dispatcher.
+`rust/behaviors/src/comments-contract.md` is the contract the behavior,
+the generators and the corpora implement: every record, parameter, check
+and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once) |
-| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest |
-| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
+| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own: how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }`, which reads, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
 | Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
-| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run |
-| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
-| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft` none, and the reads none |
+| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run; `prune`, hourly: removes the schema's deliveries made more than `deliveryRetentionMs` ago that no live claim holds, oldest first, at most 1000 a run |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`, `unknown_delivery`, `token_stale`, `not_claimed`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft`, `markRead` and `follow` none, the namespace operations none, and the reads none |
 | `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
 A message's record is `{ id, thread?, quotes?, author, via?, state, body,
-blocks, mentions, reactions, createdAt, postedAt?, editedAt?, edits,
-pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
+blocks, mentions, reactions, createdAt, postedAt?, stand?, editedAt?,
+edits, pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
 `participants` (the latest ten authors of its thread's standing
 messages) and `resolved?: { by, at }`. `state` is `composing`, `posted`,
 `interrupted` or `deleted`; a message *stands* while it is posted or
@@ -3135,7 +3140,31 @@ thread's replies and its top-level message as `root`, always in
 ascending id order: with no anchor the latest page, `before` an older
 one, `after` a newer one, and `around` a page about one message. `before`
 and `after` in the result are the anchors of the pages either side, null
-at an end.
+at an end, and `readUpTo` is the caller's marker on the listing, absent
+while it has none.
+
+A message's `stand` is its place in the order the conversation's messages
+came to stand, given at its post, finish or interrupt and never changed;
+read markers count in stands, not ids, so a streamed reply that began
+before a message a reader read and finished after it is unread. `markRead`
+moves the caller's marker on the top-level messages, or with `thread` on a
+thread's replies, up to the greatest stand among the listing's messages
+with an id up to `upTo`, never back. A subject follows each thread it posts
+in and each it is mentioned in (a `role:` group never), and `follow` turns
+that on or off. When a message comes to stand it records one delivery per
+subject it mentions or that follows its thread, never its author, with its
+reasons (`mention`, `reply`); an edit that adds a mention adds one, and
+`deleteMessage`, `purge` and the instance's delete remove them but those a
+claim holds, which the instance's delete removes too. The engine sends
+nothing: `claimDeliveries` claims the due ones of the schemas whose
+`deliverPermission` the caller holds, under one token that lapses after
+`ttlMs`, dropping those whose message no longer stands or whose subject
+has read it, and `settleDeliveries` marks them `sent`, `failed` (due again
+after the backoff, dropped at `maxAttempts`) or `dropped`. The `inbox`
+lists the caller's mentions, the threads it follows and the conversations
+it has read, across the schemas of the namespace it may read, newest
+first, each with how many of its messages the caller has not read; an item
+with none is done, and stays.
 
 Its storage is migration 2 (`conversation`): `comment_messages`,
 `comment_edits`, `comment_reactions` and `comment_conversations`, the
@@ -3146,7 +3175,10 @@ thread is the root of its chain, and it quotes the comment it replied to
 when that was a reply. Migration 3 (`drafts`) adds `comment_drafts`, one
 row per non-empty append, and a composing message's columns,
 `draft_length` and `last_append_at`, with `posted_at`, which it sets to
-each existing message's `created_at`.
+each existing message's `created_at`. Migration 4 (`inbox`) adds a
+message's `stand` and the conversation's `last_stand`, numbering each
+message that stood by its id, and the tables `comment_reads`,
+`comment_follows` and `comment_deliveries`.
 
 #### Revisions
 

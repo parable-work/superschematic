@@ -15,6 +15,7 @@ use super::checks::{
     check_action_data, check_blocks, check_body, composing, deleted, forbidden, holds, integer,
     invalid, moderates, not_a_thread, not_author, object, present, veto, MAX_EDITS, MAX_EMOJI,
 };
+use super::follows;
 use super::record::record_of;
 use super::storage::{
     conversation, key, keyed, move_counts, placeholders, save_conversation, Message, Moves,
@@ -150,10 +151,12 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
 
     let (id, existed, mut conversation) = next_message(cx)?;
     let now = cx.now();
+    conversation.last_stand += 1;
+    let stand = conversation.last_stand;
     cx.sql().run(
         format!(
-            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, NULL, NULL, NULL, NULL)"
+            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, NULL, NULL, NULL, NULL, ?)"
         ),
         &keyed(
             cx,
@@ -170,12 +173,14 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
                 SqlValue::Integer(now),
                 SqlValue::Integer(now),
                 client_id.map_or(SqlValue::Null, SqlValue::from),
+                SqlValue::Integer(stand),
             ],
         ),
     )?;
     let moves = Moves::standing(thread.is_none(), now);
     move_counts(cx, &mut conversation, &moves)?;
     save_conversation(cx, existed, &conversation)?;
+    follows::came_to_stand(cx, id, thread, subject, stand, mentions)?;
     after(cx, OP, id)
 }
 
@@ -284,6 +289,9 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         .chain(keyed(cx, [SqlValue::Integer(id)]))
         .collect::<Vec<_>>(),
     )?;
+    if let Some(mentions) = mentions {
+        follows::edited_mentions(cx, &message, mentions)?;
+    }
     after(cx, OP, id)
 }
 
@@ -313,8 +321,9 @@ pub(super) fn delete_message(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         return Err(not_author(cx, OP, &message));
     }
     remove_edits_and_reactions(cx, &[id])?;
+    follows::removed(cx, &[id], &[])?;
     let table = cx.sql().table(MESSAGES)?;
-    // It keeps posted_at, as it keeps created_at; a composing message
+    // It keeps posted_at and its stand, as it keeps created_at; a composing message
     // leaves composing.
     cx.sql().run(
         format!(
@@ -366,6 +375,12 @@ pub(super) fn purge(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let gone = rows.iter().map(Message::of).collect::<Result<Vec<_>>>()?;
     let ids: Vec<i64> = gone.iter().map(|message| message.id).collect();
     remove_edits_and_reactions(cx, &ids)?;
+    let threads: Vec<i64> = gone
+        .iter()
+        .filter(|message| message.top_level())
+        .map(|message| message.id)
+        .collect();
+    follows::removed(cx, &ids, &threads)?;
     cx.sql().run(
         format!(
             "DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND message IN ({})",
@@ -676,10 +691,11 @@ pub(super) fn reopen(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     after(cx, OP, top.id)
 }
 
-/// Deletes the instance's messages, edits, reactions and drafts, and empties its
-/// conversation row but for its high-water marks: an instance re-created
-/// with the id numbers its messages and reactions on from them, so no id
-/// is reused across the lives one instance's events span.
+/// Deletes the instance's messages, edits, reactions, drafts, markers,
+/// follows and deliveries, and empties its conversation row but for its
+/// high-water marks: an instance re-created with the id numbers its
+/// messages, reactions and stands on from them, so no id is reused across
+/// the lives one instance's events span.
 pub(super) fn delete_conversation(
     cx: &superschematic_engine::behaviors::InstanceCx<'_, CommentsConfig>,
 ) -> Result<()> {
@@ -690,6 +706,7 @@ pub(super) fn delete_conversation(
             &key(cx),
         )?;
     }
+    follows::delete_reads(cx)?;
     let table = cx.sql().table(CONVERSATIONS)?;
     cx.sql().run(
         format!(

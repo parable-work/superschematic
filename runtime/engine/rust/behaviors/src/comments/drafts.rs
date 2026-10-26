@@ -204,7 +204,8 @@ pub(super) fn append_draft(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
 
 // stand moves a composing message out of composing: to `state` with
 // `body`, its draft's chunks gone. A message that comes to stand takes
-// posted_at = now and moves the counts as a post does.
+// posted_at = now and the conversation's next stand, moves the counts as a
+// post does, and makes its deliveries and follows.
 fn stand(
     cx: Cx<'_, '_>,
     message: &Message,
@@ -222,10 +223,15 @@ fn stand(
         ),
         &keyed(cx, [SqlValue::Integer(message.id)]),
     )?;
+    let mut conversation = super::storage::conversation(cx)?.unwrap_or_default();
+    let stand = stands.then(|| {
+        conversation.last_stand += 1;
+        conversation.last_stand
+    });
     let table = cx.sql().table(MESSAGES)?;
     cx.sql().run(
         format!(
-            "UPDATE {table} SET state = ?, body = ?, blocks = ?, mentions = ?, posted_at = ?, draft_length = NULL, last_append_at = NULL
+            "UPDATE {table} SET state = ?, body = ?, blocks = ?, mentions = ?, posted_at = ?, stand = ?, draft_length = NULL, last_append_at = NULL
              WHERE namespace = ? AND schema = ? AND id = ? AND message = ?"
         ),
         &[
@@ -238,19 +244,27 @@ fn stand(
             } else {
                 SqlValue::Null
             },
+            stand.map_or(SqlValue::Null, SqlValue::Integer),
         ]
         .into_iter()
         .chain(keyed(cx, [SqlValue::Integer(message.id)]))
         .collect::<Vec<_>>(),
     )?;
-    if stands {
-        let mut conversation = super::storage::conversation(cx)?.unwrap_or_default();
+    if let Some(stand) = stand {
         move_counts(
             cx,
             &mut conversation,
             &Moves::standing(message.top_level(), now),
         )?;
         save_conversation(cx, true, &conversation)?;
+        super::follows::came_to_stand(
+            cx,
+            message.id,
+            message.thread,
+            &message.author,
+            stand,
+            mentions,
+        )?;
     }
     Ok(())
 }

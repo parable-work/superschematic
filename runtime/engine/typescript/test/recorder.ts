@@ -513,6 +513,7 @@ const PRINCIPAL_FIRST = new Set([
   'tools.describe',
   'tools.manifest',
   'tools.call',
+  'behaviors.invoke',
   'search',
 ]);
 
@@ -520,7 +521,7 @@ const COMPONENTS = new Set(['namespaces', 'schemas', 'instances', 'events', 'too
 // What a test may call on storage and the behavior registry that the
 // corpus records; the rest passes through unrecorded.
 const STORAGE_CALLS = new Set(['exec', 'run', 'get', 'all', 'transaction']);
-const BEHAVIOR_CALLS = new Set(['register', 'has', 'names', 'declaration']);
+const BEHAVIOR_CALLS = new Set(['register', 'has', 'names', 'declaration', 'invoke']);
 
 function engineProxy(raw: Engine, engine: EngineRecord): Engine {
   const components = new Map<string, object>();

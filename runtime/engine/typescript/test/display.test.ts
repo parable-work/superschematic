@@ -82,6 +82,8 @@ describe('the describe document', () => {
         ['unpin', 'tickets: unpin'],
         ['resolve', 'tickets: resolve'],
         ['reopen', 'tickets: reopen'],
+        ['markRead', 'tickets: markRead'],
+        ['follow', 'tickets: follow'],
         ['listMessages', 'tickets: listMessages'],
         ['getMessage', 'tickets: getMessage'],
         ['listEdits', 'tickets: listEdits'],

@@ -30,13 +30,26 @@
 //! posted or interrupted, and the fields count the standing ones; the
 //! `composing` field names who is writing one. Migration 3 adds the drafts.
 //!
+//! Each message that comes to stand takes a stand, its place in the order
+//! the conversation's messages came to stand, which read markers count in
+//! (batch 3): `markRead` moves the caller's marker, `follow` its follow of
+//! a thread, and the `unread` field is the reader's. A message that comes
+//! to stand records a delivery for each subject it mentions and each
+//! follower of its thread; the namespace operations `inbox`,
+//! `claimDeliveries` and `settleDeliveries` read and work them across a
+//! namespace, and the schedule `prune` removes them once
+//! `deliveryRetentionMs` passes. Migration 4 adds them.
+//!
 //! configChange: Comments can be added to a schema that has instances,
 //! which start with an empty conversation, and cannot be removed from one:
 //! their messages would stay behind with nothing to delete them. A config
 //! change applies to the next call.
 
 mod checks;
+mod deliveries;
 mod drafts;
+mod follows;
+mod inbox;
 mod reads;
 mod record;
 mod storage;
@@ -60,6 +73,16 @@ pub const DEFAULT_COMPOSE_TIMEOUT_MS: i64 = 60_000;
 /// The most composing messages a subject has on an instance when the
 /// config gives no `maxDrafts`.
 pub const DEFAULT_MAX_DRAFTS: i64 = 5;
+/// How many claims a delivery gets when the config gives no `maxAttempts`.
+pub const DEFAULT_MAX_ATTEMPTS: i64 = 5;
+/// How long after its first failure a delivery is due again when the
+/// config gives no `retryBackoffMs`.
+pub const DEFAULT_RETRY_BACKOFF_MS: i64 = 30_000;
+/// How long a delivery is kept when the config gives no
+/// `deliveryRetentionMs`: 30 days.
+pub const DEFAULT_DELIVERY_RETENTION_MS: i64 = 2_592_000_000;
+/// The schedule `prune`'s interval: an hour.
+const PRUNE_EVERY_MS: i64 = 3_600_000;
 /// The longest interval of the schedule `interrupt`.
 const MAX_INTERRUPT_EVERY_MS: i64 = 15_000;
 
@@ -85,6 +108,16 @@ pub struct CommentsConfig {
     pub compose_timeout_ms: i64,
     /// The most composing messages one subject has on an instance at once.
     pub max_drafts: i64,
+    /// What claimDeliveries and settleDeliveries need of the caller for
+    /// this schema's deliveries; nobody claims them when `None`.
+    pub deliver_permission: Option<String>,
+    /// How many claims a delivery gets.
+    pub max_attempts: i64,
+    /// How long after its first failure a delivery is due again, doubled
+    /// after each later one up to an hour.
+    pub retry_backoff_ms: i64,
+    /// How long a delivery is kept from when it was made.
+    pub delivery_retention_ms: i64,
 }
 
 impl Default for CommentsConfig {
@@ -98,6 +131,10 @@ impl Default for CommentsConfig {
             resolve_permission: None,
             compose_timeout_ms: DEFAULT_COMPOSE_TIMEOUT_MS,
             max_drafts: DEFAULT_MAX_DRAFTS,
+            deliver_permission: None,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            retry_backoff_ms: DEFAULT_RETRY_BACKOFF_MS,
+            delivery_retention_ms: DEFAULT_DELIVERY_RETENTION_MS,
         }
     }
 }
@@ -130,6 +167,12 @@ impl CommentsConfig {
             compose_timeout_ms: integer(raw.get("composeTimeoutMs"))
                 .unwrap_or(DEFAULT_COMPOSE_TIMEOUT_MS),
             max_drafts: integer(raw.get("maxDrafts")).unwrap_or(DEFAULT_MAX_DRAFTS),
+            deliver_permission: text("deliverPermission"),
+            max_attempts: integer(raw.get("maxAttempts")).unwrap_or(DEFAULT_MAX_ATTEMPTS),
+            retry_backoff_ms: integer(raw.get("retryBackoffMs"))
+                .unwrap_or(DEFAULT_RETRY_BACKOFF_MS),
+            delivery_retention_ms: integer(raw.get("deliveryRetentionMs"))
+                .unwrap_or(DEFAULT_DELIVERY_RETENTION_MS),
         })
     }
 
@@ -201,6 +244,17 @@ impl Behavior for Comments {
                 ("listReactions", |_, cx, params| {
                     reads::list_reactions(cx, params)
                 }),
+                ("markRead", |_, cx, params| follows::mark_read(cx, params)),
+                ("follow", |_, cx, params| follows::follow(cx, params)),
+            ],
+            namespace_operations: vec![
+                ("inbox", |_, cx, params| inbox::inbox(cx, params)),
+                ("claimDeliveries", |_, cx, params| {
+                    deliveries::claim_deliveries(cx, params)
+                }),
+                ("settleDeliveries", |_, cx, params| {
+                    deliveries::settle_deliveries(cx, params)
+                }),
             ],
             fields: vec![
                 ("messages", |_, view| {
@@ -220,6 +274,9 @@ impl Behavior for Comments {
                             .collect(),
                     )))
                 }),
+                ("unread", |_, view| {
+                    Ok(Some(Value::from(follows::unread(view)?)))
+                }),
             ],
             after_change: Some(|_, cx, change| {
                 if matches!(change, InstanceChange::Delete) {
@@ -227,15 +284,24 @@ impl Behavior for Comments {
                 }
                 Ok(())
             }),
-            schedules: vec![(
-                "interrupt",
-                Schedule {
-                    every: Every::Config(|_, config: &CommentsConfig| {
-                        Ok(Some(config.interrupt_every_ms()))
-                    }),
-                    run: |_, cx| drafts::interrupt_idle(cx),
-                },
-            )],
+            schedules: vec![
+                (
+                    "interrupt",
+                    Schedule {
+                        every: Every::Config(|_, config: &CommentsConfig| {
+                            Ok(Some(config.interrupt_every_ms()))
+                        }),
+                        run: |_, cx| drafts::interrupt_idle(cx),
+                    },
+                ),
+                (
+                    "prune",
+                    Schedule {
+                        every: Every::Ms(PRUNE_EVERY_MS),
+                        run: |_, cx| deliveries::prune(cx),
+                    },
+                ),
+            ],
             ..Hooks::default()
         }
     }

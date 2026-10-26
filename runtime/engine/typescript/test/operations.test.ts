@@ -576,6 +576,54 @@ describe('the namespace operation route', () => {
     ]);
   });
 
+  test("serves Comments' inbox, claimDeliveries and settleDeliveries, which the instance's markRead clears (D77, step 3)", async () => {
+    const engine = openTestEngine({ policy, clock: () => 5000 });
+    const document = schemaDocument('Review', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+    document.types.Review!.behaviors = [{ name: 'Comments', config: { deliverPermission: 'comments.notify' } }];
+    engine.schemas.define(alice, document);
+    engine.schemas.publish(alice, 'Review');
+    engine.instances.create(alice, 'Review', { title: 'Q3 plan' }, { id: 'r1' });
+    engine.instances.invoke(alice, 'Review', 'r1', 'post', { body: 'Reader,   a\nlook?', mentions: ['reader', 'agent:ada'] });
+    // The notifier holds the permission Review names.
+    const app = servedApp(engineApp, engine, {
+      authenticate: async (ctx) =>
+        ctx.bearerToken
+          ? { subject: ctx.bearerToken, permissions: ctx.bearerToken === 'reader' ? ['read'] : ctx.bearerToken === 'notifier' ? ['*', 'comments.notify'] : ['*'] }
+          : null,
+    });
+    const comments = (name: string) => route(name, 'default', 'Comments');
+    assert.deepEqual(await data(call(app, 'POST', comments('inbox'), { token: 'reader', body: {} })), {
+      data: {
+        items: [{ kind: 'mention', schema: 'Review', instanceId: 'r1', message: 1, author: 'alice', postedAt: 5000, excerpt: 'Reader, a look?', unread: 1 }],
+        next: null,
+      },
+      etag: null,
+    });
+    const claim = (await data(call(app, 'POST', comments('claimDeliveries'), { token: 'notifier', body: { prefix: 'agent:' } }))).data;
+    assert.deepEqual(
+      [claim.expiresAt, claim.items.map((item: { subject: string; reasons: string[]; attempt: number }) => [item.subject, item.reasons, item.attempt])],
+      [65_000, [['agent:ada', ['mention'], 1]]]
+    );
+    assert.deepEqual((await data(call(app, 'POST', comments('settleDeliveries'), { token: 'notifier', body: { token: claim.token, ids: [claim.items[0].id], outcome: 'sent' } }))).data, {
+      items: [{ id: claim.items[0].id, state: 'sent', attempts: 1 }],
+    });
+    // A spent token is a veto; the policy's write and the config's
+    // permission each refuse a claim.
+    const stale = await problem(call(app, 'POST', comments('settleDeliveries'), { token: 'notifier', body: { token: claim.token, ids: [claim.items[0].id], outcome: 'sent' } }), 409);
+    assert.equal(stale.code, 'vetoed');
+    assert.equal((await problem(call(app, 'POST', comments('claimDeliveries'), { token: 'reader', body: {} }), 403)).code, 'forbidden');
+    assert.equal(
+      (await problem(call(app, 'POST', comments('claimDeliveries'), { token: 'bob', body: {} }), 403)).detail,
+      'bob may not claimDeliveries in namespace default: it needs permission comments.notify'
+    );
+    // A reader's markRead asks read, and clears the mention.
+    assert.deepEqual((await data(call(app, 'POST', '/namespaces/default/schemas/Review/instances/r1/operations/markRead', { token: 'reader', body: { upTo: 1 } }))).data, {
+      readUpTo: 1,
+      unread: 0,
+    });
+    assert.deepEqual((await data(call(app, 'POST', comments('inbox'), { token: 'reader', body: { unread: true } }))).data, { items: [], next: null });
+  });
+
   test('answers each refusal with its status; the instance route refuses a namespace operation', async () => {
     const { app } = serveInbox();
     assert.equal((await problem(call(app, 'POST', route('clear'), { token: 'reader' }), 403)).code, 'forbidden');
