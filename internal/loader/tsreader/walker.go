@@ -186,7 +186,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 			return errorAtNode(d.node, "@%s takes exactly %d type argument(s) naming a schema class", d.id.name, n)
 		}
 		for _, typeArg := range typeArgNodes {
-			name, serr := w.classTypeArg(d, typeArg)
+			name, serr := w.classTypeArg(d, typeArg, spec.TypeArgAliases())
 			if serr != nil {
 				return serr
 			}
@@ -290,12 +290,16 @@ func decoratorTypeArgs(d decoratorRef) []*astNode {
 }
 
 // classTypeArg resolves one decorator type argument to the name of the
-// schema class it references.
-func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode) (string, *SchemaError) {
+// schema class it references, or of an object type alias when aliases
+// says the decorator takes one (@query's params and row, D86).
+func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode, aliases bool) (string, *SchemaError) {
 	if typeArg.Kind != kindTypeReference {
 		return "", errorAtNode(typeArg, "the @%s type argument must name a schema class", d.id.name)
 	}
 	id, ok := w.identityOf(typeArg.AsTypeReferenceNode().TypeName)
+	if ok && id.decl != nil && aliases && id.decl.Kind == kindTypeAliasDeclaration {
+		return id.name, nil
+	}
 	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
 		return "", errorAtNode(typeArg, "cannot resolve the @%s type argument %q to a schema class", d.id.name, w.nodeText(typeArg))
 	}

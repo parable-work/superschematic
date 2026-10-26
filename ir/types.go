@@ -194,6 +194,11 @@ type TypeDef struct {
 	// every other type. See [EnqueueOnChange].
 	EnqueueOnChange []*EnqueueOnChange `json:"enqueueOnChange,omitempty" yaml:"enqueueOnChange,omitempty"`
 
+	// Query is the @query declaration of a RoleQuery type: a named SQL
+	// statement of the DB service, with its params and row types (D86).
+	// Nil for every other type. See [QueryDef].
+	Query *QueryDef `json:"query,omitempty" yaml:"query,omitempty"`
+
 	// Stack, Server, Database and Environment are the declarations of a
 	// Stack schema's classes: @stack, @server, @database and @environment
 	// (docs/stack-model.md, section 4.1). A class has one of them, and every

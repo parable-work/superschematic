@@ -5215,6 +5215,92 @@
       ],
       "type": "object"
     },
+    "QueryDef": {
+      "additionalProperties": false,
+      "properties": {
+        "dialects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notNull": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "orderBy": {
+          "$ref": "#/$defs/QueryOrderBy"
+        },
+        "page": {
+          "$ref": "#/$defs/QueryPage"
+        },
+        "params": {
+          "type": "string"
+        },
+        "row": {
+          "type": "string"
+        },
+        "sql": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "params",
+        "row",
+        "sql"
+      ],
+      "type": "object"
+    },
+    "QueryOrderBy": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": "",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "param": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "options"
+      ],
+      "type": "object"
+    },
+    "QueryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "desc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "key": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "QueueDef": {
       "additionalProperties": false,
       "properties": {
@@ -5817,6 +5903,9 @@
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
+        "query": {
+          "$ref": "#/$defs/QueryDef"
+        },
         "queue": {
           "$ref": "#/$defs/QueueDef"
         },
@@ -5838,7 +5927,8 @@
             "EmbeddedStruct",
             "APIOperationSet",
             "Trait",
-            "Projection"
+            "Projection",
+            "Query"
           ],
           "type": "string"
         },

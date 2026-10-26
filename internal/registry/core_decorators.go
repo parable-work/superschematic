@@ -163,6 +163,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_enqueue.go, D80).
 	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
 
+	// A DB service's declared queries, a class each (core_queries.go, D86).
+	specs = append(specs, queryDecorator())
+
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
 	specs = append(specs, deriverDecorator())
