@@ -12,7 +12,8 @@ import { Hono } from 'hono';
 
 import { allowAll, openEngine, openEngineAsync, type AsyncEngine } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
-import { alice, cleanup, freshPath, openTestEngine, orderDocument } from './helpers.ts';
+import { openMetaSchema } from './behavior-fixtures.ts';
+import { alice, cleanup, freshPath, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
 
 const opened: AsyncEngine[] = [];
 
@@ -60,6 +61,41 @@ for (const backend of backends) {
       }
       assert.ok(heard.includes(head), `heard ${JSON.stringify(heard)}, head ${head}`);
       assert.equal(await engine.namespaces.resolve(undefined), 'default');
+    });
+
+    test("behaviors.invoke calls a namespace operation (D77), and refuses one of another scope or an unknown behavior", async () => {
+      // test.Inbox (the test addon's) keeps notes in a table of its own,
+      // read and cleared across the schemas that compose it.
+      const inboxed = await openEngineAsync({ ...backend.options(), policy: allowAll, metaSchema: openMetaSchema(), behaviors: ['test.Inbox'] } as never);
+      opened.push(inboxed);
+      for (const name of ['Note', 'Task']) {
+        const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+        document.types[name]!.behaviors = [{ name: 'test.Inbox', config: { label: name.toLowerCase() } }];
+        await inboxed.schemas.define(alice, document);
+        await inboxed.schemas.publish(alice, name);
+        await inboxed.instances.create(alice, name, { title: name }, { id: `${name}-1` });
+        await inboxed.instances.invoke(alice, name, `${name}-1`, 'add', { body: `on ${name}` });
+      }
+      assert.deepEqual(await inboxed.behaviors.invoke(alice, { behavior: 'test.Inbox', operation: 'notes' }), {
+        items: [
+          ['Note', 'Note-1', 'on Note', 0],
+          ['Task', 'Task-1', 'on Task', 0],
+        ],
+      });
+      assert.deepEqual(await inboxed.behaviors.invoke(alice, { behavior: 'test.Inbox', operation: 'clear', params: {} }), { changed: 2 });
+      assert.deepEqual(await inboxed.behaviors.invoke(alice, { behavior: 'test.Inbox', operation: 'labels' }), [
+        ['Note', 'note'],
+        ['Task', 'task'],
+      ]);
+      const engine = await open(backend);
+      await assert.rejects(
+        engine.behaviors.invoke(alice, { behavior: 'Comments', operation: 'post' }),
+        (error: Error & { code?: string }) => error.code === 'not_found' && /Comments's post is an instance operation/.test(error.message)
+      );
+      await assert.rejects(
+        engine.behaviors.invoke(alice, { behavior: 'test.Nothing', operation: 'inbox', namespace: 'default' }),
+        (error: Error & { code?: string }) => error.code === 'not_found' && error.message === 'this engine runs no behavior test.Nothing'
+      );
     });
 
     test('its options are data: a function written in TypeScript is refused', async () => {

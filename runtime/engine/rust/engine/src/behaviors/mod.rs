@@ -20,6 +20,7 @@ pub(crate) mod declaration;
 pub(crate) mod dynamic;
 pub(crate) mod erased;
 pub(crate) mod execution;
+pub(crate) mod namespace;
 pub mod paging;
 pub(crate) mod publish;
 pub(crate) mod registry;
@@ -29,19 +30,19 @@ pub use behavior::{
     BehaviorFilter, BehaviorGuidance, BehaviorSet, CheckedTypesFn, ConfigChange, ConfigChangeFn,
     CreateParamsSchemaFn, DescribeTarget, DescribedTypeOperation, Every, EveryFn, FieldFn, GuardFn,
     GuardReferenceFn, GuardRequest, GuidanceError, GuidanceFn, Hooks, InitializeFn, InstanceChange,
-    InstanceFields, InstanceSchemaFn, InstanceSchemaForm, OperationFn, OperationGuidance, ReactFn,
-    Reactions, Schedule, ScheduleFn, SchemaOperationFn, StoredInstance, StowedObject, ValidateFn,
-    ValidationRequest, WatchesFn, MIN_SCHEDULE_MS,
+    InstanceFields, InstanceSchemaFn, InstanceSchemaForm, NamespaceOperationFn, OperationFn,
+    OperationGuidance, ReactFn, Reactions, Schedule, ScheduleFn, SchemaOperationFn, StoredInstance,
+    StowedObject, ValidateFn, ValidationRequest, WatchesFn, MIN_SCHEDULE_MS,
 };
 pub use config::{
     ConfigBehaviorField, ConfigFieldKind, ConfigSchema, ConfigSchemas, ConfigTarget, ConfigType,
     ConfigTypeField, ConfigTypes,
 };
 pub use context::{
-    Columns, ColumnsReader, InstanceCx, InstanceView, InstancesHandle, OperationCx, PublishCx,
-    ReactionCx, ReadFields, ReferenceCx, ReferenceReader, References, ScheduleCx, SchemaCx,
-    SchemasHandle, Scope, SqlReader, SqlWriter, ValidationCx, ValueReader, Values, MAX_BATCH_READ,
-    MAX_CALL_DEPTH,
+    Columns, ColumnsReader, InstanceCx, InstanceView, InstancesHandle, NamespaceCx, OperationCx,
+    PublishCx, ReactionCx, ReadFields, ReferenceCx, ReferenceReader, References, ScheduleCx,
+    SchemaCx, SchemasHandle, Scope, SqlReader, SqlWriter, ValidationCx, ValueReader, Values,
+    MAX_BATCH_READ, MAX_CALL_DEPTH,
 };
 pub use declaration::{
     check_declaration, create_params_schema_problem, is_behavior_name, is_veto_code,
@@ -50,6 +51,7 @@ pub use declaration::{
 };
 #[cfg(feature = "dynamic")]
 pub use dynamic::{DynamicBehavior, DynamicHooks};
+pub use namespace::NamespaceCall;
 /// Paging for a behavior's list operations (`page`, `pageRequest`).
 pub use paging::{page, page_request, Page, PageRequest};
 /// A behavior's own storage: its migrations, the column and table specs

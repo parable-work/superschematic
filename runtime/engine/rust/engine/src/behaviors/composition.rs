@@ -33,6 +33,7 @@ use super::behavior::ConfigChange;
 use super::config::{
     other_types, ConfigBehaviorField, ConfigSchema, ConfigSchemas, ConfigTarget, ConfigTypes,
 };
+use super::declaration::OperationScope;
 use super::erased::ConfigBox;
 use super::registry::{detail, BehaviorRegistry, OperationSpec, RegisteredBehavior};
 use crate::errors::{Error, Result, SchemaChange, SchemaIssue};
@@ -102,21 +103,19 @@ impl Composition {
 
     /// A behavior operation on the type, by name, with its behavior.
     pub fn operation(&self, name: &str) -> Option<(&BoundBehavior, &OperationSpec)> {
-        self.behaviors.iter().find_map(|bound| {
-            bound
-                .behavior
-                .operation(name)
-                .map(|operation| (bound, operation))
-        })
+        self.operations()
+            .find(|(_, operation)| operation.name == name)
     }
 
-    /// Every behavior operation on the type, in list order.
+    /// Every behavior operation on the type, in list order: an instance or
+    /// a schema-level one; a namespace operation (D77) runs on no type.
     pub fn operations(&self) -> impl Iterator<Item = (&BoundBehavior, &OperationSpec)> {
         self.behaviors.iter().flat_map(|bound| {
             bound
                 .behavior
                 .operations
                 .iter()
+                .filter(|operation| operation.scope != OperationScope::Namespace)
                 .map(move |operation| (bound, operation))
         })
     }
@@ -332,7 +331,14 @@ pub(crate) fn compose(
                 ));
             }
         }
-        for operation in &each.behavior.operations {
+        // A namespace operation (D77) is called by its behavior's name, not
+        // on the type, so it shares no name with the type's operations.
+        for operation in each
+            .behavior
+            .operations
+            .iter()
+            .filter(|operation| operation.scope != OperationScope::Namespace)
+        {
             match operation_owner
                 .iter()
                 .find(|(owned, _)| *owned == operation.name)

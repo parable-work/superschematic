@@ -108,9 +108,9 @@ fn pull_text(stream: &mut EventStream) -> String {
 }
 
 #[test]
-fn routes_lists_the_27_routes_and_the_mcp_endpoint_and_route_of_finds_one() {
+fn routes_lists_the_28_routes_and_the_mcp_endpoint_and_route_of_finds_one() {
     let all = routes();
-    assert_eq!(all.len(), 30);
+    assert_eq!(all.len(), 31);
     assert_eq!(all.iter().filter(|route| route.mcp).count(), 3);
     let streaming: Vec<&str> = all
         .iter()
@@ -121,6 +121,14 @@ fn routes_lists_the_27_routes_and_the_mcp_endpoint_and_route_of_finds_one() {
     assert_eq!(
         route_of("post", "/namespaces/default/schemas/Order/instances").map(|route| route.name),
         Some("createInstance")
+    );
+    assert_eq!(
+        route_of(
+            "POST",
+            "/namespaces/default/behaviors/Comments/operations/inbox"
+        )
+        .map(|route| route.name),
+        Some("invokeNamespaceOperation")
     );
     assert_eq!(route_of("PATCH", "/namespaces"), None);
 }

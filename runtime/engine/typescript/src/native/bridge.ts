@@ -120,7 +120,7 @@ export class Bridge {
     const id = this.implementations.length;
     this.implementations.push(implementation);
     const problems: string[] = [];
-    const names = (key: 'operations' | 'schemaOperations' | 'fields'): string[] => {
+    const names = (key: 'operations' | 'schemaOperations' | 'namespaceOperations' | 'fields'): string[] => {
       const value: unknown = implementation[key];
       if (value === undefined) {
         return [];
@@ -138,8 +138,9 @@ export class Bridge {
     };
     const operations = names('operations');
     const schemaOperations = names('schemaOperations');
+    const namespaceOperations = names('namespaceOperations');
     const fields = names('fields');
-    const hooks: Record<string, unknown> = { operations, schemaOperations, fields };
+    const hooks: Record<string, unknown> = { operations, schemaOperations, namespaceOperations, fields };
     for (const hook of HOOKS) {
       const value: unknown = implementation[hook];
       if (value !== undefined && typeof value !== 'function') {
@@ -437,6 +438,15 @@ export class Bridge {
         const handler = implementation.schemaOperations?.[operation];
         const context = this.schemaContext(gen, name, cx, config);
         const result: unknown = handler?.call(implementation.schemaOperations, context as never, deepFreeze(params) as never);
+        synchronous(name, `operation ${operation}`, result);
+        return json(name, `operation ${operation} result`, result === undefined ? null : result);
+      }
+      case 'namespaceOperation': {
+        const [params] = args;
+        const operation = request.name as string;
+        const handler = implementation.namespaceOperations?.[operation];
+        const context = this.namespaceContext(gen, name, cx);
+        const result: unknown = handler?.call(implementation.namespaceOperations, context as never, deepFreeze(params) as never);
         synchronous(name, `operation ${operation}`, result);
         return json(name, `operation ${operation} result`, result === undefined ? null : result);
       }
@@ -796,6 +806,41 @@ export class Bridge {
 
   private schemaContext(gen: number, name: string, cx: Record<string, unknown>, config: unknown): object {
     return Object.freeze({ ...this.scope(gen, name, cx, config), sql: this.sqlWriter(gen), values: this.valueWriter(gen, name) });
+  }
+
+  // namespaceContext is a namespace operation's (D77): no config, schema or
+  // instance of its own; each composing schema's config by configs(), its
+  // SQL with readable(), the instances to read and invoke read-only
+  // operations of, and the value store to load from. What it may not do,
+  // the Rust engine refuses.
+  private namespaceContext(gen: number, name: string, cx: Record<string, unknown>): object {
+    const invoke = (method: string, args: readonly unknown[] = []) => this.invoke(gen, method, args);
+    const scope = this.scope(gen, name, cx, undefined);
+    const configs = () =>
+      Object.freeze(
+        (invoke('configs') as Array<{ schema: string; config: number }>).map((entry) =>
+          Object.freeze({ schema: entry.schema, config: this.config(entry.config) })
+        )
+      );
+    return Object.freeze({
+      behavior: name,
+      namespace: cx.namespace,
+      principal: scope.principal,
+      now: cx.now,
+      can: scope.can,
+      instances: scope.instances,
+      configs,
+      config: (schema: string) => {
+        checkName(name, 'config', 'schema', schema);
+        return configs().find((entry) => entry.schema === schema)?.config;
+      },
+      sql: Object.freeze({
+        ...this.sqlMembers(gen),
+        readable: () => invoke('sql.readable'),
+        run: (sql: string, params: readonly unknown[] = []) => invokeRun(this.invoke(gen, 'sql.run', [String(sql), sqlParams(params)])),
+      }),
+      values: this.valueReader(gen, name),
+    });
   }
 
   private reactionContext(gen: number, name: string, cx: Record<string, unknown>, config: unknown, event: unknown): object {

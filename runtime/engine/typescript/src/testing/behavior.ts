@@ -210,6 +210,24 @@ export interface SqlReader extends TableReader {
 
 export interface SqlWriter extends SqlReader, TableWriter {}
 
+/**
+ * A namespace operation's SQL (D77): the behavior's own tables, read, and
+ * written by a writing operation (a read-only one's run() refuses), and
+ * readable(). It has no instances(): the operation has no schema.
+ */
+export interface NamespaceSql extends TableWriter {
+  /**
+   * The SQL name of a read-only relation over the schemas of the call's
+   * namespace that compose the behavior and that the principal may read,
+   * one row each, its column `schema`. A statement joins it to keep only
+   * those schemas' rows of the behavior's tables; the policy is asked read
+   * once per composing schema per call, and a schema it refuses is left
+   * out. It is not a table: the engine defines it ahead of each statement
+   * that names it.
+   */
+  readable(): string;
+}
+
 /** What values.stow returns: what the behavior's row keeps. */
 export interface StowedObject {
   /**
@@ -497,6 +515,41 @@ export interface SchemaContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlWriter;
   /** The value store for the behavior's rows of the schema (instance ''); a read-only one's stow refuses. */
   readonly values: ValueWriter;
+}
+
+/**
+ * A namespace operation's context (D77): the behavior's tables across
+ * every schema of the call's namespace that composes it, with no config,
+ * schema or instance of its own. It appends no event and changes no
+ * instance: it reads instances and invokes their read-only operations, as
+ * the principal; a writing invoke and a create are a BehaviorError, and it
+ * has no update() and no signal().
+ */
+export interface NamespaceContext<Config> {
+  /** The behavior's name. */
+  readonly behavior: string;
+  /** The call's namespace: the rows of the behavior's tables a statement reads are the ones whose namespace column holds it. */
+  readonly namespace: string;
+  /** Who the call acts for. */
+  readonly principal: Principal;
+  /** The engine clock's time for the call, in epoch milliseconds. */
+  readonly now: number;
+  /** Whether the principal holds a permission, as the engine's PermissionMatcher answers. */
+  can(permission: string): boolean;
+  /**
+   * Each schema of the namespace whose live version composes the
+   * behavior, with the config it gives it, as parseConfig returned it. It
+   * asks no policy: a handler that decides by a schema's config reads the
+   * config of each schema readable() keeps.
+   */
+  configs(): ReadonlyArray<{ readonly schema: string; readonly config: Config }>;
+  /** The config a schema of the namespace gives the behavior; undefined when its live version does not compose it. */
+  config(schema: string): Config | undefined;
+  /** Other instances of the namespace, as the principal reaches them: reads, and invokes of read-only operations. */
+  readonly instances: Instances;
+  readonly sql: NamespaceSql;
+  /** What the behavior's rows keep in the value store. */
+  readonly values: ValueReader;
 }
 
 /**
@@ -1149,6 +1202,9 @@ export type OperationHandler<Config> = (context: OperationContext<Config>, param
 /** A schema-level operation's handler. Its result is checked against resultSchema. */
 export type SchemaOperationHandler<Config> = (context: SchemaContext<Config>, params: FrozenJSON) => unknown;
 
+/** A namespace operation's handler (D77). Its result is checked against resultSchema. */
+export type NamespaceOperationHandler<Config> = (context: NamespaceContext<Config>, params: FrozenJSON) => unknown;
+
 /** Reads one declared field for an instance: a JSON value, or undefined (or null) for none. */
 export type FieldReader<Config> = (context: InstanceView<Config>) => unknown;
 
@@ -1297,6 +1353,9 @@ export interface BehaviorImplementation<Config = unknown> {
 
   /** A handler per declared operation of scope schema. */
   readonly schemaOperations?: Readonly<Record<string, SchemaOperationHandler<Config>>>;
+
+  /** A handler per declared operation of scope namespace (D77). */
+  readonly namespaceOperations?: Readonly<Record<string, NamespaceOperationHandler<Config>>>;
 
   /** A reader per declared field. */
   readonly fields?: Readonly<Record<string, FieldReader<Config>>>;

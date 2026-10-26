@@ -33,6 +33,10 @@
 //! ends; `stream.open`'s read takes `signals: true` for the signals of what
 //! it reads (D77).
 //!
+//! `behaviors.invoke` calls a behavior's namespace operation (D77):
+//! `[{ namespace?, behavior, operation, params? }]`, after the principal,
+//! answering its result.
+//!
 //! `signals.send` (also by the name `sendSignal`) sends a signal (D77):
 //! `[{ namespace?, schema, instanceId, behavior, name, data? }]`, after
 //! the principal, answering nothing.
@@ -58,7 +62,7 @@ use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions}
 use crate::storage::Dialect;
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 59] = [
+pub const CALLS: [&str; 60] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -110,6 +114,7 @@ pub const CALLS: [&str; 59] = [
     "behaviors.has",
     "behaviors.names",
     "behaviors.declaration",
+    "behaviors.invoke",
     "api.routes",
     "api.handle",
     "stream.open",
@@ -404,6 +409,30 @@ pub fn call_with(
         "behaviors.has" => Ok(Value::Bool(engine.behaviors().has(&text(arg(0))))),
         "behaviors.names" => to_json(engine.behaviors().names()),
         "behaviors.declaration" => return Ok(engine.behaviors().declaration(&text(arg(0)))),
+        "behaviors.invoke" => {
+            let principal = who()?;
+            let input = options(0);
+            let required = |key: &str| -> Result<String> {
+                match input.and_then(|input| input.get(key)) {
+                    Some(Value::String(text)) => Ok(text.clone()),
+                    _ => Err(EngineError::invalid_argument(format!(
+                        "behaviors.invoke takes {{ namespace?, behavior, operation, params? }}: {key} is a string"
+                    ))
+                    .into()),
+                }
+            };
+            let (behavior, operation) = (required("behavior")?, required("operation")?);
+            let namespace = text_member(input, "namespace");
+            engine.behaviors().invoke(
+                principal,
+                &crate::behaviors::NamespaceCall {
+                    namespace: namespace.as_deref(),
+                    behavior: &behavior,
+                    operation: &operation,
+                    params: input.and_then(|input| input.get("params")),
+                },
+            )
+        }
         "events.read" => {
             let principal = who()?;
             let read = ReadArgs::of(options(0))?;

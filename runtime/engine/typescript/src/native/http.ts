@@ -189,7 +189,7 @@ function backgroundServing(background: EngineBackground): Serving {
 
 // The routes whose body the runtime's body limit caps, as the TypeScript
 // app's routes that take an input.
-const BODY_ROUTES = new Set(['createNamespace', 'defineSchema', 'createInstance', 'updateInstance', 'invokeOperation', 'invokeSchemaOperation', 'searchSchemas', 'sendSignal']);
+const BODY_ROUTES = new Set(['createNamespace', 'defineSchema', 'createInstance', 'updateInstance', 'invokeOperation', 'invokeSchemaOperation', 'invokeNamespaceOperation', 'searchSchemas', 'sendSignal']);
 
 const INTEGER_PARAMS = new Set(['version']);
 

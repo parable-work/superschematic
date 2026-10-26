@@ -1699,7 +1699,7 @@ fn instance_columns(ctx: &Ctx<'_, '_, '_>) -> Result<Row> {
 /// A context's `can()`: whether the principal holds one permission, as the
 /// engine's permission matcher answers. A service standing in for an end
 /// user holds none (D37), so it is never asked for one.
-fn can(reach: &Reach<'_, '_>, behavior: &str, permission: &str) -> Result<bool> {
+pub(crate) fn can(reach: &Reach<'_, '_>, behavior: &str, permission: &str) -> Result<bool> {
     if permission.is_empty() {
         return Err(Error::behavior(
             behavior,
@@ -1916,7 +1916,7 @@ pub(crate) fn veto_of(
 }
 
 // check_veto_code holds a veto's code to one its declaration lists.
-fn check_veto_code(behavior: &RegisteredBehavior, code: Option<&str>) -> Result<()> {
+pub(crate) fn check_veto_code(behavior: &RegisteredBehavior, code: Option<&str>) -> Result<()> {
     let Some(code) = code else {
         return Ok(());
     };
@@ -1961,7 +1961,7 @@ pub(crate) fn declared_vetoes<T>(exec: &Execution<'_, '_>, result: Result<T>) ->
 }
 
 // check_result holds an operation's result to its resultSchema.
-fn check_result(
+pub(crate) fn check_result(
     behavior: &RegisteredBehavior,
     operation: &OperationSpec,
     result: Value,
