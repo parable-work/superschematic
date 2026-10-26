@@ -702,6 +702,7 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 			minLength: field.ValidateMinLength, maxLength: field.ValidateMaxLength,
 			pattern: field.ValidatePattern,
 			listMin: field.ValidateListMin, listMax: field.ValidateListMax,
+			dimensions: field.ValidateDimensions,
 		}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 
 		if doc := codegen.DocText(field.Description, field.Comment); doc != "" {
@@ -742,6 +743,9 @@ type openAPIBounds struct {
 	minLength, maxLength *int
 	pattern              string
 	listMin, listMax     *int
+	// dimensions is an Embedding.Vector's length (D84): each vector, an
+	// array, holds exactly that many items.
+	dimensions *int
 }
 
 // openAPIFieldSchema is the schema of a field of a type, of a body argument
@@ -756,6 +760,9 @@ func openAPIFieldSchema(typeRef ir.TypeRef, required bool, bounds openAPIBounds,
 	valueSchema := openAPIConstraintTarget(fieldSchema, typeRef)
 	applyOpenAPIScalarConstraints(valueSchema, typeRef.Name, schema, dependencies)
 	applyOpenAPIValidationConstraints(valueSchema, bounds.min, bounds.max, bounds.minLength, bounds.maxLength, bounds.pattern, nil, nil)
+	if bounds.dimensions != nil {
+		applyOpenAPIValidationConstraints(valueSchema, nil, nil, nil, nil, "", bounds.dimensions, bounds.dimensions)
+	}
 	if typeRef.IsArray && !typeRef.IsMap {
 		applyOpenAPIValidationConstraints(fieldSchema, nil, nil, nil, nil, "", bounds.listMin, bounds.listMax)
 	}
