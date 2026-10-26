@@ -11903,7 +11903,7 @@ This entry adds:
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | `pool` is optional. A projection without one is a plain view beside the service's tables: created as its name alone, in `outputs.sql.sourceSchema` when set, with no `CREATE SCHEMA`; its migration pair is `<stamp>_<name>_projection` and its Arrow and docs files `<name>.*`; a migration plan names it in its schema, or by its name alone (`sqlmigrate.View.Schema`). Verification refuses one named as a table. It binds a setting only if a rule does. | A `@view` decorator beside `@projection`, a second declaration of one thing. A required pool, which puts a list model in a schema of its own for readers it does not have. |
-| A projection whose columns read its source's key, or that collapses by one column, has a key (`sqlutil.ViewKey`), and both ORMs read it: the row type is the class, `TransactionListRow` in `./orm` and `orm.TransactionListRow`, a struct of the ORM's package, and the repository the reads of a table over the view, `getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage` in TypeScript (`ReadRepository`, with `select`), `GetOne`, `FindOne`, `FindMany` and `FindPage` in Go. A projection with neither key has no repository. | The row in the types package, where an API would take it for a response type, and which the type generators keep to tables and payloads. `@key` on a projection column, which the view's source already states. |
+| A projection whose columns read its source's key, or that collapses by one column, has a key (`sqlutil.ViewKey`), and both ORMs read it: the row type is the class, `TransactionListRow` in `./orm` and `orm.TransactionListRow`, a struct of the ORM's package, and the repository the reads of a table over the view, `getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage` in TypeScript (`ReadRepository`, with `select`), `GetOne`, `FindOne`, `FindMany` and `FindPage` in Go. `findMany`'s `count: false` and `FindMany`'s `SkipCount` skip the count, as a table's do (D89). A projection with neither key has no repository. | The row in the types package, where an API would take it for a response type, and which the type generators keep to tables and payloads. `@key` on a projection column, which the view's source already states. |
 | `sqlutil.ViewsOf` models the view as a table, each field a column named as sqlgen names it, of its declared type, filtered and sorted as a table's column of that type (`ClassifyColumn`, `FilterKind`, `sortableColumn`), and `TableStatementsOf` writes its statements, whose reads both ORMs run, qualified by the view's name and reading from its pool-qualified name. | A statement writer for views, which would drift from the tables'. |
 | Go reads a projection through `db.<Projection>()` over the pool and `<Projection>In(tx)` in a transaction, over a querier of the pool's and the transaction's `Query`; `projections.go` holds the rows, filters, sorts, pages and repositories. | A field of `Database` and a getter on `TxInterface`, which every table's repository edits share. |
 | An API view may take a projection as its `@source`: verification holds each field to the projection's column of its name and type, as to a table's. The TypeScript reader resolves a cross-service `@source` class's decorators by its own service's kind, so a projection's, or a table's, `@column` no longer fails an API's load. | |
@@ -11922,14 +11922,16 @@ Status: built.
   `FindPage` over two pages with its account and provider, its category
   and parent, its business and its person loaded, a deleted category's
   stub, a `@hasMany` include, and the projection's `FindPage` on joined
-  columns, its next page, `GetOne`, `FindMany` and a transaction.
+  columns, its next page, `GetOne`, `FindMany`, with its count and
+  without (D89), and a transaction.
 - **TypeScript:** `TestIncludeAndSelectTypeTheRows` type-checks a read's
-  rows against its options, each kind, nested, and refuses an unknown
-  relation, member and option; `TestRepositoriesOnPostgres`'s
+  rows against its options, each kind, nested, and `findMany`'s `total`
+  under `count: false` (D89), and refuses an unknown relation, member and
+  option; `TestRepositoriesOnPostgres`'s
   `finances.test.ts`, the same reads, the dashboard's page in eight
   statements with no count, a selection's statement, a soft-deleted and
   an unset target, both kinds of one-to-many include, and the
-  projection's reads; the regenerated tsgen goldens and acme-shop's
+  projection's reads, one with `count: false`; the regenerated tsgen goldens and acme-shop's
   `orm.ts`.
 - **Parity:** `TestReadParityOfGoAndTypeScriptOnPostgres`, 48 statements
   over 30 calls alike, the includes' among them, and

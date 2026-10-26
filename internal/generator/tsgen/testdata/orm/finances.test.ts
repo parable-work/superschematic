@@ -179,5 +179,9 @@ describe.skipIf(dsn === '')('the finances', () => {
     expect(shop.rows.map(row => row.name)).toEqual(['Dinner and coffee', 'Coffee beans']);
     const inTx = await orm.transaction(tx => tx.transactionListRow.findMany(null, { select: ['id'] }));
     expect(inTx.total).toBe(6);
+    // count: false skips the count of a projection's read as of a table's (D89).
+    const uncounted = await orm.transactionListRow.findMany(null, { count: false, select: ['id'] });
+    expect(uncounted.total).toBeUndefined();
+    expect(uncounted.rows).toHaveLength(6);
   });
 });

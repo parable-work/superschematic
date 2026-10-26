@@ -11,8 +11,9 @@ import (
 // (D90): a read's rows hold what its options select and include, each
 // relation typed by its kind, one, one or null, or a list, and nested
 // includes typed in turn; a filter reaches through a relation and ORs
-// filters; and a relation, a member or an option the table does not have
-// is refused.
+// filters; findMany's total is undefined under count: false (D89), and a
+// number otherwise; and a relation, a member or an option the table does
+// not have is refused.
 const includeCheck = `import type { FixtureFinancesDbOrm, LineItemPageKey, LineItemRow, LineItemSortField, TransactionListRow } from './orm';
 
 declare const orm: FixtureFinancesDbOrm;
@@ -83,6 +84,16 @@ export async function dashboard(): Promise<void> {
   await orm.lineItem.findMany(null, { select: ['vendor'] });
   // @ts-expect-error A misspelled option is refused.
   await orm.lineItem.findMany(null, { limt: 10 });
+
+  // count: false (D89) beside an include: total is undefined, and a read
+  // that counts has a number.
+  const uncounted = await orm.lineItem.findMany(null, { count: false, include: { category: true } });
+  const none: undefined = uncounted.total;
+  const categoryName: string | undefined = uncounted.rows[0]?.category?.name;
+  const counted: number = (await orm.lineItem.findMany(null, { include: { account: true } })).total;
+  // @ts-expect-error A read without its count has no total to add to.
+  const sum: number = uncounted.total + 1;
+  void [none, categoryName, counted, sum];
 
   const flat = await orm.transactionListRow.findPage(
     { parentCategoryId: { in: ids as never }, accountName: { ilike: 'card' }, anyOf: [{ categoryName: { eq: 'Food' as never } }, { businessId: { isNull: false } }] },

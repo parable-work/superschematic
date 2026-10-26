@@ -131,6 +131,9 @@ type {{ .TypeName }}FindOptions struct {
 	Limit int
 	// Offset skips the first N results (for pagination)
 	Offset int
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1, as a table's is (D89).
+	SkipCount bool
 }
 
 // {{ .TypeName }}SortField is a field FindPage orders {{ .TypeName }} rows by: its key
@@ -250,27 +253,30 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 }
 
 // FindMany reads the rows filter finds, in opts' order, a limit of them
-// after an offset, and how many it finds in all, which it counts first.
+// after an offset, and how many it finds in all, which it counts first
+// unless opts skip the count: -1 then (D89).
 func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*{{ .TypeName }}, int, error) {
 	if opts == nil {
 		opts = &{{ .TypeName }}FindOptions{}
 	}
 	var args []interface{}
 	where := {{ lowerFirst .TypeName }}Where(filter.conditions(&args, 0))
-	counted, err := r.q.Query(ctx, fmt.Sprintf({{ goRawString .SQL.Count }}, where), args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
-	}
-	var total int
-	for counted.Next() {
-		if err := counted.Scan(&total); err != nil {
-			counted.Close()
+	total := -1
+	if !opts.SkipCount {
+		counted, err := r.q.Query(ctx, fmt.Sprintf({{ goRawString .SQL.Count }}, where), args...)
+		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get count: %w", err)
 		}
-	}
-	counted.Close()
-	if err := counted.Err(); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		for counted.Next() {
+			if err := counted.Scan(&total); err != nil {
+				counted.Close()
+				return nil, 0, fmt.Errorf("failed to get count: %w", err)
+			}
+		}
+		counted.Close()
+		if err := counted.Err(); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 	query := fmt.Sprintf({{ goRawString .SQL.FindMany }}, {{ goRawString .SQL.QualifiedColumns }}, where, {{ lowerFirst .TypeName }}OrderBy(opts.OrderBy), buildLimitOffsetClauseTyped(opts.Limit, opts.Offset))
 	rows, err := r.read(ctx, query, args)

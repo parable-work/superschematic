@@ -24,7 +24,7 @@ const financesFixture = "fixture-finances-db"
 // account and provider, its category and parent, its business and its
 // person loaded; a @hasMany include of an account's line items; and the
 // TransactionListRow projection's FindPage, filtered on joined columns, its
-// next page, GetOne and FindMany.
+// next page, GetOne, and FindMany with its count and without (D89).
 func TestFinancesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -260,6 +260,12 @@ func TestFinancesOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	must(err)
 	if total != 2 || len(all) != 2 || all[0].Name != "Dinner and coffee" {
 		t.Errorf("the shop's rows = %d %+v", total, all)
+	}
+	// A projection's FindMany skips its count as a table's does (D89).
+	uncounted, skipped, err := db.TransactionListRow().FindMany(ctx, nil, &TransactionListRowFindOptions{SkipCount: true})
+	must(err)
+	if skipped != -1 || len(uncounted) != 6 {
+		t.Errorf("the list without its count = %d rows, total %d, want 6 rows and -1", len(uncounted), skipped)
 	}
 	if _, err := db.TransactionListRow().GetOne(ctx, *ben.Id); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a key no row holds = %v, want ErrNotFound", err)
