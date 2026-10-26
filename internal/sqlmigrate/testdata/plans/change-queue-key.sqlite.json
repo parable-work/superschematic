@@ -1,0 +1,40 @@
+{
+  "dialect": "sqlite",
+  "expanded": "9e796391ffd26ed009f14e45dbc5361c68e19265a22a432fa734171810117669",
+  "from": "354c6e92b9e9034914e2f6be13f686582615c6585929084632eac7acee12b451",
+  "hash": "1f4a68218467f98d485e51d3b241123c1df435817adb8b85e99d01bc60bc5de9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_shipped_queue/index/idx_order_shipped_queue_ready_key",
+          "reason": "Building the index holds the database's write lock for time that grows with order_shipped_queue.",
+          "subject": "table/order_shipped_queue/index/idx_order_shipped_queue_ready_key"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_order_shipped_queue_ready_key\" ON \"order_shipped_queue\" (\"order_id\") WHERE state = 'ready'"
+      ],
+      "subject": "table/order_shipped_queue/index/idx_order_shipped_queue_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX \"uq_order_shipped_queue_ready_key\""
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+      "transactional": true
+    }
+  ],
+  "to": "01d3978b67853a76f95d5e177bada825eec45574ad0bc51d372beef7b4118073",
+  "toModel": null,
+  "version": 1
+}

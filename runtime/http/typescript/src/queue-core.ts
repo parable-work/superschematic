@@ -4,9 +4,11 @@ docs/stack-model.md): a queue's definition, as a DB service's TypeScript
 types package exports it in its ./queues entry, the claims a worker makes
 of it, the lost claim's error, and a duration's text, which the Postgres
 client (queue.ts, ./postgres) and the SQLite client (queue-sqlite.ts,
-./sqlite and ./d1) both read and write. It imports nothing, so a Worker
-bundles it.
+./sqlite and ./d1) both read and write. It imports nothing but uuid.ts,
+which imports nothing, so a Worker bundles it.
 */
+
+import { uuidToDb } from './uuid.js';
 
 /** A field of a queue's message and the column it writes, as a types package's ./queues entry declares it. */
 export interface QueueField {
@@ -16,6 +18,12 @@ export interface QueueField {
   readonly column: string;
   /** The column holds the value as JSON, which an enqueue writes with JSON.stringify. */
   readonly json?: boolean;
+  /**
+   * The kind of JSON value a JSON column holds for the member's type: an object for a @jsonField type or a map, a
+   * list for a list of them. A claim refuses a row whose JSON is of another kind, as Go's and Rust's types do.
+   * None for a JSON scalar, which holds any value.
+   */
+  readonly shape?: 'object' | 'list';
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
@@ -42,6 +50,11 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /**
+   * Ends an enqueue on a queue that keeps one ready message per key (D80): what it does when a ready message
+   * holds the message's key, which replaces that message or keeps it. Other queues have none.
+   */
+  readonly conflict?: string;
   readonly expire: string;
   readonly claim: string;
   readonly complete: string;
@@ -130,6 +143,11 @@ export interface Queue<M> {
 /** The claims of a queue over a pg pool, which postgresQueue makes. */
 export type PostgresQueue<M> = Queue<M>;
 
+/** What an enqueue ends with after its VALUES: a space and the queue's conflict clause, or nothing (D80). */
+export function conflictOf(statements: QueueStatements): string {
+  return statements.conflict ? ` ${statements.conflict}` : '';
+}
+
 /** What a message's member is, unset: absent or null. An enum with a default is also unset when empty, as in Go. */
 export function unset(value: unknown, field: QueueField): boolean {
   return value === undefined || value === null || (field.default !== undefined && value === '');
@@ -201,6 +219,47 @@ export function formatDuration(nanos: bigint): string {
   return `${sign}${seconds}`;
 }
 
+/**
+ * A JSON column's text as the message's member: the JSON it holds, decoded once, of the kind the field's shape
+ * names, or JSON null. A claim reads a JSON column as its text on every database: Postgres's json and jsonb
+ * columns arrive unparsed (queue.ts's type parsers), and SQLite's are TEXT. So a value that is itself a JSON
+ * string, "1" or "x", reads as that string, and is not parsed a second time.
+ */
+export function jsonMemberValue(text: unknown, field: QueueField): unknown {
+  return decodeJSONText(text, field.shape);
+}
+
+/**
+ * A JSON column's text decoded once (D79, D80): the JSON value it holds, a JSON string among them, and of the kind
+ * shape names when it names one. A queue's claim reads every JSON column so, and the Postgres value codec
+ * (pgcodec.ts) a TEXT column that holds JSON; a json or jsonb column a repository reads arrives parsed by pg, the
+ * same value.
+ */
+export function decodeJSONText(text: unknown, shape?: 'object' | 'list'): unknown {
+  if (typeof text !== 'string') throw new Error(`the column holds ${JSON.stringify(text)}, no JSON text`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`holds no JSON: ${errorMessage(error)}`, { cause: error });
+  }
+  if (shape !== undefined && value !== null && jsonKind(value) !== shape) {
+    throw new Error(`holds ${article(jsonKind(value))}, where its type is ${article(shape)}`);
+  }
+  return value;
+}
+
+/** The kind of a decoded JSON value: an object, a list, a string, a number or a boolean. */
+function jsonKind(value: unknown): string {
+  if (Array.isArray(value)) return 'list';
+  return typeof value === 'object' ? 'object' : typeof value;
+}
+
+/** A kind with its article: an object, a list. */
+function article(kind: string): string {
+  return /^[aeiou]/u.test(kind) ? `an ${kind}` : `a ${kind}`;
+}
+
 /** An error's message. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -215,34 +274,13 @@ export function errorMessage(error: unknown): string {
  */
 export const UNREADABLE = 'the message could not be read';
 
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const HYPHENATED_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/u;
-const MAX_UUID = (1n << 128n) - 1n;
-
 /**
  * A UUID's lowercase hyphenated text from its hyphenated form or its base62
  * form (1 to 22 characters, case-sensitive), as superscalar's ParseUUID, the
  * Go ORM and the Rust client read one, since a TypeScript type's
- * Identity.UUID may hold either. Throws for any other text.
+ * Identity.UUID may hold either. Throws for any other text. It is
+ * uuidToDb (uuid.ts), the one copy every runtime path converts through.
  */
 export function canonicalUUID(value: unknown): string {
-  const text = typeof value === 'string' ? value : '';
-  let n: bigint | undefined;
-  if (text.length === 36 && HYPHENATED_UUID.test(text)) {
-    n = BigInt(`0x${text.replaceAll('-', '')}`);
-  } else if (text.length >= 1 && text.length <= 22) {
-    n = 0n;
-    for (const c of text) {
-      const digit = BASE62.indexOf(c);
-      if (digit < 0) {
-        n = undefined;
-        break;
-      }
-      n = n * 62n + BigInt(digit);
-    }
-    if (n !== undefined && n > MAX_UUID) n = undefined;
-  }
-  if (n === undefined) throw new Error(`${JSON.stringify(value)} is no UUID, hyphenated or base62`);
-  const hex = n.toString(16).padStart(32, '0');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return uuidToDb(value);
 }

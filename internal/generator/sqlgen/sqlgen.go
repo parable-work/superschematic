@@ -251,8 +251,11 @@ type DDLOutput struct {
 	HistoryTables []HistoryTable
 	// OptimisticTables are the @optimistic tables, in table order.
 	OptimisticTables []OptimisticTable
-	Projections      []ProjectionView
-	Timestamp        string
+	// EnqueueTriggers are the tables' @enqueueOnChange declarations, by
+	// table and queue (enqueue.go, D80).
+	EnqueueTriggers []EnqueueTrigger
+	Projections     []ProjectionView
+	Timestamp       string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -369,7 +372,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				continue
 			}
 
-			parentTableName := codegen.ToSnakeCase(typeDef.Name)
+			parentTableName := sqlutil.TableName(typeDef)
 			fkColumnName := parentTableName + "_id"
 
 			columnExists := false
@@ -507,6 +510,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			usedScalars[col.Type] = true
 		}
 	}
+	enqueueTriggers, err := buildEnqueueTriggers(tableTypes, tables, schema)
+	if err != nil {
+		return nil, err
+	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
 
 	if err != nil {
@@ -549,6 +556,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		JoinTables:       joinTables,
 		HistoryTables:    historyTables,
 		OptimisticTables: optimisticTables,
+		EnqueueTriggers:  enqueueTriggers,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
 		RawSQL:           rawSQL,
@@ -606,7 +614,7 @@ func convertTypeToTable(
 	scalarMapping map[string]string,
 	compositeDefaults map[string]*ir.CompositeDefaultDef,
 ) (Table, error) {
-	tableName := codegen.ToSnakeCase(typeDef.Name)
+	tableName := sqlutil.TableName(typeDef)
 	table := Table{
 		Name:         tableName,
 		QuotedName:   sqlutil.QuoteIdentifier(tableName),
@@ -657,7 +665,7 @@ func convertTypeToTable(
 		}
 
 		// Regular column.
-		columnName := codegen.ToSnakeCase(field.Name)
+		columnName := sqlutil.ColumnName(field)
 		irType := field.TypeRef.Name
 		column := Column{
 			Name:       columnName,
@@ -742,7 +750,7 @@ func convertTypeToTable(
 
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
-			refTableName := codegen.ToSnakeCase(field.Relation.Type)
+			refTableName := sqlutil.TableNameOf(schema, field.Relation.Type)
 			onDelete := "CASCADE"
 			if field.Relation.OnDelete != "" {
 				onDelete = field.Relation.OnDelete
@@ -843,16 +851,10 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 
 // indexPredicate returns an index's partial-index predicate: @index's
 // where (D83), and for a unique index on a soft-deletable table
-// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it.
+// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it, as an
+// upsert's conflict target names it (sqlutil.IndexPredicate).
 func indexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
-	softDelete := uniqueIndexPredicate(idx, columns, indexColumns)
-	switch {
-	case idx.Where == "":
-		return softDelete
-	case softDelete == "":
-		return idx.Where
-	}
-	return "(" + idx.Where + ") AND " + softDelete
+	return sqlutil.IndexPredicate(idx.Where, uniqueIndexPredicate(idx, columns, indexColumns))
 }
 
 // uniqueIndexPredicate returns the partial-index predicate for a unique
@@ -1000,8 +1002,8 @@ func keyFieldType(schema *ir.Schema, typeDef *ir.TypeDef, scalarMapping map[stri
 // referencing another table type.
 func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[string]string) (Column, ForeignKey) {
 	typeName := field.TypeRef.Name
-	columnName := codegen.ToSnakeCase(field.Name) + "_id"
-	refTableName := codegen.ToSnakeCase(typeName)
+	columnName := sqlutil.ForeignKeyColumn(field)
+	refTableName := sqlutil.TableNameOf(schema, typeName)
 
 	column := Column{
 		Name:       columnName,
@@ -1029,8 +1031,8 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 
 // buildJoinTable generates a join table for a many-to-many relationship.
 func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName string, schema *ir.Schema, scalarMapping map[string]string) JoinTable {
-	parentTableName := codegen.ToSnakeCase(parentTypeName)
-	targetTableName := codegen.ToSnakeCase(targetTypeName)
+	parentTableName := sqlutil.TableNameOf(schema, parentTypeName)
+	targetTableName := sqlutil.TableNameOf(schema, targetTypeName)
 	joinTableName := parentTableName + "_" + targetTableName
 
 	return JoinTable{

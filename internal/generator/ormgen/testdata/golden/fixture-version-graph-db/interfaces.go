@@ -25,6 +25,7 @@ type CoverRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *CoverFilter, opts *CoverPageOptions) (*CoverPage, error)
 	CreateOne(ctx context.Context, input *types.Cover) (*types.Cover, error)
 	CreateMany(ctx context.Context, inputs []*types.Cover) ([]*types.Cover, error)
+	UpsertOne(ctx context.Context, input *types.Cover, on CoverUniqueKey, update *CoverUpdate) (*types.Cover, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CoverUpdate) (*types.Cover, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *CoverUpdate) (*types.Cover, error)
 	UpdateMany(ctx context.Context, filter *CoverFilter, update *CoverUpdate) (int, error)
@@ -49,6 +50,7 @@ type IngredientRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *IngredientFilter, opts *IngredientPageOptions) (*IngredientPage, error)
 	CreateOne(ctx context.Context, input *types.Ingredient) (*types.Ingredient, error)
 	CreateMany(ctx context.Context, inputs []*types.Ingredient) ([]*types.Ingredient, error)
+	UpsertOne(ctx context.Context, input *types.Ingredient, on IngredientUniqueKey, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateMany(ctx context.Context, filter *IngredientFilter, update *IngredientUpdate) (int, error)
@@ -71,6 +73,7 @@ type NoteRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
 	CreateOne(ctx context.Context, input *types.Note) (*types.Note, error)
 	CreateMany(ctx context.Context, inputs []*types.Note) ([]*types.Note, error)
+	UpsertOne(ctx context.Context, input *types.Note, on NoteUniqueKey, update *NoteUpdate) (*types.Note, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *NoteUpdate) (*types.Note, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *NoteUpdate) (*types.Note, error)
 	UpdateMany(ctx context.Context, filter *NoteFilter, update *NoteUpdate) (int, error)
@@ -88,6 +91,7 @@ type RecipeRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipeFilter, opts *RecipePageOptions) (*RecipePage, error)
 	CreateOne(ctx context.Context, input *types.Recipe) (*types.Recipe, error)
 	CreateMany(ctx context.Context, inputs []*types.Recipe) ([]*types.Recipe, error)
+	UpsertOne(ctx context.Context, input *types.Recipe, on RecipeUniqueKey, update *RecipeUpdate) (*types.Recipe, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeUpdate) (*types.Recipe, error)
 	UpdateMany(ctx context.Context, filter *RecipeFilter, update *RecipeUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -103,6 +107,7 @@ type RecipeCommitRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitPageOptions) (*RecipeCommitPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeCommit) (*types.RecipeCommit, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeCommit) ([]*types.RecipeCommit, error)
+	UpsertOne(ctx context.Context, input *types.RecipeCommit, on RecipeCommitUniqueKey, update *RecipeCommitUpdate) (*types.RecipeCommit, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeCommitUpdate) (*types.RecipeCommit, error)
 	UpdateMany(ctx context.Context, filter *RecipeCommitFilter, update *RecipeCommitUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -118,6 +123,7 @@ type RecipePatchRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchPageOptions) (*RecipePatchPage, error)
 	CreateOne(ctx context.Context, input *types.RecipePatch) (*types.RecipePatch, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipePatch) ([]*types.RecipePatch, error)
+	UpsertOne(ctx context.Context, input *types.RecipePatch, on RecipePatchUniqueKey, update *RecipePatchUpdate) (*types.RecipePatch, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipePatchUpdate) (*types.RecipePatch, error)
 	UpdateMany(ctx context.Context, filter *RecipePatchFilter, update *RecipePatchUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -140,6 +146,7 @@ type RecipeRefRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefPageOptions) (*RecipeRefPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeRef) (*types.RecipeRef, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRef) ([]*types.RecipeRef, error)
+	UpsertOne(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateMany(ctx context.Context, filter *RecipeRefFilter, update *RecipeRefUpdate) (int, error)
@@ -163,6 +170,7 @@ type RecipeReleaseRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleasePageOptions) (*RecipeReleasePage, error)
 	CreateOne(ctx context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error)
+	UpsertOne(ctx context.Context, input *types.RecipeRelease, on RecipeReleaseUniqueKey, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
 	UpdateMany(ctx context.Context, filter *RecipeReleaseFilter, update *RecipeReleaseUpdate) (int, error)
@@ -180,6 +188,7 @@ type RecipeSnapshotEntryRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryPageOptions) (*RecipeSnapshotEntryPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error)
+	UpsertOne(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
 	UpdateMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, update *RecipeSnapshotEntryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -202,6 +211,7 @@ type StepRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *StepFilter, opts *StepPageOptions) (*StepPage, error)
 	CreateOne(ctx context.Context, input *types.Step) (*types.Step, error)
 	CreateMany(ctx context.Context, inputs []*types.Step) ([]*types.Step, error)
+	UpsertOne(ctx context.Context, input *types.Step, on StepUniqueKey, update *StepUpdate) (*types.Step, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StepUpdate) (*types.Step, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *StepUpdate) (*types.Step, error)
 	UpdateMany(ctx context.Context, filter *StepFilter, update *StepUpdate) (int, error)
@@ -224,6 +234,7 @@ type TastingRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *TastingFilter, opts *TastingPageOptions) (*TastingPage, error)
 	CreateOne(ctx context.Context, input *types.Tasting) (*types.Tasting, error)
 	CreateMany(ctx context.Context, inputs []*types.Tasting) ([]*types.Tasting, error)
+	UpsertOne(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate) (*types.Tasting, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TastingUpdate) (*types.Tasting, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TastingUpdate) (*types.Tasting, error)
 	UpdateMany(ctx context.Context, filter *TastingFilter, update *TastingUpdate) (int, error)
@@ -246,6 +257,7 @@ type UtensilRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *UtensilFilter, opts *UtensilPageOptions) (*UtensilPage, error)
 	CreateOne(ctx context.Context, input *types.Utensil) (*types.Utensil, error)
 	CreateMany(ctx context.Context, inputs []*types.Utensil) ([]*types.Utensil, error)
+	UpsertOne(ctx context.Context, input *types.Utensil, on UtensilUniqueKey, update *UtensilUpdate) (*types.Utensil, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UtensilUpdate) (*types.Utensil, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *UtensilUpdate) (*types.Utensil, error)
 	UpdateMany(ctx context.Context, filter *UtensilFilter, update *UtensilUpdate) (int, error)
@@ -450,6 +462,10 @@ func (r *NoOpCoverRepository) CreateMany(_ context.Context, inputs []*types.Cove
 	return inputs, nil
 }
 
+func (r *NoOpCoverRepository) UpsertOne(_ context.Context, input *types.Cover, _ CoverUniqueKey, _ *CoverUpdate) (*types.Cover, error) {
+	return input, nil
+}
+
 func (r *NoOpCoverRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CoverUpdate) (*types.Cover, error) {
 	return nil, ErrNotFound
 }
@@ -544,6 +560,10 @@ func (r *NoOpIngredientRepository) CreateMany(_ context.Context, inputs []*types
 	return inputs, nil
 }
 
+func (r *NoOpIngredientRepository) UpsertOne(_ context.Context, input *types.Ingredient, _ IngredientUniqueKey, _ *IngredientUpdate) (*types.Ingredient, error) {
+	return input, nil
+}
+
 func (r *NoOpIngredientRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *IngredientUpdate) (*types.Ingredient, error) {
 	return nil, ErrNotFound
 }
@@ -630,6 +650,10 @@ func (r *NoOpNoteRepository) CreateMany(_ context.Context, inputs []*types.Note)
 	return inputs, nil
 }
 
+func (r *NoOpNoteRepository) UpsertOne(_ context.Context, input *types.Note, _ NoteUniqueKey, _ *NoteUpdate) (*types.Note, error) {
+	return input, nil
+}
+
 func (r *NoOpNoteRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *NoteUpdate) (*types.Note, error) {
 	return nil, ErrNotFound
 }
@@ -696,6 +720,10 @@ func (r *NoOpRecipeRepository) CreateMany(_ context.Context, inputs []*types.Rec
 	return inputs, nil
 }
 
+func (r *NoOpRecipeRepository) UpsertOne(_ context.Context, input *types.Recipe, _ RecipeUniqueKey, _ *RecipeUpdate) (*types.Recipe, error) {
+	return input, nil
+}
+
 func (r *NoOpRecipeRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeUpdate) (*types.Recipe, error) {
 	return nil, ErrNotFound
 }
@@ -754,6 +782,10 @@ func (r *NoOpRecipeCommitRepository) CreateMany(_ context.Context, inputs []*typ
 	return inputs, nil
 }
 
+func (r *NoOpRecipeCommitRepository) UpsertOne(_ context.Context, input *types.RecipeCommit, _ RecipeCommitUniqueKey, _ *RecipeCommitUpdate) (*types.RecipeCommit, error) {
+	return input, nil
+}
+
 func (r *NoOpRecipeCommitRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeCommitUpdate) (*types.RecipeCommit, error) {
 	return nil, ErrNotFound
 }
@@ -810,6 +842,10 @@ func (r *NoOpRecipePatchRepository) CreateMany(_ context.Context, inputs []*type
 		return []*types.RecipePatch{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpRecipePatchRepository) UpsertOne(_ context.Context, input *types.RecipePatch, _ RecipePatchUniqueKey, _ *RecipePatchUpdate) (*types.RecipePatch, error) {
+	return input, nil
 }
 
 func (r *NoOpRecipePatchRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipePatchUpdate) (*types.RecipePatch, error) {
@@ -896,6 +932,10 @@ func (r *NoOpRecipeRefRepository) CreateMany(_ context.Context, inputs []*types.
 		return []*types.RecipeRef{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpRecipeRefRepository) UpsertOne(_ context.Context, input *types.RecipeRef, _ RecipeRefUniqueKey, _ *RecipeRefUpdate) (*types.RecipeRef, error) {
+	return input, nil
 }
 
 func (r *NoOpRecipeRefRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeRefUpdate) (*types.RecipeRef, error) {
@@ -988,6 +1028,10 @@ func (r *NoOpRecipeReleaseRepository) CreateMany(_ context.Context, inputs []*ty
 	return inputs, nil
 }
 
+func (r *NoOpRecipeReleaseRepository) UpsertOne(_ context.Context, input *types.RecipeRelease, _ RecipeReleaseUniqueKey, _ *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
+	return input, nil
+}
+
 func (r *NoOpRecipeReleaseRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
 	return nil, ErrNotFound
 }
@@ -1052,6 +1096,10 @@ func (r *NoOpRecipeSnapshotEntryRepository) CreateMany(_ context.Context, inputs
 		return []*types.RecipeSnapshotEntry{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) UpsertOne(_ context.Context, input *types.RecipeSnapshotEntry, _ RecipeSnapshotEntryUniqueKey, _ *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
+	return input, nil
 }
 
 func (r *NoOpRecipeSnapshotEntryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
@@ -1140,6 +1188,10 @@ func (r *NoOpStepRepository) CreateMany(_ context.Context, inputs []*types.Step)
 	return inputs, nil
 }
 
+func (r *NoOpStepRepository) UpsertOne(_ context.Context, input *types.Step, _ StepUniqueKey, _ *StepUpdate) (*types.Step, error) {
+	return input, nil
+}
+
 func (r *NoOpStepRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *StepUpdate) (*types.Step, error) {
 	return nil, ErrNotFound
 }
@@ -1226,6 +1278,10 @@ func (r *NoOpTastingRepository) CreateMany(_ context.Context, inputs []*types.Ta
 	return inputs, nil
 }
 
+func (r *NoOpTastingRepository) UpsertOne(_ context.Context, input *types.Tasting, _ TastingUniqueKey, _ *TastingUpdate) (*types.Tasting, error) {
+	return input, nil
+}
+
 func (r *NoOpTastingRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TastingUpdate) (*types.Tasting, error) {
 	return nil, ErrNotFound
 }
@@ -1310,6 +1366,10 @@ func (r *NoOpUtensilRepository) CreateMany(_ context.Context, inputs []*types.Ut
 		return []*types.Utensil{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpUtensilRepository) UpsertOne(_ context.Context, input *types.Utensil, _ UtensilUniqueKey, _ *UtensilUpdate) (*types.Utensil, error) {
+	return input, nil
 }
 
 func (r *NoOpUtensilRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UtensilUpdate) (*types.Utensil, error) {

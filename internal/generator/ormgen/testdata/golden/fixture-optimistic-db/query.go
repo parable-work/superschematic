@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -326,6 +345,15 @@ func ParseShelfSort(text string) (ShelfSort, error) {
 	return ShelfSort{}, fmt.Errorf("orm: Shelf sorts by id, label, createdAt and updatedAt, not %q", text)
 }
 
+// ShelfUniqueKey names a unique key of Shelf that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type ShelfUniqueKey string
+
+const (
+	ShelfUniqueById ShelfUniqueKey = "id"
+)
+
 // ShelfPageKey is the position of a Shelf row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -514,6 +542,15 @@ func ParseStockSort(text string) (StockSort, error) {
 	return StockSort{}, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", text)
 }
 
+// StockUniqueKey names a unique key of Stock that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type StockUniqueKey string
+
+const (
+	StockUniqueById StockUniqueKey = "id"
+)
+
 // StockPageKey is the position of a Stock row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -685,6 +722,13 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf.label ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Label.ILike+"%")
 		}
+		if f.Label.IsNull != nil {
+			if *f.Label.IsNull {
+				conditions = append(conditions, `shelf.label IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf.label IS NOT NULL`)
+			}
+		}
 	}
 	if f.CreatedAt != nil {
 		if f.CreatedAt.Eq != nil {
@@ -804,13 +848,29 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `shelf._version IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.ReferencedByStockShelf != nil {
 		probe := `SELECT 1 FROM stock WHERE stock.shelf_id = shelf.id`
 		if f.ReferencedByStockShelf.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -937,6 +997,13 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`stock.ingredient ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Ingredient.ILike+"%")
 		}
+		if f.Ingredient.IsNull != nil {
+			if *f.Ingredient.IsNull {
+				conditions = append(conditions, `stock.ingredient IS NULL`)
+			} else {
+				conditions = append(conditions, `stock.ingredient IS NOT NULL`)
+			}
+		}
 	}
 	if f.Quantity != nil {
 		if f.Quantity.Eq != nil {
@@ -972,6 +1039,22 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`stock.quantity <= $%d`, paramNum))
 			*args = append(*args, f.Quantity.Between.Max)
 		}
+		if len(f.Quantity.In) > 0 {
+			placeholders := make([]string, len(f.Quantity.In))
+			for i, value := range f.Quantity.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`stock.quantity IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Quantity.IsNull != nil {
+			if *f.Quantity.IsNull {
+				conditions = append(conditions, `stock.quantity IS NULL`)
+			} else {
+				conditions = append(conditions, `stock.quantity IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -1006,6 +1089,22 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`stock._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`stock._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `stock._version IS NULL`)
+			} else {
+				conditions = append(conditions, `stock._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.ShelfID != nil {

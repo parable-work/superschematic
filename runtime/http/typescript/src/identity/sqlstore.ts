@@ -2,6 +2,7 @@ import { backend } from 'superscalar/backend';
 import { VALID_SCALARS } from 'superscalar/scalars';
 import { parseIdentityDescriptor, quoteIdentifier as quote, type IdentityDescriptor } from './descriptor.js';
 import { compareCodePoints } from './permissions.js';
+import { isHyphenatedUUID, uuidFromDb, uuidToDb, uuidValue } from '../uuid.js';
 import {
   IdentityStoreError,
   type IdentityStore,
@@ -122,45 +123,14 @@ export function postgresPlaceholders(sql: string): string {
 
 // Keys. A key of a scalar whose SQL type is UUID (Identity.UUID and
 // Identity.UserID, as superscalar's metadata types them) is base62 on the
-// wire and hyphenated in the database; any other is the same text in
-// both, parsed by its scalar on the way in when superscalar knows it.
+// wire and hyphenated in the database, converted by the runtime's one copy
+// of the two forms (uuid.ts, D79); any other is the same text in both,
+// parsed by its scalar on the way in when superscalar knows it.
 
 const UUID_KEY_SCALARS = new Set(['Identity.UUID', 'Identity.UserID']);
 
 /** The key of every table the loader adds, AutoGenerate<Identity.UUID>. */
 const SESSION_KEY_SCALAR = 'Identity.UUID';
-
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const HYPHENATED_UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/u;
-const MAX_UUID = (1n << 128n) - 1n;
-
-function hyphenate(n: bigint): string {
-  const hex = n.toString(16).padStart(32, '0');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** A UUID's value from its hyphenated form (36 characters) or its base62 form (1 to 22), as superscalar's ParseUUID reads it. */
-function uuidValue(key: string): bigint | undefined {
-  if (key.length === 36 && HYPHENATED_UUID.test(key)) return BigInt(`0x${key.replaceAll('-', '')}`);
-  if (key.length < 1 || key.length > 22) return undefined;
-  let n = 0n;
-  for (const c of key) {
-    const digit = BASE62.indexOf(c);
-    if (digit < 0) return undefined;
-    n = n * 62n + BigInt(digit);
-  }
-  return n > MAX_UUID ? undefined : n;
-}
-
-function base62(n: bigint): string {
-  if (n === 0n) return '0';
-  let out = '';
-  while (n > 0n) {
-    out = BASE62[Number(n % 62n)] + out;
-    n /= 62n;
-  }
-  return out;
-}
 
 class KeyCodec {
   private readonly uuid: boolean;
@@ -174,8 +144,8 @@ class KeyCodec {
   /** A wire key's database form, or undefined for a value that is not a key of the scalar, which names no row. */
   toDB(key: string): string | undefined {
     if (this.uuid) {
-      const n = uuidValue(key);
-      return n === undefined ? undefined : hyphenate(n);
+      // A value that is no UUID names no row.
+      return uuidValue(key) === undefined ? undefined : uuidToDb(key);
     }
     if (this.known) {
       try {
@@ -190,7 +160,7 @@ class KeyCodec {
   /** A database key's wire form. */
   toWire(key: unknown): string {
     const text = String(key);
-    if (this.uuid && HYPHENATED_UUID.test(text)) return base62(BigInt(`0x${text.replaceAll('-', '')}`));
+    if (this.uuid && isHyphenatedUUID(text)) return uuidFromDb(text);
     return text;
   }
 }

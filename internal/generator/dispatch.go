@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/rustsdkgen"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
@@ -296,6 +297,7 @@ func (r run) generateTSTypes() error {
 			Registry:           r.Registry,
 			EngineDocument:     engineDocument,
 			SQLite:             r.Outputs.SQLDialect(registry.SQLDialectSQLite),
+			NoPostgres:         !r.Outputs.SQLDialect(registry.SQLDialectPostgres),
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -700,6 +702,18 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		return nil, nil, err
 	}
 	tsDeps.Dialect = dialect
+	if tsDeps.Database != "" {
+		orm, err := r.typeScriptORM(tsDeps.Database, dialect)
+		if err != nil {
+			return nil, nil, err
+		}
+		if orm != "" {
+			// Deps holds the database's repositories, from its types'
+			// ./orm entry (D79).
+			tsDeps.ORM = orm
+			tsDeps.DatabaseTypesPackage = r.Options.Naming.NpmTypesPackage(tsDeps.Database)
+		}
+	}
 	if e := apiOutput.Engine; e != nil {
 		// Deps holds the engine of the API's engine database, which a server
 		// opens in the background (D58).
@@ -795,6 +809,47 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		deps.RateLimitStore = r.Schema.RateLimitStore.Name
 	}
 	return deps, nil
+}
+
+// typeScriptORM is the type of the repositories the TypeScript API's
+// Deps.orm holds (D79), which the ./orm entry of db's TypeScript types
+// exports: db, the API's database, lists postgres first, so Deps.db is a
+// pool, generates TypeScript types, whose orm.ts runs on Postgres, and has
+// a table. Empty otherwise, and for a build that loads no dependency or has
+// no config for db.
+func (r run) typeScriptORM(db, dialect string) (string, error) {
+	if dialect == registry.SQLDialectSQLite || r.Options.LoadDependency == nil {
+		return "", nil
+	}
+	var cfg *schemaconfig.SchemaConfig
+	if r.Options.DependencyConfig != nil {
+		cfg, _ = r.Options.DependencyConfig(db)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		loaded, err := r.Options.LoadDependencyConfig(db)
+		if err != nil {
+			return "", fmt.Errorf("generator: read the config of %s, the database of %s, whose TypeScript types hold the repositories Deps.orm takes: %w", db, r.Config.Name, err)
+		}
+		cfg = loaded
+	}
+	if cfg == nil {
+		return "", nil
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return "", fmt.Errorf("generator: schema config for %s: %w", db, err)
+	}
+	if !outputs.TypesEnabled(LangTypeScript) {
+		return "", nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return "", fmt.Errorf("generator: load %s, the database of %s, whose tables Deps.orm holds the repositories of: %w", db, r.Config.Name, err)
+	}
+	if len(sqlutil.TableTypes(schema)) == 0 {
+		return "", nil
+	}
+	return tsgen.ORMTypeName(db) + "Orm", nil
 }
 
 // typeScriptQueuesPackage is the TypeScript types package of db, the

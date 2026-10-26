@@ -428,6 +428,10 @@ type TypeScriptAPI struct {
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
 
+	// ORM is whether Deps.orm holds the repositories of Database (D79),
+	// which the entrypoint builds over its pool with Database.ORM.
+	ORM bool
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -528,6 +532,14 @@ type TypeScriptDatabase struct {
 	// Engine is the engine the entrypoint opens on the database, an engine
 	// database (D58); nil for every other.
 	Engine *TypeScriptEngine
+
+	// ORM is the name the entrypoint imports createOrm of the database's
+	// repositories as (D79), from ORMModule, the ./orm entry of its
+	// TypeScript types package, ORMPackage, when an API on the database
+	// holds them in Deps.orm; empty otherwise.
+	ORM        string
+	ORMModule  string
+	ORMPackage string
 }
 
 // TypeScriptClient is an SDK client of an API called, built once for
@@ -834,6 +846,15 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 			}
 			api.Database = d
+			if o.DepsORM() && !d.SQLite {
+				api.ORM = true
+				if d.ORM == "" {
+					stem := varStem(d.Service)
+					d.ORM = taken.take("create" + strings.ToUpper(stem[:1]) + stem[1:] + "Orm")
+					d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMEntry
+					d.ORMPackage = o.Deps.DatabaseTypesPackage
+				}
+			}
 		}
 		if a.Routes != nil && a.Routes.Engine != nil {
 			if err := s.planTypeScriptEngine(in, api, a.Routes.Engine, o.SchemaName, taken, mounts); err != nil {
@@ -1249,6 +1270,12 @@ func (s *TypeScriptServer) planPackage() {
 	if s.Worker != nil {
 		// main.ts imports the queue's definition from the database's types.
 		deps[s.Worker.Package] = "workspace:*"
+	}
+	for _, d := range s.Databases {
+		if d.ORM != "" {
+			// The entrypoint opens the database's repositories (D79).
+			deps[d.ORMPackage] = "workspace:*"
+		}
 	}
 	for _, e := range s.Engines {
 		// main.ts opens the engine through the engine's ./server entry, with

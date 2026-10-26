@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -354,6 +373,16 @@ func ParseTenantSort(text string) (TenantSort, error) {
 	return TenantSort{}, fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)
 }
 
+// TenantUniqueKey names a unique key of Tenant that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type TenantUniqueKey string
+
+const (
+	TenantUniqueById   TenantUniqueKey = "id"
+	TenantUniqueBySlug TenantUniqueKey = "slug"
+)
+
 // TenantPageKey is the position of a Tenant row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -565,6 +594,16 @@ func ParseTenantUserSort(text string) (TenantUserSort, error) {
 	}
 	return TenantUserSort{}, fmt.Errorf("orm: TenantUser sorts by id and createdAt, not %q", text)
 }
+
+// TenantUserUniqueKey names a unique key of TenantUser that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type TenantUserUniqueKey string
+
+const (
+	TenantUserUniqueById                TenantUserUniqueKey = "id"
+	TenantUserUniqueByTenantDisplayName TenantUserUniqueKey = "tenant,displayName"
+)
 
 // TenantUserPageKey is the position of a TenantUser row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -866,6 +905,13 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`tenant."name" ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Name.ILike+"%")
 		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `tenant."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant."name" IS NOT NULL`)
+			}
+		}
 	}
 	if f.Slug != nil {
 		if f.Slug.Eq != nil {
@@ -886,6 +932,13 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tenant.slug ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Slug.ILike+"%")
+		}
+		if f.Slug.IsNull != nil {
+			if *f.Slug.IsNull {
+				conditions = append(conditions, `tenant.slug IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.slug IS NOT NULL`)
+			}
 		}
 	}
 	if f.Email != nil {
@@ -908,6 +961,13 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`tenant.email ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Email.ILike+"%")
 		}
+		if f.Email.IsNull != nil {
+			if *f.Email.IsNull {
+				conditions = append(conditions, `tenant.email IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.email IS NOT NULL`)
+			}
+		}
 	}
 	if f.Status != nil {
 		if f.Status.Eq != nil {
@@ -929,11 +989,27 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`tenant.status ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Status.ILike+"%")
 		}
+		if f.Status.IsNull != nil {
+			if *f.Status.IsNull {
+				conditions = append(conditions, `tenant.status IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.status IS NOT NULL`)
+			}
+		}
 	}
-	if f.IsActive != nil && f.IsActive.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`tenant.is_active = $%d`, paramNum))
-		*args = append(*args, *f.IsActive.Eq)
+	if f.IsActive != nil {
+		if f.IsActive.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tenant.is_active = $%d`, paramNum))
+			*args = append(*args, *f.IsActive.Eq)
+		}
+		if f.IsActive.IsNull != nil {
+			if *f.IsActive.IsNull {
+				conditions = append(conditions, `tenant.is_active IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.is_active IS NOT NULL`)
+			}
+		}
 	}
 	if f.SeatCount != nil {
 		if f.SeatCount.Eq != nil {
@@ -969,6 +1045,22 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`tenant.seat_count <= $%d`, paramNum))
 			*args = append(*args, f.SeatCount.Between.Max)
 		}
+		if len(f.SeatCount.In) > 0 {
+			placeholders := make([]string, len(f.SeatCount.In))
+			for i, value := range f.SeatCount.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tenant.seat_count IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.SeatCount.IsNull != nil {
+			if *f.SeatCount.IsNull {
+				conditions = append(conditions, `tenant.seat_count IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.seat_count IS NOT NULL`)
+			}
+		}
 	}
 	if f.Metadata != nil {
 		if f.Metadata.Eq != nil {
@@ -989,6 +1081,13 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tenant.metadata ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Metadata.ILike+"%")
+		}
+		if f.Metadata.IsNull != nil {
+			if *f.Metadata.IsNull {
+				conditions = append(conditions, `tenant.metadata IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant.metadata IS NOT NULL`)
+			}
 		}
 	}
 	if f.Version != nil {
@@ -1025,6 +1124,22 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`tenant._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tenant._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `tenant._version IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.ReferencedByTenantUserTenant != nil {
 		probe := `SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id`
@@ -1032,9 +1147,9 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 			probe += ` AND tenant_user.deleted_at IS NULL`
 		}
 		if f.ReferencedByTenantUserTenant.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -1261,6 +1376,13 @@ func (f *TenantUserFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`tenant_user.display_name ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.DisplayName.ILike+"%")
 		}
+		if f.DisplayName.IsNull != nil {
+			if *f.DisplayName.IsNull {
+				conditions = append(conditions, `tenant_user.display_name IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant_user.display_name IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -1295,6 +1417,22 @@ func (f *TenantUserFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tenant_user._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tenant_user._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `tenant_user._version IS NULL`)
+			} else {
+				conditions = append(conditions, `tenant_user._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.TenantID != nil {

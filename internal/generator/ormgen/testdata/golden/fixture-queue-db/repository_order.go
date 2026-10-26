@@ -689,6 +689,115 @@ func (r *OrderRepository) CreateOne(ctx context.Context, input *types.Order) (*t
 	return result, nil
 }
 
+// orderUniqueKeys are the conflict targets of Order's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var orderUniqueKeys = map[OrderUniqueKey]struct{ conflict, keep string }{
+	OrderUniqueById: {`(id)`, `id = EXCLUDED.id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *OrderRepository) UpsertOne(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error) {
+	key, ok := orderUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Order has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &OrderUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := orderUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: placedAt
+	fields = append(fields, `placed_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, time.Time(input.PlacedAt))
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.PlacedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`placed_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PlacedAt))
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO "order" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "placed_at"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Order{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&result.PlacedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Order records in a single statement
 func (r *OrderRepository) CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error) {
 	if len(inputs) == 0 {

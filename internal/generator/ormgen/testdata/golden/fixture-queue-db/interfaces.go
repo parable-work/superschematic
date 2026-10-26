@@ -19,10 +19,43 @@ type OrderRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
+	UpsertOne(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
 	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *OrderFilter) (int, error)
+}
+
+// OrderLineRepositoryInterface defines the contract for OrderLine data access.
+type OrderLineRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderLineGetOptions) (*types.OrderLine, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error)
+	FindOne(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) (*types.OrderLine, error)
+	FindMany(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) ([]*types.OrderLine, int, error)
+	FindPage(ctx context.Context, filter *OrderLineFilter, opts *OrderLinePageOptions) (*OrderLinePage, error)
+	CreateOne(ctx context.Context, input *types.OrderLine) (*types.OrderLine, error)
+	CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error)
+	UpsertOne(ctx context.Context, input *types.OrderLine, on OrderLineUniqueKey, update *OrderLineUpdate) (*types.OrderLine, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderLineUpdate) (*types.OrderLine, error)
+	UpdateMany(ctx context.Context, filter *OrderLineFilter, update *OrderLineUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OrderLineFilter) (int, error)
+}
+
+// ProductRepositoryInterface defines the contract for Product data access.
+type ProductRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProductGetOptions) (*types.Product, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Product, error)
+	FindOne(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) (*types.Product, error)
+	FindMany(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) ([]*types.Product, int, error)
+	FindPage(ctx context.Context, filter *ProductFilter, opts *ProductPageOptions) (*ProductPage, error)
+	CreateOne(ctx context.Context, input *types.Product) (*types.Product, error)
+	CreateMany(ctx context.Context, inputs []*types.Product) ([]*types.Product, error)
+	UpsertOne(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate) (*types.Product, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ProductUpdate) (*types.Product, error)
+	UpdateMany(ctx context.Context, filter *ProductFilter, update *ProductUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *ProductFilter) (int, error)
 }
 
 // DatabaseInterface defines the interface-first ORM database surface.
@@ -31,6 +64,8 @@ type DatabaseInterface interface {
 	Ping(ctx context.Context) error
 	Close()
 	GetOrderRepository() OrderRepositoryInterface
+	GetOrderLineRepository() OrderLineRepositoryInterface
+	GetProductRepository() ProductRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -38,17 +73,23 @@ type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	GetOrderRepository() OrderRepositoryInterface
+	GetOrderLineRepository() OrderLineRepositoryInterface
+	GetProductRepository() ProductRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
-	tx    *NoOpTx
-	Order *NoOpOrderRepository
+	tx        *NoOpTx
+	Order     *NoOpOrderRepository
+	OrderLine *NoOpOrderLineRepository
+	Product   *NoOpProductRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
-	Order *NoOpOrderRepository
+	Order     *NoOpOrderRepository
+	OrderLine *NoOpOrderLineRepository
+	Product   *NoOpProductRepository
 }
 
 // NewNoOpDatabase creates a no-op database with no-op repositories.
@@ -57,6 +98,10 @@ func NewNoOpDatabase() *NoOpDatabase {
 	db := &NoOpDatabase{tx: tx}
 	db.Order = &NoOpOrderRepository{}
 	tx.Order = db.Order
+	db.OrderLine = &NoOpOrderLineRepository{}
+	tx.OrderLine = db.OrderLine
+	db.Product = &NoOpProductRepository{}
+	tx.Product = db.Product
 	return db
 }
 
@@ -135,6 +180,10 @@ func (r *NoOpOrderRepository) CreateMany(_ context.Context, inputs []*types.Orde
 	return inputs, nil
 }
 
+func (r *NoOpOrderRepository) UpsertOne(_ context.Context, input *types.Order, _ OrderUniqueKey, _ *OrderUpdate) (*types.Order, error) {
+	return input, nil
+}
+
 func (r *NoOpOrderRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderUpdate) (*types.Order, error) {
 	return nil, ErrNotFound
 }
@@ -151,11 +200,139 @@ func (r *NoOpOrderRepository) DeleteMany(_ context.Context, _ *OrderFilter) (int
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return db.OrderLine
+}
+
+func (tx *NoOpTx) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return tx.OrderLine
+}
+
+// NoOpOrderLineRepository provides deterministic no-op repository behavior.
+type NoOpOrderLineRepository struct{}
+
+func (r *NoOpOrderLineRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineGetOptions) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error) {
+	return map[types.IdentityUUID]*types.OrderLine{}, nil
+}
+
+func (r *NoOpOrderLineRepository) FindOne(_ context.Context, _ *OrderLineFilter, _ *OrderLineFindOptions) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) FindMany(_ context.Context, _ *OrderLineFilter, _ *OrderLineFindOptions) ([]*types.OrderLine, int, error) {
+	return []*types.OrderLine{}, 0, nil
+}
+
+func (r *NoOpOrderLineRepository) FindPage(_ context.Context, _ *OrderLineFilter, _ *OrderLinePageOptions) (*OrderLinePage, error) {
+	return &OrderLinePage{Rows: []*types.OrderLine{}}, nil
+}
+
+func (r *NoOpOrderLineRepository) CreateOne(_ context.Context, input *types.OrderLine) (*types.OrderLine, error) {
+	return input, nil
+}
+
+func (r *NoOpOrderLineRepository) CreateMany(_ context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error) {
+	if inputs == nil {
+		return []*types.OrderLine{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOrderLineRepository) UpsertOne(_ context.Context, input *types.OrderLine, _ OrderLineUniqueKey, _ *OrderLineUpdate) (*types.OrderLine, error) {
+	return input, nil
+}
+
+func (r *NoOpOrderLineRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineUpdate) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) UpdateMany(_ context.Context, _ *OrderLineFilter, _ *OrderLineUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOrderLineRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOrderLineRepository) DeleteMany(_ context.Context, _ *OrderLineFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetProductRepository() ProductRepositoryInterface {
+	return db.Product
+}
+
+func (tx *NoOpTx) GetProductRepository() ProductRepositoryInterface {
+	return tx.Product
+}
+
+// NoOpProductRepository provides deterministic no-op repository behavior.
+type NoOpProductRepository struct{}
+
+func (r *NoOpProductRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *ProductGetOptions) (*types.Product, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpProductRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Product, error) {
+	return map[types.IdentityUUID]*types.Product{}, nil
+}
+
+func (r *NoOpProductRepository) FindOne(_ context.Context, _ *ProductFilter, _ *ProductFindOptions) (*types.Product, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpProductRepository) FindMany(_ context.Context, _ *ProductFilter, _ *ProductFindOptions) ([]*types.Product, int, error) {
+	return []*types.Product{}, 0, nil
+}
+
+func (r *NoOpProductRepository) FindPage(_ context.Context, _ *ProductFilter, _ *ProductPageOptions) (*ProductPage, error) {
+	return &ProductPage{Rows: []*types.Product{}}, nil
+}
+
+func (r *NoOpProductRepository) CreateOne(_ context.Context, input *types.Product) (*types.Product, error) {
+	return input, nil
+}
+
+func (r *NoOpProductRepository) CreateMany(_ context.Context, inputs []*types.Product) ([]*types.Product, error) {
+	if inputs == nil {
+		return []*types.Product{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpProductRepository) UpsertOne(_ context.Context, input *types.Product, _ ProductUniqueKey, _ *ProductUpdate) (*types.Product, error) {
+	return input, nil
+}
+
+func (r *NoOpProductRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ProductUpdate) (*types.Product, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpProductRepository) UpdateMany(_ context.Context, _ *ProductFilter, _ *ProductUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpProductRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpProductRepository) DeleteMany(_ context.Context, _ *ProductFilter) (int, error) {
+	return 0, nil
+}
+
 var (
-	_ DatabaseInterface        = (*Database)(nil)
-	_ DatabaseInterface        = (*NoOpDatabase)(nil)
-	_ TxInterface              = (*Tx)(nil)
-	_ TxInterface              = (*NoOpTx)(nil)
-	_ OrderRepositoryInterface = (*OrderRepository)(nil)
-	_ OrderRepositoryInterface = (*NoOpOrderRepository)(nil)
+	_ DatabaseInterface            = (*Database)(nil)
+	_ DatabaseInterface            = (*NoOpDatabase)(nil)
+	_ TxInterface                  = (*Tx)(nil)
+	_ TxInterface                  = (*NoOpTx)(nil)
+	_ OrderRepositoryInterface     = (*OrderRepository)(nil)
+	_ OrderRepositoryInterface     = (*NoOpOrderRepository)(nil)
+	_ OrderLineRepositoryInterface = (*OrderLineRepository)(nil)
+	_ OrderLineRepositoryInterface = (*NoOpOrderLineRepository)(nil)
+	_ ProductRepositoryInterface   = (*ProductRepository)(nil)
+	_ ProductRepositoryInterface   = (*NoOpProductRepository)(nil)
 )

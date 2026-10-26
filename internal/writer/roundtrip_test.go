@@ -241,6 +241,62 @@ func TestTSWriterRoundTripsJobs(t *testing.T) {
 	}
 }
 
+// TestTSWriterRoundTripsKeyedQueuesAndTriggers: the TS writer writes a
+// queue's key, onDuplicate and serialize and a table's @enqueueOnChange
+// (D80), the queue's class before a table that names it, which TypeScript
+// needs, whatever their names' order, and the reader reads them back.
+func TestTSWriterRoundTripsKeyedQueuesAndTriggers(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-queue-db")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	// A queue whose name sorts after a table of its file that names it, and
+	// a table of another file that names it.
+	uuid := ir.TypeRef{Name: "Identity.UUID"}
+	schema.Types["ZQueue"] = &ir.TypeDef{Name: "ZQueue", Owner: "src/changes.schema", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{Key: "orderId", OnDuplicate: "skip"},
+		Fields: []*ir.FieldDef{{Name: "orderId", TypeRef: uuid, Required: true}}}
+	schema.Types["Aisle"] = &ir.TypeDef{Name: "Aisle", Owner: "src/changes.schema", Role: ir.RoleDBTable,
+		Fields:          []*ir.FieldDef{{Name: "id", TypeRef: uuid, Required: true, Key: true}},
+		EnqueueOnChange: []*ir.EnqueueOnChange{{Queue: "ZQueue", On: []string{"delete"}, Message: map[string]string{"orderId": "id"}}}}
+	schema.Types["Order"].EnqueueOnChange = []*ir.EnqueueOnChange{{Queue: "ZQueue", On: []string{"insert"}, Message: map[string]string{"orderId": "id"}}}
+	want := normalizeIR(t, schema)
+	if got := normalizeIR(t, writeAndReload(t, schema, FormatTS)); got != want {
+		t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	dir := t.TempDir()
+	if _, err := WriteService(schema, FormatTS, dir); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(dir, "src", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	changes, orders := read("changes.schema.ts"), read("orders.schema.ts")
+	for file, lines := range map[string][]string{
+		changes: {
+			`@queue({ key: "orderId", onDuplicate: "replace", serialize: true })`,
+			`@enqueueOnChange(OrderChanged, { on: ["insert", "update", "delete"], fields: ["product", "quantity"], when: [{ field: "product", notNull: true }], message: { lineId: "id", orderId: "order" } })`,
+			`@enqueueOnChange(ZQueue, { on: ["delete"], message: { orderId: "id" } })`,
+		},
+		orders: {
+			`ZQueue } from "./changes.schema";`,
+			`@enqueueOnChange(ZQueue, { on: ["insert"], message: { orderId: "id" } })`,
+		},
+	} {
+		for _, line := range lines {
+			if !strings.Contains(file, line) {
+				t.Errorf("written TypeScript lacks %q:\n%s", line, file)
+			}
+		}
+	}
+	if strings.Index(changes, "class ZQueue") > strings.Index(changes, "class Aisle") {
+		t.Errorf("the written TypeScript declares Aisle before ZQueue, which its decorator names:\n%s", changes)
+	}
+}
+
 // writableAsTS returns a copy of schema whose APIInput types are plain
 // structs, the form the TS writer emits and the reader re-classifies.
 func writableAsTS(t *testing.T, schema *ir.Schema) *ir.Schema {

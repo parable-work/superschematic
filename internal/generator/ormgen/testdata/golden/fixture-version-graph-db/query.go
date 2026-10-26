@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -324,6 +343,16 @@ func ParseCoverSort(text string) (CoverSort, error) {
 	}
 	return CoverSort{}, fmt.Errorf("orm: Cover sorts by id, photoUrl and entityKey, not %q", text)
 }
+
+// CoverUniqueKey names a unique key of Cover that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type CoverUniqueKey string
+
+const (
+	CoverUniqueById           CoverUniqueKey = "id"
+	CoverUniqueByEntityKeyRef CoverUniqueKey = "entityKey,ref"
+)
 
 // CoverPageKey is the position of a Cover row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -554,6 +583,16 @@ func ParseIngredientSort(text string) (IngredientSort, error) {
 	return IngredientSort{}, fmt.Errorf("orm: Ingredient sorts by id, stepKey, quantity and entityKey, not %q", text)
 }
 
+// IngredientUniqueKey names a unique key of Ingredient that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type IngredientUniqueKey string
+
+const (
+	IngredientUniqueById           IngredientUniqueKey = "id"
+	IngredientUniqueByEntityKeyRef IngredientUniqueKey = "entityKey,ref"
+)
+
 // IngredientPageKey is the position of a Ingredient row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -775,6 +814,16 @@ func ParseNoteSort(text string) (NoteSort, error) {
 	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, body and entityKey, not %q", text)
 }
 
+// NoteUniqueKey names a unique key of Note that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type NoteUniqueKey string
+
+const (
+	NoteUniqueById           NoteUniqueKey = "id"
+	NoteUniqueByEntityKeyRef NoteUniqueKey = "entityKey,ref"
+)
+
 // NotePageKey is the position of a Note row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -957,6 +1006,15 @@ func ParseRecipeSort(text string) (RecipeSort, error) {
 	}
 	return RecipeSort{}, fmt.Errorf("orm: Recipe sorts by id, title and createdAt, not %q", text)
 }
+
+// RecipeUniqueKey names a unique key of Recipe that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipeUniqueKey string
+
+const (
+	RecipeUniqueById RecipeUniqueKey = "id"
+)
 
 // RecipePageKey is the position of a Recipe row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -1188,6 +1246,16 @@ func ParseRecipeCommitSort(text string) (RecipeCommitSort, error) {
 	return RecipeCommitSort{}, fmt.Errorf("orm: RecipeCommit sorts by id, schemaEpoch, contentHash and createdAt, not %q", text)
 }
 
+// RecipeCommitUniqueKey names a unique key of RecipeCommit that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipeCommitUniqueKey string
+
+const (
+	RecipeCommitUniqueById           RecipeCommitUniqueKey = "id"
+	RecipeCommitUniqueByRootSequence RecipeCommitUniqueKey = "root,sequence"
+)
+
 // RecipeCommitPageKey is the position of a RecipeCommit row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -1390,6 +1458,16 @@ func ParseRecipePatchSort(text string) (RecipePatchSort, error) {
 	}
 	return RecipePatchSort{}, fmt.Errorf("orm: RecipePatch sorts by id, entityKey, entityId and entityVersion, not %q", text)
 }
+
+// RecipePatchUniqueKey names a unique key of RecipePatch that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipePatchUniqueKey string
+
+const (
+	RecipePatchUniqueById                        RecipePatchUniqueKey = "id"
+	RecipePatchUniqueByCommitEntityKindEntityKey RecipePatchUniqueKey = "commit,entityKind,entityKey"
+)
 
 // RecipePatchPageKey is the position of a RecipePatch row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -1650,6 +1728,16 @@ func ParseRecipeRefSort(text string) (RecipeRefSort, error) {
 	return RecipeRefSort{}, fmt.Errorf("orm: RecipeRef sorts by id, name, createdAt and updatedAt, not %q", text)
 }
 
+// RecipeRefUniqueKey names a unique key of RecipeRef that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipeRefUniqueKey string
+
+const (
+	RecipeRefUniqueById       RecipeRefUniqueKey = "id"
+	RecipeRefUniqueByRootName RecipeRefUniqueKey = "root,name"
+)
+
 // RecipeRefPageKey is the position of a RecipeRef row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -1867,6 +1955,16 @@ func ParseRecipeReleaseSort(text string) (RecipeReleaseSort, error) {
 	return RecipeReleaseSort{}, fmt.Errorf("orm: RecipeRelease sorts by id, createdAt and updatedAt, not %q", text)
 }
 
+// RecipeReleaseUniqueKey names a unique key of RecipeRelease that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipeReleaseUniqueKey string
+
+const (
+	RecipeReleaseUniqueById   RecipeReleaseUniqueKey = "id"
+	RecipeReleaseUniqueByRoot RecipeReleaseUniqueKey = "root"
+)
+
 // RecipeReleasePageKey is the position of a RecipeRelease row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -2070,6 +2168,16 @@ func ParseRecipeSnapshotEntrySort(text string) (RecipeSnapshotEntrySort, error) 
 	}
 	return RecipeSnapshotEntrySort{}, fmt.Errorf("orm: RecipeSnapshotEntry sorts by id, entityKey, entityId and entityVersion, not %q", text)
 }
+
+// RecipeSnapshotEntryUniqueKey names a unique key of RecipeSnapshotEntry that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RecipeSnapshotEntryUniqueKey string
+
+const (
+	RecipeSnapshotEntryUniqueById                        RecipeSnapshotEntryUniqueKey = "id"
+	RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey RecipeSnapshotEntryUniqueKey = "commit,entityKind,entityKey"
+)
 
 // RecipeSnapshotEntryPageKey is the position of a RecipeSnapshotEntry row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -2324,6 +2432,16 @@ func ParseStepSort(text string) (StepSort, error) {
 	}
 	return StepSort{}, fmt.Errorf("orm: Step sorts by id, position, instruction, createdAt, updatedAt and entityKey, not %q", text)
 }
+
+// StepUniqueKey names a unique key of Step that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type StepUniqueKey string
+
+const (
+	StepUniqueById           StepUniqueKey = "id"
+	StepUniqueByEntityKeyRef StepUniqueKey = "entityKey,ref"
+)
 
 // StepPageKey is the position of a Step row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -2629,6 +2747,16 @@ func ParseTastingSort(text string) (TastingSort, error) {
 	return TastingSort{}, fmt.Errorf("orm: Tasting sorts by id, taster, score, servings, tastedOn, tastedAt, servedAt, rested and entityKey, not %q", text)
 }
 
+// TastingUniqueKey names a unique key of Tasting that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type TastingUniqueKey string
+
+const (
+	TastingUniqueById           TastingUniqueKey = "id"
+	TastingUniqueByEntityKeyRef TastingUniqueKey = "entityKey,ref"
+)
+
 // TastingPageKey is the position of a Tasting row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -2844,6 +2972,16 @@ func ParseUtensilSort(text string) (UtensilSort, error) {
 	return UtensilSort{}, fmt.Errorf("orm: Utensil sorts by id, name and entityKey, not %q", text)
 }
 
+// UtensilUniqueKey names a unique key of Utensil that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type UtensilUniqueKey string
+
+const (
+	UtensilUniqueById           UtensilUniqueKey = "id"
+	UtensilUniqueByEntityKeyRef UtensilUniqueKey = "entityKey,ref"
+)
+
 // UtensilPageKey is the position of a Utensil row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -3036,6 +3174,13 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`cover.photo_url ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.PhotoUrl.ILike+"%")
 		}
+		if f.PhotoUrl.IsNull != nil {
+			if *f.PhotoUrl.IsNull {
+				conditions = append(conditions, `cover.photo_url IS NULL`)
+			} else {
+				conditions = append(conditions, `cover.photo_url IS NOT NULL`)
+			}
+		}
 	}
 	if f.EntityKey != nil {
 		if f.EntityKey.Eq != nil {
@@ -3060,10 +3205,19 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`cover.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`cover.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `cover.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `cover.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -3098,6 +3252,22 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`cover._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`cover._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `cover._version IS NULL`)
+			} else {
+				conditions = append(conditions, `cover._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {
@@ -3318,6 +3488,13 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`ingredient.quantity ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Quantity.ILike+"%")
 		}
+		if f.Quantity.IsNull != nil {
+			if *f.Quantity.IsNull {
+				conditions = append(conditions, `ingredient.quantity IS NULL`)
+			} else {
+				conditions = append(conditions, `ingredient.quantity IS NOT NULL`)
+			}
+		}
 	}
 	if f.Substitutes != nil {
 		if f.Substitutes.Eq != nil {
@@ -3338,6 +3515,13 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ingredient.substitutes ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Substitutes.ILike+"%")
+		}
+		if f.Substitutes.IsNull != nil {
+			if *f.Substitutes.IsNull {
+				conditions = append(conditions, `ingredient.substitutes IS NULL`)
+			} else {
+				conditions = append(conditions, `ingredient.substitutes IS NOT NULL`)
+			}
 		}
 	}
 	if f.EntityKey != nil {
@@ -3363,10 +3547,19 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`ingredient.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`ingredient.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `ingredient.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `ingredient.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -3401,6 +3594,22 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ingredient._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`ingredient._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `ingredient._version IS NULL`)
+			} else {
+				conditions = append(conditions, `ingredient._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {
@@ -3622,6 +3831,13 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.body ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Body.ILike+"%")
 		}
+		if f.Body.IsNull != nil {
+			if *f.Body.IsNull {
+				conditions = append(conditions, `note.body IS NULL`)
+			} else {
+				conditions = append(conditions, `note.body IS NOT NULL`)
+			}
+		}
 	}
 	if f.EntityKey != nil {
 		if f.EntityKey.Eq != nil {
@@ -3646,10 +3862,19 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`note.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`note.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `note.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `note.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -3684,6 +3909,22 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`note._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `note._version IS NULL`)
+			} else {
+				conditions = append(conditions, `note._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {
@@ -3870,6 +4111,13 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			conditions = append(conditions, fmt.Sprintf(`recipe.title ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Title.ILike+"%")
 		}
+		if f.Title.IsNull != nil {
+			if *f.Title.IsNull {
+				conditions = append(conditions, `recipe.title IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe.title IS NOT NULL`)
+			}
+		}
 	}
 	if f.CreatedAt != nil {
 		if f.CreatedAt.Eq != nil {
@@ -3916,33 +4164,33 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 	if f.ReferencedByCoverRecipe != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id`
 		if f.ReferencedByCoverRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByIngredientRecipe != nil {
 		probe := `SELECT 1 FROM ingredient WHERE ingredient.recipe_id = recipe.id`
 		if f.ReferencedByIngredientRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByNoteRecipe != nil {
 		probe := `SELECT 1 FROM note WHERE note.recipe_id = recipe.id`
 		if f.ReferencedByNoteRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeCommitRoot != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.root_id = recipe.id`
 		if f.ReferencedByRecipeCommitRoot.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeRefRoot != nil {
@@ -3951,41 +4199,41 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			probe += ` AND recipe_ref.deleted_at IS NULL`
 		}
 		if f.ReferencedByRecipeRefRoot.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeReleaseRoot != nil {
 		probe := `SELECT 1 FROM recipe_release WHERE recipe_release.root_id = recipe.id`
 		if f.ReferencedByRecipeReleaseRoot.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByStepRecipe != nil {
 		probe := `SELECT 1 FROM step WHERE step.recipe_id = recipe.id`
 		if f.ReferencedByStepRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByTastingRecipe != nil {
 		probe := `SELECT 1 FROM tasting WHERE tasting.recipe_id = recipe.id`
 		if f.ReferencedByTastingRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByUtensilRecipe != nil {
 		probe := `SELECT 1 FROM utensil WHERE utensil.recipe_id = recipe.id`
 		if f.ReferencedByUtensilRecipe.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -4178,6 +4426,13 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			conditions = append(conditions, fmt.Sprintf(`recipe_commit.message ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Message.ILike+"%")
 		}
+		if f.Message.IsNull != nil {
+			if *f.Message.IsNull {
+				conditions = append(conditions, `recipe_commit.message IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_commit.message IS NOT NULL`)
+			}
+		}
 	}
 	if f.SchemaEpoch != nil {
 		if f.SchemaEpoch.Eq != nil {
@@ -4213,6 +4468,22 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			conditions = append(conditions, fmt.Sprintf(`recipe_commit.schema_epoch <= $%d`, paramNum))
 			*args = append(*args, f.SchemaEpoch.Between.Max)
 		}
+		if len(f.SchemaEpoch.In) > 0 {
+			placeholders := make([]string, len(f.SchemaEpoch.In))
+			for i, value := range f.SchemaEpoch.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_commit.schema_epoch IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.SchemaEpoch.IsNull != nil {
+			if *f.SchemaEpoch.IsNull {
+				conditions = append(conditions, `recipe_commit.schema_epoch IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_commit.schema_epoch IS NOT NULL`)
+			}
+		}
 	}
 	if f.ContentHash != nil {
 		if f.ContentHash.Eq != nil {
@@ -4233,6 +4504,13 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_commit.content_hash ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.ContentHash.ILike+"%")
+		}
+		if f.ContentHash.IsNull != nil {
+			if *f.ContentHash.IsNull {
+				conditions = append(conditions, `recipe_commit.content_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_commit.content_hash IS NOT NULL`)
+			}
 		}
 	}
 	if f.Sequence != nil {
@@ -4268,6 +4546,22 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_commit."sequence" <= $%d`, paramNum))
 			*args = append(*args, f.Sequence.Between.Max)
+		}
+		if len(f.Sequence.In) > 0 {
+			placeholders := make([]string, len(f.Sequence.In))
+			for i, value := range f.Sequence.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_commit."sequence" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Sequence.IsNull != nil {
+			if *f.Sequence.IsNull {
+				conditions = append(conditions, `recipe_commit."sequence" IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_commit."sequence" IS NOT NULL`)
+			}
 		}
 	}
 	if f.CreatedAt != nil {
@@ -4384,17 +4678,17 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 	if f.ReferencedByRecipeCommitParentCommit != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id`
 		if f.ReferencedByRecipeCommitParentCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipePatchCommit != nil {
 		probe := `SELECT 1 FROM recipe_patch WHERE recipe_patch.commit_id = recipe_commit.id`
 		if f.ReferencedByRecipePatchCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeRefBaseCommit != nil {
@@ -4403,9 +4697,9 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			probe += ` AND recipe_ref.deleted_at IS NULL`
 		}
 		if f.ReferencedByRecipeRefBaseCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeRefHeadCommit != nil {
@@ -4414,25 +4708,25 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			probe += ` AND recipe_ref.deleted_at IS NULL`
 		}
 		if f.ReferencedByRecipeRefHeadCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeReleaseCommit != nil {
 		probe := `SELECT 1 FROM recipe_release WHERE recipe_release.commit_id = recipe_commit.id`
 		if f.ReferencedByRecipeReleaseCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeSnapshotEntryCommit != nil {
 		probe := `SELECT 1 FROM recipe_snapshot_entry WHERE recipe_snapshot_entry.commit_id = recipe_commit.id`
 		if f.ReferencedByRecipeSnapshotEntryCommit.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -4576,6 +4870,13 @@ func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []s
 			conditions = append(conditions, fmt.Sprintf(`recipe_patch.entity_kind ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.EntityKind.ILike+"%")
 		}
+		if f.EntityKind.IsNull != nil {
+			if *f.EntityKind.IsNull {
+				conditions = append(conditions, `recipe_patch.entity_kind IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_patch.entity_kind IS NOT NULL`)
+			}
+		}
 	}
 	if f.EntityKey != nil {
 		if f.EntityKey.Eq != nil {
@@ -4657,6 +4958,22 @@ func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []s
 			conditions = append(conditions, fmt.Sprintf(`recipe_patch.entity_version <= $%d`, paramNum))
 			*args = append(*args, f.EntityVersion.Between.Max)
 		}
+		if len(f.EntityVersion.In) > 0 {
+			placeholders := make([]string, len(f.EntityVersion.In))
+			for i, value := range f.EntityVersion.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_patch.entity_version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityVersion.IsNull != nil {
+			if *f.EntityVersion.IsNull {
+				conditions = append(conditions, `recipe_patch.entity_version IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_patch.entity_version IS NOT NULL`)
+			}
+		}
 	}
 	if f.Operation != nil {
 		if f.Operation.Eq != nil {
@@ -4677,6 +4994,13 @@ func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []s
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_patch.operation ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Operation.ILike+"%")
+		}
+		if f.Operation.IsNull != nil {
+			if *f.Operation.IsNull {
+				conditions = append(conditions, `recipe_patch.operation IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_patch.operation IS NOT NULL`)
+			}
 		}
 	}
 	if f.CommitID != nil {
@@ -4904,6 +5228,13 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`recipe_ref."name" ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Name.ILike+"%")
 		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `recipe_ref."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_ref."name" IS NOT NULL`)
+			}
+		}
 	}
 	if f.SealedAt != nil {
 		if f.SealedAt.Eq != nil {
@@ -5065,6 +5396,22 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`recipe_ref._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `recipe_ref._version IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_ref._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.RootID != nil {
 		if f.RootID.Eq != nil {
@@ -5161,33 +5508,33 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 	if f.ReferencedByCoverRef != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id`
 		if f.ReferencedByCoverRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByIngredientRef != nil {
 		probe := `SELECT 1 FROM ingredient WHERE ingredient.ref_id = recipe_ref.id`
 		if f.ReferencedByIngredientRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByNoteRef != nil {
 		probe := `SELECT 1 FROM note WHERE note.ref_id = recipe_ref.id`
 		if f.ReferencedByNoteRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeCommitRef != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.ref_id = recipe_ref.id`
 		if f.ReferencedByRecipeCommitRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByRecipeRefParentRef != nil {
@@ -5196,33 +5543,33 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			probe += ` AND recipe_ref.deleted_at IS NULL`
 		}
 		if f.ReferencedByRecipeRefParentRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByStepRef != nil {
 		probe := `SELECT 1 FROM step WHERE step.ref_id = recipe_ref.id`
 		if f.ReferencedByStepRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByTastingRef != nil {
 		probe := `SELECT 1 FROM tasting WHERE tasting.ref_id = recipe_ref.id`
 		if f.ReferencedByTastingRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByUtensilRef != nil {
 		probe := `SELECT 1 FROM utensil WHERE utensil.ref_id = recipe_ref.id`
 		if f.ReferencedByUtensilRef.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -5447,6 +5794,22 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`recipe_release._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `recipe_release._version IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.RootID != nil {
 		if f.RootID.Eq != nil {
@@ -5629,6 +5992,13 @@ func (f *RecipeSnapshotEntryFilter) conditions(args *[]interface{}, paramOffset 
 			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_kind ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.EntityKind.ILike+"%")
 		}
+		if f.EntityKind.IsNull != nil {
+			if *f.EntityKind.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_kind IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_kind IS NOT NULL`)
+			}
+		}
 	}
 	if f.EntityKey != nil {
 		if f.EntityKey.Eq != nil {
@@ -5709,6 +6079,22 @@ func (f *RecipeSnapshotEntryFilter) conditions(args *[]interface{}, paramOffset 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version <= $%d`, paramNum))
 			*args = append(*args, f.EntityVersion.Between.Max)
+		}
+		if len(f.EntityVersion.In) > 0 {
+			placeholders := make([]string, len(f.EntityVersion.In))
+			for i, value := range f.EntityVersion.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityVersion.IsNull != nil {
+			if *f.EntityVersion.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_version IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_version IS NOT NULL`)
+			}
 		}
 	}
 	if f.CommitID != nil {
@@ -5917,6 +6303,22 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`step.position <= $%d`, paramNum))
 			*args = append(*args, f.Position.Between.Max)
 		}
+		if len(f.Position.In) > 0 {
+			placeholders := make([]string, len(f.Position.In))
+			for i, value := range f.Position.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.position IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Position.IsNull != nil {
+			if *f.Position.IsNull {
+				conditions = append(conditions, `step.position IS NULL`)
+			} else {
+				conditions = append(conditions, `step.position IS NOT NULL`)
+			}
+		}
 	}
 	if f.Instruction != nil {
 		if f.Instruction.Eq != nil {
@@ -5937,6 +6339,13 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`step.instruction ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Instruction.ILike+"%")
+		}
+		if f.Instruction.IsNull != nil {
+			if *f.Instruction.IsNull {
+				conditions = append(conditions, `step.instruction IS NULL`)
+			} else {
+				conditions = append(conditions, `step.instruction IS NOT NULL`)
+			}
 		}
 	}
 	if f.Timings != nil {
@@ -5959,6 +6368,13 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`step.timings ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Timings.ILike+"%")
 		}
+		if f.Timings.IsNull != nil {
+			if *f.Timings.IsNull {
+				conditions = append(conditions, `step.timings IS NULL`)
+			} else {
+				conditions = append(conditions, `step.timings IS NOT NULL`)
+			}
+		}
 	}
 	if f.Scratch != nil {
 		if f.Scratch.Eq != nil {
@@ -5979,6 +6395,13 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`step.scratch ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Scratch.ILike+"%")
+		}
+		if f.Scratch.IsNull != nil {
+			if *f.Scratch.IsNull {
+				conditions = append(conditions, `step.scratch IS NULL`)
+			} else {
+				conditions = append(conditions, `step.scratch IS NOT NULL`)
+			}
 		}
 	}
 	if f.CreatedAt != nil {
@@ -6088,10 +6511,19 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`step.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `step.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `step.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -6126,6 +6558,22 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`step._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`step._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `step._version IS NULL`)
+			} else {
+				conditions = append(conditions, `step._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {
@@ -6386,10 +6834,19 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
-	if f.Salty != nil && f.Salty.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`tasting.salty = $%d`, paramNum))
-		*args = append(*args, *f.Salty.Eq)
+	if f.Salty != nil {
+		if f.Salty.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.salty = $%d`, paramNum))
+			*args = append(*args, *f.Salty.Eq)
+		}
+		if f.Salty.IsNull != nil {
+			if *f.Salty.IsNull {
+				conditions = append(conditions, `tasting.salty IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.salty IS NOT NULL`)
+			}
+		}
 	}
 	if f.Score != nil {
 		if f.Score.Eq != nil {
@@ -6424,6 +6881,22 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tasting.score <= $%d`, paramNum))
 			*args = append(*args, f.Score.Between.Max)
+		}
+		if len(f.Score.In) > 0 {
+			placeholders := make([]string, len(f.Score.In))
+			for i, value := range f.Score.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.score IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Score.IsNull != nil {
+			if *f.Score.IsNull {
+				conditions = append(conditions, `tasting.score IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.score IS NOT NULL`)
+			}
 		}
 	}
 	if f.Servings != nil {
@@ -6460,6 +6933,22 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`tasting.servings <= $%d`, paramNum))
 			*args = append(*args, f.Servings.Between.Max)
 		}
+		if len(f.Servings.In) > 0 {
+			placeholders := make([]string, len(f.Servings.In))
+			for i, value := range f.Servings.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Servings.IsNull != nil {
+			if *f.Servings.IsNull {
+				conditions = append(conditions, `tasting.servings IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.servings IS NOT NULL`)
+			}
+		}
 	}
 	if f.TastedOn != nil {
 		if f.TastedOn.Eq != nil {
@@ -6494,6 +6983,22 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on <= $%d`, paramNum))
 			*args = append(*args, f.TastedOn.Between.End)
+		}
+		if len(f.TastedOn.In) > 0 {
+			placeholders := make([]string, len(f.TastedOn.In))
+			for i, value := range f.TastedOn.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.TastedOn.IsNull != nil {
+			if *f.TastedOn.IsNull {
+				conditions = append(conditions, `tasting.tasted_on IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.tasted_on IS NOT NULL`)
+			}
 		}
 	}
 	if f.TastedAt != nil {
@@ -6558,25 +7063,39 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`tasting.served_at ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.ServedAt.ILike+"%")
 		}
+		if f.ServedAt.IsNull != nil {
+			if *f.ServedAt.IsNull {
+				conditions = append(conditions, `tasting.served_at IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.served_at IS NOT NULL`)
+			}
+		}
 	}
 	if f.Rested != nil {
-		// Each duration goes as its microseconds, which pgx encodes from a
-		// time.Duration.
-		for _, comparison := range []struct {
-			op    string
-			value *time.Duration
-		}{
-			{"=", f.Rested.Eq},
-			{">", f.Rested.Gt},
-			{">=", f.Rested.Gte},
-			{"<", f.Rested.Lt},
-			{"<=", f.Rested.Lte},
-		} {
-			if comparison.value != nil {
-				paramNum++
-				conditions = append(conditions, fmt.Sprintf(`tasting.rested %s $%d`, comparison.op, paramNum))
-				*args = append(*args, *comparison.value)
-			}
+		if f.Rested.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested = $%d`, paramNum))
+			*args = append(*args, *f.Rested.Eq)
+		}
+		if f.Rested.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested > $%d`, paramNum))
+			*args = append(*args, *f.Rested.Gt)
+		}
+		if f.Rested.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested >= $%d`, paramNum))
+			*args = append(*args, *f.Rested.Gte)
+		}
+		if f.Rested.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested < $%d`, paramNum))
+			*args = append(*args, *f.Rested.Lt)
+		}
+		if f.Rested.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested <= $%d`, paramNum))
+			*args = append(*args, *f.Rested.Lte)
 		}
 		if f.Rested.Between != nil {
 			paramNum++
@@ -6614,6 +7133,13 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`tasting.verdict ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Verdict.ILike+"%")
 		}
+		if f.Verdict.IsNull != nil {
+			if *f.Verdict.IsNull {
+				conditions = append(conditions, `tasting.verdict IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.verdict IS NOT NULL`)
+			}
+		}
 	}
 	if f.Remarks != nil {
 		if f.Remarks.Eq != nil {
@@ -6634,6 +7160,13 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tasting.remarks ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Remarks.ILike+"%")
+		}
+		if f.Remarks.IsNull != nil {
+			if *f.Remarks.IsNull {
+				conditions = append(conditions, `tasting.remarks IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.remarks IS NOT NULL`)
+			}
 		}
 	}
 	if f.EntityKey != nil {
@@ -6659,10 +7192,19 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`tasting.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `tasting.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -6697,6 +7239,22 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tasting._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `tasting._version IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {
@@ -6882,6 +7440,13 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`utensil."name" ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Name.ILike+"%")
 		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `utensil."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil."name" IS NOT NULL`)
+			}
+		}
 	}
 	if f.EntityKey != nil {
 		if f.EntityKey.Eq != nil {
@@ -6906,10 +7471,19 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
-	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`utensil.deleted_on_ref = $%d`, paramNum))
-		*args = append(*args, *f.DeletedOnRef.Eq)
+	if f.DeletedOnRef != nil {
+		if f.DeletedOnRef.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil.deleted_on_ref = $%d`, paramNum))
+			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if f.DeletedOnRef.IsNull != nil {
+			if *f.DeletedOnRef.IsNull {
+				conditions = append(conditions, `utensil.deleted_on_ref IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil.deleted_on_ref IS NOT NULL`)
+			}
+		}
 	}
 	if f.Version != nil {
 		if f.Version.Eq != nil {
@@ -6944,6 +7518,22 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`utensil._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
+		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `utensil._version IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil._version IS NOT NULL`)
+			}
 		}
 	}
 	if f.RecipeID != nil {

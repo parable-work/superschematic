@@ -7,16 +7,32 @@
 // lets shop-cart read and write checkouts and read the stock and the
 // collection points; the engine answers for a type, not an instance, so
 // this package checks a cart is the caller's own. shop-orders starts the
-// checkout, which holds what the cart asks, and takes payment for it.
+// checkout, which holds what the cart asks, and takes payment for it. A
+// shopper's own reviews and reorders are rows of shop-db's tables, which
+// this package reads and writes through Deps.orm, the database's generated
+// repositories (D79), with no SQL of its own.
 import { randomUUID } from 'node:crypto';
 
 import { normalizeIdentityUUIDStrict } from 'superscalar';
-import { HttpProblem, OperationResult, notFound, type RequestContext } from '@superschematic/http-runtime';
+import { HttpProblem, OperationResult, decodeCursor, encodeCursor, notFound, refusedCursor, type RequestContext } from '@superschematic/http-runtime';
+import { NotFoundError, PageKeyError, enqueue } from '@superschematic/http-runtime/postgres';
 import { BehaviorVetoError, EngineError, type Principal } from '@superschematic/engine';
 import type { AsyncEngine } from '@superschematic/engine/server';
-import type { CartsImplementation, Constructor, Deps, DerivedAnswer, DeriversConstructor, PickupSlotsImplementation, TicketsImplementation } from '@acme/shop-cart-api';
-import type { CartLine, CartView, IdentityUUID, PickupSlot, TicketView } from '@acme/shop-cart-types/types';
+import type {
+  CartsImplementation,
+  Constructor,
+  Deps,
+  DerivedAnswer,
+  DeriversConstructor,
+  MyReviewsImplementation,
+  PickupSlotsImplementation,
+  ReordersImplementation,
+  TicketsImplementation,
+} from '@acme/shop-cart-api';
+import type { CartLine, CartView, IdentityUUID, MyReview, PickupSlot, TicketView } from '@acme/shop-cart-types/types';
 import { TicketCategory, TicketPriority } from '@acme/shop-db-types';
+import type { ReviewPageKey, ReviewRow, ReviewSortField } from '@acme/shop-db-types/orm';
+import { orderPlacedQueue } from '@acme/shop-db-types/queues';
 
 // The engine namespace shop-db's engine types live in, and the deployable
 // shop-cart's calls name to its policy (D37).
@@ -36,7 +52,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Builds the implementation of shop-cart from its dependencies. Its type is the generated Constructor. */
 export const create: Constructor = deps => ({
   carts: carts(deps),
+  myReviews: myReviews(deps),
   pickupSlots: pickupSlots(deps),
+  reorders: reorders(deps),
   tickets: tickets(deps),
 });
 
@@ -194,6 +212,101 @@ function pickupSlots(deps: Deps): PickupSlotsImplementation {
       return found.slots.map(
         (slot): PickupSlot => ({ collectionPointId: slot.id, startsAt: new Date(slot.startMs), endsAt: new Date(slot.endMs) })
       );
+    },
+  };
+}
+
+/** The caller's user id, the identity runtime's subject: its base62 Identity.UUID, as the repositories' rows hold ids. */
+function callerId(ctx: RequestContext): IdentityUUID {
+  const subject = ctx.principal?.subject;
+  if (!subject) throw new HttpProblem(401, 'sign in first', { code: 'unauthorized' });
+  return subject as IdentityUUID;
+}
+
+/** Runs a repository call, answering a key no live row holds as the API's 404. */
+async function found<T>(what: string, call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (error) {
+    if (error instanceof NotFoundError) throw notFound(`${what} does not exist`);
+    throw error;
+  }
+}
+
+function myReview(row: ReviewRow): MyReview {
+  return { id: row.id, productId: row.productId, rating: row.rating, title: row.title, body: row.body, createdAt: row.createdAt };
+}
+
+// A shopper's own reviews, rows of shop-db's review table, read and written
+// through Deps.orm, the database's generated repositories (D79): a page by
+// keyset with a search beside it, an upsert by the review's unique key, and
+// a soft delete the repository stamps with the caller.
+function myReviews(deps: Deps): MyReviewsImplementation {
+  return {
+    listMyReviews: async ({ q, page }, ctx) => {
+      const author = callerId(ctx);
+      // The cursor is the repository's key of the last review of the page
+      // before, {"id": ...}, which the router has unbound from its sort.
+      const after = page.cursor ? decodeCursor<ReviewPageKey>(page.cursor) : null;
+      try {
+        const reviews = await deps.orm.review.findPage(
+          { authorId: { eq: author }, searchText: q ?? undefined },
+          { sort: { field: (page.sort?.field ?? 'createdAt') as ReviewSortField, desc: page.sort?.desc }, after, limit: page.limit }
+        );
+        return { items: reviews.rows.map(myReview), next: reviews.next ? encodeCursor(reviews.next) : null };
+      } catch (error) {
+        if (error instanceof PageKeyError) throw refusedCursor();
+        throw error;
+      }
+    },
+    // One review per shopper and product, by its unique index: the first
+    // write inserts it and the next changes it.
+    writeMyReview: async ({ productId, input }, ctx) => {
+      const author = callerId(ctx);
+      await found(`Product ${productId}`, deps.orm.product.getOne(productId));
+      const review = await deps.orm.as(ctx.principal).review.upsertOne({ productId, authorId: author, ...input }, ['product', 'author'], input);
+      deps.logger.info('review written', { review: review.id, product: productId });
+      return myReview(review);
+    },
+    // Another shopper's review is the 404 of one never written; the
+    // repository records the caller as the one who deleted it.
+    deleteMyReview: async ({ id }, ctx) => {
+      const author = callerId(ctx);
+      const review = await found(`Review ${id}`, deps.orm.review.getOne(id));
+      if (review.authorId !== author) throw notFound(`Review ${id} does not exist`);
+      await deps.orm.as(ctx.principal).review.deleteOne(id);
+      return myReview(review);
+    },
+  };
+}
+
+// Places an order of the caller's again (D79): the order, its lines at the
+// products' prices now, and its OrderPlaced message, which shop-orders' Go
+// worker FulfilOrders handles, in one transaction of Deps.orm, so all of
+// them commit or none.
+function reorders(deps: Deps): ReordersImplementation {
+  return {
+    reorder: async ({ id }, ctx) => {
+      const customer = callerId(ctx);
+      const placed = await deps.orm.as(ctx.principal).transaction(async tx => {
+        const previous = await found(`Order ${id}`, tx.order.getOne(id));
+        if (previous.customerId !== customer) throw notFound(`Order ${id} does not exist`);
+        const { rows: lines } = await tx.orderLine.findMany({ orderId: { eq: previous.id } }, { limit: 1000 });
+        // The products, one read for every line.
+        const products = await tx.product.getManyByIds(lines.map(line => line.productId));
+        const priced = lines.map(line => {
+          const product = products.get(line.productId);
+          if (!product) throw new HttpProblem(409, `product ${line.productId} is no longer sold`, { code: 'unavailable' });
+          return { productId: line.productId, quantity: line.quantity, unitPriceCents: product.priceCents };
+        });
+        const totalCents = priced.reduce((sum, line) => sum + line.quantity * line.unitPriceCents, 0);
+        const order = await tx.order.createOne({ customerId: customer, placedAt: new Date(), shippingAddress: previous.shippingAddress, totalCents });
+        await tx.orderLine.createMany(priced.map(line => ({ orderId: order.id, ...line })));
+        await enqueue(tx, orderPlacedQueue, { orderId: order.id });
+        return { order, lineCount: priced.length };
+      });
+      deps.logger.info('reordered', { order: placed.order.id, from: id });
+      return new OperationResult({ orderId: placed.order.id, totalCents: placed.order.totalCents, lineCount: placed.lineCount }, 201);
     },
   };
 }

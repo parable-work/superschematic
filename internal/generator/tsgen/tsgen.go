@@ -288,6 +288,12 @@ type ModuleOutput struct {
 	// left out, with why.
 	Queues []QueueInfo
 
+	// ORM is the schema's repositories (D79), which orm.ts writes and
+	// package.json exports as "./orm", nil for a schema with no table or a
+	// database that lists no postgres dialect. With one, the package
+	// depends on the HTTP runtime, whose ormOf runs them.
+	ORM *ORMInfo
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -423,6 +429,11 @@ type Options struct {
 	// (D53, amended).
 	SQLite bool
 
+	// NoPostgres is whether the DB service lists no postgres dialect: its
+	// package then writes no orm.ts, whose repositories run on Postgres
+	// alone (D79).
+	NoPostgres bool
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -523,6 +534,11 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if output.Queues, err = TypeScriptQueues(schema, opts.SQLite); err != nil {
 		return nil, err
+	}
+	if !opts.NoPostgres {
+		if output.ORM, err = typeScriptORM(schema, opts, output); err != nil {
+			return nil, err
+		}
 	}
 
 	return output, nil

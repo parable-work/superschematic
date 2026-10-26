@@ -10910,6 +10910,127 @@ Status: built with D75; none of it has run on Google Cloud (D75's
 Status lists the first live run's checks). The rule is reversible until
 the first release.
 
+## D79. TypeScript repositories run the Go ORM's statements, which sqlutil writes once, over a Postgres value codec
+
+A TypeScript API got a raw `pg` Pool as `Deps.db`, and nothing else. The
+Go ORM (repositories, typed filters, `FindPage`, `Transaction`, soft
+delete, audit stamping) was Go's alone, so a TypeScript implementation
+hand-wrote every INSERT, UPDATE, SELECT and DELETE of its tables, their
+column mapping and keyset paging, and nothing checked that SQL against the
+schema. Two value problems sat under it:
+- `connectPostgres` opened a pool with pg's parsers, so a BIGINT and a
+  NUMERIC came back as text, and a DATE as a `Date` at local midnight.
+- A UUID is base62 on the wire and in the TypeScript types, and
+  hyphenated in Postgres. The conversion lived privately in the identity
+  store, so `ctx.principal.subject` could not be passed to SQL.
+
+This entry adds:
+- a value codec in `@superschematic/http-runtime/postgres`: `uuidToDb`,
+  `uuidFromDb`, `decodeRow`, `encodeParam`, and per-pool type parsers;
+- the per-table statements in `internal/generator/sqlutil`, which the Go
+  ORM is ported onto and the TypeScript repositories carry;
+- `orm.ts`, the `./orm` entry of a DB service's TypeScript types, a typed
+  repository per table, and `Deps.orm` on an API whose database has one;
+- `UpsertOne` in Go and `upsertOne` in TypeScript.
+
+### The codec
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One copy of a UUID's two forms, `runtime/http/typescript/src/uuid.ts`: `uuidToDb` writes either form hyphenated, `uuidFromDb` reads either as base62. The identity store and both queue clients convert through it. | The identity store's private copy, which each implementation re-implemented. |
+| `decodeRow(row, fields)` and `encodeParam(value, codec)` are driven by the per-field descriptors the types already carry: a queue's fields in `./queues`, and now a table's columns in `./orm`. A `RowField` is a `QueueField` with `date`, `int64` and `numeric` flags beside its own. A column the row does not hold is left out, so a query may select a few. | A codec keyed by scalar name, which would copy the compiler's scalar-to-SQL table into the runtime. |
+| `connectPostgres` gives each pool its own parsers, through pg's per-client `types`, never `pg.types`: BIGINT a number, refused past 2^53 - 1 with an error that names the cast; NUMERIC its exact text; DATE its `YYYY-MM-DD` text. Lists of each alike. | Global `pg.types`, which changes every pool in the process. A `bigint`, which the TypeScript types do not hold. |
+| A JSON column is read and bound by its column's type, never by the JavaScript type of its value. pg parses a JSON or JSONB column with its own parsers and with `postgresTypeParsers` alike, so the value arrives as the JSON value it holds, a string among them, and `decodeRow` takes it as it is; `jsonText` marks a TEXT column that holds JSON, as SQLite keeps one, whose text `decodeRow` parses once with `decodeJSONText`, the function a queue's claim decodes each JSON column's text with (D80), so a claim and a repository read the same value; the generator reads which from the column's DDL type (`sqlutil.ColumnType`). On Postgres every JSON column is JSONB, a field of a `@jsonField` type among them since D83, such as acme's `Order.shippingAddress`, so none is `jsonText` there. `encodeParam` writes every JSON value as its JSON text, a list as a JSON array and never as pg's array literal, and `null` as SQL NULL but in a column that may not be null (`required`), where it is the JSON null. | Parsing a value that is a string, which read the JSON string `"1"` as the number 1 and failed on `"x"`. Parsing only when `typeParsers` is false, which keeps pg's parsers, and they parse JSON too. |
+| The parsers are on by default, and `typeParsers: false` keeps pg's. Of the callers in the repository, the identity store reads no BIGINT and no DATE, the queue claims and the repositories pass per-query types of their own, and the generated entrypoints open every pool through it; only an implementation's raw query of a BIGINT, NUMERIC or DATE sees a change, and it now sees the type its schema declares. | Opt-in, which every generated server would then turn on, leaving a raw pool that disagrees with the types. |
+
+`Identity.UUID` takes three forms. On the wire and in the TypeScript types
+it is base62, the scalar's canonical form, which `normalizeIdentityUUID`
+writes. In Postgres it is a `UUID` column, which reads and writes
+lowercase hyphenated text, as SQLite's TEXT column holds it. In Go it is
+`types.IdentityUUID`, a UUID whose JSON is base62 and whose `ToUUID()`
+pgx binds.
+
+### One source of statements
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil.TablesOf` models every table both ORMs keep: its columns in the DDL's order (fields and to-one foreign keys in schema order, an added `id` first and `_version` last), each column's class, filter kind and whether it sorts, its unique keys, the relations that point at it, soft delete and the history actor. `TableStatementsOf` writes the statements as format strings of `%s` and `%d`, and `PostgresClauses` the clauses around a column: a condition's operator, an assignment, a page key, `WHERE`, `ORDER BY`, `LIMIT`. Table and column names come from `TableName`, `ColumnName` and `ForeignKeyColumn` alone. | Each generator naming and writing its own SQL, as before, which drifts. |
+| The Go ORM's templates write the statements as sqlutil gives them, and ormgen refuses a repository whose columns differ from the model's. Its goldens are byte for byte the same but for the filters and the upsert below. | Rewriting the Go repositories, which a reviewer could not compare. |
+| `orm.ts` carries each table's statements and the clauses as data, and the runtime's `ormOf` fills them in the Go ORM's order: the count before a page of `findMany`, the key first in a single insert and at its place in a batch, a column one row of a batch leaves unset written `DEFAULT`, the fields' conditions before the relations', the probes, then the search's words. `TestTableParityOfGoAndTypeScriptOnPostgres` runs one script through both and requires the same statements, call by call. | Generated TypeScript code per table, a second copy of the Go templates' logic. A shared description each runtime assembles freely, which only a test of the text could hold together anyway. |
+
+### The TypeScript repositories
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `orm.ts` declares per table a `<T>Row`, `<T>Create`, `<T>Update` and `<T>Filter`, `<T>OrderField`, `<T>SortField`, `<T>UniqueKey` and `<T>PageKey`, and `<T>Repository`; then `<Db>Repositories`, `<Db>Orm`, `<Db>Tx` and `createOrm(pool, user?)`. A row holds a to-one relation's key as `<field>Id`, typed by the target's key. | The generated table types, whose relation fields hold the related row, which a read of one table cannot fill. |
+| The repository is the gap's interface: `getOne`, `getManyByIds`, `findOne`, `findMany`, `findPage`, `createOne`, `createMany`, `updateOne`, `updateMany`, `upsertOne`, `deleteOne`, `deleteMany`, and `hardDeleteOne` on a soft-deletable table. `getOne` and `updateOne` throw `NotFoundError`; `findOne` answers null. A relation's rows load through the target's `getManyByIds`. | Field selection and include, which the Go ORM has; they can follow. |
+| The `./orm` entry makes a DB service's TypeScript types package depend on `@superschematic/http-runtime` and name `pg` an optional peer (`peerDependenciesMeta`), with `@types/pg` for its own build. Only `./orm` imports either, so a front end that imports the package for its types and enums bundles neither, and installs no `pg`. The runtime has no dependencies of its own; it installs `hono`, its one required peer. | The runtime as a peer too, which every project would have to install itself to build the package. A required `pg` peer, which bun and npm install for any project that imports the package. |
+| An API whose database lists postgres first and generates TypeScript types with a table gets `Deps.orm`, typed `<Db>Orm`, which every entrypoint builds over the pool it opens: `orm: createShopDbOrm(shopDbPool)`. `Deps.db` stays the raw pool. | `createRepositories(deps.db)` in each implementation, which every implementation would repeat. |
+| `withUser(id)` and `as(ctx.principal)` return the ORM acting as a user. A create of a table with `createdBy` and a delete of a soft-deletable table throw `NoUserError` without one, where the Go ORM returns `ErrNoUserInContext`; an update stamps `updatedBy` when there is a user, as Go does. | Requiring a user for every write of such a table, which Go does not. |
+| `transaction(fn)` runs fn with repositories on one connection and `query` and `exec` for raw SQL, rolls back when it throws, and returns the connection broken when it cannot end. `query` takes a pg query config too, so `enqueue(tx, queue, message)` writes the message in the transaction with no change to `enqueue`. | A transaction handle that `enqueue` would have to learn. |
+| The filters are the Go ORM's, per column kind. Both now offer `In` on integers, numbers and dates and `IsNull` on every kind (additive Go fields), which the gap asked of every column; TypeScript offers `isNull` only on a column that may be null. | The Go filters as they were, which lack both. |
+| A `Generic.JSON` column filters by `eq` and `in`, which compare JSON values as JSONB does, an object whatever the order of its keys and the string `"1"` apart from the number 1, and by `isNull` on a column that may be null (`sqlutil.FilterJSON`, TypeScript's `JsonFilter<T>`). The Go ORM's filter of such a column, a `StringFilter`, predates D79 and stays its API: its `Eq` and `In` bind JSON text, which pgx sends as such, so they compare alike, and its `ILike`, for which Postgres has no operator on JSONB, fails. | No filter but `isNull` in both, which would take `Eq` and `In` out of the Go API. Text comparison, which `ILike` implies and JSONB does not have. |
+| A create writes a member's schema default when the input leaves it unset, and `createMany` writes `DEFAULT` for a column one row leaves unset only where the schema gives no default. D83's DDL gives a required text, boolean, number or enum column with a `Default<T, V>` the same value as its DEFAULT, so a TypeScript create and a raw insert agree. Go writes only an enum's default: a Go struct cannot tell unset from zero, so the Go ORM writes the zero value of any other required field with a `Default<T, V>`, over the column's DEFAULT: acme's `Product.inStock`, default true, is false when a Go create leaves it unset. That gap is left for the Go ORM. A key a create sets is written whatever its scalar; Go writes a UUID key alone. | The Go zero value, which TypeScript has no reason to copy. |
+
+### Upsert
+
+`UpsertOne(ctx, input, on, update)` and `upsertOne(input, on, update)`
+insert `input`, or, when a row holds its value of the unique key `on`,
+apply `update` to that row and return it. A key is the primary key, a
+`@unique` field or a unique `@index`, named by its fields:
+`ReviewUniqueByProductAuthor` in Go, `['product', 'author']` in
+TypeScript. A unique index of a soft-deletable table is partial, over the
+live rows, so the conflict target names its predicate, and a deleted row
+never conflicts with it. A conflict with a deleted row on a full key, such
+as the primary key, is not updated, and the upsert fails as not found. An
+update that sets no field leaves the row as it is, stamps and all.
+
+### What the later gaps build on
+
+- `nearest(field, vector, { k, metric, filter })`: a statement of
+  `TableStatementsOf` beside `Page`, whose filter is the table's
+  conditions, run by a repository method of both ORMs.
+- `Encrypted<T>`: a codec flag of `RowField`, which `encodeParam` and
+  `decodeValue` pass through a hook per column.
+- `@table` and `@column`: `sqlutil.TableName`, `ColumnName` and
+  `ForeignKeyColumn` take the definition, and every generator names
+  through them; D83's names follow from them, a CHECK's `ck_<table>_<column>`
+  (`CheckName`), an index's default name and the column an `@index` key
+  resolves to (`IndexName`, `IndexKeyMatches`, through `ColumnNameOf`).
+  A queue's table, the history tables' columns and the audit columns the
+  statements write are still named apart.
+- SQLite and D1: a second `TableStatementsOf` and clauses per dialect,
+  which `OrmDefinition` carries by dialect.
+
+Status: built.
+- **The codec:** `runtime/http/typescript/src/pgcodec.test.ts` covers the
+  two forms, the parsers and their refusal, `decodeRow` over pg's forms
+  and text, `encodeParam`, and a JSONB column holding a string, a number, a
+  list, an object, the JSON null and SQL NULL, with the parsers on and off,
+  as `TestRepositoriesOnPostgres`'s fixture-db `json.test.ts` does through
+  the repositories. The acceptance is `TestRepositoriesOnPostgres`
+  (`internal/generator/tsgen`): a raw query on `connectPostgres`'s pool,
+  through `decodeRow`, reads wire-form ids and numeric amounts, and a
+  principal's base62 subject matches its user row through `uuidToDb`.
+- **The statements:** sqlutil's table tests, ormgen's goldens and its
+  Postgres tests, and `TestTableParityOfGoAndTypeScriptOnPostgres`.
+- **The repositories:** `TestRepositoriesOnPostgres` runs bun tests on
+  Postgres over four fixtures: `fixture-ledger-db` (CRUD, filters, search,
+  pages, upsert, the acting user, soft delete, a transaction with an
+  enqueue), and the counterparts of `page_postgres_test.go`,
+  `order_by_postgres_test.go` and `user_model_postgres_test.go`.
+- **acme-shop:** shop-cart, on Bun over shop-db, keeps a shopper's
+  reviews (a page with a search, an upsert, a soft delete) and reorders
+  (a transaction that writes an order, its lines and `OrderPlaced`, which
+  the Go worker fulfils) through `Deps.orm`, with no SQL of its own, in
+  `TestStackDevRunsTheShop`.
+
+Left: field selection, include and one-to-many loading in TypeScript; the
+`@versioned` history readers and the `IfVersion` fences in TypeScript;
+SQLite and D1 repositories; the Go ORM's zero value for an unset required
+field with a `Default<T, V>`, where TypeScript and the DDL write the
+default; and `nearest` and `Encrypted<T>`, which the later gaps add.
+
 ## D82. A TypeScript project's local loop: a site's dev server behind one origin, superscalar on the SDK's first call, and the Rust build products prebuilt
 
 A TypeScript project hit three walls on the way to a fast local loop.
@@ -11121,6 +11242,99 @@ opt-out of the checks; raw SQL that a plan knows to take down around a
 change to the columns it reads (a materialized view over a column a plan
 retypes fails the step, as Postgres refuses it); `SET DEFAULT`. The rule
 is reversible until the first release.
+
+## D80. A queue keys its messages, keeps one ready per key or one claim per key, and a table's trigger enqueues on a change
+
+A queue (D53) offered `retries`, `backoff`, `maxBackoff`, `lease` and
+`retain`, and every enqueue added a message. Two needs had no home:
+- **One waiting message per key.** A line item's embedding job is keyed
+  by the line item: re-categorizing it should replace the job that waits,
+  not add another.
+- **One running message per key.** A bank sync per Plaid item must not
+  run twice at once, since both runs read and advance one cursor.
+
+And enqueueing was code in each writer's transaction (D53), so a bulk
+import, a script or psql that changed a row enqueued nothing.
+
+This entry adds `key`, `onDuplicate` and `serialize` to `@queue`, and
+`@enqueueOnChange` on a DB table, a trigger that enqueues a message of a
+queue of the same schema after a write to the table's rows.
+
+### Keys, dedupe and serialization
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `key` names a required field of the message, one scalar or enum value, whose column the queue's indexes hold. It takes effect with `onDuplicate: "replace"` or `"skip"`, or `serialize: true`, and each of those needs it; a key with neither is refused, since it would do nothing. | An optional key, whose NULL a unique index lets repeat, so a message without one would dedupe and serialize nothing, silently. A key over several fields, which no need here asks for. |
+| "Pending" is `state = 'ready'`: a message no worker holds, due now or after its backoff. A partial unique index of the ready messages by key, `uq_<table>_ready_key`, keeps one per key, and the enqueue ends with `ON CONFLICT (key) WHERE state = 'ready'`, which Postgres and SQLite both read. A claimed message is not pending: an enqueue while one runs adds a ready message for the next run, since the one that runs read the old row. | Counting a claimed message as pending, which drops the change that came in while it ran. An index over every live state, which an enqueue during a run would violate. |
+| `replace` overwrites the ready message with the new one: every column of the message but the key, a field the new message leaves out taking its column's default; `due_at`, to the new one's, so due at once; `attempts`, to zero; and `last_error`, cleared. It keeps the row's `id` and `created_at`. A message that waits out a backoff is so made fresh: new data, its retries from the start. | Keeping the attempts, which spends a new message's retries on an old one's failures. Keeping `due_at`, which leaves fresh data waiting a stale backoff. A new row and a deleted old one, which changes the ID an operator follows. |
+| `skip` keeps the ready message as it is, its backoff included, and adds none. `append`, the default, adds one as before. | |
+| A claimed message that fails, or is released, while a ready message holds its key gives way: it is `done`, its cause in `last_error` on a fail, and the ready message, newer, runs in its place. With none waiting, it is ready again as on any queue. The fail and release statements decide in one `CASE ... WHEN EXISTS (a ready message of the key)`; a queue that keeps no done message prunes it with the others. | Going back to ready beside the newer message, which the unique index refuses. Deleting it, which SQLite's single UPDATE cannot do and which loses the cause. |
+| `serialize` holds a key to one claim at a time. A partial unique index of the claimed messages by key, `uq_<table>_claimed_key`, makes it hold whatever two workers do at once. The claim takes, of each key, only the head of its line: a message whose claim expired, else the first due ready one by `(due_at, id)`, the order a claim takes them in; and none while a claim of the key lives. A queue that serializes and appends indexes its ready messages by key too, `idx_<table>_ready_key`, which the head reads. | An advisory lock per key, which a claim's transaction releases when it commits while the claim lasts its lease. A `NOT EXISTS` with no index behind it, which two claims on different snapshots both pass. A claim inside a plpgsql function, a migration object per queue. |
+| On Postgres a claim whose snapshot missed a claim another worker was committing meets the claimed index's unique violation; a fail or release that missed an enqueue being committed meets the ready index's. Each client (the Go ORM, TypeScript's `postgresQueue`, Rust's `PostgresQueue`) reads SQLSTATE 23505 there: the claim takes nothing that time and the worker polls again, and the fail or release runs once more, when it sees the ready message and gives way. SQLite has one writer, which reads every claim and ready message of the key, and never meets either. | Single statements that cannot race: a fail as DELETE and INSERT ... ON CONFLICT in one statement, which SQLite has no form of; a claim as a function. Letting the violation reach the worker's log as a failed claim. |
+| The statements stay in one place, `sqlutil.QueueSpec`, which `PostgresQueueStatements` and `SQLiteQueueStatements` now take: a dedupe queue's `Conflict`, which each client appends after its VALUES, and its fail and release; a serialized queue's claim and SQLite due read. The Go ORM, the TypeScript types' `./queues` and the Rust descriptor carry them; the TypeScript `enqueue`'s signature does not change. | A statement per client, which the parity test exists to prevent. |
+| An operator's `stack queue retry` of a dedupe queue retries one dead message per key, the last to die, and none whose key a ready message holds; a retry of IDs that leaves one dead says so ("dead, and a ready message holds its key"). The document carries the key's column, which the stack's resolution reads from the queue. | A retry that makes every named message ready, which the unique index refuses, all or nothing. |
+
+### Migrations
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Adding a key is adding the indexes: the queue's table is a table to the planner (D27), and the model's table records the key, `onDuplicate` and `serialize` (`Table.Queue`), only for a queue with a key, so every other model and its hash stay as they were. | A table kind for queues, which changes every queue's model. |
+| Pending messages that already share a key are collapsed in the step that builds the ready index, before the build: every ready message of a key but one is marked `done`, with a last error that says why, keeping the one the queue's `onDuplicate` keeps, the latest enqueued under replace and the earliest under skip. On Postgres the build is CONCURRENTLY, so a server built from the previous version can enqueue a duplicate between the two statements, and the build fails (data-dependent: run the plan again; the step's recovery drops the invalid index). On SQLite the two run in one transaction under the write lock. The step is destructive: the messages it marks do not run. | Refusing the plan while duplicates exist, which an operator cannot fix by hand faster than the servers enqueue. Deleting them, which loses what they held. |
+| The ready index's step is a compat hazard: a server built from the previous version enqueues without ON CONFLICT, so once the index is built its enqueue of a message whose key a ready message holds fails, and its write with it, until the rollout replaces it. The claimed index's is data-dependent: it fails while two claims hold one key. | No hazard, since nothing breaks while no duplicate is enqueued. |
+
+### `@enqueueOnChange`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@enqueueOnChange(Queue, { on, fields?, when?, message })` on a DB table, at most once per queue. `on` lists `insert`, `update` and `delete`; an insert and an update enqueue from the row as written, a delete from the row as it was. `fields` makes an update enqueue only when one of them changes, compared with IS DISTINCT FROM (SQLite's IS NOT); without it every update does. A relation is its key's column. | Requiring `fields` for an update, which forbids "any change" for no gain. |
+| `when` is a typed predicate: a list of `{ field, isNull: true }`, `{ field, notNull: true }` and `{ field, equals: literal }`, all of which hold, as `@projection`'s literal rules read. The trigger is written in two dialects, and the predicate names fields, which the loader checks (the field has a column, a null test is of a nullable field, an equals literal fits: an enum's member, a string for text, a whole number for an integer, a boolean for a boolean), and which each dialect renders (TRUE or 1). The loader also reads it: a required message field taken from a nullable column needs `notNull` on that column. Anything a typed rule cannot say belongs in a raw SQL object the migrations own (D83). | A raw SQL string, which would have to hold in Postgres and SQLite alike, would name columns by the names sqlgen gives them (`category_id`), and would fail only when a migration applied it, or at a write, inside the writer's transaction. |
+| `message` maps each field of the message the trigger sets to a field of the table. The loader checks that they line up: the same type (a list for a list), or from a to-one relation the type of its target's key, and the same SQL column type, so the value copies across as it is; and that every required field the trigger leaves out has its column's default (a list, a time, or an enum's schema default, which the trigger writes as the ORM's enqueue does). | Checking only the column types, which lets a `Finance.Money` message take any BIGINT. |
+| On Postgres it is a plpgsql function `<table>_enqueue_<queue>` and the trigger `trg_<table>_enqueue_<queue>`, `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, as a @versioned table's capture function and triggers are (D17), so create.sql and the planner's model take them from one renderer, and the planner creates, replaces in place (`CREATE OR REPLACE`), renames and drops them as it does those. A change of `fields`, `when` or `message` replaces the function; one of `on`, the trigger. | A trigger with a WHEN clause per write, which the planner's trigger model does not read. |
+| SQLite gets triggers too: one per write, `trg_<table>_enqueue_<queue>_<write>`, each holding its insert and, in its WHEN, the comparison and the conditions. The SQLite model holds triggers for the first time: the planner creates them, replaces them (DROP IF EXISTS and CREATE, SQLite having no functions), and drops them. A table SQLite rebuilds loses its triggers with its old copy, so the rebuild creates the triggers the phase leaves on each table it keeps, the new model's and, in expand, the previous model's that contract drops. A trigger that inserts into a rebuilt table needs nothing: SQLite resolves the name when the trigger runs. | Refusing @enqueueOnChange on SQLite, which the same app runs locally. |
+| The trigger's insert ends with the queue's Conflict, so under replace or skip repeated writes keep one ready message per key, and the trigger and an application's enqueue dedupe against each other. | |
+| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there. | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
+
+Status: built.
+- **Dedupe and serialization:** `internal/generator/sqlutil/queuesql_test.go`
+  holds the statements, `internal/registry/core_queues_test.go` and
+  `internal/loader/verify/enqueue_on_change_test.go` the options and the
+  key. The generated `TestQueueKeyParity` (`ormgen`'s
+  `queues_key_parity_test.go`, run by
+  `TestQueueParityOfGoTypeScriptAndRustOnPostgres` and `...OnSQLite`) has
+  Go, TypeScript and Rust share fixture-queue-db's keyed queues:
+  `ReplaceKeepsOneReadyMessage` (five enqueues of one key leave one ready
+  message, the last), `SkipKeepsTheFirst`, `FailedAndReleasedGiveWay`,
+  `SerializeHoldsOneClaimPerKey`, `SerializeTakesTheHeadOfEachKey` and
+  `ConcurrentClaimsNeverShareAKey` (eight workers, sixty messages, four
+  keys, no two claims of one key and no failed claim). On Postgres,
+  `LostClaimRaceTakesNothing` and `FailRacingAnEnqueueGivesWay` hold each
+  side's claim and fail in a lock wait on the other transaction, shown by
+  `pg_blocking_pids`, and check that the claim takes nothing and the fail
+  gives way, with no error.
+- **The trigger:** the same test's `TriggerEnqueuesOnChange`, on both
+  dialects, sets a line's product with raw SQL (one message), changes its
+  note (none), and changes it repeatedly and deletes it (one waiting
+  message). `TestEnqueueOnChangeIsATablesTrigger` reads the declaration.
+- **Migrations:** the plan cases `add-queue-key`, `change-queue-key`,
+  `add-enqueue-on-change`, `change-enqueue-on-change`,
+  `drop-enqueue-on-change` and `enqueue-on-change-rebuilt`, in each
+  dialect, with their goldens, and the convergence tests on Postgres and
+  SQLite, which apply them.
+- **Operator retry:** `TestQueueRetryOfAKeyedQueueOnPostgres` runs the
+  golden documents `retry-keyed` and `retry-all-keyed` of fixture-queue-db's
+  `StockChecked` (`internal/queueops`) with the migration runner: a retry
+  of two dead messages of one SKU changes none and names the one left
+  dead, and a retry of all retries the last death of each SKU and none of
+  a SKU a ready message holds.
+- **acme-shop:** `shop-db`'s `StockLow` keeps one waiting message per
+  product, the latest, and its worker handles one product at a time;
+  `OrderPlaced` waits once per order, and `Order`'s trigger enqueues it
+  when any writer puts an order back to placed.
+
+Left: a key over several fields; a delay on enqueue (`due_at` later than
+now), which replace would then take from the new message; operator
+statements on SQLite, which `stack queue` does not run yet (D68); and
+`when` rules beyond the literal ones.
 
 ## D81. A generated server covers what an app wrote by hand: approval-gated registration, files up and down, its OpenAPI document and an MCP endpoint, and a JWT body-hash webhook verifier
 

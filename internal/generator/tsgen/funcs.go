@@ -20,6 +20,9 @@ func customTemplateFuncs() template.FuncMap {
 		"elemType":                 elemType,
 		"lowerFirst":               lowerFirst,
 		"tsTemplateLiteral":        tsTemplateLiteral,
+		"tsUnion":                  tsUnion,
+		"ormPGPeerRange":           func() string { return ORMPGPeerRange },
+		"ormPGTypesVersion":        func() string { return ORMPGTypesVersion },
 		"tsDoc":                    tsDoc,
 		"secretMaskValue":          secretMaskValue,
 		"hasStringValidator": func(s ScalarInfo) bool {

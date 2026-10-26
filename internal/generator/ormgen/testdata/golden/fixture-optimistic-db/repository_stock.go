@@ -978,6 +978,151 @@ func (r *StockRepository) CreateOne(ctx context.Context, input *types.Stock) (*t
 	return result, nil
 }
 
+// stockUniqueKeys are the conflict targets of Stock's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79).
+var stockUniqueKeys = map[StockUniqueKey]struct{ conflict, keep string }{
+	StockUniqueById: {`(id)`, `id = EXCLUDED.id`},
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *StockRepository) UpsertOne(ctx context.Context, input *types.Stock, on StockUniqueKey, update *StockUpdate) (*types.Stock, error) {
+	key, ok := stockUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Stock has no unique key %q", string(on))
+	}
+	if update == nil {
+		update = &StockUpdate{}
+	}
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := stockUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: ingredient
+	fields = append(fields, `ingredient`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Ingredient)
+	// Required field: quantity
+	fields = append(fields, `quantity`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Quantity)
+
+	// Handle relationship foreign key columns
+	// Relationship: shelf (FK: shelf_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := stockUUIDValue(input.Shelf.Id); ok && relID != zeroId {
+			fields = append(fields, "shelf_id")
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses []string
+	if update.Ingredient != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`ingredient = $%d`, paramNum))
+		values = append(values, *update.Ingredient)
+	}
+	if update.Quantity != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`quantity = $%d`, paramNum))
+		values = append(values, *update.Quantity)
+	}
+	// Handle relationship foreign key: shelf
+	if update.ShelfID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("shelf_id = $%d", paramNum))
+		values = append(values, update.ShelfID.ToUUID())
+	}
+
+	if len(setClauses) == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO stock (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "shelf_id", "ingredient", "quantity", "_version"`,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		key.conflict,
+		strings.Join(setClauses, ", "),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+
+	// Scan result
+	result := &types.Stock{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelShelf *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	if err := row.Scan(
+
+		&result.Id,
+
+		&tempRelShelf,
+
+		&result.Ingredient,
+
+		&result.Quantity,
+
+		&result.Version,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			// The row the key conflicts with is soft-deleted.
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+	if tempRelShelf != nil {
+		result.Shelf.Id = stockUUIDPtr(*tempRelShelf)
+	}
+
+	return result, nil
+}
+
 // CreateMany inserts multiple Stock records in a single statement
 func (r *StockRepository) CreateMany(ctx context.Context, inputs []*types.Stock) ([]*types.Stock, error) {
 	if len(inputs) == 0 {

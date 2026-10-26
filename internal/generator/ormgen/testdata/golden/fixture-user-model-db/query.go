@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,8 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -98,6 +112,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -288,6 +307,16 @@ func ParseRoleSort(text string) (RoleSort, error) {
 	}
 	return RoleSort{}, fmt.Errorf("orm: Role sorts by id and name, not %q", text)
 }
+
+// RoleUniqueKey names a unique key of Role that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type RoleUniqueKey string
+
+const (
+	RoleUniqueById   RoleUniqueKey = "id"
+	RoleUniqueByName RoleUniqueKey = "name"
+)
 
 // RolePageKey is the position of a Role row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -491,6 +520,16 @@ func ParseSessionSort(text string) (SessionSort, error) {
 	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt and expiresAt, not %q", text)
 }
 
+// SessionUniqueKey names a unique key of Session that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type SessionUniqueKey string
+
+const (
+	SessionUniqueById        SessionUniqueKey = "id"
+	SessionUniqueByTokenHash SessionUniqueKey = "tokenHash"
+)
+
 // SessionPageKey is the position of a Session row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -668,6 +707,16 @@ func ParseUserSort(text string) (UserSort, error) {
 	}
 	return UserSort{}, fmt.Errorf("orm: User sorts by id, email, displayName and createdAt, not %q", text)
 }
+
+// UserUniqueKey names a unique key of User that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type UserUniqueKey string
+
+const (
+	UserUniqueById    UserUniqueKey = "id"
+	UserUniqueByEmail UserUniqueKey = "email"
+)
 
 // UserPageKey is the position of a User row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -863,6 +912,16 @@ func ParseUserCredentialSort(text string) (UserCredentialSort, error) {
 	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", text)
 }
 
+// UserCredentialUniqueKey names a unique key of UserCredential that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type UserCredentialUniqueKey string
+
+const (
+	UserCredentialUniqueById   UserCredentialUniqueKey = "id"
+	UserCredentialUniqueByUser UserCredentialUniqueKey = "user"
+)
+
 // UserCredentialPageKey is the position of a UserCredential row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -1047,6 +1106,16 @@ func ParseUserRoleGrantSort(text string) (UserRoleGrantSort, error) {
 	return UserRoleGrantSort{}, fmt.Errorf("orm: UserRoleGrant sorts by id and grantedAt, not %q", text)
 }
 
+// UserRoleGrantUniqueKey names a unique key of UserRoleGrant that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type UserRoleGrantUniqueKey string
+
+const (
+	UserRoleGrantUniqueById       UserRoleGrantUniqueKey = "id"
+	UserRoleGrantUniqueByUserRole UserRoleGrantUniqueKey = "user,role"
+)
+
 // UserRoleGrantPageKey is the position of a UserRoleGrant row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
 // value of its sort field from the table, so a key is the same in every order
@@ -1215,13 +1284,20 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`role."name" ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Name.ILike+"%")
 		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `role."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `role."name" IS NOT NULL`)
+			}
+		}
 	}
 	if f.ReferencedByUserRoleGrantRole != nil {
 		probe := `SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id`
 		if f.ReferencedByUserRoleGrantRole.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -1373,6 +1449,13 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".token_hash ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.TokenHash.ILike+"%")
+		}
+		if f.TokenHash.IsNull != nil {
+			if *f.TokenHash.IsNull {
+				conditions = append(conditions, `"session".token_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `"session".token_hash IS NOT NULL`)
+			}
 		}
 	}
 	if f.CreatedAt != nil {
@@ -1692,6 +1775,13 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`"user".email ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Email.ILike+"%")
 		}
+		if f.Email.IsNull != nil {
+			if *f.Email.IsNull {
+				conditions = append(conditions, `"user".email IS NULL`)
+			} else {
+				conditions = append(conditions, `"user".email IS NOT NULL`)
+			}
+		}
 	}
 	if f.DisplayName != nil {
 		if f.DisplayName.Eq != nil {
@@ -1712,6 +1802,13 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"user".display_name ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.DisplayName.ILike+"%")
+		}
+		if f.DisplayName.IsNull != nil {
+			if *f.DisplayName.IsNull {
+				conditions = append(conditions, `"user".display_name IS NULL`)
+			} else {
+				conditions = append(conditions, `"user".display_name IS NOT NULL`)
+			}
 		}
 	}
 	if f.CreatedAt != nil {
@@ -1759,25 +1856,25 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 	if f.ReferencedBySessionUser != nil {
 		probe := `SELECT 1 FROM "session" WHERE "session".user_id = "user".id`
 		if f.ReferencedBySessionUser.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByUserCredentialUser != nil {
 		probe := `SELECT 1 FROM user_credential WHERE user_credential.user_id = "user".id`
 		if f.ReferencedByUserCredentialUser.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 	if f.ReferencedByUserRoleGrantUser != nil {
 		probe := `SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = "user".id`
 		if f.ReferencedByUserRoleGrantUser.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
 	}
 
@@ -1928,6 +2025,13 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_hash ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.PasswordHash.ILike+"%")
+		}
+		if f.PasswordHash.IsNull != nil {
+			if *f.PasswordHash.IsNull {
+				conditions = append(conditions, `user_credential.password_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `user_credential.password_hash IS NOT NULL`)
+			}
 		}
 	}
 	if f.PasswordChangedAt != nil {
