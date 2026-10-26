@@ -10161,7 +10161,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
+Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10192,7 +10192,21 @@ Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
    the typed clients carry each behavior's signals as types, a guard and a
    send helper per signal a caller may send.
 3. Primitive 3, namespace operations, with the inbox, read state and
-   deliveries.
+   deliveries. Built. Namespace operations are
+   `runtime/engine/rust/engine/src/behaviors/namespace.rs` and the
+   behavior question in `access.rs`; `testkit/tests/behavior_namespace.rs`
+   holds them on both databases, `asks: read` and the writer included. A
+   field may say `perReader`, which no event records, so Comments'
+   `unread`, the caller's, is never logged as the instance's. A policy
+   rule decides a behavior's question only when it names `behavior`, so a
+   rule written before namespace operations grants none. Comments' read
+   state, follows, inbox and deliveries are `comments/follows.rs`,
+   `inbox.rs` and `deliveries.rs` with migration 4, held by
+   `testkit/tests/core_comments_inbox.rs` and an end-to-end dispatcher
+   over HTTP in the TypeScript suite; `prune` removes full batches, up to
+   twenty a run, so a busy schema's deliveries do not outgrow it. The
+   typed clients give each behavior with namespace operations a client of
+   its own, kept off every schema's.
 4. Primitive 4, acting for a subject, in the principal, the events,
    Provenance and Comments.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
