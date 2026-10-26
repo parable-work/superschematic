@@ -80,6 +80,11 @@
   },{{if .ORM}}
   "peerDependencies": {
     "pg": "{{ormPGPeerRange}}"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
   },{{end}}
   "devDependencies": {
     "@types/js-yaml": "4.0.9",{{if .ORM}}
