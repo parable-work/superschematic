@@ -62,7 +62,9 @@ function originAPI(env, pathname) {
 /** The request forwarded to the API's server, the API's path taken off. */
 async function forward(request, env, url, api) {
   const rest = url.pathname.slice(api.path.length) || '/';
-  const target = api.binding ? new URL(rest + url.search, url.origin) : new URL(api.url.replace(/\/$/u, '') + rest + url.search);
+  const target = new URL(api.binding ? url.origin : api.url.replace(/\/$/u, '') + rest);
+  if (api.binding) target.pathname = rest;
+  target.search = url.search;
   const headers = new Headers(request.headers);
   if (!api.binding) headers.delete('host');
   headers.set('x-forwarded-host', url.host);

@@ -62,6 +62,7 @@ export default {
     expect('a call with the session cookie', [me.status, me.body, me.seen.path, me.seen.search], [200, '{"name":"Ada"}', '/me', '?view=full']);
     expect('a call without it', (await ask('/api/shop-storefront/me')).status, 401);
     expect("the API's own path", (await ask('/api/shop-storefront')).seen.path, '/');
+    expect('a path with a double slash', (await ask('/api/shop-storefront//orders')).seen.path, '//orders');
     const old = await ask('/api/shop-storefront/old');
     expect('a redirect within the API', [old.status, old.headers.get('location')], [303, '/api/shop-storefront/me?from=old']);
     const missing = await ask('/api/shop-storefront/orders/9');
