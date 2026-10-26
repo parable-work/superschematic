@@ -20,6 +20,8 @@ type OrderRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
 	UpsertOne(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate) (*types.Order, error)
+	UpsertOneResult(ctx context.Context, input *types.Order, on OrderUniqueKey, update *OrderUpdate, opts *UpsertOptions) (UpsertResult[*types.Order], error)
+	UpsertMany(ctx context.Context, inputs []*types.Order, on OrderUniqueKey, update OrderFields, opts *UpsertOptions) ([]UpsertResult[*types.Order], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
 	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -36,6 +38,8 @@ type OrderLineRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.OrderLine) (*types.OrderLine, error)
 	CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error)
 	UpsertOne(ctx context.Context, input *types.OrderLine, on OrderLineUniqueKey, update *OrderLineUpdate) (*types.OrderLine, error)
+	UpsertOneResult(ctx context.Context, input *types.OrderLine, on OrderLineUniqueKey, update *OrderLineUpdate, opts *UpsertOptions) (UpsertResult[*types.OrderLine], error)
+	UpsertMany(ctx context.Context, inputs []*types.OrderLine, on OrderLineUniqueKey, update OrderLineFields, opts *UpsertOptions) ([]UpsertResult[*types.OrderLine], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderLineUpdate) (*types.OrderLine, error)
 	UpdateMany(ctx context.Context, filter *OrderLineFilter, update *OrderLineUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -52,6 +56,8 @@ type ProductRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Product) (*types.Product, error)
 	CreateMany(ctx context.Context, inputs []*types.Product) ([]*types.Product, error)
 	UpsertOne(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate) (*types.Product, error)
+	UpsertOneResult(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate, opts *UpsertOptions) (UpsertResult[*types.Product], error)
+	UpsertMany(ctx context.Context, inputs []*types.Product, on ProductUniqueKey, update ProductFields, opts *UpsertOptions) ([]UpsertResult[*types.Product], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ProductUpdate) (*types.Product, error)
 	UpdateMany(ctx context.Context, filter *ProductFilter, update *ProductUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -61,6 +67,7 @@ type ProductRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetOrderRepository() OrderRepositoryInterface
@@ -72,6 +79,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
@@ -108,6 +116,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -184,6 +203,18 @@ func (r *NoOpOrderRepository) UpsertOne(_ context.Context, input *types.Order, _
 	return input, nil
 }
 
+func (r *NoOpOrderRepository) UpsertOneResult(_ context.Context, input *types.Order, _ OrderUniqueKey, _ *OrderUpdate, _ *UpsertOptions) (UpsertResult[*types.Order], error) {
+	return UpsertResult[*types.Order]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOrderRepository) UpsertMany(_ context.Context, inputs []*types.Order, _ OrderUniqueKey, _ OrderFields, _ *UpsertOptions) ([]UpsertResult[*types.Order], error) {
+	results := make([]UpsertResult[*types.Order], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Order]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpOrderRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderUpdate) (*types.Order, error) {
 	return nil, ErrNotFound
 }
@@ -246,6 +277,18 @@ func (r *NoOpOrderLineRepository) UpsertOne(_ context.Context, input *types.Orde
 	return input, nil
 }
 
+func (r *NoOpOrderLineRepository) UpsertOneResult(_ context.Context, input *types.OrderLine, _ OrderLineUniqueKey, _ *OrderLineUpdate, _ *UpsertOptions) (UpsertResult[*types.OrderLine], error) {
+	return UpsertResult[*types.OrderLine]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOrderLineRepository) UpsertMany(_ context.Context, inputs []*types.OrderLine, _ OrderLineUniqueKey, _ OrderLineFields, _ *UpsertOptions) ([]UpsertResult[*types.OrderLine], error) {
+	results := make([]UpsertResult[*types.OrderLine], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OrderLine]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpOrderLineRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineUpdate) (*types.OrderLine, error) {
 	return nil, ErrNotFound
 }
@@ -306,6 +349,18 @@ func (r *NoOpProductRepository) CreateMany(_ context.Context, inputs []*types.Pr
 
 func (r *NoOpProductRepository) UpsertOne(_ context.Context, input *types.Product, _ ProductUniqueKey, _ *ProductUpdate) (*types.Product, error) {
 	return input, nil
+}
+
+func (r *NoOpProductRepository) UpsertOneResult(_ context.Context, input *types.Product, _ ProductUniqueKey, _ *ProductUpdate, _ *UpsertOptions) (UpsertResult[*types.Product], error) {
+	return UpsertResult[*types.Product]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpProductRepository) UpsertMany(_ context.Context, inputs []*types.Product, _ ProductUniqueKey, _ ProductFields, _ *UpsertOptions) ([]UpsertResult[*types.Product], error) {
+	results := make([]UpsertResult[*types.Product], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Product]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpProductRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ProductUpdate) (*types.Product, error) {

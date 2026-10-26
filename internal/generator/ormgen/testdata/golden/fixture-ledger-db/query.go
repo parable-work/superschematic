@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -315,6 +321,9 @@ type AccountFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // AccountSortField is a field FindPage orders Account rows by, by its
@@ -349,9 +358,9 @@ func ParseAccountSort(text string) (AccountSort, error) {
 	return AccountSort{}, fmt.Errorf("orm: Account sorts by id, name, code, createdAt and updatedAt, not %q", text)
 }
 
-// AccountUniqueKey names a unique key of Account that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// AccountUniqueKey names a unique key of Account that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type AccountUniqueKey string
 
 const (
@@ -597,6 +606,9 @@ type EntryFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // EntrySortField is a field FindPage orders Entry rows by, by its
@@ -631,9 +643,9 @@ func ParseEntrySort(text string) (EntrySort, error) {
 	return EntrySort{}, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, createdAt and updatedAt, not %q", text)
 }
 
-// EntryUniqueKey names a unique key of Entry that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// EntryUniqueKey names a unique key of Entry that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type EntryUniqueKey string
 
 const (
@@ -971,6 +983,15 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`account.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`account.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `account.created_at IS NULL`)
@@ -1012,6 +1033,15 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`account.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`account.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {
@@ -1498,6 +1528,15 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`entry.reviewed_at <= $%d`, paramNum))
 			*args = append(*args, f.ReviewedAt.Between.End)
 		}
+		if len(f.ReviewedAt.In) > 0 {
+			placeholders := make([]string, len(f.ReviewedAt.In))
+			for i, value := range f.ReviewedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.reviewed_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.ReviewedAt.IsNull != nil {
 			if *f.ReviewedAt.IsNull {
 				conditions = append(conditions, `entry.reviewed_at IS NULL`)
@@ -1540,6 +1579,15 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`entry.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `entry.created_at IS NULL`)
@@ -1581,6 +1629,15 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`entry.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {

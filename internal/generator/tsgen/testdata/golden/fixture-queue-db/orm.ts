@@ -16,7 +16,8 @@ user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -55,7 +56,7 @@ export type OrderOrderField = "id" | "placedAt";
 /** The members findPage orders rows of Order by (D60, amended); ties break by id. */
 export type OrderSortField = "id" | "placedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderUniqueKey = readonly ["id"];
 
 /** The position of a row of Order in a findPage order: its id. */
@@ -83,7 +84,7 @@ export const orderTable: TableDefinition = {
   key: "id",
   columns: [
     { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"placed_at\"",
@@ -109,14 +110,14 @@ export const orderTable: TableDefinition = {
     updateMany: "UPDATE \"order\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"order\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"placed_at\"",
+    upsert: "INSERT INTO \"order\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"placed_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"order\" WHERE id = $1",
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
@@ -168,7 +169,7 @@ export type OrderLineOrderField = "id" | "quantity" | "note";
 /** The members findPage orders rows of OrderLine by (D60, amended); ties break by id. */
 export type OrderLineSortField = "id" | "quantity";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderLineUniqueKey = readonly ["id"];
 
 /** The position of a row of OrderLine in a findPage order: its id. */
@@ -225,14 +226,14 @@ export const orderLineTable: TableDefinition = {
     updateMany: "UPDATE order_line SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO order_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
+    upsert: "INSERT INTO order_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM order_line WHERE id = $1",
     deleteMany: "DELETE FROM order_line%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE (id) IN (%s)" },
   },
 };
 
@@ -269,7 +270,7 @@ export type ProductOrderField = "id" | "name";
 /** The members findPage orders rows of Product by (D60, amended); ties break by id. */
 export type ProductSortField = "id" | "name";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ProductUniqueKey = readonly ["id"];
 
 /** The position of a row of Product in a findPage order: its id. */
@@ -323,14 +324,14 @@ export const productTable: TableDefinition = {
     updateMany: "UPDATE product SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO product (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"name\"",
+    upsert: "INSERT INTO product (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM product WHERE id = $1",
     deleteMany: "DELETE FROM product%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\" FROM product WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
@@ -376,6 +377,12 @@ export const fixtureQueueDbOrm: OrmDefinition = {
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",

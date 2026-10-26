@@ -16,7 +16,8 @@ user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -85,7 +86,7 @@ export type OrderOrderField = "createdAt" | "updatedAt" | "id" | "status" | "pla
 /** The members findPage orders rows of Order by (D60, amended); ties break by id. */
 export type OrderSortField = "id" | "createdAt" | "placedAt" | "totalCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderUniqueKey = readonly ["id"] | readonly ["checkoutId"];
 
 /** The position of a row of Order in a findPage order: its id. */
@@ -112,12 +113,12 @@ export const orderTable: TableDefinition = {
   table: "\"order\"",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"order\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"order\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"order\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"order\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "customerId", column: "customer_id", field: "customer", qualified: "\"order\".customer_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "\"order\".status", required: true, default: "placed", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "shippingAddress", column: "shipping_address", field: "shippingAddress", qualified: "\"order\".shipping_address", json: true, required: true },
     { name: "cancelReason", column: "cancel_reason", field: "cancelReason", qualified: "\"order\".cancel_reason", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "checkoutId", column: "checkout_id", field: "checkoutId", qualified: "\"order\".checkout_id", uuid: true, filter: ["eq", "in", "isNull"] },
@@ -147,15 +148,15 @@ export const orderTable: TableDefinition = {
     updateMany: "UPDATE \"order\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"order\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\"",
+    upsert: "INSERT INTO \"order\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"order\" WHERE id = $1",
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = EXCLUDED.checkout_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (id) IN (%s)" },
+    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = EXCLUDED.checkout_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (checkout_id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
@@ -205,7 +206,7 @@ export type OrderLineOrderField = "id" | "quantity" | "unitPriceCents";
 /** The members findPage orders rows of OrderLine by (D60, amended); ties break by id. */
 export type OrderLineSortField = "id" | "quantity" | "unitPriceCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderLineUniqueKey = readonly ["id"];
 
 /** The position of a row of OrderLine in a findPage order: its id. */
@@ -262,14 +263,14 @@ export const orderLineTable: TableDefinition = {
     updateMany: "UPDATE order_line SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO order_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\"",
+    upsert: "INSERT INTO order_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM order_line WHERE id = $1",
     deleteMany: "DELETE FROM order_line%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE (id) IN (%s)" },
   },
 };
 
@@ -332,7 +333,7 @@ export type ProductOrderField = "createdAt" | "updatedAt" | "id" | "sku" | "name
 /** The members findPage orders rows of Product by (D60, amended); ties break by id. */
 export type ProductSortField = "id" | "createdAt" | "sku" | "name" | "priceCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ProductUniqueKey = readonly ["id"] | readonly ["sku"];
 
 /** The position of a row of Product in a findPage order: its id. */
@@ -359,13 +360,13 @@ export const productTable: TableDefinition = {
   table: "product",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "product.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "product.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "product.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "product.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "product.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "sku", column: "sku", field: "sku", qualified: "product.sku", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "product.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "priceCents", column: "price_cents", field: "priceCents", qualified: "product.price_cents", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "inStock", column: "in_stock", field: "inStock", qualified: "product.in_stock", boolean: true, required: true, default: true, filter: ["eq", "isNull"] },
+    { name: "inStock", column: "in_stock", field: "inStock", qualified: "product.in_stock", boolean: true, required: true, default: true, filter: ["eq", "in", "isNull"] },
     { name: "imageObject", column: "image_object", field: "imageObject", qualified: "product.image_object", filter: ["eq", "in", "ilike", "isNull"] },
   ],
   statements: {
@@ -392,7 +393,7 @@ export const productTable: TableDefinition = {
     updateMany: "UPDATE product SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO product (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\"",
+    upsert: "INSERT INTO product (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM product WHERE id = $1",
@@ -400,8 +401,8 @@ export const productTable: TableDefinition = {
   },
   search: "product.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "sku": { conflict: "(sku)", keep: "sku = EXCLUDED.sku" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (id) IN (%s)" },
+    "sku": { conflict: "(sku)", keep: "sku = EXCLUDED.sku", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (sku) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
@@ -466,7 +467,7 @@ export type RestockRequestOrderField = "createdAt" | "updatedAt" | "id" | "statu
 /** The members findPage orders rows of RestockRequest by (D60, amended); ties break by id. */
 export type RestockRequestSortField = "id" | "createdAt" | "quantity";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RestockRequestUniqueKey = readonly ["id"] | readonly ["openProductId"];
 
 /** The position of a row of RestockRequest in a findPage order: its id. */
@@ -493,14 +494,14 @@ export const restockRequestTable: TableDefinition = {
   table: "restock_request",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "restock_request.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "restock_request.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "restock_request.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "restock_request.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "restock_request.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "productId", column: "product_id", field: "product", qualified: "restock_request.product_id", uuid: true, required: true, relation: "Product", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "restock_request.status", required: true, default: "open", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "quantity", column: "quantity", field: "quantity", qualified: "restock_request.quantity", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "openProductId", column: "open_product_id", field: "openProductId", qualified: "restock_request.open_product_id", uuid: true, filter: ["eq", "in", "isNull"] },
-    { name: "orderedAt", column: "ordered_at", field: "orderedAt", qualified: "restock_request.ordered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "orderedAt", column: "ordered_at", field: "orderedAt", qualified: "restock_request.ordered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\"",
@@ -526,15 +527,15 @@ export const restockRequestTable: TableDefinition = {
     updateMany: "UPDATE restock_request SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO restock_request (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\"",
+    upsert: "INSERT INTO restock_request (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM restock_request WHERE id = $1",
     deleteMany: "DELETE FROM restock_request%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (id) IN (%s)" },
+    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (open_product_id) IN (%s)" },
   },
 };
 
@@ -595,7 +596,7 @@ export type ReviewOrderField = "createdAt" | "updatedAt" | "id" | "rating" | "ti
 /** The members findPage orders rows of Review by (D60, amended); ties break by id. */
 export type ReviewSortField = "id" | "createdAt" | "rating" | "title" | "body";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ReviewUniqueKey = readonly ["id"] | readonly ["product", "author"];
 
 /** The position of a row of Review in a findPage order: its id. */
@@ -622,8 +623,8 @@ export const reviewTable: TableDefinition = {
   table: "review",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "review.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "review.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "review.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "review.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "review.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "productId", column: "product_id", field: "product", qualified: "review.product_id", uuid: true, required: true, relation: "Product", filter: ["eq", "in", "isNull"] },
     { name: "authorId", column: "author_id", field: "author", qualified: "review.author_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
@@ -657,7 +658,7 @@ export const reviewTable: TableDefinition = {
     updateMany: "UPDATE review SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO review (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE review.deleted_at IS NULL RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\"",
+    upsert: "INSERT INTO review (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE review SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE review SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM review WHERE id = $1",
@@ -666,8 +667,8 @@ export const reviewTable: TableDefinition = {
   softDelete: true,
   search: "review.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (id) IN (%s)" },
+    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (product_id, author_id) IN (%s) AND (deleted_at IS NULL)" },
   },
 };
 
@@ -716,7 +717,7 @@ export type RoleOrderField = "createdAt" | "updatedAt" | "id" | "name" | "permis
 /** The members findPage orders rows of Role by (D60, amended); ties break by id. */
 export type RoleSortField = "id" | "createdAt" | "name";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RoleUniqueKey = readonly ["id"] | readonly ["name"];
 
 /** The position of a row of Role in a findPage order: its id. */
@@ -743,8 +744,8 @@ export const roleTable: TableDefinition = {
   table: "role",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "role.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "role.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "role.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "role.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "role.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "role.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "permissions", column: "permissions", field: "permissions", qualified: "role.permissions", list: true, required: true },
@@ -773,15 +774,15 @@ export const roleTable: TableDefinition = {
     updateMany: "UPDATE role SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO role (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\"",
+    upsert: "INSERT INTO role (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM role WHERE id = $1",
     deleteMany: "DELETE FROM role%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
+    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
@@ -837,7 +838,7 @@ export type SessionOrderField = "id" | "tokenHash" | "createdAt" | "expiresAt" |
 /** The members findPage orders rows of Session by (D60, amended); ties break by id. */
 export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SessionUniqueKey = readonly ["id"] | readonly ["tokenHash"];
 
 /** The position of a row of Session in a findPage order: its id. */
@@ -867,10 +868,10 @@ export const sessionTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "\"session\".user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "\"session\".token_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
@@ -896,15 +897,15 @@ export const sessionTable: TableDefinition = {
     updateMany: "UPDATE \"session\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"session\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+    upsert: "INSERT INTO \"session\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"session\" WHERE id = $1",
     deleteMany: "DELETE FROM \"session\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
   },
 };
 
@@ -961,7 +962,7 @@ export type UserOrderField = "createdAt" | "updatedAt" | "id" | "email" | "name"
 /** The members findPage orders rows of User by (D60, amended); ties break by id. */
 export type UserSortField = "id" | "createdAt" | "email" | "name";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserUniqueKey = readonly ["id"] | readonly ["email"];
 
 /** The position of a row of User in a findPage order: its id. */
@@ -988,8 +989,8 @@ export const userTable: TableDefinition = {
   table: "\"user\"",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"user\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"user\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "\"user\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "email", column: "email", field: "email", qualified: "\"user\".email", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "\"user\".\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
@@ -1018,15 +1019,15 @@ export const userTable: TableDefinition = {
     updateMany: "UPDATE \"user\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"user\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"email\", \"name\"",
+    upsert: "INSERT INTO \"user\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"email\", \"name\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"user\" WHERE id = $1",
     deleteMany: "DELETE FROM \"user\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "email": { conflict: "(email)", keep: "email = EXCLUDED.email" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (id) IN (%s)" },
+    "email": { conflict: "(email)", keep: "email = EXCLUDED.email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderCustomer", probe: "SELECT 1 FROM \"order\" WHERE \"order\".customer_id = \"user\".id" },
@@ -1084,7 +1085,7 @@ export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedA
 /** The members findPage orders rows of UserCredential by (D60, amended); ties break by id. */
 export type UserCredentialSortField = "id" | "passwordChangedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserCredentialUniqueKey = readonly ["id"] | readonly ["user"];
 
 /** The position of a row of UserCredential in a findPage order: its id. */
@@ -1114,9 +1115,9 @@ export const userCredentialTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "user_credential.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "user_credential.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
@@ -1142,15 +1143,15 @@ export const userCredentialTable: TableDefinition = {
     updateMany: "UPDATE user_credential SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO user_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+    upsert: "INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM user_credential WHERE id = $1",
     deleteMany: "DELETE FROM user_credential%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
+    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
   },
 };
 
@@ -1193,7 +1194,7 @@ export type UserRoleGrantOrderField = "id" | "grantedAt";
 /** The members findPage orders rows of UserRoleGrant by (D60, amended); ties break by id. */
 export type UserRoleGrantSortField = "id" | "grantedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserRoleGrantUniqueKey = readonly ["id"] | readonly ["user", "role"];
 
 /** The position of a row of UserRoleGrant in a findPage order: its id. */
@@ -1223,7 +1224,7 @@ export const userRoleGrantTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "user_role_grant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "user_role_grant.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "roleId", column: "role_id", field: "role", qualified: "user_role_grant.role_id", uuid: true, required: true, relation: "Role", filter: ["eq", "in", "isNull"] },
-    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
@@ -1249,15 +1250,15 @@ export const userRoleGrantTable: TableDefinition = {
     updateMany: "UPDATE user_role_grant SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO user_role_grant (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+    upsert: "INSERT INTO user_role_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM user_role_grant WHERE id = $1",
     deleteMany: "DELETE FROM user_role_grant%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
+    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
   },
 };
 
@@ -1307,6 +1308,12 @@ export const shopDbOrm: OrmDefinition = {
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",

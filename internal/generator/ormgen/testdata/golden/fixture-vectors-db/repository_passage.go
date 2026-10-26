@@ -523,7 +523,8 @@ func (r *PassageRepository) FindOne(ctx context.Context, filter *PassageFilter, 
 	return result, nil
 }
 
-// FindMany retrieves multiple Passage records matching the filter
+// FindMany retrieves multiple Passage records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *PassageRepository) FindMany(ctx context.Context, filter *PassageFilter, opts *PassageFindOptions) ([]*types.Passage, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -564,18 +565,20 @@ func (r *PassageRepository) FindMany(ctx context.Context, filter *PassageFilter,
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM passage%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM passage%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM passage%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields, nil)
@@ -963,9 +966,83 @@ func (r *PassageRepository) CreateOne(ctx context.Context, input *types.Passage)
 
 // passageUniqueKeys are the conflict targets of Passage's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var passageUniqueKeys = map[PassageUniqueKey]struct{ conflict, keep string }{
-	PassageUniqueById: {`(id)`, `id = EXCLUDED.id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var passageUniqueKeys = map[PassageUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	PassageUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at" FROM passage WHERE (id) IN (%s)`, []string{`id`}},
+}
+
+// passageKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func passageKeyOf(on PassageUniqueKey, row *types.Passage) (string, bool) {
+	switch on {
+	case PassageUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *PassageRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Passage, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *PassageRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Passage, error) {
+	result := &types.Passage{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempTopic sql.NullString
+	var tempRates []*types.GenericDecimal
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&result.Title,
+
+		&tempTopic,
+
+		vectorScanner{&result.Embedding},
+
+		vectorPtrScanner{&result.TitleEmbedding},
+
+		&tempRates,
+
+		&result.DeletedAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempTopic.Valid {
+		result.Topic = tempTopic.String
+	}
+	if err := copyListElements("rates", tempRates, &result.Rates); err != nil {
+		return nil, fmt.Errorf("failed to decode field rates: %w", err)
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -975,13 +1052,54 @@ var passageUniqueKeys = map[PassageUniqueKey]struct{ conflict, keep string }{
 // sets no field leaves the row as it is. A soft-deleted row that holds the key is
 // left as it is, and UpsertOne returns ErrNotFound.
 func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage, on PassageUniqueKey, update *PassageUpdate) (*types.Passage, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *PassageRepository) UpsertOneResult(ctx context.Context, input *types.Passage, on PassageUniqueKey, update *PassageUpdate, opts *UpsertOptions) (UpsertResult[*types.Passage], error) {
+	var none UpsertResult[*types.Passage]
 	key, ok := passageUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: Passage has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: Passage has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Passage", string(on))
 	}
 	if update == nil {
 		update = &PassageUpdate{}
 	}
+	write := func(repo *PassageRepository) (UpsertResult[*types.Passage], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Passage], error) {
+		return write(&PassageRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *PassageRepository) upsertRow(ctx context.Context, input *types.Passage, on PassageUniqueKey, update *PassageUpdate, onlyIfChanged bool) (*UpsertResult[*types.Passage], error) {
+	key := passageUniqueKeys[on]
 	// Set audit fields
 
 	// Build INSERT query
@@ -1051,10 +1169,12 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.Title != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`title = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `passage.title`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Title)
 	}
 	if update.Topic != nil && update.TopicSetNull {
@@ -1062,14 +1182,20 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 	}
 	if update.TopicSetNull {
 		setClauses = append(setClauses, `topic = NULL`)
+		compareCurrent = append(compareCurrent, `passage.topic`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Topic != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`topic = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `passage.topic`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Topic)
 	}
 	if update.Embedding != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`embedding = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `passage.embedding`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, vectorValue(*update.Embedding))
 	}
 	if update.TitleEmbedding != nil && update.TitleEmbeddingSetNull {
@@ -1077,9 +1203,13 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 	}
 	if update.TitleEmbeddingSetNull {
 		setClauses = append(setClauses, `title_embedding = NULL`)
+		compareCurrent = append(compareCurrent, `passage.title_embedding`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.TitleEmbedding != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`title_embedding = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `passage.title_embedding`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, vectorValue(*update.TitleEmbedding))
 	}
 	if update.Rates != nil && update.RatesSetNull {
@@ -1087,13 +1217,18 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 	}
 	if update.RatesSetNull {
 		setClauses = append(setClauses, `rates = NULL`)
+		compareCurrent = append(compareCurrent, `passage.rates`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Rates != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`rates = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `passage.rates`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Rates)
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1105,11 +1240,12 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO passage (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE passage.deleted_at IS NULL RETURNING "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at"`,
+		`INSERT INTO passage (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(`passage.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1119,52 +1255,343 @@ func (r *PassageRepository) UpsertOne(ctx context.Context, input *types.Passage,
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.Passage{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempTopic sql.NullString
-	var tempRates []*types.GenericDecimal
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&result.Title,
-
-		&tempTopic,
-
-		vectorScanner{&result.Embedding},
-
-		vectorPtrScanner{&result.TitleEmbedding},
-
-		&tempRates,
-
-		&result.DeletedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Passage]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.Passage]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Passage row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Passage{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Passage]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *PassageRepository) UpsertMany(ctx context.Context, inputs []*types.Passage, on PassageUniqueKey, update PassageFields, opts *UpsertOptions) ([]UpsertResult[*types.Passage], error) {
+	key, ok := passageUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Passage has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Passage", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Passage sets the fields an update sets, not id")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Passage sets the fields an update sets, not deletedAt")
+	}
+	batch, err := upsertBatch("Passage", opts.Batch, 9361)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Passage]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Passage], error) {
+		return (&PassageRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *PassageRepository) upsertBatches(ctx context.Context, inputs []*types.Passage, on PassageUniqueKey, update PassageFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Passage], error) {
+	key := passageUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Title {
+		setClauses = append(setClauses, `title = EXCLUDED.title`)
+		compareCurrent = append(compareCurrent, `passage.title`)
+		compareNext = append(compareNext, `EXCLUDED.title`)
+	}
+	if update.Topic {
+		setClauses = append(setClauses, `topic = EXCLUDED.topic`)
+		compareCurrent = append(compareCurrent, `passage.topic`)
+		compareNext = append(compareNext, `EXCLUDED.topic`)
+	}
+	if update.Embedding {
+		setClauses = append(setClauses, `embedding = EXCLUDED.embedding`)
+		compareCurrent = append(compareCurrent, `passage.embedding`)
+		compareNext = append(compareNext, `EXCLUDED.embedding`)
+	}
+	if update.TitleEmbedding {
+		setClauses = append(setClauses, `title_embedding = EXCLUDED.title_embedding`)
+		compareCurrent = append(compareCurrent, `passage.title_embedding`)
+		compareNext = append(compareNext, `EXCLUDED.title_embedding`)
+	}
+	if update.Rates {
+		setClauses = append(setClauses, `rates = EXCLUDED.rates`)
+		compareCurrent = append(compareCurrent, `passage.rates`)
+		compareNext = append(compareNext, `EXCLUDED.rates`)
 	}
 
-	// Copy nullable fields when present
+	results := make([]UpsertResult[*types.Passage], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	if tempTopic.Valid {
-		result.Topic = tempTopic.String
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := passageUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: title
+			{
+				cell := batchInsertCell{column: `title`, set: true}
+				cell.value = input.Title
+				row = append(row, cell)
+			}
+			// Optional field: topic
+			{
+				cell := batchInsertCell{column: `topic`}
+				if !reflect.ValueOf(input.Topic).IsZero() {
+					cell.value = input.Topic
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: embedding
+			{
+				cell := batchInsertCell{column: `embedding`, set: true}
+				cell.value = vectorValue(input.Embedding)
+				row = append(row, cell)
+			}
+			// Optional field: titleEmbedding
+			{
+				cell := batchInsertCell{column: `title_embedding`}
+				if input.TitleEmbedding != nil {
+					cell.value = vectorValue(*input.TitleEmbedding)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: rates
+			{
+				cell := batchInsertCell{column: `rates`}
+				if !reflect.ValueOf(input.Rates).IsZero() {
+					cell.value = input.Rates
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: deletedAt
+			{
+				cell := batchInsertCell{column: `deleted_at`}
+				if input.DeletedAt != nil {
+					cell.value = time.Time(*input.DeletedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO passage (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(`passage.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = passageKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Passage], len(prepared))
+		for n, row := range returned {
+			text, ok := passageKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Passage wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Passage]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Passage row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Passage, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Passage row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Passage]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
 	}
-	if err := copyListElements("rates", tempRates, &result.Rates); err != nil {
-		return nil, fmt.Errorf("failed to decode field rates: %w", err)
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *PassageRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Passage, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
 	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.Passage
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
 
-	// Set relationship IDs from scanned FK values
-
-	return result, nil
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *PassageRepository) rowsOfKeys(ctx context.Context, on PassageUniqueKey, keys [][]any, inputs []*types.Passage) ([]*types.Passage, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(passageUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Passage{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := passageKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Passage, len(inputs))
+	for i, input := range inputs {
+		text, _ := passageKeyOf(on, input)
+		row := found[text]
+		if row == nil || upsertHolds(row.DeletedAt) {
+			return nil, fmt.Errorf("the Passage row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Passage records in a single statement

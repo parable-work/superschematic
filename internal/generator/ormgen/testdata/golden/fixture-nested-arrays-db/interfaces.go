@@ -20,6 +20,8 @@ type BoardRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Board) (*types.Board, error)
 	CreateMany(ctx context.Context, inputs []*types.Board) ([]*types.Board, error)
 	UpsertOne(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate) (*types.Board, error)
+	UpsertOneResult(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate, opts *UpsertOptions) (UpsertResult[*types.Board], error)
+	UpsertMany(ctx context.Context, inputs []*types.Board, on BoardUniqueKey, update BoardFields, opts *UpsertOptions) ([]UpsertResult[*types.Board], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *BoardUpdate) (*types.Board, error)
 	UpdateMany(ctx context.Context, filter *BoardFilter, update *BoardUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -29,6 +31,7 @@ type BoardRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetBoardRepository() BoardRepositoryInterface
@@ -38,6 +41,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetBoardRepository() BoardRepositoryInterface
 }
 
@@ -64,6 +68,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -138,6 +153,18 @@ func (r *NoOpBoardRepository) CreateMany(_ context.Context, inputs []*types.Boar
 
 func (r *NoOpBoardRepository) UpsertOne(_ context.Context, input *types.Board, _ BoardUniqueKey, _ *BoardUpdate) (*types.Board, error) {
 	return input, nil
+}
+
+func (r *NoOpBoardRepository) UpsertOneResult(_ context.Context, input *types.Board, _ BoardUniqueKey, _ *BoardUpdate, _ *UpsertOptions) (UpsertResult[*types.Board], error) {
+	return UpsertResult[*types.Board]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpBoardRepository) UpsertMany(_ context.Context, inputs []*types.Board, _ BoardUniqueKey, _ BoardFields, _ *UpsertOptions) ([]UpsertResult[*types.Board], error) {
+	results := make([]UpsertResult[*types.Board], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Board]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpBoardRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *BoardUpdate) (*types.Board, error) {

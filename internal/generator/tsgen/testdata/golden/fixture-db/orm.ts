@@ -16,7 +16,8 @@ user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -87,7 +88,7 @@ export type TenantOrderField = "createdAt" | "updatedAt" | "id" | "name" | "slug
 /** The members findPage orders rows of Tenant by (D60, amended); ties break by id. */
 export type TenantSortField = "id" | "createdAt" | "name" | "slug" | "email" | "seatCount";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TenantUniqueKey = readonly ["id"] | readonly ["slug"];
 
 /** The position of a row of Tenant in a findPage order: its id. */
@@ -114,14 +115,14 @@ export const tenantTable: TableDefinition = {
   table: "tenant",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "tenant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "tenant.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "slug", column: "slug", field: "slug", qualified: "tenant.slug", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "email", column: "email", field: "email", qualified: "tenant.email", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "status", column: "status", field: "status", qualified: "tenant.status", required: true, default: "active", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "isActive", column: "is_active", field: "isActive", qualified: "tenant.is_active", boolean: true, required: true, default: true, filter: ["eq", "isNull"] },
+    { name: "isActive", column: "is_active", field: "isActive", qualified: "tenant.is_active", boolean: true, required: true, default: true, filter: ["eq", "in", "isNull"] },
     { name: "seatCount", column: "seat_count", field: "seatCount", qualified: "tenant.seat_count", required: true, default: 5, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "metadata", column: "metadata", field: "metadata", qualified: "tenant.metadata", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "tenant._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
@@ -150,7 +151,7 @@ export const tenantTable: TableDefinition = {
     updateMany: "UPDATE tenant SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO tenant (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\"",
+    upsert: "INSERT INTO tenant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM tenant WHERE id = $1",
@@ -158,8 +159,8 @@ export const tenantTable: TableDefinition = {
   },
   search: "tenant.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "slug": { conflict: "(slug)", keep: "slug = EXCLUDED.slug" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (id) IN (%s)" },
+    "slug": { conflict: "(slug)", keep: "slug = EXCLUDED.slug", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE (slug) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByTenantUserTenant", probe: "SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id", live: " AND tenant_user.deleted_at IS NULL" },
@@ -209,7 +210,7 @@ export type TenantUserOrderField = "createdAt" | "updatedAt" | "id" | "displayNa
 /** The members findPage orders rows of TenantUser by (D60, amended); ties break by id. */
 export type TenantUserSortField = "id" | "createdAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TenantUserUniqueKey = readonly ["id"] | readonly ["tenant", "displayName"];
 
 /** The position of a row of TenantUser in a findPage order: its id. */
@@ -236,8 +237,8 @@ export const tenantUserTable: TableDefinition = {
   table: "tenant_user",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant_user.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant_user.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "tenant_user.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "tenant_user.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "tenant_user.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "tenantId", column: "tenant_id", field: "tenant", qualified: "tenant_user.tenant_id", uuid: true, required: true, relation: "Tenant", filter: ["eq", "in", "isNull"] },
     { name: "displayName", column: "display_name", field: "displayName", qualified: "tenant_user.display_name", filter: ["eq", "in", "ilike", "isNull"] },
@@ -269,7 +270,7 @@ export const tenantUserTable: TableDefinition = {
     updateMany: "UPDATE tenant_user SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO tenant_user (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE tenant_user.deleted_at IS NULL RETURNING \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\"",
+    upsert: "INSERT INTO tenant_user (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE tenant_user SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE tenant_user SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM tenant_user USING history_actor WHERE id = $2",
@@ -278,8 +279,8 @@ export const tenantUserTable: TableDefinition = {
   softDelete: true,
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "tenant,displayName": { conflict: "(tenant_id, display_name) WHERE deleted_at IS NULL", keep: "tenant_id = EXCLUDED.tenant_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (id) IN (%s)" },
+    "tenant,displayName": { conflict: "(tenant_id, display_name) WHERE deleted_at IS NULL", keep: "tenant_id = EXCLUDED.tenant_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE (tenant_id, display_name) IN (%s) AND (deleted_at IS NULL)" },
   },
 };
 
@@ -321,6 +322,12 @@ export const fixtureDbOrm: OrmDefinition = {
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",

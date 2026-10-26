@@ -75,10 +75,14 @@ type TableStatements struct {
 	UpdatedAt    string
 	UpdatedBy    string
 
-	// Upsert inserts the columns %s with the placeholders %s, and on a
-	// conflict on the key %s (UniqueKey.Conflict) sets %s on the row it
-	// conflicts with, a live one alone on a soft-deletable table, and
-	// returns the row.
+	// Upsert inserts the columns %s with the rows %s, each a tuple of
+	// placeholders and DEFAULT as InsertMany's, and on a conflict on the
+	// key %s (UniqueKey.Conflict) sets %s on the row it conflicts with,
+	// when the WHERE %s holds: the live rows alone on a soft-deletable
+	// table (LiveCondition), and, for an upsert only if changed, the rows
+	// whose columns differ from the update's values (Clauses.Changed). It
+	// returns each row it inserted or updated, and UpsertInserted, true for
+	// a row it inserted (D89).
 	Upsert string
 
 	// SoftDelete stamps deleted_at $1 and deleted_by $2 on the live row
@@ -199,6 +203,16 @@ type Clauses struct {
 	// the limit %d, DefaultLimit unless set, and the offset %d when there
 	// is one.
 	Where, And, OrderBy, OrderTerm, Limit, Offset string
+	// SetExcluded assigns the column %s, in an upsert's update, the value
+	// the row it would have inserted holds in the column %s, and Excluded
+	// is that value. Changed is the condition of an upsert only if changed
+	// (D89): the row's columns %s, each as ColumnModel.CompareAs writes it,
+	// are distinct from the update's values %s. Never is the condition of
+	// one whose update compares no column, which leaves every row as it is,
+	// and Null the value an update that sets a column NULL compares. NotIn
+	// keeps the rows whose column %s is none of the placeholders %s, as
+	// nearest's excludeIds does.
+	SetExcluded, Excluded, Changed, Never, Null, NotIn string
 }
 
 // PostgresClauses are the clauses on Postgres.
@@ -227,6 +241,12 @@ func PostgresClauses() Clauses {
 		OrderTerm:   "%s %s",
 		Limit:       " LIMIT %d",
 		Offset:      " OFFSET %d",
+		SetExcluded: "%s = EXCLUDED.%s",
+		Excluded:    "EXCLUDED.%s",
+		Changed:     "(%s) IS DISTINCT FROM (%s)",
+		Never:       "FALSE",
+		Null:        "NULL",
+		NotIn:       "%s NOT IN (%s)",
 	}
 }
 
@@ -244,6 +264,7 @@ func (c Clauses) AllClauses() []NamedStatement {
 		{"placeholder", c.Placeholder}, {"default", c.Default},
 		{"where", c.Where}, {"and", c.And}, {"orderBy", c.OrderBy}, {"orderTerm", c.OrderTerm},
 		{"limit", c.Limit}, {"offset", c.Offset},
+		{"setExcluded", c.SetExcluded}, {"excluded", c.Excluded}, {"changed", c.Changed}, {"never", c.Never}, {"null", c.Null}, {"notIn", c.NotIn},
 	}
 }
 
@@ -283,7 +304,6 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
 		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = $1",
 	}
-	upsertGuard := ""
 	if table.SoftDelete {
 		// The audit columns are the fields', as @column names them (D85).
 		deletedAt, deletedBy := table.AuditQuoted(AuditDeletedAt), table.AuditQuoted(AuditDeletedBy)
@@ -291,7 +311,6 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		s.LiveWhere = " WHERE " + deletedAt + " IS NULL"
 		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
-		upsertGuard = " WHERE " + s.LiveCondition
 		if table.DeletedBy {
 			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND " + deletedAt + " IS NULL"
 			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND _version = $4 AND " + deletedAt + " IS NULL"
@@ -302,7 +321,9 @@ func TableStatementsOf(table *TableModel) TableStatements {
 			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1%s"
 		}
 	}
-	s.Upsert = "INSERT INTO " + t + " (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s" + upsertGuard + " RETURNING " + list
+	// xmax is 0 in the row version an insert wrote, and holds the
+	// conflicting row's lock in the version an update wrote (D89).
+	s.Upsert = "INSERT INTO " + t + " (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING " + list + ", (xmax = 0) AS " + UpsertInserted
 	s.Stale, s.Reseal = resealStatements(table, t, key)
 	if len(table.VectorColumns()) > 0 {
 		s.Nearest = "SELECT %s, %s AS " + NearestDistance + " FROM " + t + "%s ORDER BY %s LIMIT %d"
@@ -343,25 +364,38 @@ func resealStatements(table *TableModel, t, key string) (stale, reseal string) {
 // ColumnStatements are a column's parts of a table's statements: Qualified
 // names it with its table, Set and SetNull assign it in an update (Set's
 // $%d its value's number), PageKey is its value in the row a page key
-// names, and Filter its conditions.
+// names, and Filter its conditions. SetExcluded assigns it, in an upsert's
+// update, the value of the row the upsert would have inserted; Compared,
+// CompareParam ($%d) and CompareExcluded are it, a parameter and that value
+// as an upsert only if changed compares them (D89).
 type ColumnStatements struct {
-	Qualified string
-	Set       string
-	SetNull   string
-	PageKey   string
-	Filter    FilterConditions
+	Qualified       string
+	Set             string
+	SetNull         string
+	PageKey         string
+	Filter          FilterConditions
+	SetExcluded     string
+	Compared        string
+	CompareParam    string
+	CompareExcluded string
 }
 
 // ColumnStatementsOf writes the parts of column c of its table.
 func ColumnStatementsOf(c *ColumnModel) ColumnStatements {
 	clauses := PostgresClauses()
 	on := func(clause string) string { return strings.Replace(clause, "%s", c.Quoted, 1) }
+	compare := func(value string) string { return strings.Replace(c.CompareAs(), "%s", value, 1) }
+	excluded := strings.Replace(clauses.Excluded, "%s", c.Quoted, 1)
 	return ColumnStatements{
-		Qualified: c.Qualified,
-		Set:       on(clauses.Set),
-		SetNull:   on(clauses.SetNull),
-		PageKey:   on(clauses.PageKey),
-		Filter:    FilterConditionsOf(c.Qualified),
+		Qualified:       c.Qualified,
+		Set:             on(clauses.Set),
+		SetNull:         on(clauses.SetNull),
+		PageKey:         on(clauses.PageKey),
+		Filter:          FilterConditionsOf(c.Qualified),
+		SetExcluded:     strings.Replace(on(clauses.SetExcluded), "%s", c.Quoted, 1),
+		Compared:        compare(c.Qualified),
+		CompareParam:    compare(clauses.Placeholder),
+		CompareExcluded: compare(excluded),
 	}
 }
 

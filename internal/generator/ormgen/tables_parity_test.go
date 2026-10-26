@@ -62,7 +62,9 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 // requires the same statements, as TestTableParityOfGoAndTypeScriptOnPostgres
 // does: each metric, a filter, the live rows and deleted ones, an optional
 // vector field and the default k, and a table @table and @column name with
-// an Encrypted<T> field beside its vector (D85).
+// an Encrypted<T> field beside its vector (D85); and the index's settings,
+// in a transaction of nearest's own and in one already open, and the keys
+// it leaves out (D89).
 func TestNearestParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

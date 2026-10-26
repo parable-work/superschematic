@@ -56,6 +56,8 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		{"interfaces.tmpl", "interfaces.go"},
 		{"query.tmpl", "query.go"},
 		{"utils.tmpl", "utils.go"},
+		{"upsert.tmpl", "upsert.go"},
+		{"transaction.tmpl", "transaction.go"},
 		{"module.tmpl", "go.mod"},
 		{"readme.tmpl", "README.md"},
 		{"makefile.tmpl", "Makefile"},

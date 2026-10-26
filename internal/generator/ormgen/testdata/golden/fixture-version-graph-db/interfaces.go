@@ -26,6 +26,8 @@ type CoverRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Cover) (*types.Cover, error)
 	CreateMany(ctx context.Context, inputs []*types.Cover) ([]*types.Cover, error)
 	UpsertOne(ctx context.Context, input *types.Cover, on CoverUniqueKey, update *CoverUpdate) (*types.Cover, error)
+	UpsertOneResult(ctx context.Context, input *types.Cover, on CoverUniqueKey, update *CoverUpdate, opts *UpsertOptions) (UpsertResult[*types.Cover], error)
+	UpsertMany(ctx context.Context, inputs []*types.Cover, on CoverUniqueKey, update CoverFields, opts *UpsertOptions) ([]UpsertResult[*types.Cover], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CoverUpdate) (*types.Cover, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *CoverUpdate) (*types.Cover, error)
 	UpdateMany(ctx context.Context, filter *CoverFilter, update *CoverUpdate) (int, error)
@@ -51,6 +53,8 @@ type IngredientRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Ingredient) (*types.Ingredient, error)
 	CreateMany(ctx context.Context, inputs []*types.Ingredient) ([]*types.Ingredient, error)
 	UpsertOne(ctx context.Context, input *types.Ingredient, on IngredientUniqueKey, update *IngredientUpdate) (*types.Ingredient, error)
+	UpsertOneResult(ctx context.Context, input *types.Ingredient, on IngredientUniqueKey, update *IngredientUpdate, opts *UpsertOptions) (UpsertResult[*types.Ingredient], error)
+	UpsertMany(ctx context.Context, inputs []*types.Ingredient, on IngredientUniqueKey, update IngredientFields, opts *UpsertOptions) ([]UpsertResult[*types.Ingredient], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateMany(ctx context.Context, filter *IngredientFilter, update *IngredientUpdate) (int, error)
@@ -74,6 +78,8 @@ type NoteRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Note) (*types.Note, error)
 	CreateMany(ctx context.Context, inputs []*types.Note) ([]*types.Note, error)
 	UpsertOne(ctx context.Context, input *types.Note, on NoteUniqueKey, update *NoteUpdate) (*types.Note, error)
+	UpsertOneResult(ctx context.Context, input *types.Note, on NoteUniqueKey, update *NoteUpdate, opts *UpsertOptions) (UpsertResult[*types.Note], error)
+	UpsertMany(ctx context.Context, inputs []*types.Note, on NoteUniqueKey, update NoteFields, opts *UpsertOptions) ([]UpsertResult[*types.Note], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *NoteUpdate) (*types.Note, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *NoteUpdate) (*types.Note, error)
 	UpdateMany(ctx context.Context, filter *NoteFilter, update *NoteUpdate) (int, error)
@@ -92,6 +98,8 @@ type RecipeRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Recipe) (*types.Recipe, error)
 	CreateMany(ctx context.Context, inputs []*types.Recipe) ([]*types.Recipe, error)
 	UpsertOne(ctx context.Context, input *types.Recipe, on RecipeUniqueKey, update *RecipeUpdate) (*types.Recipe, error)
+	UpsertOneResult(ctx context.Context, input *types.Recipe, on RecipeUniqueKey, update *RecipeUpdate, opts *UpsertOptions) (UpsertResult[*types.Recipe], error)
+	UpsertMany(ctx context.Context, inputs []*types.Recipe, on RecipeUniqueKey, update RecipeFields, opts *UpsertOptions) ([]UpsertResult[*types.Recipe], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeUpdate) (*types.Recipe, error)
 	UpdateMany(ctx context.Context, filter *RecipeFilter, update *RecipeUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -108,6 +116,8 @@ type RecipeCommitRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.RecipeCommit) (*types.RecipeCommit, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeCommit) ([]*types.RecipeCommit, error)
 	UpsertOne(ctx context.Context, input *types.RecipeCommit, on RecipeCommitUniqueKey, update *RecipeCommitUpdate) (*types.RecipeCommit, error)
+	UpsertOneResult(ctx context.Context, input *types.RecipeCommit, on RecipeCommitUniqueKey, update *RecipeCommitUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeCommit], error)
+	UpsertMany(ctx context.Context, inputs []*types.RecipeCommit, on RecipeCommitUniqueKey, update RecipeCommitFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeCommit], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeCommitUpdate) (*types.RecipeCommit, error)
 	UpdateMany(ctx context.Context, filter *RecipeCommitFilter, update *RecipeCommitUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -124,6 +134,8 @@ type RecipePatchRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.RecipePatch) (*types.RecipePatch, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipePatch) ([]*types.RecipePatch, error)
 	UpsertOne(ctx context.Context, input *types.RecipePatch, on RecipePatchUniqueKey, update *RecipePatchUpdate) (*types.RecipePatch, error)
+	UpsertOneResult(ctx context.Context, input *types.RecipePatch, on RecipePatchUniqueKey, update *RecipePatchUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipePatch], error)
+	UpsertMany(ctx context.Context, inputs []*types.RecipePatch, on RecipePatchUniqueKey, update RecipePatchFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipePatch], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipePatchUpdate) (*types.RecipePatch, error)
 	UpdateMany(ctx context.Context, filter *RecipePatchFilter, update *RecipePatchUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -147,6 +159,8 @@ type RecipeRefRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.RecipeRef) (*types.RecipeRef, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRef) ([]*types.RecipeRef, error)
 	UpsertOne(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate) (*types.RecipeRef, error)
+	UpsertOneResult(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeRef], error)
+	UpsertMany(ctx context.Context, inputs []*types.RecipeRef, on RecipeRefUniqueKey, update RecipeRefFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeRef], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateMany(ctx context.Context, filter *RecipeRefFilter, update *RecipeRefUpdate) (int, error)
@@ -171,6 +185,8 @@ type RecipeReleaseRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error)
 	UpsertOne(ctx context.Context, input *types.RecipeRelease, on RecipeReleaseUniqueKey, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
+	UpsertOneResult(ctx context.Context, input *types.RecipeRelease, on RecipeReleaseUniqueKey, update *RecipeReleaseUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeRelease], error)
+	UpsertMany(ctx context.Context, inputs []*types.RecipeRelease, on RecipeReleaseUniqueKey, update RecipeReleaseFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeRelease], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
 	UpdateMany(ctx context.Context, filter *RecipeReleaseFilter, update *RecipeReleaseUpdate) (int, error)
@@ -189,6 +205,8 @@ type RecipeSnapshotEntryRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error)
 	UpsertOne(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
+	UpsertOneResult(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeSnapshotEntry], error)
+	UpsertMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update RecipeSnapshotEntryFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeSnapshotEntry], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
 	UpdateMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, update *RecipeSnapshotEntryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -212,6 +230,8 @@ type StepRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Step) (*types.Step, error)
 	CreateMany(ctx context.Context, inputs []*types.Step) ([]*types.Step, error)
 	UpsertOne(ctx context.Context, input *types.Step, on StepUniqueKey, update *StepUpdate) (*types.Step, error)
+	UpsertOneResult(ctx context.Context, input *types.Step, on StepUniqueKey, update *StepUpdate, opts *UpsertOptions) (UpsertResult[*types.Step], error)
+	UpsertMany(ctx context.Context, inputs []*types.Step, on StepUniqueKey, update StepFields, opts *UpsertOptions) ([]UpsertResult[*types.Step], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StepUpdate) (*types.Step, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *StepUpdate) (*types.Step, error)
 	UpdateMany(ctx context.Context, filter *StepFilter, update *StepUpdate) (int, error)
@@ -235,6 +255,8 @@ type TastingRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Tasting) (*types.Tasting, error)
 	CreateMany(ctx context.Context, inputs []*types.Tasting) ([]*types.Tasting, error)
 	UpsertOne(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate) (*types.Tasting, error)
+	UpsertOneResult(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate, opts *UpsertOptions) (UpsertResult[*types.Tasting], error)
+	UpsertMany(ctx context.Context, inputs []*types.Tasting, on TastingUniqueKey, update TastingFields, opts *UpsertOptions) ([]UpsertResult[*types.Tasting], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TastingUpdate) (*types.Tasting, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TastingUpdate) (*types.Tasting, error)
 	UpdateMany(ctx context.Context, filter *TastingFilter, update *TastingUpdate) (int, error)
@@ -258,6 +280,8 @@ type UtensilRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Utensil) (*types.Utensil, error)
 	CreateMany(ctx context.Context, inputs []*types.Utensil) ([]*types.Utensil, error)
 	UpsertOne(ctx context.Context, input *types.Utensil, on UtensilUniqueKey, update *UtensilUpdate) (*types.Utensil, error)
+	UpsertOneResult(ctx context.Context, input *types.Utensil, on UtensilUniqueKey, update *UtensilUpdate, opts *UpsertOptions) (UpsertResult[*types.Utensil], error)
+	UpsertMany(ctx context.Context, inputs []*types.Utensil, on UtensilUniqueKey, update UtensilFields, opts *UpsertOptions) ([]UpsertResult[*types.Utensil], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UtensilUpdate) (*types.Utensil, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *UtensilUpdate) (*types.Utensil, error)
 	UpdateMany(ctx context.Context, filter *UtensilFilter, update *UtensilUpdate) (int, error)
@@ -269,6 +293,7 @@ type UtensilRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetCoverRepository() CoverRepositoryInterface
@@ -289,6 +314,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCoverRepository() CoverRepositoryInterface
 	GetIngredientRepository() IngredientRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
@@ -370,6 +396,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -464,6 +501,18 @@ func (r *NoOpCoverRepository) CreateMany(_ context.Context, inputs []*types.Cove
 
 func (r *NoOpCoverRepository) UpsertOne(_ context.Context, input *types.Cover, _ CoverUniqueKey, _ *CoverUpdate) (*types.Cover, error) {
 	return input, nil
+}
+
+func (r *NoOpCoverRepository) UpsertOneResult(_ context.Context, input *types.Cover, _ CoverUniqueKey, _ *CoverUpdate, _ *UpsertOptions) (UpsertResult[*types.Cover], error) {
+	return UpsertResult[*types.Cover]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpCoverRepository) UpsertMany(_ context.Context, inputs []*types.Cover, _ CoverUniqueKey, _ CoverFields, _ *UpsertOptions) ([]UpsertResult[*types.Cover], error) {
+	results := make([]UpsertResult[*types.Cover], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Cover]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpCoverRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CoverUpdate) (*types.Cover, error) {
@@ -564,6 +613,18 @@ func (r *NoOpIngredientRepository) UpsertOne(_ context.Context, input *types.Ing
 	return input, nil
 }
 
+func (r *NoOpIngredientRepository) UpsertOneResult(_ context.Context, input *types.Ingredient, _ IngredientUniqueKey, _ *IngredientUpdate, _ *UpsertOptions) (UpsertResult[*types.Ingredient], error) {
+	return UpsertResult[*types.Ingredient]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpIngredientRepository) UpsertMany(_ context.Context, inputs []*types.Ingredient, _ IngredientUniqueKey, _ IngredientFields, _ *UpsertOptions) ([]UpsertResult[*types.Ingredient], error) {
+	results := make([]UpsertResult[*types.Ingredient], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Ingredient]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpIngredientRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *IngredientUpdate) (*types.Ingredient, error) {
 	return nil, ErrNotFound
 }
@@ -654,6 +715,18 @@ func (r *NoOpNoteRepository) UpsertOne(_ context.Context, input *types.Note, _ N
 	return input, nil
 }
 
+func (r *NoOpNoteRepository) UpsertOneResult(_ context.Context, input *types.Note, _ NoteUniqueKey, _ *NoteUpdate, _ *UpsertOptions) (UpsertResult[*types.Note], error) {
+	return UpsertResult[*types.Note]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpNoteRepository) UpsertMany(_ context.Context, inputs []*types.Note, _ NoteUniqueKey, _ NoteFields, _ *UpsertOptions) ([]UpsertResult[*types.Note], error) {
+	results := make([]UpsertResult[*types.Note], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Note]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpNoteRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *NoteUpdate) (*types.Note, error) {
 	return nil, ErrNotFound
 }
@@ -724,6 +797,18 @@ func (r *NoOpRecipeRepository) UpsertOne(_ context.Context, input *types.Recipe,
 	return input, nil
 }
 
+func (r *NoOpRecipeRepository) UpsertOneResult(_ context.Context, input *types.Recipe, _ RecipeUniqueKey, _ *RecipeUpdate, _ *UpsertOptions) (UpsertResult[*types.Recipe], error) {
+	return UpsertResult[*types.Recipe]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipeRepository) UpsertMany(_ context.Context, inputs []*types.Recipe, _ RecipeUniqueKey, _ RecipeFields, _ *UpsertOptions) ([]UpsertResult[*types.Recipe], error) {
+	results := make([]UpsertResult[*types.Recipe], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Recipe]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpRecipeRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeUpdate) (*types.Recipe, error) {
 	return nil, ErrNotFound
 }
@@ -786,6 +871,18 @@ func (r *NoOpRecipeCommitRepository) UpsertOne(_ context.Context, input *types.R
 	return input, nil
 }
 
+func (r *NoOpRecipeCommitRepository) UpsertOneResult(_ context.Context, input *types.RecipeCommit, _ RecipeCommitUniqueKey, _ *RecipeCommitUpdate, _ *UpsertOptions) (UpsertResult[*types.RecipeCommit], error) {
+	return UpsertResult[*types.RecipeCommit]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipeCommitRepository) UpsertMany(_ context.Context, inputs []*types.RecipeCommit, _ RecipeCommitUniqueKey, _ RecipeCommitFields, _ *UpsertOptions) ([]UpsertResult[*types.RecipeCommit], error) {
+	results := make([]UpsertResult[*types.RecipeCommit], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.RecipeCommit]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpRecipeCommitRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeCommitUpdate) (*types.RecipeCommit, error) {
 	return nil, ErrNotFound
 }
@@ -846,6 +943,18 @@ func (r *NoOpRecipePatchRepository) CreateMany(_ context.Context, inputs []*type
 
 func (r *NoOpRecipePatchRepository) UpsertOne(_ context.Context, input *types.RecipePatch, _ RecipePatchUniqueKey, _ *RecipePatchUpdate) (*types.RecipePatch, error) {
 	return input, nil
+}
+
+func (r *NoOpRecipePatchRepository) UpsertOneResult(_ context.Context, input *types.RecipePatch, _ RecipePatchUniqueKey, _ *RecipePatchUpdate, _ *UpsertOptions) (UpsertResult[*types.RecipePatch], error) {
+	return UpsertResult[*types.RecipePatch]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipePatchRepository) UpsertMany(_ context.Context, inputs []*types.RecipePatch, _ RecipePatchUniqueKey, _ RecipePatchFields, _ *UpsertOptions) ([]UpsertResult[*types.RecipePatch], error) {
+	results := make([]UpsertResult[*types.RecipePatch], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.RecipePatch]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpRecipePatchRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipePatchUpdate) (*types.RecipePatch, error) {
@@ -936,6 +1045,18 @@ func (r *NoOpRecipeRefRepository) CreateMany(_ context.Context, inputs []*types.
 
 func (r *NoOpRecipeRefRepository) UpsertOne(_ context.Context, input *types.RecipeRef, _ RecipeRefUniqueKey, _ *RecipeRefUpdate) (*types.RecipeRef, error) {
 	return input, nil
+}
+
+func (r *NoOpRecipeRefRepository) UpsertOneResult(_ context.Context, input *types.RecipeRef, _ RecipeRefUniqueKey, _ *RecipeRefUpdate, _ *UpsertOptions) (UpsertResult[*types.RecipeRef], error) {
+	return UpsertResult[*types.RecipeRef]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipeRefRepository) UpsertMany(_ context.Context, inputs []*types.RecipeRef, _ RecipeRefUniqueKey, _ RecipeRefFields, _ *UpsertOptions) ([]UpsertResult[*types.RecipeRef], error) {
+	results := make([]UpsertResult[*types.RecipeRef], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.RecipeRef]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpRecipeRefRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeRefUpdate) (*types.RecipeRef, error) {
@@ -1032,6 +1153,18 @@ func (r *NoOpRecipeReleaseRepository) UpsertOne(_ context.Context, input *types.
 	return input, nil
 }
 
+func (r *NoOpRecipeReleaseRepository) UpsertOneResult(_ context.Context, input *types.RecipeRelease, _ RecipeReleaseUniqueKey, _ *RecipeReleaseUpdate, _ *UpsertOptions) (UpsertResult[*types.RecipeRelease], error) {
+	return UpsertResult[*types.RecipeRelease]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) UpsertMany(_ context.Context, inputs []*types.RecipeRelease, _ RecipeReleaseUniqueKey, _ RecipeReleaseFields, _ *UpsertOptions) ([]UpsertResult[*types.RecipeRelease], error) {
+	results := make([]UpsertResult[*types.RecipeRelease], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.RecipeRelease]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpRecipeReleaseRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
 	return nil, ErrNotFound
 }
@@ -1100,6 +1233,18 @@ func (r *NoOpRecipeSnapshotEntryRepository) CreateMany(_ context.Context, inputs
 
 func (r *NoOpRecipeSnapshotEntryRepository) UpsertOne(_ context.Context, input *types.RecipeSnapshotEntry, _ RecipeSnapshotEntryUniqueKey, _ *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
 	return input, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) UpsertOneResult(_ context.Context, input *types.RecipeSnapshotEntry, _ RecipeSnapshotEntryUniqueKey, _ *RecipeSnapshotEntryUpdate, _ *UpsertOptions) (UpsertResult[*types.RecipeSnapshotEntry], error) {
+	return UpsertResult[*types.RecipeSnapshotEntry]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) UpsertMany(_ context.Context, inputs []*types.RecipeSnapshotEntry, _ RecipeSnapshotEntryUniqueKey, _ RecipeSnapshotEntryFields, _ *UpsertOptions) ([]UpsertResult[*types.RecipeSnapshotEntry], error) {
+	results := make([]UpsertResult[*types.RecipeSnapshotEntry], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.RecipeSnapshotEntry]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpRecipeSnapshotEntryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
@@ -1192,6 +1337,18 @@ func (r *NoOpStepRepository) UpsertOne(_ context.Context, input *types.Step, _ S
 	return input, nil
 }
 
+func (r *NoOpStepRepository) UpsertOneResult(_ context.Context, input *types.Step, _ StepUniqueKey, _ *StepUpdate, _ *UpsertOptions) (UpsertResult[*types.Step], error) {
+	return UpsertResult[*types.Step]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpStepRepository) UpsertMany(_ context.Context, inputs []*types.Step, _ StepUniqueKey, _ StepFields, _ *UpsertOptions) ([]UpsertResult[*types.Step], error) {
+	results := make([]UpsertResult[*types.Step], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Step]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpStepRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *StepUpdate) (*types.Step, error) {
 	return nil, ErrNotFound
 }
@@ -1282,6 +1439,18 @@ func (r *NoOpTastingRepository) UpsertOne(_ context.Context, input *types.Tastin
 	return input, nil
 }
 
+func (r *NoOpTastingRepository) UpsertOneResult(_ context.Context, input *types.Tasting, _ TastingUniqueKey, _ *TastingUpdate, _ *UpsertOptions) (UpsertResult[*types.Tasting], error) {
+	return UpsertResult[*types.Tasting]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpTastingRepository) UpsertMany(_ context.Context, inputs []*types.Tasting, _ TastingUniqueKey, _ TastingFields, _ *UpsertOptions) ([]UpsertResult[*types.Tasting], error) {
+	results := make([]UpsertResult[*types.Tasting], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Tasting]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpTastingRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TastingUpdate) (*types.Tasting, error) {
 	return nil, ErrNotFound
 }
@@ -1370,6 +1539,18 @@ func (r *NoOpUtensilRepository) CreateMany(_ context.Context, inputs []*types.Ut
 
 func (r *NoOpUtensilRepository) UpsertOne(_ context.Context, input *types.Utensil, _ UtensilUniqueKey, _ *UtensilUpdate) (*types.Utensil, error) {
 	return input, nil
+}
+
+func (r *NoOpUtensilRepository) UpsertOneResult(_ context.Context, input *types.Utensil, _ UtensilUniqueKey, _ *UtensilUpdate, _ *UpsertOptions) (UpsertResult[*types.Utensil], error) {
+	return UpsertResult[*types.Utensil]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpUtensilRepository) UpsertMany(_ context.Context, inputs []*types.Utensil, _ UtensilUniqueKey, _ UtensilFields, _ *UpsertOptions) ([]UpsertResult[*types.Utensil], error) {
+	results := make([]UpsertResult[*types.Utensil], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Utensil]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpUtensilRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UtensilUpdate) (*types.Utensil, error) {

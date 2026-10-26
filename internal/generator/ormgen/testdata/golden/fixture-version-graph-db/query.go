@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -312,6 +318,9 @@ type CoverFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // CoverSortField is a field FindPage orders Cover rows by, by its
@@ -344,9 +353,9 @@ func ParseCoverSort(text string) (CoverSort, error) {
 	return CoverSort{}, fmt.Errorf("orm: Cover sorts by id, photoUrl and entityKey, not %q", text)
 }
 
-// CoverUniqueKey names a unique key of Cover that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// CoverUniqueKey names a unique key of Cover that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type CoverUniqueKey string
 
 const (
@@ -550,6 +559,9 @@ type IngredientFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // IngredientSortField is a field FindPage orders Ingredient rows by, by its
@@ -583,9 +595,9 @@ func ParseIngredientSort(text string) (IngredientSort, error) {
 	return IngredientSort{}, fmt.Errorf("orm: Ingredient sorts by id, stepKey, quantity and entityKey, not %q", text)
 }
 
-// IngredientUniqueKey names a unique key of Ingredient that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// IngredientUniqueKey names a unique key of Ingredient that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type IngredientUniqueKey string
 
 const (
@@ -782,6 +794,9 @@ type NoteFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // NoteSortField is a field FindPage orders Note rows by, by its
@@ -814,9 +829,9 @@ func ParseNoteSort(text string) (NoteSort, error) {
 	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, body and entityKey, not %q", text)
 }
 
-// NoteUniqueKey names a unique key of Note that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// NoteUniqueKey names a unique key of Note that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type NoteUniqueKey string
 
 const (
@@ -975,6 +990,9 @@ type RecipeFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipeSortField is a field FindPage orders Recipe rows by, by its
@@ -1007,9 +1025,9 @@ func ParseRecipeSort(text string) (RecipeSort, error) {
 	return RecipeSort{}, fmt.Errorf("orm: Recipe sorts by id, title and createdAt, not %q", text)
 }
 
-// RecipeUniqueKey names a unique key of Recipe that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipeUniqueKey names a unique key of Recipe that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipeUniqueKey string
 
 const (
@@ -1213,6 +1231,9 @@ type RecipeCommitFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipeCommitSortField is a field FindPage orders RecipeCommit rows by, by its
@@ -1246,9 +1267,9 @@ func ParseRecipeCommitSort(text string) (RecipeCommitSort, error) {
 	return RecipeCommitSort{}, fmt.Errorf("orm: RecipeCommit sorts by id, schemaEpoch, contentHash and createdAt, not %q", text)
 }
 
-// RecipeCommitUniqueKey names a unique key of RecipeCommit that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipeCommitUniqueKey names a unique key of RecipeCommit that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipeCommitUniqueKey string
 
 const (
@@ -1426,6 +1447,9 @@ type RecipePatchFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipePatchSortField is a field FindPage orders RecipePatch rows by, by its
@@ -1459,9 +1483,9 @@ func ParseRecipePatchSort(text string) (RecipePatchSort, error) {
 	return RecipePatchSort{}, fmt.Errorf("orm: RecipePatch sorts by id, entityKey, entityId and entityVersion, not %q", text)
 }
 
-// RecipePatchUniqueKey names a unique key of RecipePatch that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipePatchUniqueKey names a unique key of RecipePatch that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipePatchUniqueKey string
 
 const (
@@ -1695,6 +1719,9 @@ type RecipeRefFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipeRefSortField is a field FindPage orders RecipeRef rows by, by its
@@ -1728,9 +1755,9 @@ func ParseRecipeRefSort(text string) (RecipeRefSort, error) {
 	return RecipeRefSort{}, fmt.Errorf("orm: RecipeRef sorts by id, name, createdAt and updatedAt, not %q", text)
 }
 
-// RecipeRefUniqueKey names a unique key of RecipeRef that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipeRefUniqueKey names a unique key of RecipeRef that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipeRefUniqueKey string
 
 const (
@@ -1923,6 +1950,9 @@ type RecipeReleaseFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipeReleaseSortField is a field FindPage orders RecipeRelease rows by, by its
@@ -1955,9 +1985,9 @@ func ParseRecipeReleaseSort(text string) (RecipeReleaseSort, error) {
 	return RecipeReleaseSort{}, fmt.Errorf("orm: RecipeRelease sorts by id, createdAt and updatedAt, not %q", text)
 }
 
-// RecipeReleaseUniqueKey names a unique key of RecipeRelease that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipeReleaseUniqueKey names a unique key of RecipeRelease that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipeReleaseUniqueKey string
 
 const (
@@ -2136,6 +2166,9 @@ type RecipeSnapshotEntryFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RecipeSnapshotEntrySortField is a field FindPage orders RecipeSnapshotEntry rows by, by its
@@ -2169,9 +2202,9 @@ func ParseRecipeSnapshotEntrySort(text string) (RecipeSnapshotEntrySort, error) 
 	return RecipeSnapshotEntrySort{}, fmt.Errorf("orm: RecipeSnapshotEntry sorts by id, entityKey, entityId and entityVersion, not %q", text)
 }
 
-// RecipeSnapshotEntryUniqueKey names a unique key of RecipeSnapshotEntry that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RecipeSnapshotEntryUniqueKey names a unique key of RecipeSnapshotEntry that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RecipeSnapshotEntryUniqueKey string
 
 const (
@@ -2398,6 +2431,9 @@ type StepFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // StepSortField is a field FindPage orders Step rows by, by its
@@ -2433,9 +2469,9 @@ func ParseStepSort(text string) (StepSort, error) {
 	return StepSort{}, fmt.Errorf("orm: Step sorts by id, position, instruction, createdAt, updatedAt and entityKey, not %q", text)
 }
 
-// StepUniqueKey names a unique key of Step that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// StepUniqueKey names a unique key of Step that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type StepUniqueKey string
 
 const (
@@ -2709,6 +2745,9 @@ type TastingFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // TastingSortField is a field FindPage orders Tasting rows by, by its
@@ -2747,9 +2786,9 @@ func ParseTastingSort(text string) (TastingSort, error) {
 	return TastingSort{}, fmt.Errorf("orm: Tasting sorts by id, taster, score, servings, tastedOn, tastedAt, servedAt, rested and entityKey, not %q", text)
 }
 
-// TastingUniqueKey names a unique key of Tasting that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// TastingUniqueKey names a unique key of Tasting that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type TastingUniqueKey string
 
 const (
@@ -2940,6 +2979,9 @@ type UtensilFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // UtensilSortField is a field FindPage orders Utensil rows by, by its
@@ -2972,9 +3014,9 @@ func ParseUtensilSort(text string) (UtensilSort, error) {
 	return UtensilSort{}, fmt.Errorf("orm: Utensil sorts by id, name and entityKey, not %q", text)
 }
 
-// UtensilUniqueKey names a unique key of Utensil that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// UtensilUniqueKey names a unique key of Utensil that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type UtensilUniqueKey string
 
 const (
@@ -3210,6 +3252,15 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`cover.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`cover.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {
@@ -3553,6 +3604,15 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`ingredient.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
 		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`ingredient.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {
 				conditions = append(conditions, `ingredient.deleted_on_ref IS NULL`)
@@ -3868,6 +3928,15 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`note.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
 		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`note.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {
 				conditions = append(conditions, `note.deleted_on_ref IS NULL`)
@@ -4152,6 +4221,15 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe.created_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
@@ -4597,6 +4675,15 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_commit.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_commit.created_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
@@ -5270,6 +5357,15 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`recipe_ref.sealed_at <= $%d`, paramNum))
 			*args = append(*args, f.SealedAt.Between.End)
 		}
+		if len(f.SealedAt.In) > 0 {
+			placeholders := make([]string, len(f.SealedAt.In))
+			for i, value := range f.SealedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.sealed_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.SealedAt.IsNull != nil {
 			if *f.SealedAt.IsNull {
 				conditions = append(conditions, `recipe_ref.sealed_at IS NULL`)
@@ -5312,6 +5408,15 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			conditions = append(conditions, fmt.Sprintf(`recipe_ref.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `recipe_ref.created_at IS NULL`)
@@ -5353,6 +5458,15 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_ref.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_ref.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {
@@ -5710,6 +5824,15 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `recipe_release.created_at IS NULL`)
@@ -5751,6 +5874,15 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {
@@ -6438,6 +6570,15 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`step.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `step.created_at IS NULL`)
@@ -6480,6 +6621,15 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`step.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
 		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {
 				conditions = append(conditions, `step.updated_at IS NULL`)
@@ -6516,6 +6666,15 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`step.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`step.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {
@@ -6840,6 +6999,15 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`tasting.salty = $%d`, paramNum))
 			*args = append(*args, *f.Salty.Eq)
 		}
+		if len(f.Salty.In) > 0 {
+			placeholders := make([]string, len(f.Salty.In))
+			for i, value := range f.Salty.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.salty IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.Salty.IsNull != nil {
 			if *f.Salty.IsNull {
 				conditions = append(conditions, `tasting.salty IS NULL`)
@@ -7035,6 +7203,15 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at <= $%d`, paramNum))
 			*args = append(*args, f.TastedAt.Between.End)
 		}
+		if len(f.TastedAt.In) > 0 {
+			placeholders := make([]string, len(f.TastedAt.In))
+			for i, value := range f.TastedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.TastedAt.IsNull != nil {
 			if *f.TastedAt.IsNull {
 				conditions = append(conditions, `tasting.tasted_at IS NULL`)
@@ -7197,6 +7374,15 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`tasting.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {
@@ -7476,6 +7662,15 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`utensil.deleted_on_ref = $%d`, paramNum))
 			*args = append(*args, *f.DeletedOnRef.Eq)
+		}
+		if len(f.DeletedOnRef.In) > 0 {
+			placeholders := make([]string, len(f.DeletedOnRef.In))
+			for i, value := range f.DeletedOnRef.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil.deleted_on_ref IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.DeletedOnRef.IsNull != nil {
 			if *f.DeletedOnRef.IsNull {

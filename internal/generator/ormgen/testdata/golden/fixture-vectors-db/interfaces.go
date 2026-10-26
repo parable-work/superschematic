@@ -20,6 +20,8 @@ type ChunkRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Chunk) (*types.Chunk, error)
 	CreateMany(ctx context.Context, inputs []*types.Chunk) ([]*types.Chunk, error)
 	UpsertOne(ctx context.Context, input *types.Chunk, on ChunkUniqueKey, update *ChunkUpdate) (*types.Chunk, error)
+	UpsertOneResult(ctx context.Context, input *types.Chunk, on ChunkUniqueKey, update *ChunkUpdate, opts *UpsertOptions) (UpsertResult[*types.Chunk], error)
+	UpsertMany(ctx context.Context, inputs []*types.Chunk, on ChunkUniqueKey, update ChunkFields, opts *UpsertOptions) ([]UpsertResult[*types.Chunk], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ChunkUpdate) (*types.Chunk, error)
 	UpdateMany(ctx context.Context, filter *ChunkFilter, update *ChunkUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -39,6 +41,8 @@ type LedgerLineRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.LedgerLine) (*types.LedgerLine, error)
 	CreateMany(ctx context.Context, inputs []*types.LedgerLine) ([]*types.LedgerLine, error)
 	UpsertOne(ctx context.Context, input *types.LedgerLine, on LedgerLineUniqueKey, update *LedgerLineUpdate) (*types.LedgerLine, error)
+	UpsertOneResult(ctx context.Context, input *types.LedgerLine, on LedgerLineUniqueKey, update *LedgerLineUpdate, opts *UpsertOptions) (UpsertResult[*types.LedgerLine], error)
+	UpsertMany(ctx context.Context, inputs []*types.LedgerLine, on LedgerLineUniqueKey, update LedgerLineFields, opts *UpsertOptions) ([]UpsertResult[*types.LedgerLine], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *LedgerLineUpdate) (*types.LedgerLine, error)
 	UpdateMany(ctx context.Context, filter *LedgerLineFilter, update *LedgerLineUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -55,6 +59,8 @@ type PassageRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Passage) (*types.Passage, error)
 	CreateMany(ctx context.Context, inputs []*types.Passage) ([]*types.Passage, error)
 	UpsertOne(ctx context.Context, input *types.Passage, on PassageUniqueKey, update *PassageUpdate) (*types.Passage, error)
+	UpsertOneResult(ctx context.Context, input *types.Passage, on PassageUniqueKey, update *PassageUpdate, opts *UpsertOptions) (UpsertResult[*types.Passage], error)
+	UpsertMany(ctx context.Context, inputs []*types.Passage, on PassageUniqueKey, update PassageFields, opts *UpsertOptions) ([]UpsertResult[*types.Passage], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *PassageUpdate) (*types.Passage, error)
 	UpdateMany(ctx context.Context, filter *PassageFilter, update *PassageUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -73,6 +79,8 @@ type TextEmbeddingRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.TextEmbedding) (*types.TextEmbedding, error)
 	CreateMany(ctx context.Context, inputs []*types.TextEmbedding) ([]*types.TextEmbedding, error)
 	UpsertOne(ctx context.Context, input *types.TextEmbedding, on TextEmbeddingUniqueKey, update *TextEmbeddingUpdate) (*types.TextEmbedding, error)
+	UpsertOneResult(ctx context.Context, input *types.TextEmbedding, on TextEmbeddingUniqueKey, update *TextEmbeddingUpdate, opts *UpsertOptions) (UpsertResult[*types.TextEmbedding], error)
+	UpsertMany(ctx context.Context, inputs []*types.TextEmbedding, on TextEmbeddingUniqueKey, update TextEmbeddingFields, opts *UpsertOptions) ([]UpsertResult[*types.TextEmbedding], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TextEmbeddingUpdate) (*types.TextEmbedding, error)
 	UpdateMany(ctx context.Context, filter *TextEmbeddingFilter, update *TextEmbeddingUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -83,6 +91,7 @@ type TextEmbeddingRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetChunkRepository() ChunkRepositoryInterface
@@ -95,6 +104,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetChunkRepository() ChunkRepositoryInterface
 	GetLedgerLineRepository() LedgerLineRepositoryInterface
 	GetPassageRepository() PassageRepositoryInterface
@@ -136,6 +146,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -212,6 +233,18 @@ func (r *NoOpChunkRepository) UpsertOne(_ context.Context, input *types.Chunk, _
 	return input, nil
 }
 
+func (r *NoOpChunkRepository) UpsertOneResult(_ context.Context, input *types.Chunk, _ ChunkUniqueKey, _ *ChunkUpdate, _ *UpsertOptions) (UpsertResult[*types.Chunk], error) {
+	return UpsertResult[*types.Chunk]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpChunkRepository) UpsertMany(_ context.Context, inputs []*types.Chunk, _ ChunkUniqueKey, _ ChunkFields, _ *UpsertOptions) ([]UpsertResult[*types.Chunk], error) {
+	results := make([]UpsertResult[*types.Chunk], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Chunk]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpChunkRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ChunkUpdate) (*types.Chunk, error) {
 	return nil, ErrNotFound
 }
@@ -286,6 +319,18 @@ func (r *NoOpLedgerLineRepository) UpsertOne(_ context.Context, input *types.Led
 	return input, nil
 }
 
+func (r *NoOpLedgerLineRepository) UpsertOneResult(_ context.Context, input *types.LedgerLine, _ LedgerLineUniqueKey, _ *LedgerLineUpdate, _ *UpsertOptions) (UpsertResult[*types.LedgerLine], error) {
+	return UpsertResult[*types.LedgerLine]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpLedgerLineRepository) UpsertMany(_ context.Context, inputs []*types.LedgerLine, _ LedgerLineUniqueKey, _ LedgerLineFields, _ *UpsertOptions) ([]UpsertResult[*types.LedgerLine], error) {
+	results := make([]UpsertResult[*types.LedgerLine], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.LedgerLine]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpLedgerLineRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *LedgerLineUpdate) (*types.LedgerLine, error) {
 	return nil, ErrNotFound
 }
@@ -346,6 +391,18 @@ func (r *NoOpPassageRepository) CreateMany(_ context.Context, inputs []*types.Pa
 
 func (r *NoOpPassageRepository) UpsertOne(_ context.Context, input *types.Passage, _ PassageUniqueKey, _ *PassageUpdate) (*types.Passage, error) {
 	return input, nil
+}
+
+func (r *NoOpPassageRepository) UpsertOneResult(_ context.Context, input *types.Passage, _ PassageUniqueKey, _ *PassageUpdate, _ *UpsertOptions) (UpsertResult[*types.Passage], error) {
+	return UpsertResult[*types.Passage]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpPassageRepository) UpsertMany(_ context.Context, inputs []*types.Passage, _ PassageUniqueKey, _ PassageFields, _ *UpsertOptions) ([]UpsertResult[*types.Passage], error) {
+	results := make([]UpsertResult[*types.Passage], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Passage]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpPassageRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *PassageUpdate) (*types.Passage, error) {
@@ -416,6 +473,18 @@ func (r *NoOpTextEmbeddingRepository) CreateMany(_ context.Context, inputs []*ty
 
 func (r *NoOpTextEmbeddingRepository) UpsertOne(_ context.Context, input *types.TextEmbedding, _ TextEmbeddingUniqueKey, _ *TextEmbeddingUpdate) (*types.TextEmbedding, error) {
 	return input, nil
+}
+
+func (r *NoOpTextEmbeddingRepository) UpsertOneResult(_ context.Context, input *types.TextEmbedding, _ TextEmbeddingUniqueKey, _ *TextEmbeddingUpdate, _ *UpsertOptions) (UpsertResult[*types.TextEmbedding], error) {
+	return UpsertResult[*types.TextEmbedding]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpTextEmbeddingRepository) UpsertMany(_ context.Context, inputs []*types.TextEmbedding, _ TextEmbeddingUniqueKey, _ TextEmbeddingFields, _ *UpsertOptions) ([]UpsertResult[*types.TextEmbedding], error) {
+	results := make([]UpsertResult[*types.TextEmbedding], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.TextEmbedding]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpTextEmbeddingRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TextEmbeddingUpdate) (*types.TextEmbedding, error) {

@@ -175,6 +175,50 @@ type ORMOutput struct {
 	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
 	// told (sqlutil.DefaultLimit).
 	DefaultLimit int
+
+	// Clauses are the clauses upsert.go writes an upsert's WHERE and a
+	// read of the rows that hold keys with (D89), TxStatements the
+	// statements transaction.go begins a transaction of options and nests
+	// a savepoint with, and NearestSettings the settings of a vector
+	// index's scan Nearest's options set, NearestSettingsStatement the
+	// statement that sets them.
+	Clauses                  sqlutil.Clauses
+	TxStatements             TxStatements
+	NearestSettings          []sqlutil.NearestSetting
+	NearestSettingsStatement string
+}
+
+// TxStatements are sqlutil's statements of a transaction of options and a
+// nested one (D89), as transaction.go writes them.
+type TxStatements struct {
+	IsolationLevels                                 []IsolationLevel
+	Begin, Isolation, ReadOnly                      string
+	Savepoint, Release, RollbackTo, SavepointPrefix string
+}
+
+// IsolationLevel is an isolation level as transaction.go writes it: its
+// constant's name, ReadCommitted, and sqlutil's.
+type IsolationLevel struct {
+	sqlutil.IsolationLevel
+	GoName string
+}
+
+// txStatements are sqlutil's.
+func txStatements() TxStatements {
+	var levels []IsolationLevel
+	for _, level := range sqlutil.IsolationLevels() {
+		levels = append(levels, IsolationLevel{IsolationLevel: level, GoName: codegen.ToPascalCase(strings.ReplaceAll(level.Name, " ", "_"))})
+	}
+	return TxStatements{
+		IsolationLevels: levels,
+		Begin:           sqlutil.Begin,
+		Isolation:       sqlutil.Isolation,
+		ReadOnly:        sqlutil.ReadOnly,
+		Savepoint:       sqlutil.Savepoint,
+		Release:         sqlutil.ReleaseSavepoint,
+		RollbackTo:      sqlutil.RollbackToSavepoint,
+		SavepointPrefix: sqlutil.SavepointPrefix,
+	}
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -260,6 +304,15 @@ type Repository struct {
 	// SearchText, sqlutil.SearchConditionOf; empty without search fields.
 	SearchCondition string
 
+	// Clauses are sqlutil.PostgresClauses, which an upsert's update writes
+	// a NULL it compares with (D89), and BatchRows the most rows one
+	// statement of UpsertMany writes (sqlutil.TableModel.BatchRows).
+	// QualifiedKey is the primary key's column qualified by the table, which
+	// Nearest's ExcludeIDs leaves out the keys of.
+	Clauses      sqlutil.Clauses
+	BatchRows    int
+	QualifiedKey string
+
 	// EncryptedFields are the table's Encrypted<T> fields (D85), which
 	// encrypted.go seals and opens; GeneratesKey is a table whose create
 	// generates a UUID key the input leaves unset, since each envelope is
@@ -284,10 +337,15 @@ type Repository struct {
 }
 
 // UniqueKey is a key UpsertOne may be keyed by: sqlutil's, with the Go
-// constant that names it, <Type>UniqueBy<Fields>.
+// constant that names it, <Type>UniqueBy<Fields>. QuotedColumns are its
+// columns as a batch insert's cells name them, and KeyParts the Go
+// expressions of a row's values of it, row a *types.<Type>, which UpsertMany
+// matches the rows a statement returns to its inputs by (D89).
 type UniqueKey struct {
 	sqlutil.UniqueKey
-	Const string
+	Const         string
+	QuotedColumns []string
+	KeyParts      []string
 }
 
 // HasArrayRelationships reports whether any relationship is a hasMany.
@@ -977,6 +1035,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		HasEncryptedFields:       hasEncryptedFields,
 		DefaultLimit:             sqlutil.DefaultLimit,
+		Clauses:                  sqlutil.PostgresClauses(),
+		TxStatements:             txStatements(),
+		NearestSettings:          sqlutil.NearestSettingsOf(),
+		NearestSettingsStatement: sqlutil.NearestSettings,
 	}
 
 	return output, nil
@@ -1593,14 +1655,51 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 		}
 	}
 	repo.GeneratesKey = table.GeneratesKey()
+	repo.Clauses = sqlutil.PostgresClauses()
+	repo.BatchRows = table.BatchRows()
+	repo.QualifiedKey = table.KeyColumn().Qualified
 	for _, key := range table.UniqueKeys {
 		name := repo.TypeName + "UniqueBy"
 		for _, field := range key.Fields {
 			name += codegen.ToPascalCase(field)
 		}
-		repo.UniqueKeys = append(repo.UniqueKeys, UniqueKey{UniqueKey: key, Const: name})
+		unique := UniqueKey{UniqueKey: key, Const: name}
+		for i, field := range key.Fields {
+			part, err := keyPart(repo, field)
+			if err != nil {
+				return err
+			}
+			unique.KeyParts = append(unique.KeyParts, part)
+			unique.QuotedColumns = append(unique.QuotedColumns, sqlutil.QuoteIdentifier(key.Columns[i]))
+		}
+		repo.UniqueKeys = append(repo.UniqueKeys, unique)
 	}
 	return nil
+}
+
+// keyPart is the Go expression of a row's value of field, a field of a
+// unique key of repo, as UpsertMany matches rows to inputs by it (D89):
+// upsertKeyValue of the field, or of a to-one relation's key, which leaves
+// a value the insert leaves to the database unset, as an optional field's
+// zero value, which the insert does not write.
+func keyPart(repo *Repository, field string) (string, error) {
+	for _, f := range repo.Fields {
+		if f.Name == field {
+			optional := !f.IsRequired && !f.IsPrimaryKey
+			return fmt.Sprintf("upsertKeyValue(row.%s, %t)", codegen.ToPascalCase(f.Name), optional), nil
+		}
+	}
+	for _, rel := range repo.Relationships {
+		if rel.FieldName != field || rel.IsArray {
+			continue
+		}
+		member := codegen.ToPascalCase(rel.FieldName)
+		if rel.IsRequired {
+			return fmt.Sprintf("upsertKeyValue(row.%s.Id, false)", member), nil
+		}
+		return fmt.Sprintf("upsertKeyValue(func() any { if row.%[1]s == nil { return nil }; return row.%[1]s.Id }(), false)", member), nil
+	}
+	return "", fmt.Errorf("ormgen: the unique key of %s names %s, which is no field of it", repo.TypeName, field)
 }
 
 // attachInboundReferences indexes every to-one foreign key by the table it

@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -269,6 +275,9 @@ type OrderFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // OrderSortField is a field FindPage orders Order rows by, by its
@@ -300,9 +309,9 @@ func ParseOrderSort(text string) (OrderSort, error) {
 	return OrderSort{}, fmt.Errorf("orm: Order sorts by id and placedAt, not %q", text)
 }
 
-// OrderUniqueKey names a unique key of Order that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// OrderUniqueKey names a unique key of Order that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type OrderUniqueKey string
 
 const (
@@ -469,6 +478,9 @@ type OrderLineFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // OrderLineSortField is a field FindPage orders OrderLine rows by, by its
@@ -500,9 +512,9 @@ func ParseOrderLineSort(text string) (OrderLineSort, error) {
 	return OrderLineSort{}, fmt.Errorf("orm: OrderLine sorts by id and quantity, not %q", text)
 }
 
-// OrderLineUniqueKey names a unique key of OrderLine that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// OrderLineUniqueKey names a unique key of OrderLine that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type OrderLineUniqueKey string
 
 const (
@@ -641,6 +653,9 @@ type ProductFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // ProductSortField is a field FindPage orders Product rows by, by its
@@ -672,9 +687,9 @@ func ParseProductSort(text string) (ProductSort, error) {
 	return ProductSort{}, fmt.Errorf("orm: Product sorts by id and name, not %q", text)
 }
 
-// ProductUniqueKey names a unique key of Product that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// ProductUniqueKey names a unique key of Product that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type ProductUniqueKey string
 
 const (
@@ -856,6 +871,15 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"order".placed_at <= $%d`, paramNum))
 			*args = append(*args, f.PlacedAt.Between.End)
+		}
+		if len(f.PlacedAt.In) > 0 {
+			placeholders := make([]string, len(f.PlacedAt.In))
+			for i, value := range f.PlacedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"order".placed_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.PlacedAt.IsNull != nil {
 			if *f.PlacedAt.IsNull {

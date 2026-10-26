@@ -1646,7 +1646,8 @@ func (r *RecipeRefRepository) FindOne(ctx context.Context, filter *RecipeRefFilt
 	return result, nil
 }
 
-// FindMany retrieves multiple RecipeRef records matching the filter
+// FindMany retrieves multiple RecipeRef records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *RecipeRefRepository) FindMany(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) ([]*types.RecipeRef, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -1687,18 +1688,20 @@ func (r *RecipeRefRepository) FindMany(ctx context.Context, filter *RecipeRefFil
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe_ref%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM recipe_ref%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM recipe_ref%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -2385,10 +2388,116 @@ func (r *RecipeRefRepository) CreateOne(ctx context.Context, input *types.Recipe
 
 // recipeRefUniqueKeys are the conflict targets of RecipeRef's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var recipeRefUniqueKeys = map[RecipeRefUniqueKey]struct{ conflict, keep string }{
-	RecipeRefUniqueById:       {`(id)`, `id = EXCLUDED.id`},
-	RecipeRefUniqueByRootName: {`(root_id, "name") WHERE deleted_at IS NULL`, `root_id = EXCLUDED.root_id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var recipeRefUniqueKeys = map[RecipeRefUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	RecipeRefUniqueById:       {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeRefUniqueByRootName: {`(root_id, "name") WHERE deleted_at IS NULL`, `root_id = EXCLUDED.root_id`, `SELECT "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM recipe_ref WHERE (root_id, "name") IN (%s) AND (deleted_at IS NULL)`, []string{`root_id`, `"name"`}},
+}
+
+// recipeRefKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func recipeRefKeyOf(on RecipeRefUniqueKey, row *types.RecipeRef) (string, bool) {
+	switch on {
+	case RecipeRefUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case RecipeRefUniqueByRootName:
+		return upsertKeyText(upsertKeyValue(row.Root.Id, false), upsertKeyValue(row.Name, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *RecipeRefRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of RecipeRef, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *RecipeRefRepository) scanReturned(row pgx.Row, inserted *bool) (*types.RecipeRef, error) {
+	result := &types.RecipeRef{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempSealedAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRoot *types.IdentityUUID
+	var tempRelParentRef *types.IdentityUUID
+	var tempRelBaseCommit *types.IdentityUUID
+	var tempRelHeadCommit *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelRoot,
+
+		&tempRelParentRef,
+
+		&tempRelBaseCommit,
+
+		&tempRelHeadCommit,
+
+		&result.Name,
+
+		&tempSealedAt,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
+		&result.DeletedAt,
+
+		&result.DeletedBy,
+
+		&result.Version,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempSealedAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.SealedAt = tempSealedAt
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRoot != nil {
+		result.Root.Id = recipeRefUUIDPtr(*tempRelRoot)
+	}
+	if tempRelParentRef != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.ParentRef = &types.RecipeRef{Id: recipeRefUUIDPtr(*tempRelParentRef)}
+	}
+	if tempRelBaseCommit != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.BaseCommit = &types.RecipeCommit{Id: recipeRefUUIDPtr(*tempRelBaseCommit)}
+	}
+	if tempRelHeadCommit != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.HeadCommit = &types.RecipeCommit{Id: recipeRefUUIDPtr(*tempRelHeadCommit)}
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -2398,13 +2507,54 @@ var recipeRefUniqueKeys = map[RecipeRefUniqueKey]struct{ conflict, keep string }
 // sets no field leaves the row as it is. A soft-deleted row that holds the key is
 // left as it is, and UpsertOne returns ErrNotFound.
 func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate) (*types.RecipeRef, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *RecipeRefRepository) UpsertOneResult(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeRef], error) {
+	var none UpsertResult[*types.RecipeRef]
 	key, ok := recipeRefUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: RecipeRef has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: RecipeRef has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "RecipeRef", string(on))
 	}
 	if update == nil {
 		update = &RecipeRefUpdate{}
 	}
+	write := func(repo *RecipeRefRepository) (UpsertResult[*types.RecipeRef], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.RecipeRef], error) {
+		return write(&RecipeRefRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *RecipeRefRepository) upsertRow(ctx context.Context, input *types.RecipeRef, on RecipeRefUniqueKey, update *RecipeRefUpdate, onlyIfChanged bool) (*UpsertResult[*types.RecipeRef], error) {
+	key := recipeRefUniqueKeys[on]
 	// Set audit fields
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
@@ -2521,10 +2671,12 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.Name != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`"name" = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref."name"`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Name)
 	}
 	if update.SealedAt != nil && update.SealedAtSetNull {
@@ -2532,15 +2684,21 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	}
 	if update.SealedAtSetNull {
 		setClauses = append(setClauses, `sealed_at = NULL`)
+		compareCurrent = append(compareCurrent, `recipe_ref.sealed_at`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.SealedAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`sealed_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref.sealed_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.SealedAt))
 	}
 	// Handle relationship foreign key: root
 	if update.RootID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("root_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref.root_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.RootID.ToUUID())
 	}
 	// Handle relationship foreign key: parentRef
@@ -2549,9 +2707,13 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	}
 	if update.ParentRefIDSetNull {
 		setClauses = append(setClauses, "parent_ref_id = NULL")
+		compareCurrent = append(compareCurrent, `recipe_ref.parent_ref_id`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.ParentRefID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("parent_ref_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref.parent_ref_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.ParentRefID.ToUUID())
 	}
 	// Handle relationship foreign key: baseCommit
@@ -2560,9 +2722,13 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	}
 	if update.BaseCommitIDSetNull {
 		setClauses = append(setClauses, "base_commit_id = NULL")
+		compareCurrent = append(compareCurrent, `recipe_ref.base_commit_id`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.BaseCommitID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("base_commit_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref.base_commit_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.BaseCommitID.ToUUID())
 	}
 	// Handle relationship foreign key: headCommit
@@ -2571,13 +2737,18 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	}
 	if update.HeadCommitIDSetNull {
 		setClauses = append(setClauses, "head_commit_id = NULL")
+		compareCurrent = append(compareCurrent, `recipe_ref.head_commit_id`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.HeadCommitID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("head_commit_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `recipe_ref.head_commit_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.HeadCommitID.ToUUID())
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -2601,11 +2772,12 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO recipe_ref (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE recipe_ref.deleted_at IS NULL RETURNING "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version"`,
+		`INSERT INTO recipe_ref (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(`recipe_ref.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -2615,82 +2787,420 @@ func (r *RecipeRefRepository) UpsertOne(ctx context.Context, input *types.Recipe
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.RecipeRef{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempSealedAt *types.TemporalDateTime
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-	var tempRelRoot *types.IdentityUUID
-	var tempRelParentRef *types.IdentityUUID
-	var tempRelBaseCommit *types.IdentityUUID
-	var tempRelHeadCommit *types.IdentityUUID
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&tempRelRoot,
-
-		&tempRelParentRef,
-
-		&tempRelBaseCommit,
-
-		&tempRelHeadCommit,
-
-		&result.Name,
-
-		&tempSealedAt,
-
-		&result.CreatedAt,
-
-		&result.CreatedBy,
-
-		&result.UpdatedAt,
-
-		&result.UpdatedBy,
-
-		&result.DeletedAt,
-
-		&result.DeletedBy,
-
-		&result.Version,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.RecipeRef]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.RecipeRef]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no RecipeRef row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.RecipeRef{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.RecipeRef]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *RecipeRefRepository) UpsertMany(ctx context.Context, inputs []*types.RecipeRef, on RecipeRefUniqueKey, update RecipeRefFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeRef], error) {
+	key, ok := recipeRefUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipeRef has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "RecipeRef", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not createdAt")
+	}
+	if update.CreatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not createdBy")
+	}
+	if update.UpdatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not updatedAt")
+	}
+	if update.UpdatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not updatedBy")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not deletedAt")
+	}
+	if update.DeletedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not deletedBy")
+	}
+	if update.Version {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeRef sets the fields an update sets, not _version")
+	}
+	batch, err := upsertBatch("RecipeRef", opts.Batch, 5957)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.RecipeRef]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.RecipeRef], error) {
+		return (&RecipeRefRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *RecipeRefRepository) upsertBatches(ctx context.Context, inputs []*types.RecipeRef, on RecipeRefUniqueKey, update RecipeRefFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.RecipeRef], error) {
+	key := recipeRefUniqueKeys[on]
+
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	for _, input := range inputs {
+		input.CreatedBy = GetUserID(ctx)
+	}
+	for _, input := range inputs {
+		input.UpdatedBy = GetUserID(ctx)
 	}
 
-	// Copy nullable fields when present
-
-	if tempSealedAt != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.SealedAt = tempSealedAt
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Name {
+		setClauses = append(setClauses, `"name" = EXCLUDED."name"`)
+		compareCurrent = append(compareCurrent, `recipe_ref."name"`)
+		compareNext = append(compareNext, `EXCLUDED."name"`)
+	}
+	if update.SealedAt {
+		setClauses = append(setClauses, `sealed_at = EXCLUDED.sealed_at`)
+		compareCurrent = append(compareCurrent, `recipe_ref.sealed_at`)
+		compareNext = append(compareNext, `EXCLUDED.sealed_at`)
+	}
+	if update.Root {
+		setClauses = append(setClauses, `root_id = EXCLUDED.root_id`)
+		compareCurrent = append(compareCurrent, `recipe_ref.root_id`)
+		compareNext = append(compareNext, `EXCLUDED.root_id`)
+	}
+	if update.ParentRef {
+		setClauses = append(setClauses, `parent_ref_id = EXCLUDED.parent_ref_id`)
+		compareCurrent = append(compareCurrent, `recipe_ref.parent_ref_id`)
+		compareNext = append(compareNext, `EXCLUDED.parent_ref_id`)
+	}
+	if update.BaseCommit {
+		setClauses = append(setClauses, `base_commit_id = EXCLUDED.base_commit_id`)
+		compareCurrent = append(compareCurrent, `recipe_ref.base_commit_id`)
+		compareNext = append(compareNext, `EXCLUDED.base_commit_id`)
+	}
+	if update.HeadCommit {
+		setClauses = append(setClauses, `head_commit_id = EXCLUDED.head_commit_id`)
+		compareCurrent = append(compareCurrent, `recipe_ref.head_commit_id`)
+		compareNext = append(compareNext, `EXCLUDED.head_commit_id`)
 	}
 
-	// Set relationship IDs from scanned FK values
-	if tempRelRoot != nil {
-		result.Root.Id = recipeRefUUIDPtr(*tempRelRoot)
-	}
-	if tempRelParentRef != nil {
-		// Initialize pointer for optional relationship before setting ID
-		result.ParentRef = &types.RecipeRef{Id: recipeRefUUIDPtr(*tempRelParentRef)}
-	}
-	if tempRelBaseCommit != nil {
-		// Initialize pointer for optional relationship before setting ID
-		result.BaseCommit = &types.RecipeCommit{Id: recipeRefUUIDPtr(*tempRelBaseCommit)}
-	}
-	if tempRelHeadCommit != nil {
-		// Initialize pointer for optional relationship before setting ID
-		result.HeadCommit = &types.RecipeCommit{Id: recipeRefUUIDPtr(*tempRelHeadCommit)}
-	}
+	results := make([]UpsertResult[*types.RecipeRef], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	return result, nil
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := recipeRefUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: name
+			{
+				cell := batchInsertCell{column: `"name"`, set: true}
+				cell.value = input.Name
+				row = append(row, cell)
+			}
+			// Optional field: sealedAt
+			{
+				cell := batchInsertCell{column: `sealed_at`}
+				if input.SealedAt != nil {
+					cell.value = time.Time(*input.SealedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: createdBy
+			{
+				cell := batchInsertCell{column: `created_by`, set: true}
+				cell.value = input.CreatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: updatedBy
+			{
+				cell := batchInsertCell{column: `updated_by`, set: true}
+				cell.value = input.UpdatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Optional field: deletedAt
+			{
+				cell := batchInsertCell{column: `deleted_at`}
+				if input.DeletedAt != nil {
+					cell.value = time.Time(*input.DeletedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: deletedBy
+			{
+				cell := batchInsertCell{column: `deleted_by`}
+				if input.DeletedBy != nil {
+					cell.value = input.DeletedBy.ToUUID()
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: root (FK: root_id)
+			{
+				cell := batchInsertCell{column: `root_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := recipeRefUUIDValue(input.Root.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Relationship: parentRef (FK: parent_ref_id)
+			{
+				cell := batchInsertCell{column: `parent_ref_id`}
+				var zeroId types.IdentityUUID
+				if input.ParentRef != nil {
+					if relID, ok := recipeRefUUIDValue(input.ParentRef.Id); ok && relID != zeroId {
+						cell.value, cell.set = relID.ToUUID(), true
+					}
+				}
+				row = append(row, cell)
+			}
+			// Relationship: baseCommit (FK: base_commit_id)
+			{
+				cell := batchInsertCell{column: `base_commit_id`}
+				var zeroId types.IdentityUUID
+				if input.BaseCommit != nil {
+					if relID, ok := recipeRefUUIDValue(input.BaseCommit.Id); ok && relID != zeroId {
+						cell.value, cell.set = relID.ToUUID(), true
+					}
+				}
+				row = append(row, cell)
+			}
+			// Relationship: headCommit (FK: head_commit_id)
+			{
+				cell := batchInsertCell{column: `head_commit_id`}
+				var zeroId types.IdentityUUID
+				if input.HeadCommit != nil {
+					if relID, ok := recipeRefUUIDValue(input.HeadCommit.Id); ok && relID != zeroId {
+						cell.value, cell.set = relID.ToUUID(), true
+					}
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+			values = append(values, time.Now())
+			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			if HasUserID(ctx) {
+				values = append(values, GetUserID(ctx))
+				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
+			}
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO recipe_ref (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(`recipe_ref.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = recipeRefKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.RecipeRef], len(prepared))
+		for n, row := range returned {
+			text, ok := recipeRefKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of RecipeRef wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.RecipeRef]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the RecipeRef row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.RecipeRef, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no RecipeRef row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.RecipeRef]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *RecipeRefRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.RecipeRef, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.RecipeRef
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *RecipeRefRepository) rowsOfKeys(ctx context.Context, on RecipeRefUniqueKey, keys [][]any, inputs []*types.RecipeRef) ([]*types.RecipeRef, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(recipeRefUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.RecipeRef{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := recipeRefKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.RecipeRef, len(inputs))
+	for i, input := range inputs {
+		text, _ := recipeRefKeyOf(on, input)
+		row := found[text]
+		if row == nil || upsertHolds(row.DeletedAt) {
+			return nil, fmt.Errorf("the RecipeRef row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple RecipeRef records in a single statement

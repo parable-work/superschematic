@@ -119,11 +119,14 @@ func TestTableStatementsOfALedger(t *testing.T) {
 			t.Errorf("Entry's %s = %q, want %q", name, got, want)
 		}
 	}
-	if !strings.HasPrefix(entry.Upsert, "INSERT INTO entry (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE entry.deleted_at IS NULL RETURNING \"id\", \"account_id\"") {
+	// The upsert takes its rows and its WHERE, and returns whether it
+	// inserted each row (D89).
+	if !strings.HasPrefix(entry.Upsert, "INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"account_id\"") ||
+		!strings.HasSuffix(entry.Upsert, `"deleted_by", (xmax = 0) AS _inserted`) {
 		t.Errorf("Entry's upsert = %q", entry.Upsert)
 	}
 	account := TableStatementsOf(tables["Account"])
-	if account.Live != "" || account.SoftDelete != "" || !strings.Contains(account.Upsert, "DO UPDATE SET %s RETURNING") {
+	if account.Live != "" || account.SoftDelete != "" || !strings.Contains(account.Upsert, "DO UPDATE SET %s%s RETURNING") {
 		t.Errorf("Account, which has no deletedAt, has %+v", account)
 	}
 	c := ColumnStatementsOf(tables["Account"].Column("name"))

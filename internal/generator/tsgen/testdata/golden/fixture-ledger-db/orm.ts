@@ -16,7 +16,8 @@ user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -78,7 +79,7 @@ export type AccountOrderField = "id" | "name" | "code" | "openedOn" | "mailingAd
 /** The members findPage orders rows of Account by (D60, amended); ties break by id. */
 export type AccountSortField = "id" | "name" | "code" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type AccountUniqueKey = readonly ["id"] | readonly ["code"];
 
 /** The position of a row of Account in a findPage order: its id. */
@@ -110,9 +111,9 @@ export const accountTable: TableDefinition = {
     { name: "code", column: "code", field: "code", qualified: "account.code", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", json: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "account.updated_by", uuid: true, required: true, audit: "updatedBy" },
   ],
   statements: {
@@ -139,7 +140,7 @@ export const accountTable: TableDefinition = {
     updateMany: "UPDATE account SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO account (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
+    upsert: "INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM account WHERE id = $1",
@@ -147,8 +148,8 @@ export const accountTable: TableDefinition = {
   },
   search: "account.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "code": { conflict: "(code)", keep: "code = EXCLUDED.code" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (id) IN (%s)" },
+    "code": { conflict: "(code)", keep: "code = EXCLUDED.code", rows: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE (code) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByEntryAccount", probe: "SELECT 1 FROM entry WHERE entry.account_id = account.id", live: " AND entry.deleted_at IS NULL" },
@@ -234,7 +235,7 @@ export type EntryOrderField = "id" | "amountCents" | "bookedOn" | "kind" | "memo
 /** The members findPage orders rows of Entry by (D60, amended); ties break by id. */
 export type EntrySortField = "id" | "amountCents" | "bookedOn" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type EntryUniqueKey = readonly ["id"] | readonly ["account", "externalId"];
 
 /** The position of a row of Entry in a findPage order: its id. */
@@ -271,10 +272,10 @@ export const entryTable: TableDefinition = {
     { name: "externalId", column: "external_id", field: "externalId", qualified: "entry.external_id", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "tags", column: "tags", field: "tags", qualified: "entry.tags", list: true, required: true },
     { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "in", "isNull"] },
-    { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "entry.updated_by", uuid: true, required: true, audit: "updatedBy" },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "entry.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "entry.deleted_by", uuid: true, audit: "deletedBy" },
@@ -303,7 +304,7 @@ export const entryTable: TableDefinition = {
     updateMany: "UPDATE entry SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO entry (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE entry.deleted_at IS NULL RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
+    upsert: "INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE entry SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE entry SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM entry WHERE id = $1",
@@ -312,8 +313,8 @@ export const entryTable: TableDefinition = {
   softDelete: true,
   search: "entry.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = EXCLUDED.account_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (id) IN (%s)" },
+    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = EXCLUDED.account_id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)" },
   },
 };
 
@@ -355,6 +356,12 @@ export const fixtureLedgerDbOrm: OrmDefinition = {
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",

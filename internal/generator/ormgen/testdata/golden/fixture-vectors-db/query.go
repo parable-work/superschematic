@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -311,6 +317,9 @@ type ChunkFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // ChunkSortField is a field FindPage orders Chunk rows by, by its
@@ -342,9 +351,9 @@ func ParseChunkSort(text string) (ChunkSort, error) {
 	return ChunkSort{}, fmt.Errorf("orm: Chunk sorts by id and text, not %q", text)
 }
 
-// ChunkUniqueKey names a unique key of Chunk that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// ChunkUniqueKey names a unique key of Chunk that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type ChunkUniqueKey string
 
 const (
@@ -517,6 +526,9 @@ type LedgerLineFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // LedgerLineSortField is a field FindPage orders LedgerLine rows by, by its
@@ -551,9 +563,9 @@ func ParseLedgerLineSort(text string) (LedgerLineSort, error) {
 	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate and bookedAt, not %q", text)
 }
 
-// LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type LedgerLineUniqueKey string
 
 const (
@@ -725,6 +737,9 @@ type PassageFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // PassageSortField is a field FindPage orders Passage rows by, by its
@@ -756,9 +771,9 @@ func ParsePassageSort(text string) (PassageSort, error) {
 	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id and title, not %q", text)
 }
 
-// PassageUniqueKey names a unique key of Passage that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// PassageUniqueKey names a unique key of Passage that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type PassageUniqueKey string
 
 const (
@@ -903,6 +918,9 @@ type TextEmbeddingFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // TextEmbeddingSortField is a field FindPage orders TextEmbedding rows by, by its
@@ -934,9 +952,9 @@ func ParseTextEmbeddingSort(text string) (TextEmbeddingSort, error) {
 	return TextEmbeddingSort{}, fmt.Errorf("orm: TextEmbedding sorts by id and text, not %q", text)
 }
 
-// TextEmbeddingUniqueKey names a unique key of TextEmbedding that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// TextEmbeddingUniqueKey names a unique key of TextEmbedding that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type TextEmbeddingUniqueKey string
 
 const (
@@ -1532,6 +1550,15 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at <= $%d`, paramNum))
 			*args = append(*args, f.BookedAt.Between.End)
+		}
+		if len(f.BookedAt.In) > 0 {
+			placeholders := make([]string, len(f.BookedAt.In))
+			for i, value := range f.BookedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.BookedAt.IsNull != nil {
 			if *f.BookedAt.IsNull {

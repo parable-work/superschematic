@@ -669,7 +669,8 @@ func (r *SessionRepository) FindOne(ctx context.Context, filter *SessionFilter, 
 	return result, nil
 }
 
-// FindMany retrieves multiple Session records matching the filter
+// FindMany retrieves multiple Session records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *SessionRepository) FindMany(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) ([]*types.Session, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -702,18 +703,20 @@ func (r *SessionRepository) FindMany(ctx context.Context, filter *SessionFilter,
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM "session"%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "session"%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "session"%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -1134,10 +1137,92 @@ func (r *SessionRepository) CreateOne(ctx context.Context, input *types.Session)
 
 // sessionUniqueKeys are the conflict targets of Session's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var sessionUniqueKeys = map[SessionUniqueKey]struct{ conflict, keep string }{
-	SessionUniqueById:        {`(id)`, `id = EXCLUDED.id`},
-	SessionUniqueByTokenHash: {`(token_hash)`, `token_hash = EXCLUDED.token_hash`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var sessionUniqueKeys = map[SessionUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	SessionUniqueById:        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (id) IN (%s)`, []string{`id`}},
+	SessionUniqueByTokenHash: {`(token_hash)`, `token_hash = EXCLUDED.token_hash`, `SELECT "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at" FROM "session" WHERE (token_hash) IN (%s)`, []string{`token_hash`}},
+}
+
+// sessionKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func sessionKeyOf(on SessionUniqueKey, row *types.Session) (string, bool) {
+	switch on {
+	case SessionUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case SessionUniqueByTokenHash:
+		return upsertKeyText(upsertKeyValue(row.TokenHash, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *SessionRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Session, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *SessionRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Session, error) {
+	result := &types.Session{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempLastSeenAt *types.TemporalDateTime
+	var tempRevokedAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelUser *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelUser,
+
+		&result.TokenHash,
+
+		&result.CreatedAt,
+
+		&result.ExpiresAt,
+
+		&tempLastSeenAt,
+
+		&tempRevokedAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempLastSeenAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.LastSeenAt = tempLastSeenAt
+	}
+	if tempRevokedAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.RevokedAt = tempRevokedAt
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelUser != nil {
+		result.User.Id = sessionUUIDPtr(*tempRelUser)
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -1146,13 +1231,54 @@ var sessionUniqueKeys = map[SessionUniqueKey]struct{ conflict, keep string }{
 // UpdateOne writes, updated_at and updated_by among it, but an update that
 // sets no field leaves the row as it is.
 func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session, on SessionUniqueKey, update *SessionUpdate) (*types.Session, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *SessionRepository) UpsertOneResult(ctx context.Context, input *types.Session, on SessionUniqueKey, update *SessionUpdate, opts *UpsertOptions) (UpsertResult[*types.Session], error) {
+	var none UpsertResult[*types.Session]
 	key, ok := sessionUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: Session has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: Session has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Session", string(on))
 	}
 	if update == nil {
 		update = &SessionUpdate{}
 	}
+	write := func(repo *SessionRepository) (UpsertResult[*types.Session], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Session], error) {
+		return write(&SessionRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *SessionRepository) upsertRow(ctx context.Context, input *types.Session, on SessionUniqueKey, update *SessionUpdate, onlyIfChanged bool) (*UpsertResult[*types.Session], error) {
+	key := sessionUniqueKeys[on]
 	// Set audit fields
 
 	// Build INSERT query
@@ -1214,15 +1340,19 @@ func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session,
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.TokenHash != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`token_hash = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"session".token_hash`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.TokenHash)
 	}
 	if update.ExpiresAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`expires_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"session".expires_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.ExpiresAt))
 	}
 	if update.LastSeenAt != nil && update.LastSeenAtSetNull {
@@ -1230,9 +1360,13 @@ func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session,
 	}
 	if update.LastSeenAtSetNull {
 		setClauses = append(setClauses, `last_seen_at = NULL`)
+		compareCurrent = append(compareCurrent, `"session".last_seen_at`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.LastSeenAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`last_seen_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"session".last_seen_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.LastSeenAt))
 	}
 	if update.RevokedAt != nil && update.RevokedAtSetNull {
@@ -1240,19 +1374,26 @@ func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session,
 	}
 	if update.RevokedAtSetNull {
 		setClauses = append(setClauses, `revoked_at = NULL`)
+		compareCurrent = append(compareCurrent, `"session".revoked_at`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.RevokedAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`revoked_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"session".revoked_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.RevokedAt))
 	}
 	// Handle relationship foreign key: user
 	if update.UserID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("user_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `"session".user_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.UserID.ToUUID())
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1264,11 +1405,12 @@ func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session,
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO "session" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at"`,
+		`INSERT INTO "session" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1278,58 +1420,333 @@ func (r *SessionRepository) UpsertOne(ctx context.Context, input *types.Session,
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.Session{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempLastSeenAt *types.TemporalDateTime
-	var tempRevokedAt *types.TemporalDateTime
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-	var tempRelUser *types.IdentityUUID
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&tempRelUser,
-
-		&result.TokenHash,
-
-		&result.CreatedAt,
-
-		&result.ExpiresAt,
-
-		&tempLastSeenAt,
-
-		&tempRevokedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Session]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.Session]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Session row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Session{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Session]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *SessionRepository) UpsertMany(ctx context.Context, inputs []*types.Session, on SessionUniqueKey, update SessionFields, opts *UpsertOptions) ([]UpsertResult[*types.Session], error) {
+	key, ok := sessionUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Session has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Session", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Session sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Session sets the fields an update sets, not createdAt")
+	}
+	batch, err := upsertBatch("Session", opts.Batch, 10922)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Session]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Session], error) {
+		return (&SessionRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *SessionRepository) upsertBatches(ctx context.Context, inputs []*types.Session, on SessionUniqueKey, update SessionFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Session], error) {
+	key := sessionUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.TokenHash {
+		setClauses = append(setClauses, `token_hash = EXCLUDED.token_hash`)
+		compareCurrent = append(compareCurrent, `"session".token_hash`)
+		compareNext = append(compareNext, `EXCLUDED.token_hash`)
+	}
+	if update.ExpiresAt {
+		setClauses = append(setClauses, `expires_at = EXCLUDED.expires_at`)
+		compareCurrent = append(compareCurrent, `"session".expires_at`)
+		compareNext = append(compareNext, `EXCLUDED.expires_at`)
+	}
+	if update.LastSeenAt {
+		setClauses = append(setClauses, `last_seen_at = EXCLUDED.last_seen_at`)
+		compareCurrent = append(compareCurrent, `"session".last_seen_at`)
+		compareNext = append(compareNext, `EXCLUDED.last_seen_at`)
+	}
+	if update.RevokedAt {
+		setClauses = append(setClauses, `revoked_at = EXCLUDED.revoked_at`)
+		compareCurrent = append(compareCurrent, `"session".revoked_at`)
+		compareNext = append(compareNext, `EXCLUDED.revoked_at`)
+	}
+	if update.User {
+		setClauses = append(setClauses, `user_id = EXCLUDED.user_id`)
+		compareCurrent = append(compareCurrent, `"session".user_id`)
+		compareNext = append(compareNext, `EXCLUDED.user_id`)
 	}
 
-	// Copy nullable fields when present
+	results := make([]UpsertResult[*types.Session], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	if tempLastSeenAt != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.LastSeenAt = tempLastSeenAt
-	}
-	if tempRevokedAt != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.RevokedAt = tempRevokedAt
-	}
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := sessionUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: tokenHash
+			{
+				cell := batchInsertCell{column: `token_hash`, set: true}
+				cell.value = input.TokenHash
+				row = append(row, cell)
+			}
+			// Required field: expiresAt
+			{
+				cell := batchInsertCell{column: `expires_at`, set: true}
+				cell.value = time.Time(input.ExpiresAt)
+				row = append(row, cell)
+			}
+			// Optional field: lastSeenAt
+			{
+				cell := batchInsertCell{column: `last_seen_at`}
+				if input.LastSeenAt != nil {
+					cell.value = time.Time(*input.LastSeenAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: revokedAt
+			{
+				cell := batchInsertCell{column: `revoked_at`}
+				if input.RevokedAt != nil {
+					cell.value = time.Time(*input.RevokedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
 
-	// Set relationship IDs from scanned FK values
-	if tempRelUser != nil {
-		result.User.Id = sessionUUIDPtr(*tempRelUser)
-	}
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: user (FK: user_id)
+			{
+				cell := batchInsertCell{column: `user_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := sessionUUIDValue(input.User.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO "session" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
 
-	return result, nil
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = sessionKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Session], len(prepared))
+		for n, row := range returned {
+			text, ok := sessionKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Session wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Session]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Session row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Session, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Session row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Session]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *SessionRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Session, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.Session
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *SessionRepository) rowsOfKeys(ctx context.Context, on SessionUniqueKey, keys [][]any, inputs []*types.Session) ([]*types.Session, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(sessionUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Session{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := sessionKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Session, len(inputs))
+	for i, input := range inputs {
+		text, _ := sessionKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the Session row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Session records in a single statement

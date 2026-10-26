@@ -509,7 +509,8 @@ func (r *ShelfRepository) FindOne(ctx context.Context, filter *ShelfFilter, opts
 	return result, nil
 }
 
-// FindMany retrieves multiple Shelf records matching the filter
+// FindMany retrieves multiple Shelf records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *ShelfRepository) FindMany(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) ([]*types.Shelf, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -550,18 +551,20 @@ func (r *ShelfRepository) FindMany(ctx context.Context, filter *ShelfFilter, opt
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM shelf%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM shelf%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM shelf%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -922,9 +925,77 @@ func (r *ShelfRepository) CreateOne(ctx context.Context, input *types.Shelf) (*t
 
 // shelfUniqueKeys are the conflict targets of Shelf's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var shelfUniqueKeys = map[ShelfUniqueKey]struct{ conflict, keep string }{
-	ShelfUniqueById: {`(id)`, `id = EXCLUDED.id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var shelfUniqueKeys = map[ShelfUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	ShelfUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM shelf WHERE (id) IN (%s)`, []string{`id`}},
+}
+
+// shelfKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func shelfKeyOf(on ShelfUniqueKey, row *types.Shelf) (string, bool) {
+	switch on {
+	case ShelfUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *ShelfRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Shelf, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *ShelfRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Shelf, error) {
+	result := &types.Shelf{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&result.Label,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
+		&result.DeletedAt,
+
+		&result.DeletedBy,
+
+		&result.Version,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -934,13 +1005,54 @@ var shelfUniqueKeys = map[ShelfUniqueKey]struct{ conflict, keep string }{
 // sets no field leaves the row as it is. A soft-deleted row that holds the key is
 // left as it is, and UpsertOne returns ErrNotFound.
 func (r *ShelfRepository) UpsertOne(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate) (*types.Shelf, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *ShelfRepository) UpsertOneResult(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate, opts *UpsertOptions) (UpsertResult[*types.Shelf], error) {
+	var none UpsertResult[*types.Shelf]
 	key, ok := shelfUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: Shelf has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: Shelf has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Shelf", string(on))
 	}
 	if update == nil {
 		update = &ShelfUpdate{}
 	}
+	write := func(repo *ShelfRepository) (UpsertResult[*types.Shelf], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Shelf], error) {
+		return write(&ShelfRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *ShelfRepository) upsertRow(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate, onlyIfChanged bool) (*UpsertResult[*types.Shelf], error) {
+	key := shelfUniqueKeys[on]
 	// Set audit fields
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
@@ -1002,14 +1114,17 @@ func (r *ShelfRepository) UpsertOne(ctx context.Context, input *types.Shelf, on 
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.Label != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`label = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `shelf.label`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Label)
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1033,11 +1148,12 @@ func (r *ShelfRepository) UpsertOne(ctx context.Context, input *types.Shelf, on 
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO shelf (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE shelf.deleted_at IS NULL RETURNING "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version"`,
+		`INSERT INTO shelf (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(`shelf.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1047,46 +1163,344 @@ func (r *ShelfRepository) UpsertOne(ctx context.Context, input *types.Shelf, on 
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.Shelf{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&result.Label,
-
-		&result.CreatedAt,
-
-		&result.CreatedBy,
-
-		&result.UpdatedAt,
-
-		&result.UpdatedBy,
-
-		&result.DeletedAt,
-
-		&result.DeletedBy,
-
-		&result.Version,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Shelf]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.Shelf]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Shelf row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Shelf{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Shelf]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *ShelfRepository) UpsertMany(ctx context.Context, inputs []*types.Shelf, on ShelfUniqueKey, update ShelfFields, opts *UpsertOptions) ([]UpsertResult[*types.Shelf], error) {
+	key, ok := shelfUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Shelf has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Shelf", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not createdAt")
+	}
+	if update.CreatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not createdBy")
+	}
+	if update.UpdatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not updatedAt")
+	}
+	if update.UpdatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not updatedBy")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not deletedAt")
+	}
+	if update.DeletedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not deletedBy")
+	}
+	if update.Version {
+		return nil, fmt.Errorf("orm: UpsertMany of Shelf sets the fields an update sets, not _version")
+	}
+	batch, err := upsertBatch("Shelf", opts.Batch, 10922)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Shelf]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Shelf], error) {
+		return (&ShelfRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *ShelfRepository) upsertBatches(ctx context.Context, inputs []*types.Shelf, on ShelfUniqueKey, update ShelfFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Shelf], error) {
+	key := shelfUniqueKeys[on]
+
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	for _, input := range inputs {
+		input.CreatedBy = GetUserID(ctx)
+	}
+	for _, input := range inputs {
+		input.UpdatedBy = GetUserID(ctx)
 	}
 
-	// Copy nullable fields when present
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Label {
+		setClauses = append(setClauses, `label = EXCLUDED.label`)
+		compareCurrent = append(compareCurrent, `shelf.label`)
+		compareNext = append(compareNext, `EXCLUDED.label`)
+	}
 
-	// Set relationship IDs from scanned FK values
+	results := make([]UpsertResult[*types.Shelf], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	return result, nil
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := shelfUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: label
+			{
+				cell := batchInsertCell{column: `label`, set: true}
+				cell.value = input.Label
+				row = append(row, cell)
+			}
+			// Required field: createdBy
+			{
+				cell := batchInsertCell{column: `created_by`, set: true}
+				cell.value = input.CreatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: updatedBy
+			{
+				cell := batchInsertCell{column: `updated_by`, set: true}
+				cell.value = input.UpdatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Optional field: deletedAt
+			{
+				cell := batchInsertCell{column: `deleted_at`}
+				if input.DeletedAt != nil {
+					cell.value = time.Time(*input.DeletedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: deletedBy
+			{
+				cell := batchInsertCell{column: `deleted_by`}
+				if input.DeletedBy != nil {
+					cell.value = input.DeletedBy.ToUUID()
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+			values = append(values, time.Now())
+			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			if HasUserID(ctx) {
+				values = append(values, GetUserID(ctx))
+				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
+			}
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO shelf (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(`shelf.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = shelfKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Shelf], len(prepared))
+		for n, row := range returned {
+			text, ok := shelfKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Shelf wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Shelf]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Shelf row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Shelf, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Shelf row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Shelf]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *ShelfRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Shelf, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.Shelf
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *ShelfRepository) rowsOfKeys(ctx context.Context, on ShelfUniqueKey, keys [][]any, inputs []*types.Shelf) ([]*types.Shelf, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(shelfUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Shelf{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := shelfKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Shelf, len(inputs))
+	for i, input := range inputs {
+		text, _ := shelfKeyOf(on, input)
+		row := found[text]
+		if row == nil || upsertHolds(row.DeletedAt) {
+			return nil, fmt.Errorf("the Shelf row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Shelf records in a single statement

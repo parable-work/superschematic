@@ -462,7 +462,8 @@ func (r *ApiCredentialRepository) FindOne(ctx context.Context, filter *ApiCreden
 	return result, nil
 }
 
-// FindMany retrieves multiple ApiCredential records matching the filter
+// FindMany retrieves multiple ApiCredential records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *ApiCredentialRepository) FindMany(ctx context.Context, filter *ApiCredentialFilter, opts *ApiCredentialFindOptions) ([]*types.ApiCredential, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -495,18 +496,20 @@ func (r *ApiCredentialRepository) FindMany(ctx context.Context, filter *ApiCrede
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM api_credential%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM api_credential%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM api_credential%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -847,10 +850,82 @@ func (r *ApiCredentialRepository) CreateOne(ctx context.Context, input *types.Ap
 
 // apiCredentialUniqueKeys are the conflict targets of ApiCredential's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var apiCredentialUniqueKeys = map[ApiCredentialUniqueKey]struct{ conflict, keep string }{
-	ApiCredentialUniqueById:      {`(id)`, `id = EXCLUDED.id`},
-	ApiCredentialUniqueByService: {`(service)`, `service = EXCLUDED.service`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var apiCredentialUniqueKeys = map[ApiCredentialUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	ApiCredentialUniqueById:      {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (id) IN (%s)`, []string{`id`}},
+	ApiCredentialUniqueByService: {`(service)`, `service = EXCLUDED.service`, `SELECT "id", "service", "secret", "rotated_at" FROM api_credential WHERE (service) IN (%s)`, []string{`service`}},
+}
+
+// apiCredentialKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func apiCredentialKeyOf(on ApiCredentialUniqueKey, row *types.ApiCredential) (string, bool) {
+	switch on {
+	case ApiCredentialUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case ApiCredentialUniqueByService:
+		return upsertKeyText(upsertKeyValue(row.Service, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *ApiCredentialRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of ApiCredential, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *ApiCredentialRepository) scanReturned(row pgx.Row, inserted *bool) (*types.ApiCredential, error) {
+	result := &types.ApiCredential{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempRotatedAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&result.Service,
+
+		&result.Secret,
+
+		&tempRotatedAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempRotatedAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.RotatedAt = tempRotatedAt
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -859,32 +934,73 @@ var apiCredentialUniqueKeys = map[ApiCredentialUniqueKey]struct{ conflict, keep 
 // UpdateOne writes, updated_at and updated_by among it, but an update that
 // sets no field leaves the row as it is.
 func (r *ApiCredentialRepository) UpsertOne(ctx context.Context, input *types.ApiCredential, on ApiCredentialUniqueKey, update *ApiCredentialUpdate) (*types.ApiCredential, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. An
+// encrypted field the update sets is sealed under the key of the row it
+// updates, which only the statement names, so a second statement, an
+// UpdateOne, sets it when it differs from what the row holds. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *ApiCredentialRepository) UpsertOneResult(ctx context.Context, input *types.ApiCredential, on ApiCredentialUniqueKey, update *ApiCredentialUpdate, opts *UpsertOptions) (UpsertResult[*types.ApiCredential], error) {
+	var none UpsertResult[*types.ApiCredential]
 	key, ok := apiCredentialUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: ApiCredential has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: ApiCredential has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "ApiCredential", string(on))
 	}
 	if update == nil {
 		update = &ApiCredentialUpdate{}
 	}
+	write := func(repo *ApiCredentialRepository) (UpsertResult[*types.ApiCredential], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if apiCredentialSetsEncrypted(update) == "" && !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.ApiCredential], error) {
+		return write(&ApiCredentialRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *ApiCredentialRepository) upsertRow(ctx context.Context, input *types.ApiCredential, on ApiCredentialUniqueKey, update *ApiCredentialUpdate, onlyIfChanged bool) (*UpsertResult[*types.ApiCredential], error) {
+	key := apiCredentialUniqueKeys[on]
 	// Set audit fields
 
 	// The key, generated when unset, and each encrypted field sealed under
-	// it (D85). The update's are sealed for the row it updates, which only
-	// the primary key names before the statement runs.
+	// it (D85). An encrypted field the update sets is sealed under the key
+	// of the row it updates, which only the statement names, so resealed
+	// sets it after it (D89); one it sets to null goes in the statement.
 	sealedInput, sealErr := r.seal(input)
 	if sealErr != nil {
 		return nil, fmt.Errorf("upsert ApiCredential: %w", sealErr)
 	}
 	input = sealedInput
-	if field := apiCredentialSetsEncrypted(update); field != "" {
-		if on != ApiCredentialUniqueById {
-			return nil, fmt.Errorf("upsert ApiCredential on %s: %w", string(on), &EncryptedWriteError{Table: "ApiCredential", Field: field, Write: "UpsertOne on another key than id"})
-		}
-		sealedUpdate, sealErr := r.sealUpdate(input.Id, update)
-		if sealErr != nil {
-			return nil, fmt.Errorf("upsert ApiCredential: %w", sealErr)
-		}
-		update = sealedUpdate
+	sealing := update
+	{
+		plain := *update
+		plain.Secret = nil
+		update = &plain
 	}
 
 	// Build INSERT query
@@ -927,15 +1043,19 @@ func (r *ApiCredentialRepository) UpsertOne(ctx context.Context, input *types.Ap
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.Service != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`service = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `api_credential.service`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Service)
 	}
 	if update.Secret != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`secret = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `api_credential.secret`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Secret)
 	}
 	if update.RotatedAt != nil && update.RotatedAtSetNull {
@@ -943,13 +1063,18 @@ func (r *ApiCredentialRepository) UpsertOne(ctx context.Context, input *types.Ap
 	}
 	if update.RotatedAtSetNull {
 		setClauses = append(setClauses, `rotated_at = NULL`)
+		compareCurrent = append(compareCurrent, `api_credential.rotated_at`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.RotatedAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`rotated_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `api_credential.rotated_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.RotatedAt))
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -961,11 +1086,12 @@ func (r *ApiCredentialRepository) UpsertOne(ctx context.Context, input *types.Ap
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO api_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "service", "secret", "rotated_at"`,
+		`INSERT INTO api_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "service", "secret", "rotated_at", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -975,48 +1101,341 @@ func (r *ApiCredentialRepository) UpsertOne(ctx context.Context, input *types.Ap
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.ApiCredential{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempRotatedAt *types.TemporalDateTime
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&result.Service,
-
-		&result.Secret,
-
-		&tempRotatedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.ApiCredential]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.ApiCredential]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no ApiCredential row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.ApiCredential{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.ApiCredential]{Row: found[0], Status: UpsertUnchanged}
 	}
+	return r.resealed(ctx, upserted, sealing)
+}
 
-	// Copy nullable fields when present
-
-	if tempRotatedAt != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.RotatedAt = tempRotatedAt
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *ApiCredentialRepository) UpsertMany(ctx context.Context, inputs []*types.ApiCredential, on ApiCredentialUniqueKey, update ApiCredentialFields, opts *UpsertOptions) ([]UpsertResult[*types.ApiCredential], error) {
+	key, ok := apiCredentialUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: ApiCredential has no unique key %q", string(on))
 	}
-
-	// Set relationship IDs from scanned FK values
-
-	// Open each encrypted field under the row's key (D85).
-	if err := r.open(result); err != nil {
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "ApiCredential", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of ApiCredential sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("ApiCredential", opts.Batch, 16383)
+	if err != nil {
 		return nil, err
 	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.ApiCredential]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged && !update.Secret {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.ApiCredential], error) {
+		return (&ApiCredentialRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
 
-	return result, nil
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *ApiCredentialRepository) upsertBatches(ctx context.Context, inputs []*types.ApiCredential, on ApiCredentialUniqueKey, update ApiCredentialFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.ApiCredential], error) {
+	key := apiCredentialUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Service {
+		setClauses = append(setClauses, `service = EXCLUDED.service`)
+		compareCurrent = append(compareCurrent, `api_credential.service`)
+		compareNext = append(compareNext, `EXCLUDED.service`)
+	}
+	if update.RotatedAt {
+		setClauses = append(setClauses, `rotated_at = EXCLUDED.rotated_at`)
+		compareCurrent = append(compareCurrent, `api_credential.rotated_at`)
+		compareNext = append(compareNext, `EXCLUDED.rotated_at`)
+	}
+
+	results := make([]UpsertResult[*types.ApiCredential], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		// Each row's key, generated when unset, and its encrypted fields
+		// sealed under it (D85).
+		prepared := make([]*types.ApiCredential, len(chunk))
+		for i, input := range chunk {
+			sealed, err := r.seal(input)
+			if err != nil {
+				return nil, fmt.Errorf("upsert ApiCredential %d: %w", start+i, err)
+			}
+			prepared[i] = sealed
+		}
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := apiCredentialUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: service
+			{
+				cell := batchInsertCell{column: `service`, set: true}
+				cell.value = input.Service
+				row = append(row, cell)
+			}
+			// Required field: secret
+			{
+				cell := batchInsertCell{column: `secret`, set: true}
+				cell.value = input.Secret
+				row = append(row, cell)
+			}
+			// Optional field: rotatedAt
+			{
+				cell := batchInsertCell{column: `rotated_at`}
+				if input.RotatedAt != nil {
+					cell.value = time.Time(*input.RotatedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO api_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "service", "secret", "rotated_at", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = apiCredentialKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.ApiCredential], len(prepared))
+		for n, row := range returned {
+			text, ok := apiCredentialKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of ApiCredential wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.ApiCredential]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the ApiCredential row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.ApiCredential, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no ApiCredential row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.ApiCredential]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for i, result := range matched {
+			// Each encrypted field update names, which the statement left
+			// as it was, set to the input's when it differs.
+			want := &ApiCredentialUpdate{}
+			if update.Secret {
+				value := chunk[i].Secret
+				want.Secret = &value
+			}
+			resealed, err := r.resealed(ctx, result, want)
+			if err != nil {
+				return nil, err
+			}
+			result = resealed
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *ApiCredentialRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.ApiCredential, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.ApiCredential
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *ApiCredentialRepository) rowsOfKeys(ctx context.Context, on ApiCredentialUniqueKey, keys [][]any, inputs []*types.ApiCredential) ([]*types.ApiCredential, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(apiCredentialUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.ApiCredential{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := apiCredentialKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.ApiCredential, len(inputs))
+	for i, input := range inputs {
+		text, _ := apiCredentialKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the ApiCredential row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
+}
+
+// resealed is result, with each encrypted field want sets that the row it
+// updated holds another value of set by UpdateOne, sealed under the row's
+// key, and UpsertUpdated (D89). A row the upsert inserted holds the
+// input's already.
+func (r *ApiCredentialRepository) resealed(ctx context.Context, result *UpsertResult[*types.ApiCredential], want *ApiCredentialUpdate) (*UpsertResult[*types.ApiCredential], error) {
+	if result.Status == UpsertInserted || want == nil {
+		return result, nil
+	}
+	change := &ApiCredentialUpdate{}
+	changed := false
+	if want.Secret != nil && result.Row.Secret != *want.Secret {
+		change.Secret, changed = want.Secret, true
+	}
+	if !changed {
+		return result, nil
+	}
+	row, err := r.UpdateOne(ctx, result.Row.Id, change)
+	if err != nil {
+		return nil, err
+	}
+	return &UpsertResult[*types.ApiCredential]{Row: row, Status: UpsertUpdated}, nil
 }
 
 // CreateMany inserts multiple ApiCredential records in a single statement

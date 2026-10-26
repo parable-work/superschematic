@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -345,6 +351,9 @@ type {{ $typeName }}FindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 {{- $pk := .PrimaryKeySortField }}
 
@@ -378,9 +387,9 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
 
-// {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type {{ $typeName }}UniqueKey string
 
 const (

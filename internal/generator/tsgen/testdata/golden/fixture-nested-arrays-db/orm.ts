@@ -16,7 +16,8 @@ user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -61,7 +62,7 @@ export type BoardOrderField = "id" | "labels" | "states" | "walls" | "scores";
 /** The members findPage orders rows of Board by (D60, amended); ties break by id. */
 export type BoardSortField = "id";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type BoardUniqueKey = readonly ["id"];
 
 /** The position of a row of Board in a findPage order: its id. */
@@ -118,14 +119,14 @@ export const boardTable: TableDefinition = {
     updateMany: "UPDATE board SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO board (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\"",
+    upsert: "INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM board WHERE id = $1",
     deleteMany: "DELETE FROM board%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE (id) IN (%s)" },
   },
 };
 
@@ -166,6 +167,12 @@ export const fixtureNestedArraysDbOrm: OrmDefinition = {
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",

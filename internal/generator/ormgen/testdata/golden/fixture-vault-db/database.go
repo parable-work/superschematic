@@ -32,7 +32,11 @@ type Database struct {
 
 // Tx represents a database transaction with repositories
 type Tx struct {
-	tx            pgx.Tx
+	tx pgx.Tx
+	// db is the Database the transaction runs on, and depth the savepoints
+	// it is nested in, 0 for a transaction of its own (D89).
+	db            *Database
+	depth         int
 	ApiCredential *ApiCredentialRepository
 	PlaidItem     *PlaidItemRepository
 }
@@ -130,7 +134,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	txWrapper := &Tx{tx: tx}
+	txWrapper := &Tx{tx: tx, db: db}
 
 	// Initialize transaction repositories with parent database reference
 	txWrapper.ApiCredential = &ApiCredentialRepository{tx: tx, txDB: db}

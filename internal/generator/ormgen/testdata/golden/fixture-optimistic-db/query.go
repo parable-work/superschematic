@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -312,6 +318,9 @@ type ShelfFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // ShelfSortField is a field FindPage orders Shelf rows by, by its
@@ -345,9 +354,9 @@ func ParseShelfSort(text string) (ShelfSort, error) {
 	return ShelfSort{}, fmt.Errorf("orm: Shelf sorts by id, label, createdAt and updatedAt, not %q", text)
 }
 
-// ShelfUniqueKey names a unique key of Shelf that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// ShelfUniqueKey names a unique key of Shelf that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type ShelfUniqueKey string
 
 const (
@@ -510,6 +519,9 @@ type StockFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // StockSortField is a field FindPage orders Stock rows by, by its
@@ -542,9 +554,9 @@ func ParseStockSort(text string) (StockSort, error) {
 	return StockSort{}, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", text)
 }
 
-// StockUniqueKey names a unique key of Stock that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// StockUniqueKey names a unique key of Stock that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type StockUniqueKey string
 
 const (
@@ -764,6 +776,15 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `shelf.created_at IS NULL`)
@@ -805,6 +826,15 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`shelf.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {

@@ -740,7 +740,8 @@ func (r *LineItemRepository) FindOne(ctx context.Context, filter *LineItemFilter
 	return result, nil
 }
 
-// FindMany retrieves multiple LineItem records matching the filter
+// FindMany retrieves multiple LineItem records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *LineItemRepository) FindMany(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) ([]*types.LineItem, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -781,18 +782,20 @@ func (r *LineItemRepository) FindMany(ctx context.Context, filter *LineItemFilte
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM "lineItem"%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "lineItem"%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "lineItem"%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -1255,10 +1258,104 @@ func (r *LineItemRepository) CreateOne(ctx context.Context, input *types.LineIte
 
 // lineItemUniqueKeys are the conflict targets of LineItem's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var lineItemUniqueKeys = map[LineItemUniqueKey]struct{ conflict, keep string }{
-	LineItemUniqueById:                 {`(id)`, `id = EXCLUDED.id`},
-	LineItemUniqueByCategoryExternalId: {`("categoryId", "externalId") WHERE "deletedAt" IS NULL`, `"categoryId" = EXCLUDED."categoryId"`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var lineItemUniqueKeys = map[LineItemUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	LineItemUniqueById:                 {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE (id) IN (%s)`, []string{`id`}},
+	LineItemUniqueByCategoryExternalId: {`("categoryId", "externalId") WHERE "deletedAt" IS NULL`, `"categoryId" = EXCLUDED."categoryId"`, `SELECT "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt" FROM "lineItem" WHERE ("categoryId", "externalId") IN (%s) AND ("deletedAt" IS NULL)`, []string{`"categoryId"`, `"externalId"`}},
+}
+
+// lineItemKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func lineItemKeyOf(on LineItemUniqueKey, row *types.LineItem) (string, bool) {
+	switch on {
+	case LineItemUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case LineItemUniqueByCategoryExternalId:
+		return upsertKeyText(upsertKeyValue(func() any {
+			if row.Category == nil {
+				return nil
+			}
+			return row.Category.Id
+		}(), false), upsertKeyValue(row.ExternalId, true))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *LineItemRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of LineItem, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *LineItemRepository) scanReturned(row pgx.Row, inserted *bool) (*types.LineItem, error) {
+	result := &types.LineItem{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempPostedOn pgtype.Date
+	var tempMemo sql.NullString
+	var tempExternalId sql.NullString
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelCategory *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&result.AmountCents,
+
+		&tempPostedOn,
+
+		&tempMemo,
+
+		&tempExternalId,
+
+		&tempRelCategory,
+
+		&result.CreatedAt,
+
+		&result.UpdatedAt,
+
+		&result.DeletedAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempPostedOn.Valid {
+		result.PostedOn = types.TemporalDate(tempPostedOn.Time.Format("2006-01-02"))
+	}
+	if tempMemo.Valid {
+		result.Memo = tempMemo.String
+	}
+	if tempExternalId.Valid {
+		result.ExternalId = tempExternalId.String
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelCategory != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.Category = &types.Category{Id: lineItemUUIDPtr(*tempRelCategory)}
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -1268,13 +1365,54 @@ var lineItemUniqueKeys = map[LineItemUniqueKey]struct{ conflict, keep string }{
 // sets no field leaves the row as it is. A soft-deleted row that holds the key is
 // left as it is, and UpsertOne returns ErrNotFound.
 func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineItem, on LineItemUniqueKey, update *LineItemUpdate) (*types.LineItem, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *LineItemRepository) UpsertOneResult(ctx context.Context, input *types.LineItem, on LineItemUniqueKey, update *LineItemUpdate, opts *UpsertOptions) (UpsertResult[*types.LineItem], error) {
+	var none UpsertResult[*types.LineItem]
 	key, ok := lineItemUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: LineItem has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: LineItem has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "LineItem", string(on))
 	}
 	if update == nil {
 		update = &LineItemUpdate{}
 	}
+	write := func(repo *LineItemRepository) (UpsertResult[*types.LineItem], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.LineItem], error) {
+		return write(&LineItemRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *LineItemRepository) upsertRow(ctx context.Context, input *types.LineItem, on LineItemUniqueKey, update *LineItemUpdate, onlyIfChanged bool) (*UpsertResult[*types.LineItem], error) {
+	key := lineItemUniqueKeys[on]
 	// Set audit fields
 
 	// Build INSERT query
@@ -1347,15 +1485,19 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.AmountCents != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`"amountCents" = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"lineItem"."amountCents"`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.AmountCents)
 	}
 	if update.PostedOn != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`"postedOn" = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"lineItem"."postedOn"`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.PostedOn)
 	}
 	if update.Memo != nil && update.MemoSetNull {
@@ -1363,9 +1505,13 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	}
 	if update.MemoSetNull {
 		setClauses = append(setClauses, `memo = NULL`)
+		compareCurrent = append(compareCurrent, `"lineItem".memo`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Memo != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`memo = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"lineItem".memo`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Memo)
 	}
 	if update.ExternalId != nil && update.ExternalIdSetNull {
@@ -1373,9 +1519,13 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	}
 	if update.ExternalIdSetNull {
 		setClauses = append(setClauses, `"externalId" = NULL`)
+		compareCurrent = append(compareCurrent, `"lineItem"."externalId"`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.ExternalId != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`"externalId" = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `"lineItem"."externalId"`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.ExternalId)
 	}
 	// Handle relationship foreign key: category
@@ -1384,13 +1534,18 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	}
 	if update.CategoryIDSetNull {
 		setClauses = append(setClauses, "\"categoryId\" = NULL")
+		compareCurrent = append(compareCurrent, `"lineItem"."categoryId"`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.CategoryID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("\"categoryId\" = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `"lineItem"."categoryId"`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.CategoryID.ToUUID())
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1405,11 +1560,12 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO "lineItem" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE "lineItem"."deletedAt" IS NULL RETURNING "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt"`,
+		`INSERT INTO "lineItem" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(`"lineItem"."deletedAt" IS NULL`, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1419,65 +1575,353 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.LineItem{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempPostedOn pgtype.Date
-	var tempMemo sql.NullString
-	var tempExternalId sql.NullString
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-	var tempRelCategory *types.IdentityUUID
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&result.AmountCents,
-
-		&tempPostedOn,
-
-		&tempMemo,
-
-		&tempExternalId,
-
-		&tempRelCategory,
-
-		&result.CreatedAt,
-
-		&result.UpdatedAt,
-
-		&result.DeletedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.LineItem]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.LineItem]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no LineItem row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.LineItem{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.LineItem]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *LineItemRepository) UpsertMany(ctx context.Context, inputs []*types.LineItem, on LineItemUniqueKey, update LineItemFields, opts *UpsertOptions) ([]UpsertResult[*types.LineItem], error) {
+	key, ok := lineItemUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: LineItem has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "LineItem", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of LineItem sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of LineItem sets the fields an update sets, not createdAt")
+	}
+	if update.UpdatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of LineItem sets the fields an update sets, not updatedAt")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of LineItem sets the fields an update sets, not deletedAt")
+	}
+	batch, err := upsertBatch("LineItem", opts.Batch, 9361)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.LineItem]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.LineItem], error) {
+		return (&LineItemRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *LineItemRepository) upsertBatches(ctx context.Context, inputs []*types.LineItem, on LineItemUniqueKey, update LineItemFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.LineItem], error) {
+	key := lineItemUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.AmountCents {
+		setClauses = append(setClauses, `"amountCents" = EXCLUDED."amountCents"`)
+		compareCurrent = append(compareCurrent, `"lineItem"."amountCents"`)
+		compareNext = append(compareNext, `EXCLUDED."amountCents"`)
+	}
+	if update.PostedOn {
+		setClauses = append(setClauses, `"postedOn" = EXCLUDED."postedOn"`)
+		compareCurrent = append(compareCurrent, `"lineItem"."postedOn"`)
+		compareNext = append(compareNext, `EXCLUDED."postedOn"`)
+	}
+	if update.Memo {
+		setClauses = append(setClauses, `memo = EXCLUDED.memo`)
+		compareCurrent = append(compareCurrent, `"lineItem".memo`)
+		compareNext = append(compareNext, `EXCLUDED.memo`)
+	}
+	if update.ExternalId {
+		setClauses = append(setClauses, `"externalId" = EXCLUDED."externalId"`)
+		compareCurrent = append(compareCurrent, `"lineItem"."externalId"`)
+		compareNext = append(compareNext, `EXCLUDED."externalId"`)
+	}
+	if update.Category {
+		setClauses = append(setClauses, `"categoryId" = EXCLUDED."categoryId"`)
+		compareCurrent = append(compareCurrent, `"lineItem"."categoryId"`)
+		compareNext = append(compareNext, `EXCLUDED."categoryId"`)
 	}
 
-	// Copy nullable fields when present
+	results := make([]UpsertResult[*types.LineItem], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	if tempPostedOn.Valid {
-		result.PostedOn = types.TemporalDate(tempPostedOn.Time.Format("2006-01-02"))
-	}
-	if tempMemo.Valid {
-		result.Memo = tempMemo.String
-	}
-	if tempExternalId.Valid {
-		result.ExternalId = tempExternalId.String
-	}
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := lineItemUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: amountCents
+			{
+				cell := batchInsertCell{column: `"amountCents"`, set: true}
+				cell.value = input.AmountCents
+				row = append(row, cell)
+			}
+			// Required field: postedOn
+			{
+				cell := batchInsertCell{column: `"postedOn"`, set: true}
+				cell.value = input.PostedOn
+				row = append(row, cell)
+			}
+			// Optional field: memo
+			{
+				cell := batchInsertCell{column: `memo`}
+				if !reflect.ValueOf(input.Memo).IsZero() {
+					cell.value = input.Memo
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: externalId
+			{
+				cell := batchInsertCell{column: `"externalId"`}
+				if !reflect.ValueOf(input.ExternalId).IsZero() {
+					cell.value = input.ExternalId
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: deletedAt
+			{
+				cell := batchInsertCell{column: `"deletedAt"`}
+				if input.DeletedAt != nil {
+					cell.value = time.Time(*input.DeletedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
 
-	// Set relationship IDs from scanned FK values
-	if tempRelCategory != nil {
-		// Initialize pointer for optional relationship before setting ID
-		result.Category = &types.Category{Id: lineItemUUIDPtr(*tempRelCategory)}
-	}
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: category (FK: categoryId)
+			{
+				cell := batchInsertCell{column: `"categoryId"`}
+				var zeroId types.IdentityUUID
+				if input.Category != nil {
+					if relID, ok := lineItemUUIDValue(input.Category.Id); ok && relID != zeroId {
+						cell.value, cell.set = relID.ToUUID(), true
+					}
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+			values = append(values, time.Now())
+			assignments = append(assignments, fmt.Sprintf("\"updatedAt\" = $%d", len(values)))
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO "lineItem" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(`"lineItem"."deletedAt" IS NULL`, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
 
-	return result, nil
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = lineItemKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.LineItem], len(prepared))
+		for n, row := range returned {
+			text, ok := lineItemKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of LineItem wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.LineItem]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the LineItem row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.LineItem, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no LineItem row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.LineItem]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *LineItemRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.LineItem, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.LineItem
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *LineItemRepository) rowsOfKeys(ctx context.Context, on LineItemUniqueKey, keys [][]any, inputs []*types.LineItem) ([]*types.LineItem, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(lineItemUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.LineItem{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := lineItemKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.LineItem, len(inputs))
+	for i, input := range inputs {
+		text, _ := lineItemKeyOf(on, input)
+		row := found[text]
+		if row == nil || upsertHolds(row.DeletedAt) {
+			return nil, fmt.Errorf("the LineItem row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple LineItem records in a single statement

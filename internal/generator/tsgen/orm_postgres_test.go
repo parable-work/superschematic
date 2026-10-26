@@ -38,9 +38,11 @@ type repositoryCase struct {
 // column through the codec; fixture-user-model-db's user model tables,
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
-// the repositories; fixture-vault-db's Encrypted<T> fields (D85), sealed,
-// opened, refused and resealed; and fixture-vectors-db's decimals, vectors
-// and nearest (D84), on the Postgres with pgvector.
+// the repositories; fixture-sync-db's upserts of many rows, their results
+// and updates only if changed under a trigger, and its options of a find, a
+// transaction and a raw query (D89); fixture-vault-db's Encrypted<T> fields
+// (D85), sealed, opened, refused and resealed; and fixture-vectors-db's
+// decimals, vectors and nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -83,6 +85,7 @@ var repositoryCases = []repositoryCase{
 		"a vector reads and writes as its numbers, and nearest finds the neighbours by each metric",
 		"a table @table and @column name, with a sealed note beside its vector: nearest orders by the renamed column and opens each note",
 		"nearest runs the statement sqlutil writes: the filter, the live rows, the vector last, and the order of its distance",
+		"a filtered nearest scans the hnsw index on, with iterativeScan, until it has k rows, where its first candidates hold none",
 	}},
 	{fixture: "fixture-ddl-db", files: []string{"ddl.test.ts"}, tests: []string{
 		"a create that leaves a defaulted field unset writes what the column's DEFAULT gives a raw insert",
@@ -91,10 +94,19 @@ var repositoryCases = []repositoryCase{
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
 	}},
+	{fixture: "fixture-sync-db", files: []string{"sync.test.ts"}, tests: []string{
+		"a sync of 500 lines is one statement, which reports each line inserted, then updated or unchanged, and an unchanged line keeps its stamp and enqueues nothing",
+		"a batch takes a statement per batch in one transaction, a line without the key is inserted, and a failed batch rolls the others back",
+		"upsertOneResult says what it did, and only if changed compares a location as its text and reads back a line it left",
+		"findMany with count false reads the rows without counting them, and in on a time and a boolean keeps the rows that hold one",
+		"a transaction begins at its isolation, read only or not, and a nested one is a savepoint a throw rolls back to",
+		"a raw query reads its rows through a table definition as the repository does, on the ORM and in a transaction",
+	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",
 		"a wrong key, no key and an envelope moved to another row fail with FieldEncryptionError",
-		"updateMany and an upsert on another key than the primary key cannot set an encrypted field; an upsert on the primary key can",
+		"updateMany cannot set an encrypted field; an upsert on any unique key sets one under the key of the row it updates, by a second statement when it differs",
+		"plaidItem.upsertOne by itemId inserts an item sealed under the key it generates, then updates its token; upsertMany seals each item it inserts or updates",
 		"no filter holds an encrypted field, and the DDL bounds the plaintext, not the envelope",
 		"reencrypt reseals the envelopes of an older key under the current one, and the older key can then leave the secret",
 	}},
