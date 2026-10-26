@@ -112,7 +112,7 @@ export const orderTable: TableDefinition = {
     { name: "customerId", column: "customer_id", field: "customer", qualified: "\"order\".customer_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "\"order\".status", required: true, default: "placed", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "shippingAddress", column: "shipping_address", field: "shippingAddress", qualified: "\"order\".shipping_address", json: true, required: true },
+    { name: "shippingAddress", column: "shipping_address", field: "shippingAddress", qualified: "\"order\".shipping_address", jsonText: true, required: true },
     { name: "cancelReason", column: "cancel_reason", field: "cancelReason", qualified: "\"order\".cancel_reason", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "checkoutId", column: "checkout_id", field: "checkoutId", qualified: "\"order\".checkout_id", uuid: true, filter: ["eq", "in", "isNull"] },
     { name: "totalCents", column: "total_cents", field: "totalCents", qualified: "\"order\".total_cents", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },

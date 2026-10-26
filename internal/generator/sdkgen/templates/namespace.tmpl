@@ -26,7 +26,39 @@ import type {
 } from '{{$typesPackage}}';
 {{- end}}
 {{- $valueImports := value_imports .Namespace.Imports}}
-{{- if $valueImports}}
+{{- $lazy := and .SDK.LazyValidation $valueImports}}
+{{- if $lazy}}
+import type * as TypesPackage from '{{$typesPackage}}';
+
+// The types package's validators and parsers, which loadTypes sets on the
+// namespace's first call.
+{{- range $i, $imp := $valueImports}}
+let {{$imp}}: typeof TypesPackage.{{$imp}};
+{{- end}}
+let typesLoaded: Promise<void> | undefined;
+
+/**
+ * Loads the types package's validators and parsers, and with them
+ * superscalar's WebAssembly core, on the namespace's first call rather than
+ * when the SDK is imported (lazyValidation, D82): a bundler that splits code
+ * puts them in a chunk of their own, out of the page's first load. A load
+ * that fails is tried again on the next call.
+ */
+function loadTypes(): Promise<void> {
+  typesLoaded ??= import('{{$typesPackage}}').then(
+    (types) => {
+      {{- range $i, $imp := $valueImports}}
+      {{$imp}} = types.{{$imp}};
+      {{- end}}
+    },
+    (error: unknown) => {
+      typesLoaded = undefined;
+      throw error;
+    }
+  );
+  return typesLoaded;
+}
+{{- else if $valueImports}}
 import {
   {{- range $i, $imp := $valueImports}}
   {{$imp}},
@@ -201,6 +233,9 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
     signal?: AbortSignal | RequestOptions
   ): Promise<{{.TSOutputType}}> {
+    {{- if $lazy}}
+    await loadTypes();
+    {{- end}}
     const formData = new FormData();
     {{- if .HasInput}}
     formData.append('data', JSON.stringify(input));
@@ -281,6 +316,9 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
     signal?: AbortSignal | RequestOptions
   ): Promise<{{.TSOutputType}}> {
+    {{- if $lazy}}
+    await loadTypes();
+    {{- end}}
     const result = await this.client.{{multipart_method .Method}}<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
@@ -383,6 +421,9 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
     ...extraArgs: any[]
   ): Promise<{{.TSOutputType}}> {
+    {{- if $lazy}}
+    await loadTypes();
+    {{- end}}
     {{- if and .ScalarArgs (not .HasInput)}}
     {{- $firstArg := index .ScalarArgs 0}}
     {{- $firstName := toCamelCase $firstArg.Name}}

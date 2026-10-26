@@ -15,6 +15,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -89,10 +90,12 @@ import (
 // shop-db's generated TypeScript repositories (D79), upserts, searches and
 // soft-deletes the shopper's review, and reorders the order in one
 // transaction with its OrderPlaced, which FulfilOrders fulfils too. It
-// reads the static site shop-web, which
-// stack dev built and serves with its config, and asks shop-api, as a
-// browser would, whether the site's origin may call it, and another origin
-// (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
+// reads the static site shop-web, whose dev server stack dev runs behind a
+// proxy that serves shop-api on the site's origin, opens the page's
+// hot-reload socket through it, signs a shopper in with a cookie session
+// there with no CORS to set (D82), and asks shop-api, as a browser on
+// another origin would, whether the site's origin may call it, and another
+// origin (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
 // the implementation's NewJobs, ships the order fulfilled: once on demand
 // with `superschematic stack run`, and again on the every-minute schedule
 // Dev's settings give it, which stack dev runs
@@ -117,8 +120,10 @@ import (
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
 // against that root's mirror of rust-impl/shop-stock and its own API
-// crates, and shop-cart and shop-storefront against their mirrors of
-// typescript/shop-cart and typescript/shop-storefront, and runs the job there with stack run. The
+// crates, shop-cart and shop-storefront against their mirrors of
+// typescript/shop-cart and typescript/shop-storefront, and shop-web, which
+// --build-sites builds, in its mirror of web/shop-web, and runs the job
+// there with stack run. The
 // project's own TypeScript packages keep the links the default output
 // root's install made.
 //
@@ -607,22 +612,28 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			strings.HasPrefix(s.Name, "POST /api/carts/{") && strings.HasSuffix(s.Name, "}/lines")
 	})
 
-	// shop-web, the static site, which stack dev built once and serves
-	// from a file server of its own (D55): its page, its config with
-	// shop-api's address, and the page again for a route of the
-	// application. shop-api answers CORS for the site's origin, which its
-	// CORS field lists, and for no other: the site's CORS answers that
-	// origin's preflight itself, 204, and hands another origin's on to
-	// shop-api's router (D55, amended). There the identity runtime's CORS
-	// answers the trusted origins of its config, which in Dev trusts none,
-	// and the router, which routes no OPTIONS, answers 405 with no
-	// Access-Control-Allow-Origin, so the browser refuses it.
+	// shop-web, the static site, whose dev server, Bun's, stack dev runs
+	// behind a proxy on the site's origin (D82): the dev server's page, the
+	// page again for a route of the application, and the config, which
+	// names shop-api under /api/shop-api on the site's own origin. The
+	// page's hot-reload socket upgrades through the proxy and opens with the
+	// dev server's version message. A shopper signs in with a cookie session
+	// through the proxy: the login is same-origin, so the identity runtime's
+	// cross-origin check passes though Dev trusts no origin, and the session
+	// cookie alone lists the products. The same login sent to shop-api's own
+	// port from the site's origin is cross-origin, and refused.
 	site := env.site
 	if site == "" {
 		t.Fatalf("environment Dev has no site shop-web")
 	}
-	if status, body := call(t, http.MethodGet, site+"/", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
-		t.Fatalf("the site's page: %d %s", status, body)
+	if !strings.Contains(output.String(), "  site     shop-web                 "+site+", its dev server (bun run dev) and its APIs under /api/<service>") {
+		t.Fatalf("stack dev's summary does not say it runs shop-web's dev server at %s", site)
+	}
+	for _, path := range []string{"/", "/products/42"} {
+		if status, body := call(t, http.MethodGet, site+path, "", ""); status != http.StatusOK ||
+			!strings.Contains(string(body), "<title>acme shop</title>") || !strings.Contains(string(body), "/_bun/client/") {
+			t.Fatalf("GET %s on the site: %d %s, want the dev server's page", path, status, body)
+		}
 	}
 	status, body = call(t, http.MethodGet, site+"/__superschematic/config.json", "", "")
 	var config struct {
@@ -630,12 +641,48 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			URL string `json:"url"`
 		} `json:"apis"`
 	}
-	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != env.servers["shop-api"] {
-		t.Fatalf("the site's config: %d %s, want shop-api at %s", status, body, env.servers["shop-api"])
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != site+"/api/shop-api" {
+		t.Fatalf("the site's config: %d %s, want shop-api at %s/api/shop-api", status, body, site)
 	}
-	if status, body := call(t, http.MethodGet, site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
-		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
+	if version := hotReloadVersion(t, site); version == "" {
+		t.Fatalf("the site's hot-reload socket sent no version")
 	}
+	shopper := addUserOnTheStack(ctx, t, env.database, "Grace Hopper", "products.read")
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := &http.Client{Jar: jar}
+	loginBody := fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, shopper.login, shopper.password)
+	if status := browserPost(t, browser, site, site+"/api/shop-api/api/auth/login", "same-origin", loginBody); status != http.StatusOK {
+		t.Fatalf("a cookie login through the site's origin answered %d, want 200", status)
+	}
+	if status := browserPost(t, http.DefaultClient, site, env.servers["shop-api"]+"/api/auth/login", "same-site", loginBody); status != http.StatusForbidden {
+		t.Fatalf("a cookie login from the site's origin to shop-api's own port answered %d, want 403", status)
+	}
+	response, err := browser.Get(site + "/api/shop-api/api/products?inStock=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var productsPage struct {
+		Data []apitypes.ProductView `json:"data"`
+	}
+	err = json.NewDecoder(response.Body).Decode(&productsPage)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || err != nil {
+		t.Fatalf("list the products with the session cookie through the site's origin: %s, %v", response.Status, err)
+	}
+	if status, body := call(t, http.MethodGet, site+"/api/shop-api/api/products?inStock=true", "", ""); status != http.StatusUnauthorized {
+		t.Fatalf("list the products through the site's origin with no session: %d %s, want 401", status, body)
+	}
+	// shop-api answers CORS for the site's origin, which its CORS field
+	// lists, as a deploy's site, on an origin of its own, needs, and for no
+	// other: the site's CORS answers that origin's preflight itself, 204,
+	// and hands another origin's on to shop-api's router (D55, amended).
+	// There the identity runtime's CORS answers the trusted origins of its
+	// config, which in Dev trusts none, and the router, which routes no
+	// OPTIONS, answers 405 with no Access-Control-Allow-Origin, so the
+	// browser refuses it.
 	listing := env.servers["shop-api"] + "/api/products?inStock=true"
 	if status, allowed := preflight(t, listing, site); status != http.StatusNoContent ||
 		allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
@@ -1011,12 +1058,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// cargo compiles the crates the root generates and reuses every other.
 	// It mirrors typescript/shop-storefront into impl/shop-storefront too,
 	// and the site web/shop-web into impl/shop-web, where the site builds,
-	// and its Bun workspace lists the mirrors in place of the project's
-	// packages, so its install leaves their node_modules as the first
-	// run's install linked them, to outputRoot (D65, amended).
+	// since --build-sites builds it once in place of running its dev
+	// server (D82), and its Bun workspace lists the mirrors in place of the
+	// project's packages, so its install leaves their node_modules as the
+	// first run's install linked them, to outputRoot (D65, amended).
 	links := projectLinks(t, outputRoot)
 	otherRoot := otherOutputRoot(t, outputRoot)
-	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
+	again := startStackDev(t, binary, shopStack, "--out", otherRoot, "--build-sites")
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
 	if status := get(t, againEnv.apps[backoffice]+"/stock/engine"); status != http.StatusUnauthorized {
 		t.Fatalf("the Backoffice built in %s answered GET /stock/engine %d, want 401", otherRoot, status)
@@ -1039,13 +1087,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if status := get(t, againEnv.servers["shop-storefront"]+"/readyz"); status != http.StatusOK {
 		t.Fatalf("shop-storefront built in %s answered GET /readyz %d", otherRoot, status)
 	}
-	// shop-web built in its mirror, which its file server serves, and not
-	// in the project's package.
+	// shop-web built in its mirror, which its file server serves, with
+	// shop-api's own address in its config and the page for a route of the
+	// application, and not in the project's package.
 	if _, err := os.Stat(filepath.Join(otherRoot, "impl", "shop-web", "dist", "index.html")); err != nil {
 		t.Fatalf("shop-web's build in %s wrote no page into its mirror: %v", otherRoot, err)
 	}
-	if status := get(t, againEnv.site+"/"); status != http.StatusOK {
-		t.Fatalf("shop-web built in %s answered GET / %d", otherRoot, status)
+	if status, body := call(t, http.MethodGet, againEnv.site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") || strings.Contains(string(body), "/_bun/client/") {
+		t.Fatalf("shop-web built in %s answered a route of the application %d %s, want the built page", otherRoot, status, body)
+	}
+	status, body = call(t, http.MethodGet, againEnv.site+"/__superschematic/config.json", "", "")
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != againEnv.servers["shop-api"] {
+		t.Fatalf("the built site's config: %d %s, want shop-api at %s", status, body, againEnv.servers["shop-api"])
 	}
 	if got := projectLinks(t, outputRoot); !maps.Equal(got, links) {
 		t.Fatalf("stack dev --out %s relinked the project's TypeScript packages:\n%v\nwas\n%v", otherRoot, got, links)
@@ -1524,6 +1577,61 @@ func signInAs(ctx context.Context, t *testing.T, shopAPI string, user stackUser)
 		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
 	}
 	return result.Token
+}
+
+// browserPost posts body to url as JSON as a page on origin would, its
+// fetch's Sec-Fetch-Site fetchSite, and returns the answer's status.
+func browserPost(t *testing.T, client *http.Client, origin, url, fetchSite, body string) int {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Sec-Fetch-Site", fetchSite)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	return response.StatusCode
+}
+
+// hotReloadVersion opens the page's hot-reload socket on the site's
+// origin, /_bun/hmr, where Bun's dev server takes it, as the page's script
+// does, and returns the first message it sends, Bun's version ("V" and a
+// hash). It speaks just enough of RFC 6455 to read one unmasked frame.
+func hotReloadVersion(t *testing.T, site string) string {
+	t.Helper()
+	host := strings.TrimPrefix(site, "http://")
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	fmt.Fprintf(conn, "GET /_bun/hmr HTTP/1.1\r\nHost: %s\r\nOrigin: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n", host, site)
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("the hot-reload socket's upgrade through the site's origin answered %s", response.Status)
+	}
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(reader, header); err != nil || header[1]&0x7f >= 126 {
+		t.Fatalf("the hot-reload socket's first frame: %v %v", header, err)
+	}
+	payload := make([]byte, header[1]&0x7f)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) == 0 || payload[0] != 'V' {
+		t.Fatalf("the hot-reload socket opened with %q, not Bun's version", payload)
+	}
+	return string(payload)
 }
 
 // receiveThroughTheBackoffice receives a delivery of the product in
