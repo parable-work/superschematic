@@ -124,7 +124,7 @@ path for when the store is unavailable.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
   transaction as the change that causes them; `key` with `onDuplicate` or
-  `serialize` for one waiting or one running message per key, and
+  `serialize` for one waiting or one running message per key;
   `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
