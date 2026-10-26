@@ -752,6 +752,24 @@ the runner removes each after the config's `deliveryRetentionMs`,
 thirty days by default. This example's notes name none, so a claim is
 409 `vetoed` with the code `not_configured` until they do.
 
+Check the recipient before you send a body. Comments records a delivery
+for every subject a message mentions, and every follower, whether or not
+that subject may read the schema. A claim returns up to 4000 code points
+of the message's body to the claimer, and says nothing of what the
+recipient may see. Before a notifier sends the
+body, it checks that the recipient may read the instance:
+
+- read the instance as the recipient: `engine.instances.get` with a
+  principal of the recipient's subject and their permissions from your
+  identity store, which asks the policy as their own read would; or
+- ask your policy the same question with the recipient's permissions,
+  `<schema>.read` under `permissionPolicy()`.
+
+For a group subject (`role:editors`), check each member you send to. A
+recipient who may not read it gets no body: settle the delivery
+`dropped`, or send a notice with a link and no text, where signing in
+decides.
+
 A deployment runs two claimers: a notifier that claims people's
 deliveries and sends them to chat, mail or a phone, and an agent
 dispatcher that claims `prefix: "agent:"` and hands each to its agent,
@@ -802,7 +820,13 @@ A delivery carries what the agent needs with no other read: the schema,
 the instance and the message, its thread, its author, and its body as it
 is now. The dispatcher's principal holds the schema's `deliverPermission`
 and, under `permissionPolicy()`, `Comments.claimDeliveries` and
-`Comments.settleDeliveries`.
+`Comments.settleDeliveries`. A mention does not mean the agent may read
+the instance: anyone who may post can mention `agent:reviewer`. Before
+`ask` hands the agent the body, the dispatcher checks that the agent may
+read the instance, as a notifier checks a person (above), by reading it
+as the agent's principal or asking the policy with the agent's
+permissions, and drops the delivery when it may not. Run the agent as
+its own principal, so what it reads next is held to the same policy.
 
 ### Revisions
 

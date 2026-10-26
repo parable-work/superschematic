@@ -3095,7 +3095,17 @@ and `finish` posts it. Each caller has its own read markers and follows,
 each message that comes to stand records a delivery for each subject that
 should hear of it, and three namespace operations read and work them
 across a namespace: the caller's `inbox`, and `claimDeliveries` and
-`settleDeliveries` for a notifier or an agent dispatcher.
+`settleDeliveries` for a notifier or an agent dispatcher. A delivery is
+recorded for each subject a message mentions, and each follower, whether
+or not that subject may read the schema, and a claim returns up to 4000
+code points of the message's body. So a notifier must check that the
+recipient may read the instance before it sends the body: read the
+instance as the recipient (`instances.get` with a principal of the
+recipient's subject and permissions, from the deployment's identity
+store), or ask the deployment's policy with the recipient's permissions,
+and for a `role:<name>` subject each member it sends to. One who may not
+read it gets no body: settle the delivery `dropped`, or send a notice
+with a link and no text.
 `rust/behaviors/src/comments-contract.md` is the contract the behavior,
 the generators and the corpora implement: every record, parameter, check
 and refusal in its order.

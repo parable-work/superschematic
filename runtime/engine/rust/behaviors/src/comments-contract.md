@@ -1120,6 +1120,23 @@ The engine sends nothing (D77). The delivery row is also the inbox's
 record of a mention ("inbox"), so it is kept, sent or not, until
 `deliveryRetentionMs` passes.
 
+A delivery is recorded for every subject X mentions and every follower,
+whether or not that subject may read the schema: Comments asks the policy
+nothing about a recipient, since only the caller is a principal here, and
+a `role:<name>` subject is not one at all. `claimDeliveries` returns the
+message's body, up to 4000 code points ("claimDeliveries"), to the
+claimer, whose `readable()` holds the schema; it says nothing about the
+recipient. So a notifier must check that the recipient may read the
+instance before it sends the body anywhere: read the instance as the
+recipient (`instances.get` with the recipient's principal, its subject
+and permissions from the deployment's identity store, which asks the
+policy as the recipient's own read would), or ask the deployment's
+policy the same question with the recipient's permissions. For a
+`role:<name>` subject it checks each member it expands to. A recipient
+who may not read it gets no body: the notifier settles the delivery
+`dropped`, or sends a notice with no text that links to the instance,
+where a sign-in decides.
+
 ### Operations
 
 `markRead` and `follow` are `"writes": true, "beside": true, "log":
