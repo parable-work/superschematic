@@ -201,15 +201,7 @@ enum Offer {
 }
 
 /// The namespace's tools as the caller sees them, by name (`note.comment`),
-/// from the namespace's tools document and why the engine hides each one
-/// (`mcp.hiddenBy`): none for a tool the deployment hides (`deployment`),
-/// which no caller is offered; refused, with the engine's reason, for one
-/// the policy refuses the caller (`policy`) or that writes in an archived
-/// namespace (`archived`); and offered otherwise. A tool hidden for its
-/// MCP handle alone (`handle`: one longer than MCP allows, not snake case,
-/// an engine tool's, or another tool's too) is a limit of MCP's, so it is
-/// offered: the engine asks the policy of it as of any other, so a refused
-/// one is refused here too, and `hiddenReason` is then the policy's. The
+/// from the namespace's tools document, each as `tool_offer` reads it. The
 /// request keeps them (`#[memoize]`), so a request builds the tools
 /// document once.
 #[memoize(as_ref)]
@@ -220,22 +212,39 @@ async fn offers(cx: &Cx) -> Result<HashMap<String, Offer>, Refusal> {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|tool| {
-                let hidden_by = tool["mcp"]["hiddenBy"].as_array();
-                let by = |cause: HiddenBy| hidden_by.is_some_and(|by| by.iter().any(|each| each == cause.as_str()));
-                if by(HiddenBy::Deployment) {
-                    return None;
-                }
-                let offer = if by(HiddenBy::Policy) || by(HiddenBy::Archived) {
-                    Offer::Refused(tool["mcp"]["hiddenReason"].as_str().unwrap_or_default().to_owned())
-                } else {
-                    Offer::Offered
-                };
-                Some((tool["name"].as_str()?.to_owned(), offer))
-            })
+            .filter_map(|tool| Some((tool["name"].as_str()?.to_owned(), tool_offer(&tool["mcp"])?)))
             .collect())
     })
     .await
+}
+
+/// What a tool is to the caller, from its `mcp` record and why the engine
+/// hides it (`mcp.hiddenBy`). A visible tool is offered. A hidden one is
+/// offered only when every cause is a limit of MCP's: `handle` (its MCP
+/// handle is longer than MCP allows, not snake case, an engine tool's, or
+/// another tool's too) or `filter` (a mount's narrowing, which the pages
+/// do not apply). The engine asks the policy of a tool hidden for its
+/// handle as of any other, so one the policy refuses lists `policy` too.
+/// A tool the deployment hides (`deployment`) is none, as no caller is
+/// offered it. Any other hidden tool is refused with `hiddenReason`: one
+/// the policy refuses (`policy`), one that writes in an archived namespace
+/// (`archived`), and one whose causes are missing or unknown to the pages,
+/// which fail closed.
+fn tool_offer(mcp: &Value) -> Option<Offer> {
+    if mcp["hidden"] != Value::Bool(true) {
+        return Some(Offer::Offered);
+    }
+    let causes: Vec<&str> = mcp["hiddenBy"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if causes.contains(&HiddenBy::Deployment.as_str()) {
+        return None;
+    }
+    let mcp_limit = |cause: &&str| *cause == HiddenBy::Handle.as_str() || *cause == HiddenBy::Filter.as_str();
+    let listed = mcp["hiddenBy"].as_array().is_some_and(|by| !by.is_empty() && by.len() == causes.len());
+    if listed && causes.iter().all(mcp_limit) {
+        return Some(Offer::Offered);
+    }
+    let reason = mcp["hiddenReason"].as_str().filter(|reason| !reason.is_empty()).unwrap_or("The engine does not offer this operation");
+    Some(Offer::Refused(reason.to_owned()))
 }
 
 /// What an operation of a describe document is to the caller (`offers`):
