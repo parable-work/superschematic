@@ -149,6 +149,13 @@ type DepsMemoryStore struct {
 
 	// Field is the Deps field that holds the store.
 	Field string
+
+	// Definitions is the crate of the store's Rust definitions, which the
+	// implementation's crate depends on to name a channel or a key, and
+	// DefinitionsPath its directory relative to the API crate's; both are
+	// empty when the store's outputs write none.
+	Definitions     string
+	DefinitionsPath string
 }
 
 // CrateIdent is the SDK crate as Rust source spells it.
@@ -558,6 +565,17 @@ type ImplementationScaffold struct {
 	// depends on.
 	APIPath     string
 	RuntimePath string
+	// Definitions are the crates of the Rust definitions of the memory
+	// stores the API lists (D75), by their paths relative to the
+	// implementation's directory, which its Cargo.toml depends on.
+	Definitions []ScaffoldDependency
+}
+
+// ScaffoldDependency is a crate the implementation's Cargo.toml depends on
+// by path.
+type ScaffoldDependency struct {
+	Crate string
+	Path  string
 }
 
 // CrateIdent is the API crate as Rust source spells it.
@@ -731,6 +749,16 @@ func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths na
 	}
 	if view.RuntimePath, err = naming.RelPath(dir, paths.HTTPRuntimeRust); err != nil {
 		return false, fmt.Errorf("rustrestgen: the runtime crate's path from the implementation of %s: %w", output.SchemaName, err)
+	}
+	for _, m := range output.Deps.MemoryStores {
+		if m.Definitions == "" {
+			continue
+		}
+		path, err := naming.RelPath(dir, filepath.Join(apiDir, m.DefinitionsPath))
+		if err != nil {
+			return false, fmt.Errorf("rustrestgen: the definitions of %s from the implementation of %s: %w", m.Service, output.SchemaName, err)
+		}
+		view.Definitions = append(view.Definitions, ScaffoldDependency{Crate: m.Definitions, Path: path})
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		return false, fmt.Errorf("create implementation crate %s: %w", dir, err)

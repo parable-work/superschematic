@@ -72,11 +72,17 @@ export abstract class InvoiceIssued {
 A message's fields are values a column holds: a scalar, an enum, a list
 or map of them, or a JSON value such as a `@jsonField` type. A message
 names an order by its key, not by a relation to its table. The build
-refuses a `@key`, a generated field, a relation, an index, and a field
-named like a column the queue keeps.
+refuses a `@key`, a generated field, a relation, an index, a field
+named like a column the queue keeps, and an
+[`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
+field, whose envelope no worker opens: carry the key of the row that holds
+one instead.
 
 The DB service's build writes the queue's table, after its tables, named
-after the class with `_queue`. It holds a column per field, and the
+after the class with `_queue`, or as `@table` names it, whose columns
+`@column` names too
+([Table and column names](/superschematic/guides/database-tables/#table-and-column-names)).
+It holds a column per field, and the
 columns the queue keeps: the message's `id`, its `state` (`ready`,
 `claimed`, `done` or `dead`), its `attempts`, when it is next due, when
 its claim expires and the claim's token, its last error, and when it was
@@ -165,9 +171,14 @@ condition on it, and every required field it leaves out has its
 column's default: a list, a time, a `Default<T, V>` the column carries
 ([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
 schema default, which the trigger writes. `when` names fields rather
-than SQL, since the trigger is written for Postgres and SQLite alike.
+than SQL, since the trigger is written for Postgres and SQLite alike. An
+[`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
+field's column holds an envelope the trigger cannot open, sealed anew on
+every write: the message takes no such field, `fields` compares none, and
+`when` tests only whether one is null.
 
-On Postgres the trigger is a function, `<table>_enqueue_<queue>`, and the
+On Postgres the trigger is a function, `<table>_enqueue_<queue>`, named
+after the tables, `@table`'s names among them, and the
 trigger that runs it after each write, as a
 [versioned table's](/superschematic/reference/versioned-tables/) history
 triggers are. On SQLite it is a trigger per write. The insert ends with

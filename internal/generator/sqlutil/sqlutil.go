@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // PostgresReservedKeywords lists PostgreSQL reserved keywords that need to be
@@ -86,12 +88,32 @@ var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // overlong result is a schema error: the author picks a purpose name, which
 // reads better than any suffix the generator could derive.
 func IndexName(tableName string, keys []string, purpose string, unique bool) (string, error) {
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = ColumnNameOf(key)
+	}
+	return indexName(tableName, keys, parts, purpose, unique)
+}
+
+// IndexNameIn is IndexName of an @index of td, whose keys name td's
+// fields: the table is td's (TableName), and a key whose field takes a
+// name from @column (D85) is spelled by it in the default name.
+func IndexNameIn(td *ir.TypeDef, keys []string, purpose string, unique bool) (string, error) {
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = ColumnNameOf(key)
+		if f := FieldNamed(td, key); f != nil && f.SQLName != "" {
+			parts[i] = f.SQLName
+		}
+	}
+	return indexName(TableName(td), keys, parts, purpose, unique)
+}
+
+func indexName(tableName string, keys, columns []string, purpose string, unique bool) (string, error) {
 	if purpose == "" {
 		parts := make([]string, 0, 2+len(keys))
 		parts = append(parts, "idx", tableName)
-		for _, key := range keys {
-			parts = append(parts, ColumnNameOf(key))
-		}
+		parts = append(parts, columns...)
 		name := strings.Join(parts, "_")
 		if len(name) > PostgresIdentifierLimit {
 			return "", fmt.Errorf(

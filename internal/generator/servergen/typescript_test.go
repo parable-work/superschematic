@@ -514,8 +514,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	}
 	f := loadTypeScriptFixture(t)
 	// ts-db's TypeScript types export the queue ts-shop's implementation
-	// enqueues on and its worker claims (D53).
-	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack", tsMergedStack)...)...)
+	// enqueues on and its worker claims (D53), and ts-cache's the
+	// definitions both implementations depend on (D75).
+	f.build(t, repoRoot, paths, append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), "ts-stack", tsMergedStack)...)...)
 	names := naming.Default()
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	run := func(dir, name string, args ...string) {

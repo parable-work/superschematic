@@ -1167,7 +1167,7 @@ func (r *OrderLineRepository) CreateOne(ctx context.Context, input *types.OrderL
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := orderLineUUIDValue(input.Order.Id); ok && relID != zeroId {
-			fields = append(fields, "order_id")
+			fields = append(fields, `order_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1178,7 +1178,7 @@ func (r *OrderLineRepository) CreateOne(ctx context.Context, input *types.OrderL
 		var zeroId types.IdentityUUID
 		if input.Product != nil {
 			if relID, ok := orderLineUUIDValue(input.Product.Id); ok && relID != zeroId {
-				fields = append(fields, "product_id")
+				fields = append(fields, `product_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -1305,7 +1305,7 @@ func (r *OrderLineRepository) UpsertOne(ctx context.Context, input *types.OrderL
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := orderLineUUIDValue(input.Order.Id); ok && relID != zeroId {
-			fields = append(fields, "order_id")
+			fields = append(fields, `order_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1316,7 +1316,7 @@ func (r *OrderLineRepository) UpsertOne(ctx context.Context, input *types.OrderL
 		var zeroId types.IdentityUUID
 		if input.Product != nil {
 			if relID, ok := orderLineUUIDValue(input.Product.Id); ok && relID != zeroId {
-				fields = append(fields, "product_id")
+				fields = append(fields, `product_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -1479,7 +1479,7 @@ func (r *OrderLineRepository) CreateMany(ctx context.Context, inputs []*types.Or
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: order (FK: order_id)
 		{
-			cell := batchInsertCell{column: "order_id"}
+			cell := batchInsertCell{column: `order_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := orderLineUUIDValue(input.Order.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1488,7 +1488,7 @@ func (r *OrderLineRepository) CreateMany(ctx context.Context, inputs []*types.Or
 		}
 		// Relationship: product (FK: product_id)
 		{
-			cell := batchInsertCell{column: "product_id"}
+			cell := batchInsertCell{column: `product_id`}
 			var zeroId types.IdentityUUID
 			if input.Product != nil {
 				if relID, ok := orderLineUUIDValue(input.Product.Id); ok && relID != zeroId {

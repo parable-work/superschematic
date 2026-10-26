@@ -23,6 +23,14 @@ http = "1"
 {{- end }}
 {{ .CrateName }} = { path = "{{ .APIPath }}" }
 {{ .RuntimeCrate }} = { path = "{{ .RuntimePath }}" }
+{{- if .Definitions }}
+
+# The definitions of the channels and keys of each memory store the API
+# lists (D75).
+{{- range .Definitions }}
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
+{{- end }}
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

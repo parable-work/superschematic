@@ -1274,7 +1274,7 @@ func (r *TenantUserRepository) CreateOne(ctx context.Context, input *types.Tenan
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tenantUserUUIDValue(input.Tenant.Id); ok && relID != zeroId {
-			fields = append(fields, "tenant_id")
+			fields = append(fields, `tenant_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1416,7 +1416,7 @@ func (r *TenantUserRepository) UpsertOne(ctx context.Context, input *types.Tenan
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tenantUserUUIDValue(input.Tenant.Id); ok && relID != zeroId {
-			fields = append(fields, "tenant_id")
+			fields = append(fields, `tenant_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1578,7 +1578,7 @@ func (r *TenantUserRepository) CreateMany(ctx context.Context, inputs []*types.T
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: tenant (FK: tenant_id)
 		{
-			cell := batchInsertCell{column: "tenant_id"}
+			cell := batchInsertCell{column: `tenant_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := tenantUserUUIDValue(input.Tenant.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

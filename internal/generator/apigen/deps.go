@@ -29,6 +29,11 @@ type DepsInfo struct {
 	// ORMModule is Database's Go ORM module.
 	ORMModule string
 
+	// FieldKeys is the field of the API's EnvConfig that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open its ORM
+	// with (D85): its Go name. Empty for a database without one.
+	FieldKeys string
+
 	// VersionGraph reports whether Database declares a version graph: its
 	// ORM then imports the version-graph core's Go binding, which go.mod
 	// replaces.

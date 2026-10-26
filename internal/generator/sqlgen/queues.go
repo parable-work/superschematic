@@ -24,10 +24,10 @@ import (
 // the service lists: the SQLite model reads it from this output, as it
 // reads every table.
 
-// QueueTableName is the table of the queue whose class is name
+// QueueTableName is the table of the queue td declares
 // (sqlutil.QueueTableName, `order_placed_queue`).
-func QueueTableName(name string) string {
-	return sqlutil.QueueTableName(name)
+func QueueTableName(td *ir.TypeDef) string {
+	return sqlutil.QueueTableName(td)
 }
 
 // convertQueueToTable builds the table of the queue typeDef declares.
@@ -39,7 +39,7 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string
 	if len(message.ForeignKeys) > 0 || message.PrimaryKey != "" || len(message.Unique) > 0 || len(message.SearchFields) > 0 || len(message.Indexes) > 0 {
 		return Table{}, fmt.Errorf("queue %s: a message's fields are values, with no key, reference, unique field, search field or index", typeDef.Name)
 	}
-	name := QueueTableName(typeDef.Name)
+	name := QueueTableName(typeDef)
 	doc := message.Doc
 	if doc == "" {
 		doc = "Messages of the queue " + typeDef.Name + ", one row each."

@@ -44,7 +44,7 @@ func checkProjections(schema *ir.Schema, r *Result) {
 			}
 			for _, fd := range td.Fields {
 				if fd.ProjectedFrom != "" || fd.ProjectedFunction != nil {
-					r.errorf(td.Owner, "%s.%s: @column is only valid on a @projection class", td.Name, fd.Name)
+					r.errorf(td.Owner, "%s.%s: @column of an alias.field or a function is only valid on a @projection class; a table's field takes a column name, a SQL identifier with no dot", td.Name, fd.Name)
 				}
 			}
 			continue
@@ -297,6 +297,10 @@ func checkProjectionColumns(schema *ir.Schema, td *ir.TypeDef, scope *projection
 		}
 		if source.JsonField || source.HasMany || source.ManyToMany || source.TypeRef.IsMap {
 			r.errorf(td.Owner, "%s: %s.%s is not a scalar column of %s", owner, alias, source.Name, table.Name)
+			continue
+		}
+		if source.EncryptedAtRest {
+			r.errorf(td.Owner, "%s: %s.%s is Encrypted<T>, so the view would show its ciphertext, which no reader of the view can decrypt; leave it out of the view", owner, alias, source.Name)
 			continue
 		}
 

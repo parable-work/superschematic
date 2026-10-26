@@ -147,6 +147,18 @@ type ORMOutput struct {
 	// (sqlutil.HistoryActorCTE), over Naming.HistoryActorSetting.
 	HistoryActorCTE   string
 	ClearHistoryActor string
+
+	// HasEncryptedFields is a schema with an Encrypted<T> field (D85): it
+	// writes encrypted.go, the Database takes Options (WithFieldKeys), and
+	// go.mod requires the schema runtime, whose fieldcrypt package seals
+	// and opens the envelopes. SchemaRuntimeReplacePath is that module's
+	// replace target, relative to the output directory; empty omits it.
+	HasEncryptedFields       bool
+	SchemaRuntimeReplacePath string
+
+	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
+	// told (sqlutil.DefaultLimit).
+	DefaultLimit int
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -178,6 +190,7 @@ type Repository struct {
 	PrimaryKeyField        string // schema field name, e.g. "id" or "orderId"
 	LookupKeyType          string // GetManyByIDs key: UUIDGoType for a UUID key, else PrimaryKeyType
 	HasSoftDelete          bool   // deletedAt field present
+	DeletedAtCol           string // deletedAt's column, as @column names it (D85), which a history image keys
 	HasDeletedBy           bool   // deletedBy field present (soft deletes stamp it)
 	Versioned              bool   // history table/read methods should be generated
 	HasVersion             bool   // _version column and the fenced UpdateOneIfVersion/DeleteOneIfVersion (@versioned or @optimistic)
@@ -230,6 +243,15 @@ type Repository struct {
 	// SearchCondition is the condition of one word of the filter's
 	// SearchText, sqlutil.SearchConditionOf; empty without search fields.
 	SearchCondition string
+
+	// EncryptedFields are the table's Encrypted<T> fields (D85), which
+	// encrypted.go seals and opens; GeneratesKey is a table whose create
+	// generates a UUID key the input leaves unset, since each envelope is
+	// bound to its row's key (sqlutil.TableModel.GeneratesKey); and
+	// PrimaryKeyIsPointer a key the Go type holds as a pointer.
+	EncryptedFields     []Field
+	GeneratesKey        bool
+	PrimaryKeyIsPointer bool
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -298,6 +320,9 @@ type Field struct {
 	IsJSONLike         bool
 	IsEnum             bool // the field's type is an enum, local or imported
 	IsSecret           bool // @secret: never sent to a client
+	// IsEncrypted is an Encrypted<T> field (D85), whose column holds its
+	// envelope: a write seals it and a read opens it (encrypted.go).
+	IsEncrypted bool
 
 	// Sortable is true when FindPage can order the table's rows by the
 	// field's column (D60, amended), as sqlutil's column says
@@ -819,9 +844,13 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasIntervalLists := false
 	hasIntervalHistory := false
 	hasSearch := false
+	hasEncryptedFields := false
 	for _, repo := range repositories {
 		if repo.HasSearch {
 			hasSearch = true
+		}
+		if len(repo.EncryptedFields) > 0 {
+			hasEncryptedFields = true
 		}
 	}
 	geoPointListGoTypes := make(map[string]string)
@@ -903,6 +932,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasSearch:                hasSearch,
 		HistoryActorCTE:          sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
+		HasEncryptedFields:       hasEncryptedFields,
+		DefaultLimit:             sqlutil.DefaultLimit,
 	}
 
 	return output, nil
@@ -953,6 +984,11 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}
 	}
+	if output.HasEncryptedFields {
+		if output.SchemaRuntimeReplacePath, err = naming.RelPath(outputDir, paths.SchemaRuntimeGo); err != nil {
+			return fmt.Errorf("schema runtime replace path: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -965,6 +1001,9 @@ func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 	modules := []string{output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule}
 	if len(output.VersionGraphs) > 0 {
 		modules = append(modules, output.Naming.VersionGraphGoModule)
+	}
+	if output.HasEncryptedFields {
+		modules = append(modules, output.Naming.SchemaRuntimeGoModule)
 	}
 	output.Pins = pins.Of(modules...)
 }
@@ -1101,6 +1140,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	for _, field := range typeDef.Fields {
 		if field.Name == "deletedAt" {
 			repo.HasSoftDelete = true
+			repo.DeletedAtCol = sqlutil.ColumnName(field)
 		}
 		if field.Name == "deletedBy" {
 			repo.HasDeletedBy = true
@@ -1174,6 +1214,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			repo.QuotedPrimaryKey = field.QuotedDBName
 			repo.PrimaryKeyType = field.GoType
 			repo.PrimaryKeyIsUUID = field.IsUUIDScalar
+			repo.PrimaryKeyIsPointer = field.DerefValue || field.IsAutoGenerated
 		}
 	}
 
@@ -1213,6 +1254,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		repo.QuotedPrimaryKey = sqlutil.QuoteIdentifier("id")
 		repo.PrimaryKeyType = uuidGoType
 		repo.PrimaryKeyIsUUID = true
+		repo.PrimaryKeyIsPointer = true
 	}
 	repo.LookupKeyType = uuidGoType
 	if !repo.PrimaryKeyIsUUID {
@@ -1222,7 +1264,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		appendVersionField(&repo)
 	}
 	if repo.Versioned {
-		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef.VersionedConfig)
+		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef)
 	}
 
 	repo.SortFields = sortFields(repo.Fields)
@@ -1357,11 +1399,12 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateLike:                class.DateLike,
 		IsJSONLike:                class.JSONLike,
 		IsEnum:                    isEnum,
-		IsSecret:                  fieldDef.Secret,
+		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,
+		IsEncrypted:               fieldDef.EncryptedAtRest,
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
 		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}
-	if !field.IsAuditField || field.IsAuditTimestamp {
+	if (!field.IsAuditField || field.IsAuditTimestamp) && !field.IsEncrypted {
 		field.FilterKind = goFilterKind(class.FilterKind(isArray))
 	}
 
@@ -1495,6 +1538,12 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	}
 	repo.SortFields = sortFields(repo.Fields)
 	repo.SearchCondition = sqlutil.SearchConditionOf(table)
+	for _, field := range repo.Fields {
+		if field.IsEncrypted {
+			repo.EncryptedFields = append(repo.EncryptedFields, field)
+		}
+	}
+	repo.GeneratesKey = table.GeneratesKey()
 	for _, key := range table.UniqueKeys {
 		name := repo.TypeName + "UniqueBy"
 		for _, field := range key.Fields {
@@ -1535,6 +1584,7 @@ func attachInboundReferences(repositories []Repository) {
 					SourceTable:      source.QuotedTableName,
 					SourceColumn:     rel.QuotedDBColumn,
 					SourceSoftDelete: source.HasSoftDelete,
+					SourceDeletedAt:  source.Table.AuditQuoted(sqlutil.AuditDeletedAt),
 				}),
 			})
 		}
@@ -1615,11 +1665,11 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 
 // historyActorColumn returns the column a versioned table's delete
 // tombstone records its actor in, as sqlgen's history trigger picks it
-// (sqlutil.VersionedHistory): deleted_by when the table has one, else
-// updated_by, else "". An actor column @versioned({ exclude }) leaves out
-// of history records none.
-func historyActorColumn(fields []Field, cfg *ir.VersionedConfig) string {
-	return sqlutil.VersionedHistory(cfg, func(column string) bool {
+// (sqlutil.VersionedHistory): deletedBy's column when the table has one,
+// else updatedBy's, else "". An actor column @versioned({ exclude }) leaves
+// out of history records none.
+func historyActorColumn(fields []Field, td *ir.TypeDef) string {
+	return sqlutil.VersionedHistory(td, func(column string) bool {
 		return slices.ContainsFunc(fields, func(field Field) bool { return field.DBName == column })
 	}).Actor
 }

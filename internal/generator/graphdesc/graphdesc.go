@@ -224,7 +224,7 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef, sqlTypes map[string]strin
 	if _, ok := columns["updatedBy"]; ok {
 		kind.Author = columns["updatedBy"]
 	}
-	kept := sqlutil.VersionedHistory(td.VersionedConfig, func(column string) bool {
+	kept := sqlutil.VersionedHistory(td, func(column string) bool {
 		_, ok := kind.Columns[column]
 		return ok
 	})
@@ -509,16 +509,12 @@ func keyColumn(schema *ir.Schema, td *ir.TypeDef) string {
 	return "id"
 }
 
-// Column is the column that holds fd, as the sql generator names it: a
-// to-one relation to a table is <field>_id, every other field its
-// snake_case name.
+// Column is the column that holds fd, as the sql generator names it
+// (sqlutil.ColumnOf): a to-one relation to a table is its foreign key,
+// <field>_id, every other field its snake_case name, unless @column names
+// it (D85).
 func Column(schema *ir.Schema, fd *ir.FieldDef) string {
-	name := codegen.ToSnakeCase(fd.Name)
-	target := schema.Types[fd.TypeRef.Name]
-	if target != nil && target.Role == ir.RoleDBTable && !target.JsonField && !fd.JsonField && !fd.TypeRef.IsArray && !fd.TypeRef.IsMap {
-		return name + "_id"
-	}
-	return name
+	return sqlutil.ColumnNameIn(schema, fd)
 }
 
 // isAudit reports whether a field is one of the audit fields D17 leaves out

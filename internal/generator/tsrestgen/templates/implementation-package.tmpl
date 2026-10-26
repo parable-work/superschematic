@@ -15,6 +15,11 @@
 {{- if and .Deps.DatabaseTypesPackage (ne .Deps.DatabaseTypesPackage .TypesPackage) }}
     "{{ .Deps.DatabaseTypesPackage }}": "workspace:*",
 {{- end }}
+{{- range .Deps.MemoryStores }}
+{{- if .Definitions }}
+    "{{ .Definitions }}": "workspace:*",
+{{- end }}
+{{- end }}
     "{{ .RuntimePackage }}": "*"
   },
   "devDependencies": {
