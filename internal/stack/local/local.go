@@ -269,7 +269,10 @@ func Register(r *registry.Registry) error {
 			NameOf:          processName,
 			AddressOf:       siteAddress,
 			PublicAddressOf: siteAddress,
-			Lower:           lowerSite,
+			// The site's proxy serves its origin's APIs (D91), as it
+			// serves a dev server's (D82).
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name: JobPlatform,
@@ -573,7 +576,8 @@ var resourceTypes = map[string]string{
 	        "additionalProperties": false
 	      }}},
 	      "additionalProperties": false
-	    }
+	    },
+	    "origin": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}}
 	  },
 	  "additionalProperties": false
 	}`,
