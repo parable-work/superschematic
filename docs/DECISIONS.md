@@ -11783,7 +11783,13 @@ Status: built.
   as a token; replicas under one key with a shared store redeem each
   other's tokens once; `mountMcp` refuses a missing or short key and a
   tool that takes `confirmationToken`. `src/mcp-parity.test.ts` replays
-  the engine's corpus unchanged.
+  the engine's corpus unchanged. A one-off run of the official MCP client
+  (`@modelcontextprotocol/client` 2.2.0, the engine's test dependency,
+  which the HTTP runtime does not take) against `mountMcp` found its
+  multi-round-trip driver asks its elicitation handler the summary and
+  retries, so `accept` runs the call and `decline` and `cancel` are
+  `confirmation_declined`, and its 2025 client, eliciting or not, gets
+  and redeems the token.
 - **The generated server.** `TestGeneratedMCPRuntime` runs fixture-mcp's
   generated router: `update_order` (`ask`) answers a token, runs with it
   once, and the router refuses to build without a key.
