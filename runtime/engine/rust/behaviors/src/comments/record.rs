@@ -198,6 +198,9 @@ fn record(
     if let Some(at) = message.posted_at {
         out.insert("postedAt".into(), Value::from(at));
     }
+    if let Some(stand) = message.stand {
+        out.insert("stand".into(), Value::from(stand));
+    }
     if let Some(at) = message.edited_at {
         out.insert("editedAt".into(), Value::from(at));
     }

@@ -309,7 +309,7 @@ fn begin_holds_a_place_appends_build_the_draft_and_finish_posts_it() {
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 1, "lastMessageAt": 1000, "threads": {"open": 1, "resolved": 0}, "composing": ["bob"]})
+            json!({"messages": 1, "lastMessageAt": 1000, "threads": {"open": 1, "resolved": 0}, "composing": ["bob"], "unread": 0})
         );
         world.set_clock(2500);
         assert_eq!(
@@ -337,11 +337,11 @@ fn begin_holds_a_place_appends_build_the_draft_and_finish_posts_it() {
         assert_eq!(
             finished,
             json!({"id": 2, "author": "bob", "state": "posted", "body": "Héllo, wörld 🙂", "blocks": [], "mentions": ["alice"], "reactions": {},
-                   "createdAt": 2000, "postedAt": 4000, "edits": 0, "pinned": false, "replies": 0, "participants": ["bob"]})
+                   "createdAt": 2000, "postedAt": 4000, "stand": 3, "edits": 0, "pinned": false, "replies": 0, "participants": ["bob"]})
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 3, "lastMessageAt": 4000, "threads": {"open": 3, "resolved": 0}, "composing": []})
+            json!({"messages": 3, "lastMessageAt": 4000, "threads": {"open": 3, "resolved": 0}, "composing": [], "unread": 2})
         );
         assert_eq!(world.drafts(), 0);
         // A reply streamed into a thread: the thread counts it once it
@@ -364,7 +364,7 @@ fn begin_holds_a_place_appends_build_the_draft_and_finish_posts_it() {
             finished,
             json!({"id": 4, "thread": 1, "quotes": 1, "author": "carol", "state": "posted", "body": "Replaced.",
                    "blocks": [{"kind": "action", "title": "Ran it", "status": "succeeded"}], "mentions": [], "reactions": {},
-                   "createdAt": 5000, "postedAt": 6000, "edits": 0, "pinned": false})
+                   "createdAt": 5000, "postedAt": 6000, "stand": 4, "edits": 0, "pinned": false})
         );
         let top = world.message(1);
         assert_eq!(
@@ -373,7 +373,7 @@ fn begin_holds_a_place_appends_build_the_draft_and_finish_posts_it() {
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 4, "lastMessageAt": 6000, "threads": {"open": 3, "resolved": 0}, "composing": []})
+            json!({"messages": 4, "lastMessageAt": 6000, "threads": {"open": 3, "resolved": 0}, "composing": [], "unread": 2})
         );
         // begin, finish and interrupt are logged beside the instance;
         // appendDraft appends nothing.
@@ -749,11 +749,11 @@ fn interrupt_keeps_what_was_written_and_only_its_author_or_a_moderator_stops_it_
         assert_eq!(
             interrupted,
             json!({"id": 2, "thread": 1, "author": "bob", "state": "interrupted", "body": "Half a th", "blocks": [], "mentions": [],
-                   "reactions": {}, "createdAt": 1000, "postedAt": 3000, "edits": 0, "pinned": false})
+                   "reactions": {}, "createdAt": 1000, "postedAt": 3000, "stand": 2, "edits": 0, "pinned": false})
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 2, "lastMessageAt": 3000, "threads": {"open": 1, "resolved": 0}, "composing": []})
+            json!({"messages": 2, "lastMessageAt": 3000, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0})
         );
         let top = world.message(1);
         assert_eq!(
@@ -1107,7 +1107,7 @@ fn batch_1s_operations_refuse_a_composing_message_and_delete_and_purge_drop_its_
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []})
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(world.drafts(), 0);
         // A moderator deletes another's.
@@ -1535,7 +1535,7 @@ fn migration_3_adds_drafts_to_a_conversation_migration_2_holds() {
         assert_eq!(
             thread["root"],
             json!({"id": 1, "author": "alice", "state": "posted", "body": "One.", "blocks": [], "mentions": [], "reactions": {},
-                   "createdAt": 1001, "postedAt": 1001, "edits": 0, "pinned": false, "replies": 1, "lastReplyAt": 1002, "participants": ["bob", "alice"]})
+                   "createdAt": 1001, "postedAt": 1001, "stand": 1, "edits": 0, "pinned": false, "replies": 1, "lastReplyAt": 1002, "participants": ["bob", "alice"]})
         );
         // Every message stood from its createdAt, the deleted one too.
         let posted: Vec<(Value, Value)> = thread["items"]
@@ -1560,7 +1560,7 @@ fn migration_3_adds_drafts_to_a_conversation_migration_2_holds() {
             .clone();
         assert_eq!(
             fields,
-            json!({"messages": 3, "lastMessageAt": 1004, "threads": {"open": 2, "resolved": 0}, "composing": []})
+            json!({"messages": 3, "lastMessageAt": 1004, "threads": {"open": 2, "resolved": 0}, "composing": [], "unread": 0})
         );
         // The edit window counts from the backfilled postedAt.
         publish(&engine, json!({"editWindowMs": 3998}));
@@ -1598,7 +1598,7 @@ fn migration_3_adds_drafts_to_a_conversation_migration_2_holds() {
                     .collect::<superschematic_engine::storage::Result<Vec<_>>>()
             })
             .unwrap();
-        assert_eq!(ledger, [1, 2, 3]);
+        assert_eq!(ledger, [1, 2, 3, 4]);
         engine.shutdown();
     }
 }
