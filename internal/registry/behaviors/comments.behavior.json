@@ -1181,7 +1181,7 @@
     },
     {
       "name": "markRead",
-      "description": "Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event.",
+      "description": "Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1203,11 +1203,12 @@
       },
       "writes": true,
       "beside": true,
-      "log": false
+      "log": false,
+      "asks": "read"
     },
     {
       "name": "follow",
-      "description": "Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event.",
+      "description": "Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1228,7 +1229,8 @@
       },
       "writes": true,
       "beside": true,
-      "log": false
+      "log": false,
+      "asks": "read"
     },
     {
       "name": "listMessages",

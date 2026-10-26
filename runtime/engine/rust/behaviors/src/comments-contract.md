@@ -1123,11 +1123,10 @@ record of a mention ("inbox"), so it is kept, sent or not, until
 ### Operations
 
 `markRead` and `follow` are `"writes": true, "beside": true, "log":
-false`, as `appendDraft` is: they append no event and move nothing a read
-of another caller returns. The policy is asked `write` with the operation
-`markRead` or `follow`, as for every writing operation, and D77's rule for
-`post` applies to them too: a deployment whose readers may read state lets
-both through for a caller who may read the type.
+false, "asks": "read"`: they append no event and move nothing a read of
+another caller returns, and since they write only the caller's own state
+the policy is asked `read` with the operation `markRead` or `follow`, so a
+caller who may read the instance may call them under `permissionPolicy`.
 
 #### `markRead({ upTo, thread? })`
 
@@ -1214,7 +1213,11 @@ lets `inbox` through and asks `Comments.claimDeliveries` and
 `sql.readable()`, written `<readable>` below, the schemas that compose
 Comments and that the caller may read (column `schema`), or reads its
 schemas into a list it binds; a row of another schema never leaves a
-statement. `cx.now()` is one value for the call.
+statement. `cx.now()` is one value for the call. A schema's config
+(`deliverPermission`, `maxAttempts`, `retryBackoffMs`,
+`deliveryRetentionMs`) comes from `cx.configs()`, each composing schema's
+live config, or `cx.config(schema)`. The two writing operations run under
+the namespace's writer, so they serialize with posts and finishes.
 
 #### `inbox({ kinds?, unread?, limit?, cursor? })`
 
