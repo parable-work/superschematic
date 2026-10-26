@@ -226,6 +226,16 @@ export function formatDuration(nanos: bigint): string {
  * string, "1" or "x", reads as that string, and is not parsed a second time.
  */
 export function jsonMemberValue(text: unknown, field: QueueField): unknown {
+  return decodeJSONText(text, field.shape);
+}
+
+/**
+ * A JSON column's text decoded once (D79, D80): the JSON value it holds, a JSON string among them, and of the kind
+ * shape names when it names one. A queue's claim reads every JSON column so, and the Postgres value codec
+ * (pgcodec.ts) a TEXT column that holds JSON; a json or jsonb column a repository reads arrives parsed by pg, the
+ * same value.
+ */
+export function decodeJSONText(text: unknown, shape?: 'object' | 'list'): unknown {
   if (typeof text !== 'string') throw new Error(`the column holds ${JSON.stringify(text)}, no JSON text`);
   let value: unknown;
   try {
@@ -233,8 +243,8 @@ export function jsonMemberValue(text: unknown, field: QueueField): unknown {
   } catch (error) {
     throw new Error(`holds no JSON: ${errorMessage(error)}`, { cause: error });
   }
-  if (field.shape !== undefined && value !== null && jsonKind(value) !== field.shape) {
-    throw new Error(`holds ${article(jsonKind(value))}, where its type is ${article(field.shape)}`);
+  if (shape !== undefined && value !== null && jsonKind(value) !== shape) {
+    throw new Error(`holds ${article(jsonKind(value))}, where its type is ${article(shape)}`);
   }
   return value;
 }
