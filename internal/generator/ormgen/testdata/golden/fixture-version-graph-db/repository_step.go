@@ -1785,7 +1785,7 @@ func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*typ
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stepUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1795,7 +1795,7 @@ func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*typ
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stepUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1988,7 +1988,7 @@ func (r *StepRepository) UpsertOne(ctx context.Context, input *types.Step, on St
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stepUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1998,7 +1998,7 @@ func (r *StepRepository) UpsertOne(ctx context.Context, input *types.Step, on St
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stepUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2266,7 +2266,7 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := stepUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -2275,7 +2275,7 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := stepUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

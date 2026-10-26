@@ -1,4 +1,5 @@
 export {
+  decrypted,
   denyUnknownFields,
   docs,
   icon,

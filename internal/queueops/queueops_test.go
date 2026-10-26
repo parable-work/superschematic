@@ -117,3 +117,23 @@ func TestReadResult(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// TestDocumentNamesTheQueuesTable: a queue whose @table names its table
+// (D85) has its statements run on that table, quoted, and a queue without
+// one on its class's name with _queue.
+func TestDocumentNamesTheQueuesTable(t *testing.T) {
+	for _, tc := range []struct {
+		table, want string
+	}{
+		{"linePosted", `"linePosted"`},
+		{"", "line_posted_queue"},
+	} {
+		doc, err := Document(Request{Service: "fixture-naming-db", Queue: "LinePosted", Operation: Dead, Limit: 1, Table: tc.table})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(doc), "FROM "+strings.ReplaceAll(tc.want, `"`, `\"`)+" ") {
+			t.Errorf("table %q: the document names no %s:\n%s", tc.table, tc.want, doc)
+		}
+	}
+}

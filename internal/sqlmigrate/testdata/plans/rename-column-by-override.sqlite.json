@@ -1,0 +1,85 @@
+{
+  "dialect": "sqlite",
+  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
+  "hash": "ce5b8114b2c468553c610d80a27a2deb42bc614dcedd59ffaea6013db2f3aafa",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/customer/column/emailAddress",
+          "reason": "customer.email is renamed to customer.emailAddress, following Customer.email's @column: servers built from the previous version still use the old name.",
+          "subject": "table/customer/column/emailAddress"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"customer\" RENAME COLUMN \"email\" TO \"emailAddress\""
+      ],
+      "subject": "table/customer/column/emailAddress",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/customerId",
+          "reason": "order.customer_id is renamed to order.customerId, following Order.customer's @column: servers built from the previous version still use the old name.",
+          "subject": "table/order/column/customerId"
+        }
+      ],
+      "index": 2,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN \"customer_id\" TO \"customerId\""
+      ],
+      "subject": "table/order/column/customerId",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer/constraint/customer_emailAddress_key",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with customer.",
+          "subject": "table/customer/constraint/customer_emailAddress_key"
+        }
+      ],
+      "index": 3,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"customer_email_key\"",
+        "CREATE UNIQUE INDEX \"customer_emailAddress_key\" ON \"customer\" (\"emailAddress\")"
+      ],
+      "subject": "table/customer/constraint/customer_emailAddress_key",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/index/idx_order_customerId_placed_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with order.",
+          "subject": "table/order/index/idx_order_customerId_placed_at"
+        }
+      ],
+      "index": 4,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_customer_placed_at\"",
+        "CREATE INDEX \"idx_order_customerId_placed_at\" ON \"order\" (\"customerId\", \"placed_at\")"
+      ],
+      "subject": "table/order/index/idx_order_customerId_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "aa346e04b1b4a2e626a2332ab169f87de6ff303861b305787be694122617b5db",
+  "toModel": null,
+  "version": 1
+}

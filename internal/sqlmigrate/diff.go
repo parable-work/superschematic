@@ -194,7 +194,7 @@ func (d *differ) diffRenames() {
 		})
 		reason := fmt.Sprintf("Table %s is renamed to %s: servers built from the previous version still use the old name.", prev, name)
 		if because := d.renames.because["table:"+name]; because != "" {
-			reason = fmt.Sprintf("Table %s is renamed to %s, following --rename %s: servers built from the previous version still use the old name.", prev, name, because)
+			reason = fmt.Sprintf("Table %s is renamed to %s, following %s: servers built from the previous version still use the old name.", prev, name, because)
 		}
 		c.addHazard(HazardCompat, "", reason)
 		d.breaksReaders(c, prev, "", "renames its table to "+name)
@@ -210,7 +210,7 @@ func (d *differ) diffRenames() {
 			reason := fmt.Sprintf("%s.%s is renamed to %s.%s%s: servers built from the previous version still use the old name.",
 				prevTable, prev, table, name, originNote(columnNamed(tt, name)))
 			if because := d.renames.because["column:"+table+"."+name]; because != "" {
-				reason = fmt.Sprintf("%s.%s is renamed to %s.%s, following --rename %s: servers built from the previous version still use the old name.",
+				reason = fmt.Sprintf("%s.%s is renamed to %s.%s, following %s: servers built from the previous version still use the old name.",
 					prevTable, prev, table, name, because)
 			}
 			c.addHazard(HazardCompat, "", reason)

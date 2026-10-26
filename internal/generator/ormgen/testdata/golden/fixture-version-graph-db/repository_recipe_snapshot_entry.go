@@ -955,7 +955,7 @@ func (r *RecipeSnapshotEntryRepository) CreateOne(ctx context.Context, input *ty
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeSnapshotEntryUUIDValue(input.Commit.Id); ok && relID != zeroId {
-			fields = append(fields, "commit_id")
+			fields = append(fields, `commit_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1079,7 +1079,7 @@ func (r *RecipeSnapshotEntryRepository) UpsertOne(ctx context.Context, input *ty
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeSnapshotEntryUUIDValue(input.Commit.Id); ok && relID != zeroId {
-			fields = append(fields, "commit_id")
+			fields = append(fields, `commit_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1235,7 +1235,7 @@ func (r *RecipeSnapshotEntryRepository) CreateMany(ctx context.Context, inputs [
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: commit (FK: commit_id)
 		{
-			cell := batchInsertCell{column: "commit_id"}
+			cell := batchInsertCell{column: `commit_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeSnapshotEntryUUIDValue(input.Commit.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

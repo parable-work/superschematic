@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -389,17 +390,28 @@ func applyJoin(td *ir.TypeDef, args []any) error {
 
 // applyColumn reads @column("alias.field") or @column({ function, args }).
 func applyColumn(fd *ir.FieldDef, args []any) error {
-	if fd.ProjectedFrom != "" || fd.ProjectedFunction != nil {
-		return fmt.Errorf("a projection column takes one @column")
+	if fd.ProjectedFrom != "" || fd.ProjectedFunction != nil || fd.SQLName != "" {
+		return fmt.Errorf("a field takes one @column")
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("@column takes exactly one alias.field string or function object")
+		return fmt.Errorf("@column takes exactly one column name, alias.field string or function object")
 	}
 	if s, ok := args[0].(string); ok {
 		if s == "" {
-			return ArgErrorf(0, "@column requires a non-empty alias.field")
+			return ArgErrorf(0, "@column requires a non-empty column name or alias.field")
 		}
-		fd.ProjectedFrom = s
+		// A projection column reads alias.field; a table's field names its
+		// own column, a SQL identifier, which holds no dot (D85). Which one
+		// a field may take is verify's, which knows the class's role.
+		if strings.Contains(s, ".") {
+			fd.ProjectedFrom = s
+			return nil
+		}
+		name, err := sqlIdentifierArg("@column", args)
+		if err != nil {
+			return err
+		}
+		fd.SQLName = name
 		return nil
 	}
 	obj, ok := args[0].(map[string]any)

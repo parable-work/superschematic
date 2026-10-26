@@ -15,7 +15,7 @@ APIs.
     db: {{ .Database.Var }},
 {{- end }}
 {{- if .ORM }}
-    orm: {{ .Database.ORM }}({{ .Database.Var }}),
+    orm: {{ .Database.ORM }}({{ .Database.Var }}{{ if .ORMFieldKeys }}, { fieldKeys: {{ .ORMFieldKeys }} }{{ end }}),
 {{- end }}
 {{- range .Calls }}
     {{ .Field }}: {{ .Client.Var }},

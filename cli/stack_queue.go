@@ -268,7 +268,7 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	req := request(service, queue)
-	req.Key = c.queueKey(service, queue)
+	req.Key, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
 	doc, err := queueops.Document(req)
 	if err != nil {
 		return err
@@ -371,6 +371,17 @@ func (c *deployContext) queueKey(service, queue string) string {
 	for _, svc := range c.services {
 		if svc.Name == service {
 			return svc.QueueKeys[queue]
+		}
+	}
+	return ""
+}
+
+// queueTable is the table of service's queue, as its class names it
+// (D85), or "" when the service is not among the stack's.
+func (c *deployContext) queueTable(service, queue string) string {
+	for _, svc := range c.services {
+		if svc.Name == service {
+			return svc.QueueTables[queue]
 		}
 	}
 	return ""

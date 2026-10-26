@@ -432,6 +432,11 @@ type TypeScriptAPI struct {
 	// which the entrypoint builds over its pool with Database.ORM.
 	ORM bool
 
+	// ORMFieldKeys is the expression of the API's config that holds the
+	// keys of Database's Encrypted<T> fields, which the repositories open
+	// with (D85); empty for a database without one.
+	ORMFieldKeys string
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -848,6 +853,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Database = d
 			if o.DepsORM() && !d.SQLite {
 				api.ORM = true
+				if key := o.Deps.ORMFieldKeys; key != "" && api.Config != "" {
+					api.ORMFieldKeys = api.Config + "." + key
+				}
 				if d.ORM == "" {
 					stem := varStem(d.Service)
 					d.ORM = taken.take("create" + strings.ToUpper(stem[:1]) + stem[1:] + "Orm")

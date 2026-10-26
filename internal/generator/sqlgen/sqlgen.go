@@ -175,6 +175,11 @@ type JoinTable struct {
 
 	// OriginalField is the schema field that declared the relationship.
 	OriginalField string
+
+	// QuotedLeftRef and QuotedRightRef are the key columns of the two
+	// tables the foreign keys reference.
+	QuotedLeftRef  string
+	QuotedRightRef string
 }
 
 // HistoryTable represents the generated append-only history table and capture
@@ -393,13 +398,14 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				Type:       keyFieldType(schema, typeDef, scalarMapping),
 				Nullable:   !field.Required,
 			})
+			parentKey := sqlutil.KeyColumnOf(typeDef)
 			targetTable.ForeignKeys = append(targetTable.ForeignKeys, ForeignKey{
 				Column:          fkColumnName,
 				QuotedColumn:    sqlutil.QuoteIdentifier(fkColumnName),
 				RefTable:        parentTableName,
 				QuotedRefTable:  sqlutil.QuoteIdentifier(parentTableName),
-				RefColumn:       "id",
-				QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+				RefColumn:       parentKey,
+				QuotedRefColumn: sqlutil.QuoteIdentifier(parentKey),
 				// @hasMany back-ref: no RelationDef to read; stays CASCADE.
 				OnDelete: "CASCADE",
 			})
@@ -485,7 +491,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			})
 			continue
 		}
-		historyTable, err := buildHistoryTable(*table, typeDef.VersionedConfig, historyActorSetting)
+		historyTable, err := buildHistoryTable(*table, typeDef, historyActorSetting)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build history table for %s: %w", typeDef.Name, err)
 		}
@@ -751,6 +757,7 @@ func convertTypeToTable(
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
 			refTableName := sqlutil.TableNameOf(schema, field.Relation.Type)
+			refKey := sqlutil.KeyColumnOf(schema.Types[field.Relation.Type])
 			onDelete := "CASCADE"
 			if field.Relation.OnDelete != "" {
 				onDelete = field.Relation.OnDelete
@@ -760,8 +767,8 @@ func convertTypeToTable(
 				QuotedColumn:    sqlutil.QuoteIdentifier(columnName),
 				RefTable:        refTableName,
 				QuotedRefTable:  sqlutil.QuoteIdentifier(refTableName),
-				RefColumn:       "id",
-				QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+				RefColumn:       refKey,
+				QuotedRefColumn: sqlutil.QuoteIdentifier(refKey),
 				OnDelete:        onDelete,
 			})
 		}
@@ -783,7 +790,7 @@ func convertTypeToTable(
 		indexKeys := make([]string, 0, len(idx.Keys))
 
 		for _, key := range idx.Keys {
-			indexCol := findIndexColumn(table.Columns, key)
+			indexCol := fieldColumn(&table, key)
 			if indexCol == nil {
 				return table, fmt.Errorf("@index key %q of type %s names no column of table %s", key, typeDef.Name, table.Name)
 			}
@@ -801,7 +808,7 @@ func convertTypeToTable(
 				Columns:       indexColumns,
 				Type:          method,
 				Unique:        idx.Unique,
-				Where:         indexPredicate(idx, table.Columns, indexColumns),
+				Where:         indexPredicate(idx, typeDef, table.Columns, indexColumns),
 				Opclass:       idx.Ops,
 				Expression:    idx.Expression,
 				InTransaction: idx.Concurrently != nil && !*idx.Concurrently,
@@ -810,7 +817,7 @@ func convertTypeToTable(
 			name: idx.Name,
 		})
 	}
-	indexes, err := assignIndexNames(table.Name, pending)
+	indexes, err := assignIndexNames(typeDef, pending)
 	if err != nil {
 		return table, err
 	}
@@ -853,38 +860,30 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 // where (D83), and for a unique index on a soft-deletable table
 // (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it, as an
 // upsert's conflict target names it (sqlutil.IndexPredicate).
-func indexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
-	return sqlutil.IndexPredicate(idx.Where, uniqueIndexPredicate(idx, columns, indexColumns))
+func indexPredicate(idx ir.IndexDef, typeDef *ir.TypeDef, columns []Column, indexColumns []string) string {
+	return sqlutil.IndexPredicate(idx.Where, uniqueIndexPredicate(idx, typeDef, columns, indexColumns))
 }
 
 // uniqueIndexPredicate returns the partial-index predicate for a unique
-// index on a soft-deletable table (one with a deleted_at column):
-// "deleted_at IS NULL", so soft-deleted tombstones do not permanently
-// occupy the unique slot. Non-unique indexes, tables without
-// deleted_at, and indexes that key on deleted_at itself get no predicate.
-func uniqueIndexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
-	if !idx.Unique {
+// index on a soft-deletable table (one with a deletedAt field):
+// "deleted_at IS NULL", its column as @column names it (D85), so
+// soft-deleted tombstones do not permanently occupy the unique slot.
+// Non-unique indexes, tables without deletedAt, and indexes that key on
+// deletedAt itself get no predicate.
+func uniqueIndexPredicate(idx ir.IndexDef, typeDef *ir.TypeDef, columns []Column, indexColumns []string) string {
+	if !idx.Unique || sqlutil.FieldNamed(typeDef, sqlutil.AuditDeletedAt) == nil {
 		return ""
 	}
-
-	deletedAtQuoted := ""
-	for _, col := range columns {
-		if col.Name == "deleted_at" {
-			deletedAtQuoted = col.QuotedName
-			break
-		}
-	}
-	if deletedAtQuoted == "" {
+	deletedAt := columnNamed(Table{Columns: columns}, sqlutil.AuditColumnIn(typeDef, sqlutil.AuditDeletedAt))
+	if deletedAt == nil {
 		return ""
 	}
-
 	for _, quotedCol := range indexColumns {
-		if quotedCol == deletedAtQuoted {
+		if quotedCol == deletedAt.QuotedName {
 			return ""
 		}
 	}
-
-	return "deleted_at IS NULL"
+	return deletedAt.QuotedName + " IS NULL"
 }
 
 func injectVersionColumn(table *Table) {
@@ -902,7 +901,8 @@ func injectVersionColumn(table *Table) {
 	})
 }
 
-func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string) (HistoryTable, error) {
+func buildHistoryTable(table Table, typeDef *ir.TypeDef, actorSetting string) (HistoryTable, error) {
+	cfg := typeDef.VersionedConfig
 	keyColumn := primaryKeyColumn(table)
 	if keyColumn == nil {
 		return HistoryTable{}, fmt.Errorf("table %s has no primary key", table.Name)
@@ -931,7 +931,7 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string
 	}
 	// The retention, the exclusions and the actor column are the ones
 	// graphdesc gives a version graph's kind (sqlutil.VersionedHistory).
-	kept := sqlutil.VersionedHistory(cfg, func(column string) bool { return columnNamed(table, column) != nil })
+	kept := sqlutil.VersionedHistory(typeDef, func(column string) bool { return columnNamed(table, column) != nil })
 	history.RetentionDays = kept.RetentionDays
 	if len(kept.Exclude) > 0 {
 		literals := make([]string, 0, len(kept.Exclude))
@@ -1016,13 +1016,14 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 	if field.Relation != nil && field.Relation.OnDelete != "" {
 		onDelete = field.Relation.OnDelete
 	}
+	refKey := sqlutil.KeyColumnOf(schema.Types[typeName])
 	fk := ForeignKey{
 		Column:          columnName,
 		QuotedColumn:    sqlutil.QuoteIdentifier(columnName),
 		RefTable:        refTableName,
 		QuotedRefTable:  sqlutil.QuoteIdentifier(refTableName),
-		RefColumn:       "id",
-		QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+		RefColumn:       refKey,
+		QuotedRefColumn: sqlutil.QuoteIdentifier(refKey),
 		OnDelete:        onDelete,
 	}
 
@@ -1035,11 +1036,15 @@ func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName st
 	targetTableName := sqlutil.TableNameOf(schema, targetTypeName)
 	joinTableName := parentTableName + "_" + targetTableName
 
+	leftKey := sqlutil.KeyColumnOf(schema.Types[parentTypeName])
+	rightKey := sqlutil.KeyColumnOf(schema.Types[targetTypeName])
 	return JoinTable{
 		Name:              joinTableName,
 		QuotedName:        sqlutil.QuoteIdentifier(joinTableName),
 		LeftTable:         parentTableName,
 		QuotedLeftTable:   sqlutil.QuoteIdentifier(parentTableName),
+		QuotedLeftRef:     sqlutil.QuoteIdentifier(leftKey),
+		QuotedRightRef:    sqlutil.QuoteIdentifier(rightKey),
 		LeftColumn:        parentTableName + "_id",
 		QuotedLeftColumn:  sqlutil.QuoteIdentifier(parentTableName + "_id"),
 		LeftColumnType:    keyFieldType(schema, schema.Types[parentTypeName], scalarMapping),
@@ -1189,13 +1194,20 @@ func determineIndexType(columnTypes []string) string {
 	return "BTREE"
 }
 
-// findIndexColumn returns the first of columns an @index key resolves to
-// (sqlutil.IndexKeyMatches), or nil.
-func findIndexColumn(columns []Column, key string) *Column {
-	for i := range columns {
-		col := &columns[i]
-		if sqlutil.IndexKeyMatches(key, col.Name) {
-			return col
+// fieldColumn returns table's column that stores its type's field, by the
+// column's origin, which @column does not change (D85); else the column a
+// field of that name has without @column (sqlutil.IndexKeyMatches); else
+// nil.
+func fieldColumn(table *Table, field string) *Column {
+	origin := table.OriginalName + "." + field
+	for i := range table.Columns {
+		if table.Columns[i].Origin == origin {
+			return &table.Columns[i]
+		}
+	}
+	for i := range table.Columns {
+		if sqlutil.IndexKeyMatches(field, table.Columns[i].Name) {
+			return &table.Columns[i]
 		}
 	}
 	return nil
@@ -1209,10 +1221,10 @@ type pendingIndex struct {
 	name  string
 }
 
-// indexName builds the identifier for one declared index
-// (sqlutil.IndexName).
-func indexName(tableName string, p pendingIndex) (string, error) {
-	return sqlutil.IndexName(tableName, p.keys, p.name, p.index.Unique)
+// indexName builds the identifier for one declared index of typeDef
+// (sqlutil.IndexNameIn).
+func indexName(typeDef *ir.TypeDef, p pendingIndex) (string, error) {
+	return sqlutil.IndexNameIn(typeDef, p.keys, p.name, p.index.Unique)
 }
 
 // serverConstraintName returns the identifier PostgreSQL will create for name.
@@ -1268,14 +1280,15 @@ func assignCheckNames(table *Table) error {
 	return nil
 }
 
-func assignIndexNames(tableName string, pending []pendingIndex) ([]Index, error) {
+func assignIndexNames(typeDef *ir.TypeDef, pending []pendingIndex) ([]Index, error) {
 	if len(pending) == 0 {
 		return nil, nil
 	}
+	tableName := sqlutil.TableName(typeDef)
 	out := make([]Index, len(pending))
 	seen := make(map[string]int, len(pending))
 	for i, p := range pending {
-		name, err := indexName(tableName, p)
+		name, err := indexName(typeDef, p)
 		if err != nil {
 			return nil, err
 		}

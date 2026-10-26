@@ -11464,6 +11464,76 @@ MCP in the Go and Rust servers; per-route scaffolds in TypeScript; RS256
 and EdDSA webhook tokens. D4's note that `FileUploadData` does not exist
 is resolved here. The rules are reversible until the first release.
 
+## D85. A DB table's Encrypted<T> field is sealed at rest by both ORMs, and @table and @column name a table and its columns
+
+Two gaps kept a real application's tables out of a DB schema:
+
+- `Secret<T>` keeps a value out of logs; its column holds the value, so a
+  bank's access token, an API credential or a webhook secret sat in the
+  database, its backups and its replicas as text anyone with read access
+  saw. The only encryption was the API's request envelope, which ends at
+  the server.
+- Every table was its class's name in snake case, and every column its
+  field's. A database the schema did not create, or one built to another
+  convention (`lineItem`, `createdAt`), could not be described, and so not
+  adopted or migrated.
+
+### Encrypted fields
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Encrypted<string>` from `@superschematic/db` marks a stored field of a DB table (`FieldDef.EncryptedAtRest`). It implies `Secret<T>`, so the mask helpers clear it and a TypeScript row holds a `SecretValue`. A request or a response carries the value itself, so an argument or a result typed `Encrypted<T>` fails the load. | A decorator, `@encrypted`, which the API's encrypted payloads already name; an `Encrypted<T>` of any type, whose envelope would need a type tag (strings first). |
+| The column is `TEXT` and holds `v1:<keyId>:<nonce>:<ciphertext+tag>`: AES-256-GCM, a random 12-byte nonce, unpadded base64url. The additional data is `superschematic field v1\0<Type>\0<field>\0<row key>`, the schema's names, so an envelope copied to another row or column does not open, and neither does one whose `@table` or `@column` changed. The key id is the first 8 hex digits of SHA-256 over `superschematic field key\0` and the key. | The column's SQL names in the additional data, which a rename would break; pgcrypto, which puts the key in the statement and the server's logs; an envelope without the row key, which lets a ciphertext move between rows. |
+| The keys are an `@envVars` `Secret<string>` the DB service's config names, `outputs.sql.encryption.key`, by its declaring type and field, as a stack names a secret (`VaultKeys.VAULT_DB_FIELD_KEYS`). Each API on the database holds that field in its `@envVars` class, and its build refuses one that does not, so every server, job, worker and app reads the one secret each environment binds, and the generated entrypoints open the ORM with it (`WithFieldKeys` in Go, `createOrm(pool, { fieldKeys })` in TypeScript). The stack resolver refuses a deployable that runs code on the database and reads no binding of it. | A key per table, which multiplies the secrets for no isolation the row binding does not give; a KMS call per value; a key the ORM reads from the process environment by a fixed name, which the stack would not see. |
+| The secret's value is one or more 32-byte keys in base64, separated by commas. The first seals; each opens the envelopes that name its id. A rotation puts a new key first, `Reencrypt` (Go) or `reencrypt` (TypeScript) reseals every envelope an older key sealed, a batch at a time, deleted rows among them, with a guard (`IS NOT DISTINCT FROM` the envelope it read) so a concurrent write keeps its own, and the old key then leaves the secret. | A key version column, which a schema change would add to every such table. |
+| `runtime/schema/go/fieldcrypt` and the HTTP runtime's `fieldcrypt.ts` seal and open alike, byte for byte; `runtime/schema/testdata/fieldcrypt_parity.json` holds envelopes each side opens and each side's sealing must reproduce under a fixed nonce. Their errors are typed and name the cell, never the value or a key: no keys, bad keys, an unknown key id, an envelope that does not open, and one that is malformed. | A Rust and a Python ORM, which do not exist yet. |
+| The envelope is bound to the row's key, which the ORMs must know before the insert: a table with an encrypted field has a UUID key the ORMs generate when a create leaves it unset, or a key each create sets; a key the database generates otherwise fails the load. `updateMany` and an upsert on another unique key than the primary key, which do not know each row's key, refuse to set the field with a typed error; `updateOne` and an upsert on the primary key set it. | Reading the row back to learn its key, a round trip per write. |
+| A ciphertext compares with nothing, so the field takes no `@key`, `@unique`, `@searchField`, `@index`, `Default<T, V>`, relation, `AutoGenerate` or `@jsonField`, has no filter or sort, and its column no `CHECK` or `DEFAULT` (D83); `Validate` holds the plaintext in the decoders. A `@versioned` table excludes it from its history, or the load fails. The engine, a version graph and the identity stores keep their own tables, which no ORM writes, so a field of theirs cannot be encrypted. | A blind index for equality lookups, which leaks equality and can follow. |
+| A queue's message carries no encrypted field, and an `@enqueueOnChange` (D80) neither maps one into a message, nor compares one in `fields` (a fresh nonce changes the ciphertext on every write and every rotation), nor tests what one `equals`; a null test it may make. A message carries the row's key, and the worker reads the field through the repository. | Copying the envelope into the message, which is bound to the source row and which no worker could open; re-encrypting in the trigger, which would put the key in the database. |
+| A `@source` view's field that reads an encrypted field carries the plaintext to every response, so it is marked `@decrypted`, or the load fails. Raw SQL, triggers, projection views and hand-written queries see the envelope. | Letting a view send it silently. |
+
+### Table and column names
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@table(name)` on a class and `@column(name)` on a field (`TypeDef.SQLName`, `FieldDef.SQLName`) name the table and the column, a to-one relation's foreign key among them, in place of the snake-case names. Each takes a SQL identifier; a mixed-case one is quoted wherever it is written. `@column("alias.field")` stays a projection column's source. | A naming strategy for the whole schema (camel case), which overrides express table by table and which can follow on top of them. |
+| Every generator names a table and a column through `sqlutil` (D79): `TableName`, `ColumnName`, `ForeignKeyColumn`, `QueueTableName`, and what is derived from them, the DDL's columns, foreign keys, index and check names, defaults, history tables, functions and triggers, `@source` and projection views, the identity tables, a queue's table and columns and its `@enqueueOnChange` function and trigger, and both ORMs' statements. Verification refuses an override where a generator names a table itself (the engine, a version graph, the tables the user model adds, a projection view); the User and UserRole tables take one, which the identity stores read through their descriptor and two tables, or two columns of a table, a column the generator adds among them, of one name. On a `@queue`, `@table` names the table whole, with no `_queue`. | Overrides in the ORMs alone, which leaves the DDL and the migrations out of step. |
+| The migration model records each table's type and each column's field (their origin). A table or column whose name an override changes, on either side, is a rename the planner derives by that origin, never by shape (D27), with a `compat` hazard that names the override; what is named after it follows, as a `--rename` does. | Requiring `--rename` for every override, which the schema already says. |
+| `superschematic-migrate adopt --diff` compares a live database with the model it would adopt and prints each difference, recording nothing, so an existing database's names can be matched with overrides before it is adopted. | Adopting blind, which leaves the first plan to fail. |
+
+Status: built.
+- **Encryption:** `TestEncryptedFieldsAcrossGoAndTypeScriptOnPostgres`
+  (`ormgen`) runs fixture-vault-db's Go and TypeScript repositories on one
+  Postgres: both send the same statements, call by call; a row Go writes
+  is an envelope in the database and plaintext through TypeScript's
+  repository; TypeScript writes another and rotates the key with
+  `reencrypt`, and Go reads both under the new key alone; each side fails
+  with its typed error under a wrong key and with none.
+  `TestRepositoriesOnPostgres/fixture-vault-db` runs `vault.test.ts`,
+  which also refuses `updateMany` and a moved envelope; `fieldcrypt`'s
+  `TestParityVectors` writes the shared vectors, which
+  `fieldcrypt.test.ts` opens and reproduces under each fixed nonce.
+  `TestEncryptedFieldsLoad`, `TestEncryptedFieldsRefusals`,
+  `TestEncryptedFieldsStayOutOfQueues` and
+  `TestASourceViewOfAnEncryptedFieldSaysSo` hold the rules;
+  `TestAnAPIOnAnEncryptedDatabaseHoldsItsKey`,
+  `TestAnEntrypointOpensTheORMWithItsFieldKeys` and
+  `TestFieldKeysReachEveryDeployableOnTheDatabase` the key's wiring.
+- **Names:** `TestNamingCreateSQLOnPostgres` applies fixture-naming-db's
+  create.sql and checks every derived name Postgres holds, its queue's
+  table and trigger among them, and that the trigger enqueues;
+  `TestNamedTablesAcrossGoAndTypeScriptOnPostgres` has both ORMs create,
+  read, filter, page, update, upsert, soft and hard delete its rows and
+  claim, complete and enqueue its queue's messages under the quoted names,
+  sending the same statements. The plan cases `rename-table-by-override`,
+  `rename-column-by-override`, `rename-versioned-table-by-override` and
+  `rename-queue-by-override`, and `TestDrift`.
+
+Left: `Encrypted<T>` of other types than string; a blind index for
+lookups; encrypted fields in the engine, version graphs and the identity
+tables; a Rust or Python ORM's encryption; a schema-wide naming strategy;
+overrides on the engine's and a version graph's tables and on the Session, UserCredential and UserRoleGrant tables the user model adds.
+
 ### D58, amended: a hidden tool names each cause in `hiddenBy`, the policy is asked of a tool hidden for its handle, and the describe document gives each field's display
 
 The console's engine pages (D44, amended, above) met two gaps in what the

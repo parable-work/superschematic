@@ -3864,6 +3864,10 @@
           ],
           "type": "string"
         },
+        "decrypted": {
+          "default": false,
+          "type": "boolean"
+        },
         "default": {
           "type": "string"
         },
@@ -3878,6 +3882,10 @@
           "$ref": "#/$defs/OperationDocs"
         },
         "encrypted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "encryptedAtRest": {
           "default": false,
           "type": "boolean"
         },
@@ -4035,6 +4043,10 @@
         "sourceMustProject": {
           "default": false,
           "type": "boolean"
+        },
+        "sqlName": {
+          "default": "",
+          "type": "string"
         },
         "temporalFormat": {
           "default": "",
@@ -5645,6 +5657,10 @@
         },
         "source": {
           "$ref": "#/$defs/SourceRef"
+        },
+        "sqlName": {
+          "default": "",
+          "type": "string"
         },
         "stack": {
           "$ref": "#/$defs/StackDecl"

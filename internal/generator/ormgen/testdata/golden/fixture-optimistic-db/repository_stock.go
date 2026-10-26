@@ -921,7 +921,7 @@ func (r *StockRepository) CreateOne(ctx context.Context, input *types.Stock) (*t
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stockUUIDValue(input.Shelf.Id); ok && relID != zeroId {
-			fields = append(fields, "shelf_id")
+			fields = append(fields, `shelf_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1032,7 +1032,7 @@ func (r *StockRepository) UpsertOne(ctx context.Context, input *types.Stock, on 
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := stockUUIDValue(input.Shelf.Id); ok && relID != zeroId {
-			fields = append(fields, "shelf_id")
+			fields = append(fields, `shelf_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1164,7 +1164,7 @@ func (r *StockRepository) CreateMany(ctx context.Context, inputs []*types.Stock)
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: shelf (FK: shelf_id)
 		{
-			cell := batchInsertCell{column: "shelf_id"}
+			cell := batchInsertCell{column: `shelf_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := stockUUIDValue(input.Shelf.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
