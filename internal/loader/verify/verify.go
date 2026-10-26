@@ -232,6 +232,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkMiddleware(schema, r)
 	checkPages(schema, r)
 	checkFileTransfers(schema, r)
+	checkMCPToolsLeftOut(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)

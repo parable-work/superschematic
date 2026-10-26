@@ -467,14 +467,31 @@ outputs: { sql: { encryption: { key: "FieldKeys.FINANCES_DB_FIELD_KEYS" } } }
 
 Its value is one or more 32-byte keys in base64, separated by commas. Each
 API on the database holds that field in its `@envVars` class, usually by
-extending the class that declares it, so its servers, jobs and workers
-read the one secret each environment sets, and the generated entrypoints
-open the ORM with it: `ConnectWithPool(pool, WithFieldKeys(config.FinancesDbFieldKeys))`
-in Go, `createOrm(pool, { fieldKeys: config.FINANCES_DB_FIELD_KEYS })` in
-TypeScript. The build refuses an
-API on the database whose `@envVars` lacks it, and a stack a deployable
-that reads no binding of it. Without the keys, a read or a write of the
-field fails with a typed error (`fieldcrypt.ErrNoKeys` in Go,
+extending the class that declares it. The declaring class lives where
+each API can extend it: in the API's own schema, or, for several APIs on
+the database, in a General service they depend on:
+
+```ts
+// finances-api/src/finances-api.schema.ts, or a General service's schema
+@envVars
+export abstract class FieldKeys {
+  FINANCES_DB_FIELD_KEYS: Secret<string>;
+}
+
+@envVars
+export abstract class FinancesConfig extends FieldKeys {
+  PLAID_CLIENT_ID: Secret<string>;
+}
+```
+
+So each API's servers, jobs and workers read the one secret each
+environment sets, and the generated entrypoints open the ORM with it:
+`ConnectWithPool(pool, WithFieldKeys(config.FinancesDbFieldKeys))` in Go,
+`createOrm(pool, { fieldKeys: config.FINANCES_DB_FIELD_KEYS })` in
+TypeScript. The build refuses a database whose config names no key and an
+API on the database whose `@envVars` lacks it, each saying where the class
+goes, and a stack refuses a deployable that reads no binding of it.
+Without the keys, a read or a write of the field fails with a typed error (`fieldcrypt.ErrNoKeys` in Go,
 `FieldEncryptionError` with reason `no-keys` in TypeScript); an envelope
 under a key the keyring does not hold fails with `ErrUnknownKey`
 (`unknown-key`), one that does not open with `ErrDecrypt` (`decrypt`).

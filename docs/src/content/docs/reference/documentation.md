@@ -40,7 +40,7 @@ export class ReturnMutations {
 | --- | --- | --- |
 | `title` | yes | non-empty, no surrounding whitespace |
 | `description` | yes | non-empty |
-| `capability` | yes | a stable dotted identifier with at least two lowercase segments (`[a-z0-9]` words joined by `-`), such as `orders.returns.open` |
+| `capability` | yes | a stable dotted identifier with at least two segments, each lowercase letters and digits (`[a-z0-9]` words joined by `-`, never `_`), such as `orders.returns.open`; an error names the first character it may not hold |
 | `lifecycle` | yes | `draft`, `experimental`, `active`, `deprecated` or `retired` |
 | `visibility` | yes | `public`, `internal` or `preview`; how the operation appears in documentation, not who may call it |
 | `audience` | no | the primary reader; any non-blank string (see [Rules an extension adds](#rules-an-extension-adds)) |
@@ -75,7 +75,7 @@ An operation takes at most one `@docs`. Every value must be a literal. A
 config that breaks a rule fails the load with the decorator's location:
 
 ```
-src/orders.schema.ts:14:9: invalid @docs config: capability "GetNote" must contain at least two dot-separated lowercase segments
+src/orders.schema.ts:14:9: invalid @docs config: capability "GetNote" holds "G" at character 1; a capability is two or more dot-separated segments of lowercase letters, digits and hyphens, such as "orders.returns.create"
 ```
 
 The record is `FieldDef.docs` (`ir.OperationDocs`) in the IR. The JSON and
