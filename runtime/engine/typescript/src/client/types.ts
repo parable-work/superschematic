@@ -113,6 +113,22 @@ export interface EventCause {
   depth: number;
 }
 
+/** One signal (D77), as a stream opened with signals delivers it. */
+export interface EngineSignal {
+  namespace: string;
+  schema: string;
+  instanceId: string;
+  /** The behavior that declares it. */
+  behavior: string;
+  name: string;
+  /** Its data, which the signal's paramsSchema accepted. */
+  data: unknown;
+  /** The sender's subject: the caller's, or the operation's principal's. */
+  from: string;
+  /** The engine's clock when it was sent, in epoch milliseconds. */
+  at: number;
+}
+
 /** One entry of the event log (runtime/engine/README.md, "The event log"). */
 export interface EngineEvent {
   /** The global cursor: every later event has a higher one. */
@@ -327,6 +343,8 @@ export interface BehaviorDocument {
   /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
   fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: BehaviorOperationDocument[];
+  /** Its signals (D77), present when it declares any. */
+  signals?: Array<{ name: string; description?: string; access: 'read' | 'write' | 'operation'; paramsSchema: JSONSchema }>;
   vetoes: Array<{ code: string; description?: string }>;
 }
 

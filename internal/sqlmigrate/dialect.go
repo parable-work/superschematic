@@ -11,8 +11,8 @@ import (
 // dialect is what one database contributes to a plan (D27). The diff is
 // shared: it matches two models, finds the changes, puts each in its phase
 // and order, and computes the hazards every dialect shares (destructive,
-// compat, data-dependent, api-breaking, history). A dialect supplies the
-// rest:
+// compat, data-dependent, api-breaking, history, raw-sql). A dialect
+// supplies the rest:
 //
 //   - the model: what its create.sql creates, with types in its spelling
 //     and the definitions of the derived objects;

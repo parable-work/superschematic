@@ -224,6 +224,8 @@ export interface BehaviorDocument {
   /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
   fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: BehaviorOperationDocument[];
+  /** Its signals (D77), present when it declares any. */
+  signals?: Array<{ name: string; description?: string; access: 'read' | 'write' | 'operation'; paramsSchema: JSONSchema }>;
   /** The codes its vetoes carry. */
   vetoes: Array<{ code: string; description?: string }>;
 }

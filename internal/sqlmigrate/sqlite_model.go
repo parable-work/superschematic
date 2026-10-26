@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -66,6 +67,11 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return nil, err
 	}
 	m.Graphs = graphs
+	pieces, err := sqlutil.OrderRawSQL(schema, string(SQLite))
+	if err != nil {
+		return nil, err
+	}
+	m.RawSQL = modelRawSQL(pieces)
 	m.sort()
 	return m, nil
 }
@@ -79,8 +85,11 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 	}
 	for _, t := range out.Tables {
 		for _, idx := range t.Indexes {
-			if idx.Type == "GIN" || idx.Type == "GIST" {
+			if idx.Type != "BTREE" {
 				refuse("the index %s of %s is a %s index", idx.Name, t.OriginalName, idx.Type)
+			}
+			if idx.Opclass != "" {
+				refuse("the index %s of %s names the operator class %s", idx.Name, t.OriginalName, idx.Opclass)
 			}
 		}
 	}

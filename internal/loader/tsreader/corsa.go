@@ -75,6 +75,7 @@ const (
 	kindFalseKeyword                = tsast.Kind(96)
 	kindNullKeyword                 = tsast.Kind(105)
 	kindPrefixUnaryExpression       = tsast.Kind(225)
+	kindNoSubstitutionTemplate      = tsast.Kind(14)
 	kindMinusToken                  = tsast.Kind(40)
 	kindTypeLiteral                 = tsast.Kind(188)
 	kindTupleType                   = tsast.Kind(190)

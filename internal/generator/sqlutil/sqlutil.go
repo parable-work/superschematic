@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
 
 // PostgresReservedKeywords lists PostgreSQL reserved keywords that need to be
@@ -92,7 +90,7 @@ func IndexName(tableName string, keys []string, purpose string, unique bool) (st
 		parts := make([]string, 0, 2+len(keys))
 		parts = append(parts, "idx", tableName)
 		for _, key := range keys {
-			parts = append(parts, codegen.ToSnakeCase(key))
+			parts = append(parts, ColumnNameOf(key))
 		}
 		name := strings.Join(parts, "_")
 		if len(name) > PostgresIdentifierLimit {
@@ -125,6 +123,6 @@ func IndexName(tableName string, keys []string, purpose string, unique bool) (st
 // resolves each key with it, and verification checks keys with it, so the
 // two accept the same keys.
 func IndexKeyMatches(key, column string) bool {
-	name := codegen.ToSnakeCase(key)
+	name := ColumnNameOf(key)
 	return column == name || column == name+"_id"
 }

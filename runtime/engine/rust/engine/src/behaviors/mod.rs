@@ -45,8 +45,8 @@ pub use context::{
 };
 pub use declaration::{
     check_declaration, create_params_schema_problem, is_behavior_name, is_veto_code,
-    BehaviorDeclaration, FieldDeclaration, OperationDeclaration, OperationScope, VetoDeclaration,
-    BEHAVIOR_NAME, BUILTIN_OPERATIONS, VETO_CODE,
+    BehaviorDeclaration, FieldDeclaration, OperationDeclaration, OperationScope, SignalAccess,
+    SignalDeclaration, VetoDeclaration, BEHAVIOR_NAME, BUILTIN_OPERATIONS, VETO_CODE,
 };
 #[cfg(feature = "dynamic")]
 pub use dynamic::{DynamicBehavior, DynamicHooks};

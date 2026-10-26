@@ -6,7 +6,7 @@
 //! authenticated) and sends back the [`Response`]: its status, headers and
 //! body bytes, or an [`EventStream`] the host copies to the client.
 //!
-//! The engine owns routing over the 26 routes and the MCP endpoint
+//! The engine owns routing over the 27 routes and the MCP endpoint
 //! ([`routes`]), the decoding of their parameters and bodies, the
 //! media-type refusals, ETags and `If-Match`, the `Preconditions` header,
 //! the success envelope and the RFC 9457 problems, `Location` (from the
@@ -41,8 +41,8 @@ use crate::tools::ToolFilter;
 pub use mcp::{McpOptions, MCP_DISCOVER_VERSIONS, MCP_INITIALIZE_VERSIONS, MCP_SERVER_NAME};
 pub use problems::{status_text, Problem};
 pub use stream::{
-    start as start_stream, EventStream, Pull, StreamOptions, DEFAULT_HEARTBEAT_MS,
-    DEFAULT_STREAM_PAGE_SIZE,
+    start as start_stream, start_with as start_stream_with, EventStream, Pull, StreamOptions,
+    DEFAULT_HEARTBEAT_MS, DEFAULT_STREAM_PAGE_SIZE, READY_EVENT, SIGNAL_EVENT,
 };
 
 /// The service the host's service step verified (D37): the calling
@@ -193,7 +193,7 @@ pub struct Route {
 }
 
 impl Route {
-    /// Whether its spec declares a request body: the seven routes a host's
+    /// Whether its spec declares a request body: the eight routes a host's
     /// body limit applies to ([`DEFAULT_BODY_LIMIT_BYTES`] unless the mount
     /// sets one), as the HTTP runtimes apply theirs to a spec route. The
     /// event stream and the MCP endpoint, which the TypeScript app mounts
@@ -208,6 +208,7 @@ impl Route {
                 | "invokeOperation"
                 | "invokeSchemaOperation"
                 | "searchSchemas"
+                | "sendSignal"
         )
     }
 }
@@ -229,7 +230,7 @@ const fn route(name: &'static str, method: &'static str, path: &'static str) -> 
 
 /// Every route the engine serves, in the order the TypeScript app mounts
 /// them, then the MCP endpoint's.
-pub const ROUTES: [Route; 29] = [
+pub const ROUTES: [Route; 30] = [
     route("listNamespaces", "GET", "/namespaces"),
     route("createNamespace", "POST", "/namespaces"),
     route("getNamespace", "GET", "/namespaces/{namespace}"),
@@ -306,6 +307,11 @@ pub const ROUTES: [Route; 29] = [
         "POST",
         "/namespaces/{namespace}/schemas/{name}/operations/{operation}",
     ),
+    route(
+        "sendSignal",
+        "POST",
+        "/namespaces/{namespace}/schemas/{name}/instances/{id}/signals/{behavior}/{signal}",
+    ),
     route("listTools", "GET", "/namespaces/{namespace}/tools"),
     route("listBehaviors", "GET", "/behaviors"),
     route("describeBehavior", "GET", "/behaviors/{name}"),
@@ -329,7 +335,7 @@ pub const ROUTES: [Route; 29] = [
     },
 ];
 
-/// Every route the engine serves (`routes()`): the 26 of the HTTP API,
+/// Every route the engine serves (`routes()`): the 27 of the HTTP API,
 /// then the MCP endpoint's POST, GET and DELETE.
 pub fn routes() -> Vec<Route> {
     ROUTES.to_vec()
@@ -518,14 +524,26 @@ mod tests {
             .name,
             "invokeSchemaOperation"
         );
-        assert_eq!(routes().len(), 29);
-        assert_eq!(routes().iter().filter(|route| !route.mcp).count(), 26);
+        assert_eq!(
+            matching(
+                "POST",
+                "/namespaces/default/schemas/Ticket/instances/t1/signals/test.Chat/typing"
+            )
+            .map(|found| (
+                found.route.name,
+                found.param("behavior").to_owned(),
+                found.param("signal").to_owned()
+            )),
+            Some(("sendSignal", "test.Chat".to_owned(), "typing".to_owned()))
+        );
+        assert_eq!(routes().len(), 30);
+        assert_eq!(routes().iter().filter(|route| !route.mcp).count(), 27);
         let bodies: Vec<&str> = routes()
             .iter()
             .filter(|route| route.takes_body())
             .map(|route| route.name)
             .collect();
-        assert_eq!(bodies.len(), 7, "{bodies:?}");
+        assert_eq!(bodies.len(), 8, "{bodies:?}");
         assert!(routes()
             .iter()
             .filter(|route| route.takes_body())

@@ -11,7 +11,8 @@
 //! and compatibility rule, the access policy as data ([`PolicyConfig`]),
 //! the instances ([`Instances`]) with their filters, unique indexes and
 //! the value store that keeps a large member once, the event log
-//! ([`Events`]), the behavior plug-in API ([`behaviors`]: a behavior is a
+//! ([`Events`]), the signals that reach its event streams and are kept
+//! nowhere ([`Signals`], D77), the behavior plug-in API ([`behaviors`]: a behavior is a
 //! Rust type that implements [`Behavior`], composed on a schema's instance
 //! type and run with every call on its instances), the refusals and their
 //! codes ([`errors`]), the principal a call acts for ([`Principal`]), and
@@ -70,6 +71,7 @@ mod registry;
 mod retention;
 mod runner;
 pub mod search;
+mod signals;
 pub mod tools;
 mod values;
 
@@ -125,6 +127,10 @@ pub use runner::{
     SubscriptionKey, SubscriptionSkip, SubscriptionState, SubscriptionStatus, DEFAULT_BATCH_SIZE,
     DEFAULT_LEASE_RETRY_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_DEPTH, DEFAULT_RETRY_INITIAL_MS,
     DEFAULT_RETRY_MAX_MS,
+};
+pub use signals::{
+    EngineSignal, SendSignal, SignalOptions, Signals, DEFAULT_SIGNALS_PER_SECOND,
+    MAX_SIGNAL_DATA_BYTES, SIGNAL_BUFFER, SIGNAL_OPERATION_PREFIX,
 };
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;

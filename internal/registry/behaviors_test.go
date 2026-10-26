@@ -139,6 +139,48 @@ func TestRegisterBehaviorBesideOperations(t *testing.T) {
 	}
 }
 
+// A declaration may give signals (D77), each a camelCase name declared
+// once, a paramsSchema that compiles and an access of read, write or
+// operation.
+func TestRegisterBehaviorSignals(t *testing.T) {
+	typing := map[string]any{"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": map[string]any{"type": "object"}}
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Chat", map[string]any{
+		"signals": []any{
+			typing,
+			map[string]any{"name": "nudge", "access": "write", "paramsSchema": true},
+			map[string]any{"name": "draft", "access": "operation", "paramsSchema": map[string]any{"type": "object", "required": []any{"text"}}},
+		},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	chat, _ := reg.Behavior("acme.Chat")
+	var got []string
+	for _, signal := range chat.Signals {
+		got = append(got, signal.Name+" "+signal.Access)
+	}
+	if want := []string{"typing read", "nudge write", "draft operation"}; !slices.Equal(got, want) {
+		t.Fatalf("acme.Chat signals = %v, want %v", got, want)
+	}
+	for _, tc := range []struct {
+		signals []any
+		want    string
+	}{
+		{[]any{map[string]any{"name": "Typing", "access": "read", "paramsSchema": true}}, `signal name "Typing" is not camelCase`},
+		{[]any{typing, typing}, `declares signal "typing" twice`},
+		{[]any{map[string]any{"name": "typing", "access": "read"}}, "signal typing has no paramsSchema"},
+		{[]any{map[string]any{"name": "typing", "access": "read", "paramsSchema": map[string]any{"type": 3}}}, "signal typing paramsSchema"},
+		{[]any{map[string]any{"name": "typing", "access": "everyone", "paramsSchema": true}}, `signal typing access "everyone" is not "read", "write" or "operation"`},
+		{[]any{map[string]any{"name": "typing", "access": "read", "paramsSchema": true, "colour": 1}}, `unknown field "colour"`},
+	} {
+		reg := New(naming.Default())
+		err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Chat", map[string]any{"signals": tc.signals})})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("signals %v: got %v, want an error containing %q", tc.signals, err, tc.want)
+		}
+	}
+}
+
 // A declaration may give the schema of the precondition a caller sends
 // for the behavior, held to a paramsSchema's rule, and the codes its
 // vetoes carry, each lowercase snake case and listed once, beside the

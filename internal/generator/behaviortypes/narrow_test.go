@@ -2,6 +2,7 @@ package behaviortypes
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"testing"
 
@@ -33,11 +34,11 @@ func TestCoreNarrowingsTypeDeclaredFields(t *testing.T) {
 	}
 }
 
-// Comments' blocks config narrows what post and edit give: every declared
-// kind when absent (the block alias), the kinds it names, and when it
-// names none, no blocks for post and an empty array for edit, which
-// clears the blocks a message was posted with before. A record's blocks
-// keep every kind.
+// Comments' blocks config narrows what post, finish and edit give: every
+// declared kind when absent (the block alias), the kinds it names, and
+// when it names none, no blocks for post and finish and an empty array for
+// edit, which clears the blocks a message was posted with before. A
+// record's blocks keep every kind.
 func TestCommentsNarrowsTheBlocksPostAndEditGive(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Comments")
@@ -68,14 +69,14 @@ func TestCommentsNarrowsTheBlocksPostAndEditGive(t *testing.T) {
 		if items, _ := at(n.Aliases[1].Schema, "properties", "blocks", "items"); items[RefKey] != "NoteCommentBlock" {
 			t.Errorf("%s: a record's blocks are %v", test.config, items)
 		}
-		for _, op := range []string{"post", "edit"} {
+		for _, op := range commentsBlocksGiven {
 			items := given(n, op)
 			switch {
 			case test.want == nil:
 				if node, _ := items.(map[string]any); node[RefKey] != "NoteCommentBlock" {
 					t.Errorf("%s: %s gives %v, want every kind", test.config, op, items)
 				}
-			case len(test.want) == 0 && op == "post":
+			case len(test.want) == 0 && op != "edit":
 				if items != nil {
 					t.Errorf("%s: %s gives %v, want no blocks", test.config, op, items)
 				}
@@ -100,8 +101,33 @@ func TestCommentsNarrowsTheBlocksPostAndEditGive(t *testing.T) {
 				}
 			}
 		}
-		if n.Results["getMessage"].(map[string]any)[RefKey] != "NoteCommentMessage" {
-			t.Errorf("%s: getMessage returns %v", test.config, n.Results["getMessage"])
+		for _, op := range []string{"getMessage", "begin", "finish", "interrupt"} {
+			if n.Results[op].(map[string]any)[RefKey] != "NoteCommentMessage" {
+				t.Errorf("%s: %s returns %v", test.config, op, n.Results[op])
+			}
 		}
+	}
+}
+
+// Comments' composing field is always there, an array of subjects, and its
+// signals' data are their declared paramsSchemas, which no config narrows.
+func TestCommentsComposingAndSignals(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Comments")
+	target := Target{Schema: "notes", Base: "Note", Document: ir.NewSchema("notes", ir.SchemaKindGeneral), Instance: &ir.TypeDef{Name: "Note"}}
+	n, err := Narrow(declaration, nil, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composing := n.Fields["composing"]
+	var r TSRenderer
+	if got := r.Render(WithoutDescription(composing.Schema), ""); !composing.Present || got != "string[]" {
+		t.Errorf("composing is %s (present %v), want string[] on every read", got, composing.Present)
+	}
+	if got := slices.Sorted(maps.Keys(n.Signals)); !slices.Equal(got, []string{"draft", "typing", "viewing"}) {
+		t.Fatalf("signals %v", got)
+	}
+	if required, _ := n.Signals["draft"].(map[string]any)["required"].([]any); len(required) != 3 {
+		t.Errorf("draft's data requires %v", required)
 	}
 }

@@ -2,7 +2,7 @@
 //
 // Typed wrappers over the engine's client: each schema's instances, create
 // input and patches, and its behaviors' create parameters, preconditions,
-// operations and veto codes, as their configs narrow them.
+// operations, signals and veto codes, as their configs narrow them.
 //
 // Schema batches: BatchesClient, batchesClient.
 // Schema jobs: JobsClient, jobsClient.

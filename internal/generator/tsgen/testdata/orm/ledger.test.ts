@@ -284,15 +284,18 @@ describe.skipIf(dsn === '')('the ledger', () => {
     }
   });
 
-  test('a field of a @jsonField type, a TEXT column, holds its JSON text and reads back as its value', async () => {
+  test('a field of a @jsonField type is a JSON object in its JSONB column, and reads back as its value', async () => {
     const address = { line1: '1 Tea St', city: 'Leeds' };
     const posted = await orm.account.createOne({ name: name('Posted'), code: 'posted', mailingAddress: address });
     expect(posted.mailingAddress).toEqual(address);
     expect((await orm.account.getOne(posted.id)).mailingAddress).toEqual(address);
     const moved = await orm.account.updateOne(posted.id, { mailingAddress: { line1: '2 Tea St', city: 'York' } });
     expect(moved.mailingAddress).toEqual({ line1: '2 Tea St', city: 'York' });
-    const { rows } = await db.pool.query('SELECT mailing_address FROM account WHERE id = $1', [uuidToDb(posted.id)]);
-    expect(JSON.parse(rows[0].mailing_address)).toEqual({ line1: '2 Tea St', city: 'York' });
+    // D83 keeps a @jsonField value as JSONB, which pg reads already parsed.
+    const { rows } = await db.pool.query("SELECT mailing_address, jsonb_typeof(mailing_address) AS type, mailing_address->>'city' AS city FROM account WHERE id = $1", [
+      uuidToDb(posted.id),
+    ]);
+    expect([rows[0].type, rows[0].city]).toEqual(['object', 'York']);
     expect(decodeRow(rows[0], accountTable.columns)).toEqual({ mailingAddress: { line1: '2 Tea St', city: 'York' } });
     expect((await orm.account.updateOne(posted.id, { mailingAddress: null })).mailingAddress).toBeNull();
   });

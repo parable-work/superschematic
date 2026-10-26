@@ -194,7 +194,7 @@ async fn the_engine_serves_at_its_mount_behind_the_apis_authenticator() {
     assert!(body.contains(r#""createdBy":"ada""#), "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), Some("ada"), "").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body.contains(r#""title":"Hello""#) && body.contains(r#""Comments":{"messages":0,"threads":{"open":0,"resolved":0}}"#), "{body}");
+    assert!(body.contains(r#""title":"Hello""#) && body.contains(r#""Comments":{"messages":0,"threads":{"open":0,"resolved":0},"composing":[]}"#), "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), Some("nobody"), "").await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), None, "").await;

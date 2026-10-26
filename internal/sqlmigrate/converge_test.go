@@ -188,16 +188,40 @@ type seedCheck struct {
 }
 
 // seeds is how a dialect seeds rows: value is a literal for a column, or
-// false for a column whose type it has none for, and same compares a
-// column with a literal, true when both are null.
+// false for a column whose type it has none for, checked the literal of a
+// column for a value that passes the column's check (D83), and same
+// compares a column with a literal, true when both are null.
 type seeds struct {
-	value func(col *Column, n, i int) (string, bool)
-	same  string
+	value   func(col *Column, n, i int) (string, bool)
+	checked func(col *Column, raw string, number bool) string
+	same    string
 }
 
 var postgresSeeds = seeds{
-	value: func(col *Column, n, i int) (string, bool) { return seedValue(col.Type, n, i) },
-	same:  "IS NOT DISTINCT FROM",
+	value:   func(col *Column, n, i int) (string, bool) { return seedValue(col.Type, n, i) },
+	checked: func(col *Column, raw string, _ bool) string { return literal(raw) + "::" + col.Type },
+	same:    "IS NOT DISTINCT FROM",
+}
+
+// checkedSeed is the raw value of a column that passes c, whether it is a
+// number, and whether c has one to give: an enum's first value, a number
+// inside the bounds, or text as long as the bounds need.
+func checkedSeed(c *Check) (string, bool, bool) {
+	switch {
+	case c == nil:
+		return "", false, false
+	case len(c.In) > 0:
+		return c.In[0], false, true
+	case c.Min != nil:
+		return fmt.Sprint(*c.Min), true, true
+	case c.Max != nil:
+		return fmt.Sprint(*c.Max), true, true
+	case c.MinLength != nil:
+		return strings.Repeat("a", *c.MinLength), false, true
+	case c.MaxLength != nil:
+		return "", false, true
+	}
+	return "", false, false
 }
 
 // seedRows inserts one row into every entity and join table of from, with
@@ -226,7 +250,29 @@ func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string,
 		sort.Strings(names)
 		for _, name := range names {
 			table := pending[name]
-			row, ok := seedRow(table, len(order)+1, keys, dialect.value)
+			checkOf := func(column string) *Check {
+				// The new model's check, which the plan holds the row to, else
+				// the previous model's.
+				if tt := tablesByName(to)[r.table(table.Name)]; tt != nil {
+					for _, c := range tt.Checks {
+						if c.Column == r.column(table.Name, column) {
+							return c
+						}
+					}
+				}
+				for _, c := range table.Checks {
+					if c.Column == column {
+						return c
+					}
+				}
+				return nil
+			}
+			row, ok := seedRow(table, len(order)+1, keys, func(col *Column, n, i int) (string, bool) {
+				if raw, number, ok := checkedSeed(checkOf(col.Name)); ok {
+					return dialect.checked(col, raw, number), true
+				}
+				return dialect.value(col, n, i)
+			})
 			if !ok {
 				continue
 			}

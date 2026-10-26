@@ -38,6 +38,13 @@ var postgresTypeExtensions = map[string]string{
 	"geometry":  "postgis",
 }
 
+// opclassExtensions maps an operator class an @index names (ops) to the
+// extension that defines it.
+var opclassExtensions = map[string]string{
+	"gin_trgm_ops":  "pg_trgm",
+	"gist_trgm_ops": "pg_trgm",
+}
+
 // Table represents a database table.
 type Table struct {
 	Name         string
@@ -50,6 +57,10 @@ type Table struct {
 	ForeignKeys  []ForeignKey
 	Indexes      []Index
 
+	// Checks are the CHECK constraints the fields' enums and Validate rules
+	// give their columns, in column order (D83).
+	Checks []Check
+
 	// SearchFields lists column names marked @searchField; they feed the
 	// generated search_text column and its trigram index.
 	SearchFields []string
@@ -59,13 +70,53 @@ type Table struct {
 type Index struct {
 	Name    string
 	Columns []string
-	Type    string // BTREE, GIST, GIN, ...
+	Type    string // BTREE, GIST, GIN, BRIN, HNSW, IVFFLAT
 	Unique  bool
 
 	// Where is an optional partial-index predicate (without the WHERE
-	// keyword), e.g. "deleted_at IS NULL" for unique indexes on
-	// soft-deletable tables.
+	// keyword): @index's where, and "deleted_at IS NULL" for unique indexes
+	// on soft-deletable tables.
 	Where string
+
+	// Opclass is the operator class every element is indexed with (@index's
+	// ops); empty is the method's default.
+	Opclass string
+	// Expression is the raw expression the index covers instead of Columns
+	// (@index's expression); Columns are then the columns of its keys.
+	Expression string
+	// InTransaction is set by @index's concurrently: false: a migration plan
+	// builds the index inside its step's transaction.
+	InTransaction bool
+}
+
+// Elements is the index's element list as CREATE INDEX writes it inside its
+// parentheses: each column, or the expression in parentheses, followed by
+// the operator class when there is one.
+func (idx Index) Elements() string {
+	elements := idx.Columns
+	if idx.Expression != "" {
+		elements = []string{"(" + idx.Expression + ")"}
+	}
+	out := make([]string, len(elements))
+	for i, element := range elements {
+		out[i] = element
+		if idx.Opclass != "" {
+			out[i] += " " + idx.Opclass
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// Check is a CHECK constraint over one column: the values the field's enum
+// allows, or the bounds of its Validate rules (D83).
+type Check struct {
+	// Name is the identifier Postgres creates (sqlutil.CheckName, cut as a
+	// foreign key's is).
+	Name   string
+	Column string
+	// Spec is the rule; Expression its predicate as Postgres writes it.
+	Spec       sqlutil.Check
+	Expression string
 }
 
 // Column represents a table column.
@@ -203,6 +254,11 @@ type DDLOutput struct {
 	Projections      []ProjectionView
 	Timestamp        string
 
+	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
+	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
+	// then those that run after every object the schema declares.
+	RawSQL []sqlutil.RawSQL
+
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Options.MetadataKeyPrefix).
 	MetadataKeyPrefix string
@@ -283,7 +339,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	tables := make([]Table, 0, len(tableTypes)+len(queueTypes))
 	usedScalars := make(map[string]bool)
 	for _, typeDef := range tableTypes {
-		table, err := convertTypeToTable(typeDef, schema, scalarMapping, compositeDefaults)
+		table, err := convertTypeToTable(typeDef, schema, opts.Dependencies, scalarMapping, compositeDefaults)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert type %s to table: %w", typeDef.Name, err)
 		}
@@ -331,7 +387,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				Name:       fkColumnName,
 				QuotedName: sqlutil.QuoteIdentifier(fkColumnName),
 				Origin:     typeDef.Name + "." + field.Name,
-				Type:       keyFieldType(typeDef, scalarMapping),
+				Type:       keyFieldType(schema, typeDef, scalarMapping),
 				Nullable:   !field.Required,
 			})
 			targetTable.ForeignKeys = append(targetTable.ForeignKeys, ForeignKey{
@@ -365,6 +421,9 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	// adding them.
 	for i := range tables {
 		if err := assignForeignKeyNames(&tables[i]); err != nil {
+			return nil, err
+		}
+		if err := assignCheckNames(&tables[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -434,7 +493,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	// columns are in place: no table references it, and it references none
 	// (D53).
 	for _, typeDef := range queueTypes {
-		table, err := convertQueueToTable(typeDef, schema, scalarMapping, compositeDefaults)
+		table, err := convertQueueToTable(typeDef, schema, opts.Dependencies, scalarMapping, compositeDefaults)
 		if err != nil {
 			return nil, err
 		}
@@ -478,6 +537,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if metadataKeyPrefix == "" {
 		metadataKeyPrefix = DefaultMetadataKeyPrefix
 	}
+	rawSQL, err := sqlutil.OrderRawSQL(schema, PostgresDialect)
+	if err != nil {
+		return nil, err
+	}
 
 	output := &DDLOutput{
 		SchemaName:       opts.SchemaName,
@@ -488,6 +551,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		OptimisticTables: optimisticTables,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
+		RawSQL:           rawSQL,
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}
@@ -530,10 +594,15 @@ func isRelationalTarget(typeName string, schema *ir.Schema) bool {
 	return targetTypeDef != nil && targetTypeDef.Role == ir.RoleDBTable && !targetTypeDef.JsonField
 }
 
+// PostgresDialect is the dialect name a raw SQL piece runs on Postgres
+// under (ir.RawSQLDef.Dialects).
+const PostgresDialect = "postgres"
+
 // convertTypeToTable converts an IR type to a database table.
 func convertTypeToTable(
 	typeDef *ir.TypeDef,
 	schema *ir.Schema,
+	deps map[string]*ir.Schema,
 	scalarMapping map[string]string,
 	compositeDefaults map[string]*ir.CompositeDefaultDef,
 ) (Table, error) {
@@ -594,7 +663,7 @@ func convertTypeToTable(
 			Name:       columnName,
 			QuotedName: sqlutil.QuoteIdentifier(columnName),
 			Origin:     typeDef.Name + "." + field.Name,
-			Type:       sqlutil.ColumnType(field, scalarMapping),
+			Type:       sqlutil.ColumnType(schema, field, scalarMapping),
 			Nullable:   !field.Required,
 		}
 
@@ -654,6 +723,23 @@ func convertTypeToTable(
 			}
 		}
 
+		// A required field's Default<T, V> is its column's DEFAULT, when V
+		// has a literal form in the column's type (D83).
+		if !column.AutoGenerated && column.DefaultValue == "" {
+			if def, ok := sqlutil.ColumnDefault(field, column.Type); ok {
+				column.DefaultValue = def
+			}
+		}
+
+		// The field's enum or Validate rules are its column's CHECK (D83).
+		if check, ok := sqlutil.ColumnCheck(field, columnName, column.Type, lookupEnum(schema, deps, irType)); ok {
+			table.Checks = append(table.Checks, Check{
+				Column:     columnName,
+				Spec:       check,
+				Expression: check.Expression(sqlutil.QuoteIdentifier),
+			})
+		}
+
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
 			refTableName := sqlutil.TableNameOf(schema, field.Relation.Type)
@@ -698,12 +784,19 @@ func convertTypeToTable(
 			indexKeys = append(indexKeys, key)
 		}
 
+		method := strings.ToUpper(idx.Method)
+		if method == "" {
+			method = determineIndexType(indexTypes)
+		}
 		pending = append(pending, pendingIndex{
 			index: Index{
-				Columns: indexColumns,
-				Type:    determineIndexType(indexTypes),
-				Unique:  idx.Unique,
-				Where:   uniqueIndexPredicate(idx, table.Columns, indexColumns),
+				Columns:       indexColumns,
+				Type:          method,
+				Unique:        idx.Unique,
+				Where:         indexPredicate(idx, table.Columns, indexColumns),
+				Opclass:       idx.Ops,
+				Expression:    idx.Expression,
+				InTransaction: idx.Concurrently != nil && !*idx.Concurrently,
 			},
 			keys: indexKeys,
 			name: idx.Name,
@@ -746,6 +839,20 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 		}
 	}
 	return defaults, nil
+}
+
+// indexPredicate returns an index's partial-index predicate: @index's
+// where (D83), and for a unique index on a soft-deletable table
+// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it.
+func indexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
+	softDelete := uniqueIndexPredicate(idx, columns, indexColumns)
+	switch {
+	case idx.Where == "":
+		return softDelete
+	case softDelete == "":
+		return idx.Where
+	}
+	return "(" + idx.Where + ") AND " + softDelete
 }
 
 // uniqueIndexPredicate returns the partial-index predicate for a unique
@@ -872,18 +979,18 @@ func primaryKeyColumn(table Table) *Column {
 }
 
 // keyFieldType returns the SQL type of a type's primary key field.
-func keyFieldType(typeDef *ir.TypeDef, scalarMapping map[string]string) string {
+func keyFieldType(schema *ir.Schema, typeDef *ir.TypeDef, scalarMapping map[string]string) string {
 	if typeDef == nil {
 		return "UUID"
 	}
 	for _, field := range typeDef.Fields {
 		if field.Key {
-			return sqlutil.ColumnType(field, scalarMapping)
+			return sqlutil.ColumnType(schema, field, scalarMapping)
 		}
 	}
 	for _, field := range typeDef.Fields {
 		if field.Name == "id" {
-			return sqlutil.ColumnType(field, scalarMapping)
+			return sqlutil.ColumnType(schema, field, scalarMapping)
 		}
 	}
 	return "UUID"
@@ -899,7 +1006,7 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 	column := Column{
 		Name:       columnName,
 		QuotedName: sqlutil.QuoteIdentifier(columnName),
-		Type:       keyFieldType(schema.Types[typeName], scalarMapping),
+		Type:       keyFieldType(schema, schema.Types[typeName], scalarMapping),
 		Nullable:   !field.Required,
 	}
 
@@ -933,12 +1040,12 @@ func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName st
 		QuotedLeftTable:   sqlutil.QuoteIdentifier(parentTableName),
 		LeftColumn:        parentTableName + "_id",
 		QuotedLeftColumn:  sqlutil.QuoteIdentifier(parentTableName + "_id"),
-		LeftColumnType:    keyFieldType(schema.Types[parentTypeName], scalarMapping),
+		LeftColumnType:    keyFieldType(schema, schema.Types[parentTypeName], scalarMapping),
 		RightTable:        targetTableName,
 		QuotedRightTable:  sqlutil.QuoteIdentifier(targetTableName),
 		RightColumn:       targetTableName + "_id",
 		QuotedRightColumn: sqlutil.QuoteIdentifier(targetTableName + "_id"),
-		RightColumnType:   keyFieldType(schema.Types[targetTypeName], scalarMapping),
+		RightColumnType:   keyFieldType(schema, schema.Types[targetTypeName], scalarMapping),
 		OriginalField:     field.Name,
 	}
 }
@@ -985,6 +1092,13 @@ func collectExtensions(tables []Table, historyTables []HistoryTable, usedScalars
 		if len(table.SearchFields) > 0 {
 			add("pg_trgm")
 			break
+		}
+	}
+	for _, table := range tables {
+		for _, idx := range table.Indexes {
+			if ext, ok := opclassExtensions[strings.ToLower(idx.Opclass)]; ok {
+				add(ext)
+			}
 		}
 	}
 
@@ -1131,6 +1245,23 @@ func assignForeignKeyNames(table *Table) error {
 				table.Name, prev, fk.Column, fk.ConstraintName, postgresIdentifierLimit)
 		}
 		seen[fk.ConstraintName] = fk.Column
+	}
+	return nil
+}
+
+// assignCheckNames names each check of table (sqlutil.CheckName), cut as
+// Postgres cuts it, and fails when two collapse into one name.
+func assignCheckNames(table *Table) error {
+	seen := make(map[string]string, len(table.Checks))
+	for i := range table.Checks {
+		check := &table.Checks[i]
+		check.Name = serverConstraintName(sqlutil.CheckName(table.Name, check.Column))
+		if prev, dup := seen[check.Name]; dup {
+			return fmt.Errorf(
+				"checks on %s over %s and %s both generate the constraint name %q; PostgreSQL truncates identifiers to %d bytes, so shorten one of the column names",
+				table.Name, prev, check.Column, check.Name, postgresIdentifierLimit)
+		}
+		seen[check.Name] = check.Column
 	}
 	return nil
 }

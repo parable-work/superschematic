@@ -9,6 +9,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // identityFixtureDir holds the fixture the identity runtimes' stores run
@@ -19,7 +20,10 @@ const identityFixtureDir = "../../runtime/http/testdata/identity"
 
 // TestIdentityStoreFixtureIsCurrent builds fixture-user-model-db's identity
 // descriptor and both dialects' DDL, and fails when the checked-in copies
-// the identity runtimes read differ. Rewrite them with:
+// the identity runtimes read differ. It writes the DDL again under
+// defaults/ with a column the store's insert leaves out, a required
+// active: Default<boolean, false> on the User table, whose DEFAULT the
+// column carries (D83). Rewrite them with:
 //
 //	go test ./internal/generator -run TestIdentityStoreFixtureIsCurrent -update
 func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
@@ -28,6 +32,26 @@ func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	checkIdentityFixture(t, fixture, schema, true)
+
+	withDefault, err := loader.LoadService(filepath.Join(tsFixtures, fixture))
+	if err != nil {
+		t.Fatalf("load %s: %v", fixture, err)
+	}
+	user := withDefault.UserTable()
+	if user == nil {
+		t.Fatalf("%s has no User table", fixture)
+	}
+	inactive := "false"
+	user.Fields = append(user.Fields, &ir.FieldDef{Name: "active", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, Default: &inactive})
+	checkIdentityFixture(t, fixture, withDefault, false)
+}
+
+// checkIdentityFixture compares schema's identity descriptor, when
+// withDescriptor is set, and both dialects' DDL with the copies under
+// identityFixtureDir, or under its defaults/ when it is not.
+func checkIdentityFixture(t *testing.T, fixture string, schema *ir.Schema, withDescriptor bool) {
+	t.Helper()
 	descriptor, ok, err := identitydesc.Describe(schema)
 	if err != nil || !ok {
 		t.Fatalf("describe the identity tables: %v (described: %v)", err, ok)
@@ -58,12 +82,18 @@ func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
 		t.Fatalf("render the SQLite DDL: %v", err)
 	}
 
-	for name, want := range map[string][]byte{
+	files := map[string][]byte{
 		fixture + ".json": descriptorJSON,
 		"create.sql":      createSQL,
 		filepath.Join(SQLiteSubdir, "create.sql"): []byte(sqliteSQL),
-	} {
-		path := filepath.Join(identityFixtureDir, name)
+	}
+	dir := identityFixtureDir
+	if !withDescriptor {
+		delete(files, fixture+".json")
+		dir = filepath.Join(identityFixtureDir, "defaults")
+	}
+	for name, want := range files {
+		path := filepath.Join(dir, name)
 		if *updateNamingGolden {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatal(err)

@@ -1,0 +1,40 @@
+{
+  "dialect": "sqlite",
+  "expanded": "3df8f6f4dc7b5e3715498c9f00203b71963d0f026ef5f872df3ad5674f21586f",
+  "from": "3df8f6f4dc7b5e3715498c9f00203b71963d0f026ef5f872df3ad5674f21586f",
+  "hash": "383596e5f2259f5fc3813f12932b062b80ef7ced3bae73cd0b246dab3365b591",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line",
+          "reason": "Copying order_line holds the database's write lock for time that grows with the table.",
+          "subject": "table/order_line"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order_line",
+          "reason": "SQLite's ALTER TABLE cannot change foreign key fk_order_line_product_id, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one.",
+          "subject": "table/order_line"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"product_id\" TEXT,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"product_id\") REFERENCES \"product\" (\"id\") ON DELETE SET NULL\n)",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"product_id\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"product_id\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_line\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\""
+      ],
+      "subject": "table/order_line",
+      "transactional": true
+    }
+  ],
+  "to": "79d61af61d95bc5f47b50e999a309e424378787c45696eadf62651518e4c45a4",
+  "toModel": null,
+  "version": 1
+}

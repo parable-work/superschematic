@@ -192,7 +192,7 @@ fn the_http_api_is_a_call_and_a_stream_is_pulled_by_its_id() {
                 .as_array()
                 .unwrap()
                 .len(),
-            29
+            30
         );
         let caller = json!({"principal": {"subject": "alice", "permissions": []}});
         let answered = call(

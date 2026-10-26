@@ -17,8 +17,8 @@ as their support lands in every generator.
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
 | `Nullable<T>` | field | the field may be absent or null; `name?: T` means the same | [Modeling types](/superschematic/guides/modeling-types/#required-nullable-and-optional) |
-| `Default<T, V>` | field | the decoders fill in `V` when a payload leaves the field out | [Modeling types](/superschematic/guides/modeling-types/#defaults) |
-| `Validate<T, C>` | field | `min`, `max`, `minLength`, `maxLength`, `pattern`, `listMin`, `listMax`, `uploadMaxBytes` | [Modeling types](/superschematic/guides/modeling-types/#constraints) |
+| `Default<T, V>` | field | the decoders fill in `V` when a payload leaves the field out; on a required field of a DB table whose column holds text, a number, a boolean or an enum, it is the column's `DEFAULT` too | [Modeling types](/superschematic/guides/modeling-types/#defaults) |
+| `Validate<T, C>` | field | `min`, `max`, `minLength`, `maxLength`, `pattern`, `listMin`, `listMax`, `uploadMaxBytes`; on a DB table, `min` and `max` on a number column and `minLength` and `maxLength` on a text column are the column's `CHECK` too | [Modeling types](/superschematic/guides/modeling-types/#constraints) |
 | `Secret<T>` | field | a value kept out of logs: mask helpers clear it, and an `@envVars` loader marks it secret | [Modeling types](/superschematic/guides/modeling-types/#secrets) |
 | `@strictJSON` | class | every decoder of the type refuses a key it does not declare | [Modeling types](/superschematic/guides/modeling-types/#strict-decoding) |
 | `@denyUnknownFields` | class | the Rust type refuses a key it does not declare | [Modeling types](/superschematic/guides/modeling-types/#strict-decoding) |
@@ -40,9 +40,10 @@ as their support lands in every generator.
 | `@key` | field | the primary key; a unique field in the engine | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
 | `AutoGenerate<T>` | field | the database generates the value on insert | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
 | `@unique` | field | a unique constraint on the column; in the engine, on the field within a namespace, which `lookup` reads by | [Database tables](/superschematic/guides/database-tables/#tables-and-keys), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
-| `Relation<T, { onDelete }>` | field | a foreign key to table `T`; `onDelete` is `CASCADE` (the default), `RESTRICT` or `NO ACTION` | [Database tables](/superschematic/guides/database-tables/#relations) |
+| `Relation<T, { onDelete }>` | field | a foreign key to table `T`; `onDelete` is `CASCADE` (the default), `RESTRICT`, `NO ACTION`, or `SET NULL` on a `Nullable<Relation<T, ...>>` | [Database tables](/superschematic/guides/database-tables/#relations) |
 | `HasMany<T>` | field | the rows of `T` whose relation points at this row | [Database tables](/superschematic/guides/database-tables/#one-to-many) |
-| `@index<T>(keys, { unique?, name? })` | class | an index over the listed fields, in the engine too | [Database tables](/superschematic/guides/database-tables/#indexes), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
+| `@index<T>(keys, { unique?, name?, method?, ops?, where?, expression?, concurrently? })` | class | an index over the listed fields, in the engine too; on a table, of the method, operator class, predicate or expression given, built inside a plan's step with `concurrently: false` | [Database tables](/superschematic/guides/database-tables/#indexes), [Engine](/superschematic/guides/engine/#unique-fields-and-lookups) |
+| `@rawSql({ id, up, down?, after?, dialects? })` | class (a table) | raw SQL the service runs after its tables or after every object it declares; `create.sql` includes it, and a migration plan runs it when it is new or changes and its `down` when it is gone | [Database tables](/superschematic/guides/database-tables/#raw-sql), [Schema migrations](/superschematic/reference/migrations/#raw-sql) |
 | `@searchField` | field | joins the field into a trigram-indexed `search_text` column | [Database tables](/superschematic/guides/database-tables/#text-search) |
 | `@jsonField`, `JsonField<T>` | field | stores the field as `JSONB` | [Database tables](/superschematic/guides/database-tables/#json-columns) |
 | `@sourceMustProject` | field | warns when a `@source` view leaves the field out | [API routes](/superschematic/guides/api-routes/#responses-and-views) |

@@ -47,7 +47,7 @@ var repositoryCases = []repositoryCase{
 		"a soft delete stamps deletedAt and deletedBy, and reads leave the row out unless they include deleted rows",
 		"a transaction writes rows and enqueues their message together, and rolls both back when it throws",
 		"a nullable JSON column's null is SQL NULL, and a JSON string in it stays a string",
-		"a field of a @jsonField type, a TEXT column, holds its JSON text and reads back as its value",
+		"a field of a @jsonField type is a JSON object in its JSONB column, and reads back as its value",
 		"a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts",
 	}},
 	{fixture: "fixture-db", test: "page.test.ts", tests: []string{

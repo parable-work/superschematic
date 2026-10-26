@@ -90,7 +90,7 @@ describe('the addon an engine opens on', () => {
       () => openEngine({ path: freshPath(), policy: allowAll, behaviors: ['acme.Rating'] }),
       (error: Error) => {
         assert.equal(error.name, 'TypeError');
-        assert.match(error.message, /superschematic-engine-addon is built with beside the core's \(Lease, Assignment, Queue, Presence, Blueprint, Budget, Retries, Stock, Calendar, Holds, Payments\)/u);
+        assert.match(error.message, /superschematic-engine-addon is built with beside the core's \(Lease, Assignment, Queue, Presence, Blueprint, Budget, Retries, Stock, Calendar, Holds, Payments(, test\.Chatter)?\)/u);
         assert.match(error.message, /not "acme\.Rating"/u);
         return true;
       }

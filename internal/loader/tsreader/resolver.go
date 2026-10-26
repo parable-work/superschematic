@@ -41,7 +41,8 @@ type typeInfo struct {
 	relation      bool
 
 	// relationOnDelete holds the Relation<T, { onDelete }> action when set
-	// (CASCADE|RESTRICT|NO ACTION); empty means the generator default.
+	// (CASCADE|RESTRICT|NO ACTION|SET NULL); empty means the generator
+	// default.
 	relationOnDelete string
 	hasMany          bool
 	manyToMany       bool

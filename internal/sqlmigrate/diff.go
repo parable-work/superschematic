@@ -34,6 +34,7 @@ func Diff(from, to *Model, opts Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	d.empty = from == nil
 	if err := d.diff(); err != nil {
 		return nil, err
 	}
@@ -112,6 +113,8 @@ type differ struct {
 	// seeds are the new history tables of tables that become versioned, by
 	// source table.
 	seeds map[string]*change
+	// empty is set when the plan starts from an empty database.
+	empty bool
 
 	changes []*change
 }
@@ -153,6 +156,7 @@ func (d *differ) diff() error {
 	d.diffFunctions()
 	d.diffTriggers()
 	d.diffViews(d.groupAlterations())
+	d.diffRawSQL()
 	return nil
 }
 
@@ -320,6 +324,7 @@ func (d *differ) diffTable(ft, tt *Table) error {
 	d.diffUniques(ft, tt, mapColumns)
 	d.diffForeignKeys(ft, tt, mapColumns)
 	d.diffIndexes(ft, tt, mapColumns)
+	d.diffChecks(ft, tt)
 
 	if ft.Comment != tt.Comment {
 		d.add(&change{
@@ -624,7 +629,7 @@ func (d *differ) diffForeignKeys(ft, tt *Table, mapColumns func([]string) []stri
 // it is created again.
 func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) {
 	key := func(idx *Index, columns []string) string {
-		return fmt.Sprintf("%s|%s|%s|%t|%s", strings.Join(columns, ","), idx.Method, idx.Opclass, idx.Unique, idx.Where)
+		return fmt.Sprintf("%s|%s|%s|%t|%s|%s", strings.Join(columns, ","), idx.Method, idx.Opclass, idx.Unique, idx.Where, idx.Expression)
 	}
 	regenerated := func(columns []string) bool {
 		for _, col := range columns {

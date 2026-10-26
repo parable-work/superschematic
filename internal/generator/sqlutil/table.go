@@ -40,9 +40,19 @@ func TableNameOf(schema *ir.Schema, typeName string) string {
 }
 
 // ColumnName is the column a field is stored in: its name in snake case.
-// Like TableName, it is the one place a column is named.
+// Like TableName, it is the one place a column is named, through
+// ColumnNameOf, which names an @index key's column too.
 func ColumnName(f *ir.FieldDef) string {
-	return codegen.ToSnakeCase(f.Name)
+	return ColumnNameOf(f.Name)
+}
+
+// ColumnNameOf is the column of the field named field: what ColumnName
+// gives its definition. An @index's default name (IndexName) and the
+// column an @index key resolves to (IndexKeyMatches) are spelled by it,
+// as a CHECK's (CheckName) is by the column ColumnName gives, so the
+// DDL's names (D83) and the ORMs' columns come from one place.
+func ColumnNameOf(field string) string {
+	return codegen.ToSnakeCase(field)
 }
 
 // ForeignKeyColumn is the column a to-one relation field stores its
@@ -379,9 +389,8 @@ type ColumnModel struct {
 
 	Class ColumnClass
 	// Type is the column's type as the DDL writes it (ColumnType): JSONB
-	// for a list of lists, a map or a field's @jsonField, and TEXT for a
-	// field of a @jsonField type, which holds its JSON as text. Empty for a
-	// column the generator adds.
+	// for a list of lists, a map and a @jsonField value (D83), a list its
+	// element's type with []. Empty for a column the generator adds.
 	Type string
 	// Filter is the kind of the column's filter: FilterNone for a column
 	// the filter holds no condition on, and for an audit field but
@@ -594,7 +603,7 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 			Secret:        f.Secret,
 			Default:       f.Default,
 			Class:         class,
-			Type:          ColumnType(f, sqlTypes),
+			Type:          ColumnType(schema, f, sqlTypes),
 		}
 		if AuditField(f.Name) {
 			c.Audit = f.Name

@@ -28,6 +28,21 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "note",
+          "maxLength": 200,
+          "name": "ck_order_placed_queue_note"
+        },
+        {
+          "column": "priority",
+          "in": [
+            "low",
+            "high"
+          ],
+          "name": "ck_order_placed_queue_priority"
+        }
+      ],
       "columns": [
         {
           "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
@@ -46,6 +61,7 @@
           "type": "TEXT"
         },
         {
+          "default": "'low'",
           "name": "priority",
           "origin": "OrderPlaced.priority",
           "type": "TEXT"
@@ -62,6 +78,7 @@
           "type": "TEXT"
         },
         {
+          "holds": "json",
           "name": "ship_to",
           "origin": "OrderPlaced.shipTo",
           "type": "TEXT"

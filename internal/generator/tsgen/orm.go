@@ -298,8 +298,10 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 	if cl.AnyJSON && c.IsArray() && !cl.JSON {
 		column.JSON = true
 	}
-	// A field of a @jsonField type is a TEXT column that holds its JSON as
-	// text, which the codec parses; pg parses a JSON or JSONB column itself.
+	// A JSON value in a TEXT column is its text, which the codec parses;
+	// pg parses a JSON or JSONB column itself. On Postgres every JSON
+	// column is JSONB (D83); the flag follows the DDL's type wherever a
+	// dialect keeps JSON as TEXT.
 	if column.JSON && strings.EqualFold(c.Type, "TEXT") {
 		column.JSON, column.JSONText = false, true
 	}

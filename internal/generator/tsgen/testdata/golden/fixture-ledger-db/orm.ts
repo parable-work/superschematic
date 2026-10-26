@@ -106,7 +106,7 @@ export const accountTable: TableDefinition = {
     { name: "name", column: "\"name\"", field: "name", qualified: "account.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "code", column: "code", field: "code", qualified: "account.code", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "openedOn", column: "opened_on", field: "openedOn", qualified: "account.opened_on", date: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", jsonText: true },
+    { name: "mailingAddress", column: "mailing_address", field: "mailingAddress", qualified: "account.mailing_address", json: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "account.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "account.created_by", uuid: true, required: true, audit: "createdBy" },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "account.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },

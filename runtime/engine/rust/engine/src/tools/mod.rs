@@ -1991,8 +1991,9 @@ fn behavior_summary(declaration: &BehaviorDeclaration) -> Value {
     Value::Object(out)
 }
 
-/// A behavior's document: its declaration with every list present and
-/// each operation's scope, whether it writes (and runs beside the instance,
+/// A behavior's document: its declaration with every list present but
+/// its signals, which it lists when it declares any (D77), and each
+/// operation's scope, whether it writes (and runs beside the instance,
 /// and appends no event, when it does) and its invocation policy
 /// under the policy's key: the tool options' for it, else its
 /// declaration's, else the default.
@@ -2060,6 +2061,30 @@ fn behavior_document(declaration: &BehaviorDeclaration, options: &ResolvedToolOp
                 .collect(),
         ),
     );
+    // Its signals (D77), when it declares any.
+    if !declaration.signals.is_empty() {
+        out.insert(
+            "signals".into(),
+            Value::Array(
+                declaration
+                    .signals
+                    .iter()
+                    .map(|signal| {
+                        let mut entry = Map::new();
+                        entry.insert("name".into(), Value::from(signal.name.as_str()));
+                        if let Some(description) =
+                            signal.description.as_deref().filter(|d| !d.is_empty())
+                        {
+                            entry.insert("description".into(), Value::from(description));
+                        }
+                        entry.insert("access".into(), Value::from(signal.access.as_str()));
+                        entry.insert("paramsSchema".into(), json::js_copy(&signal.params_schema));
+                        Value::Object(entry)
+                    })
+                    .collect(),
+            ),
+        );
+    }
     out.insert("vetoes".into(), declared_vetoes(declaration));
     Value::Object(out)
 }

@@ -30,7 +30,12 @@
 //! an event stream it opens, or one `stream.open` opens from a read of the
 //! log, is held by the engine and named by an id, which `stream.next`
 //! pulls (`{data}`, `{pending: true}` or `{end: true}`) and `stream.close`
-//! ends.
+//! ends; `stream.open`'s read takes `signals: true` for the signals of what
+//! it reads (D77).
+//!
+//! `signals.send` (also by the name `sendSignal`) sends a signal (D77):
+//! `[{ namespace?, schema, instanceId, behavior, name, data? }]`, after
+//! the principal, answering nothing.
 
 use std::borrow::Cow;
 
@@ -53,7 +58,7 @@ use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions}
 use crate::storage::Dialect;
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 57] = [
+pub const CALLS: [&str; 59] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -92,6 +97,8 @@ pub const CALLS: [&str; 57] = [
     "tools.manifest",
     "tools.call",
     "search",
+    "signals.send",
+    "sendSignal",
     "runner.start",
     "runner.stop",
     "runner.running",
@@ -472,6 +479,40 @@ pub fn call_with(
                 },
             )
         }
+        "signals.send" | "sendSignal" => {
+            let principal = who()?;
+            let input = options(0);
+            let required = |key: &str| -> Result<String> {
+                match input.and_then(|input| input.get(key)) {
+                    Some(Value::String(text)) => Ok(text.clone()),
+                    _ => Err(EngineError::invalid_argument(format!(
+                        "signals.send takes {{ namespace?, schema, instanceId, behavior, name, data? }}: {key} is a string"
+                    ))
+                    .into()),
+                }
+            };
+            let (schema, instance_id, behavior, name) = (
+                required("schema")?,
+                required("instanceId")?,
+                required("behavior")?,
+                required("name")?,
+            );
+            let namespace = text_member(input, "namespace");
+            let empty = Value::Object(Map::new());
+            let data = input.and_then(|input| input.get("data")).unwrap_or(&empty);
+            engine.signals().send(
+                principal,
+                &crate::signals::SendSignal {
+                    namespace: namespace.as_deref(),
+                    schema: &schema,
+                    instance_id: &instance_id,
+                    behavior: &behavior,
+                    name: &name,
+                    data,
+                },
+            )?;
+            return Ok(None);
+        }
         "search" => {
             let namespace = text_member(options(1), "namespace");
             engine.search(who()?, arg(0), namespace.as_deref())
@@ -512,11 +553,22 @@ pub fn call_with(
         "stream.open" => {
             let principal = who()?;
             let read = ReadArgs::of(options(0))?;
-            let stream = api::start_stream(
+            let signals = match options(0).and_then(|read| read.get("signals")) {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(signals)) => *signals,
+                Some(_) => {
+                    return Err(EngineError::invalid_argument(
+                        "signals is a boolean: true sends the signals of what the stream reads",
+                    )
+                    .into())
+                }
+            };
+            let stream = api::start_stream_with(
                 engine,
                 &stream_options_of(options(1))?,
                 principal,
                 &read.view(),
+                signals,
             )?;
             Ok(Value::from(engine.streams.hold(Box::new(stream))))
         }

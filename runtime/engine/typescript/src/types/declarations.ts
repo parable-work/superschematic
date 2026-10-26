@@ -30,6 +30,8 @@ export interface BehaviorDeclaration {
   readonly fields?: readonly BehaviorFieldDeclaration[];
   /** The operations it adds beside create, get, list, update and delete. */
   readonly operations?: readonly BehaviorOperationDeclaration[];
+  /** Its signals (D77): messages about an instance the engine delivers to the event streams open on it and keeps nowhere. */
+  readonly signals?: readonly BehaviorSignalDeclaration[];
   /**
    * The JSON Schema of the entry a caller sends for it in the
    * preconditions of an update, a delete or an operation, which its guard
@@ -86,6 +88,24 @@ export interface BehaviorOperationDeclaration {
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }
+
+/** One signal a behavior declares (D77). */
+export interface BehaviorSignalDeclaration {
+  /** camelCase, unique among its signals. */
+  readonly name: string;
+  readonly description?: string;
+  /** The JSON Schema of its data. */
+  readonly paramsSchema: JSONSchema;
+  /**
+   * Who may send it: a caller the policy lets read the schema (read), or
+   * write it (write), or the behavior's own operations alone (operation).
+   * A string, as a JSON module types it.
+   */
+  readonly access: string;
+}
+
+/** Who may send a signal. */
+export type SignalAccess = 'read' | 'write' | 'operation';
 
 /** What an operation runs on. */
 export type OperationScope = 'instance' | 'schema';

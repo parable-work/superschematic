@@ -37,8 +37,8 @@ its own parsers and with postgresTypeParsers alike, so the value arrives as
 the JSON value it holds, a string among them, and decodeRow takes it as it
 is: parsing it again would read the JSON string "1" as the number 1, and
 fail on "x". Only a TEXT column that holds JSON (jsonText), as SQLite keeps
-it and as the DDL types a field of a @jsonField type, arrives as its text,
-which decodeRow parses. encodeParam writes every
+it, arrives as its text, which decodeRow parses; on Postgres every JSON
+column is JSONB (D83). encodeParam writes every
 JSON value as its JSON text, a string as its quoted text and a list as a
 JSON array, never as pg's array literal; null is SQL NULL, but in a column that
 may not be null (required), where it is the JSON null.
@@ -52,7 +52,7 @@ export interface RowField {
   readonly column: string;
   /** The column is JSON or JSONB, which pg reads already parsed: the JSON value it holds, a string, a number, a boolean, null, a list or an object. */
   readonly json?: boolean;
-  /** The column is TEXT that holds a JSON value, as SQLite keeps one and the DDL a field of a @jsonField type, which decodeRow parses. */
+  /** The column is TEXT that holds a JSON value, as SQLite keeps one, which decodeRow parses. */
   readonly jsonText?: boolean;
   /** The column is NOT NULL: a JSON column's null is the JSON null, where a nullable column's is SQL NULL. */
   readonly required?: boolean;

@@ -144,8 +144,14 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 		if f.Relation != nil && f.Relation.OnDelete != "" {
 			switch f.Relation.OnDelete {
 			case "CASCADE", "RESTRICT", "NO ACTION":
+			case "SET NULL":
+				// SET NULL writes null into the foreign key column, which a
+				// required relation's NOT NULL column refuses (D83).
+				if f.Required {
+					errs = append(errs, fmt.Errorf(`%s.%s relation onDelete "SET NULL" needs a nullable relation: declare it Nullable<Relation<%s, { onDelete: "SET NULL" }>>, or pick CASCADE, RESTRICT or NO ACTION`, td.Name, f.Name, f.Relation.Type))
+				}
 			default:
-				errs = append(errs, fmt.Errorf("%s.%s relation onDelete %q is invalid (want CASCADE, RESTRICT, or NO ACTION)", td.Name, f.Name, f.Relation.OnDelete))
+				errs = append(errs, fmt.Errorf("%s.%s relation onDelete %q is invalid (want CASCADE, RESTRICT, NO ACTION, or SET NULL)", td.Name, f.Name, f.Relation.OnDelete))
 			}
 		}
 		for _, arg := range f.Arguments {
