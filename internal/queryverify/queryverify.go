@@ -190,7 +190,7 @@ func judgeParams(where string, q sqlutil.QueryModel, args []sqlutil.QueryField, 
 				owner = q.Row + "'s page key"
 			}
 			problems = append(problems, fmt.Sprintf("%s: :%s is %s in %s, which binds as %s, and Postgres reads $%d as %s; cast it in the SQL (:%s::%s) or give the field a type of %s's",
-				where, a.Name, a.Def.TypeRef.Name, owner, a.SQLType, i+1, params[i].Type, a.Name, strings.ToLower(baseType(a.SQLType)), params[i].Type))
+				where, a.Name, a.Def.TypeRef.Name, owner, a.SQLType, i+1, params[i].Type, a.Name, castOf(a.SQLType), params[i].Type))
 		}
 	}
 	return problems
@@ -215,7 +215,7 @@ func judgeColumns(where string, q sqlutil.QueryModel, columns []Column) []string
 		}
 		if !compatible(f.SQLType, c.Type) {
 			problems = append(problems, fmt.Sprintf("%s: column %s is %s, and %s.%s is %s, which a %s column holds; cast it in the SQL (::%s) or give the field a type of %s's",
-				where, c.Name, c.Type.Type, q.Row, f.Name, f.Def.TypeRef.Name, f.SQLType, strings.ToLower(baseType(f.SQLType)), c.Type.Type))
+				where, c.Name, c.Type.Type, q.Row, f.Name, f.Def.TypeRef.Name, f.SQLType, castOf(f.SQLType), c.Type.Type))
 		}
 		if f.Nullable || q.NotNull[f.Name] || q.NotNull[f.Column] || straightNotNull(q, c) {
 			continue
@@ -289,6 +289,16 @@ func baseType(sqlType string) string {
 		t = t[:i]
 	}
 	return strings.ToUpper(strings.TrimSpace(t))
+}
+
+// castOf is the cast a statement writes to give a value the DDL type
+// sqlType, its modifier left out: bigint for BIGINT, uuid[] for UUID[].
+func castOf(sqlType string) string {
+	cast := strings.ToLower(baseType(sqlType))
+	if strings.HasSuffix(strings.TrimSpace(sqlType), "[]") {
+		cast += "[]"
+	}
+	return cast
 }
 
 // familyOf is the family of a pg_type name; a type of no family is its own.
