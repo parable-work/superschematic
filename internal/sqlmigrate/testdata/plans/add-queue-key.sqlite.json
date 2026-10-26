@@ -1,0 +1,72 @@
+{
+  "dialect": "sqlite",
+  "from": "39da4c816c122d9e52634ee171190e141ede2435f035e2cc0ab885afe1d46304",
+  "hash": "b9f74a416d0270cd111262fc4289e9619acc9787aea4eb1f77fc22b7d63aa6f5",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key",
+          "reason": "Building the index holds the database's write lock for time that grows with order_shipped_queue.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key",
+          "reason": "Building the index fails while two claims hold one order_id of OrderShipped: let them finish or expire, and run the plan again.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX \"uq_order_shipped_queue_claimed_key\" ON \"order_shipped_queue\" (\"order_id\") WHERE state = 'claimed'"
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "The step marks done every ready message of OrderShipped but one per order_id, the latest enqueued, which replace keeps: the others do not run.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "Building the index holds the database's write lock for time that grows with order_shipped_queue.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "Servers built from the previous version enqueue OrderShipped without ON CONFLICT: once the index is built, such an enqueue of a message whose order_id a ready message holds fails, and the write that enqueued it with it.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "Building the index fails when such a server enqueues a duplicate order_id between the step's two statements; run the plan again.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        }
+      ],
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "UPDATE \"order_shipped_queue\" SET state = 'done', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),\n  last_error = 'another ready message of its key was kept when the queue began to keep one per key'\nWHERE state = 'ready' AND id NOT IN (\n  SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY \"order_id\" ORDER BY created_at DESC, id DESC) AS n FROM \"order_shipped_queue\" WHERE state = 'ready') AS kept WHERE n = 1\n)",
+        "CREATE UNIQUE INDEX \"uq_order_shipped_queue_ready_key\" ON \"order_shipped_queue\" (\"order_id\") WHERE state = 'ready'"
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+      "transactional": true
+    }
+  ],
+  "to": "354c6e92b9e9034914e2f6be13f686582615c6585929084632eac7acee12b451",
+  "toModel": null,
+  "version": 1
+}

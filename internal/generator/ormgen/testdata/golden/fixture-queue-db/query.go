@@ -330,6 +330,360 @@ type OrderPage struct {
 	Next *OrderPageKey
 }
 
+// OrderLineFields specifies which OrderLine fields to select
+type OrderLineFields struct {
+	Id       bool
+	Quantity bool
+	Note     bool
+	// Order selects the order_id foreign key field
+	Order bool
+	// OrderNested selects fields for the related Order
+	OrderNested OrderFields
+	// Product selects the product_id foreign key field
+	Product bool
+	// ProductNested selects fields for the related Product
+	ProductNested ProductFields
+}
+
+// ToStringSlice converts OrderLineFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f OrderLineFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Order {
+		fields = append(fields, "order_id")
+	}
+	if f.Product {
+		fields = append(fields, "product_id")
+	}
+	if f.Quantity {
+		fields = append(fields, "quantity")
+	}
+	if f.Note {
+		fields = append(fields, "note")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f OrderLineFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.OrderNested.IsZero() {
+		return false
+	}
+	if !f.ProductNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a OrderLineFields with all fields selected
+func (OrderLineFields) All() OrderLineFields {
+	return OrderLineFields{
+		Id:       true,
+		Quantity: true,
+		Note:     true,
+		Order:    true,
+		Product:  true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (OrderLineFields) Minimal() OrderLineFields {
+	return OrderLineFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (OrderLineFields) WithoutAudit() OrderLineFields {
+	return OrderLineFields{
+		Id:       true,
+		Quantity: true,
+		Note:     true,
+	}
+}
+
+// OrderLineOrderByField represents a field that can be used for ordering
+type OrderLineOrderByField string
+
+const (
+	OrderLineOrderById       OrderLineOrderByField = "id"
+	OrderLineOrderByQuantity OrderLineOrderByField = "quantity"
+	OrderLineOrderByNote     OrderLineOrderByField = "note"
+)
+
+// OrderLineOrderBy specifies ordering for OrderLine queries
+type OrderLineOrderBy struct {
+	Field OrderLineOrderByField
+	Desc  bool
+}
+
+// OrderLineGetOptions contains options for OrderLine GetOne operations
+type OrderLineGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OrderLineFields
+}
+
+// OrderLineFindOptions contains options for OrderLine Find operations
+type OrderLineFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OrderLineFields
+	// OrderBy specifies sorting order
+	OrderBy []OrderLineOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OrderLineSortField is a field FindPage orders OrderLine rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OrderLineSortField string
+
+const (
+	OrderLineSortById       OrderLineSortField = "id"
+	OrderLineSortByQuantity OrderLineSortField = "quantity"
+)
+
+// OrderLineSort is the order FindPage reads OrderLine rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OrderLineSort struct {
+	Field OrderLineSortField
+	Desc  bool
+}
+
+// ParseOrderLineSort reads a sort as a page request writes it, "quantity" or
+// "-quantity": an error for a field OrderLine cannot be sorted by.
+func ParseOrderLineSort(text string) (OrderLineSort, error) {
+	parsed := OrderLineSort{Field: OrderLineSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OrderLineSortById, OrderLineSortByQuantity:
+		return parsed, nil
+	}
+	return OrderLineSort{}, fmt.Errorf("orm: OrderLine sorts by id and quantity, not %q", text)
+}
+
+// OrderLinePageKey is the position of a OrderLine row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OrderLinePageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OrderLinePageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the OrderLine key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// orderLinePageKeyOf is row's key: its id.
+func orderLinePageKeyOf(row *types.OrderLine) *OrderLinePageKey {
+	key := &OrderLinePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OrderLinePageOptions are FindPage's options.
+type OrderLinePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OrderLineFields
+	// Sort is the order the rows are read in.
+	Sort OrderLineSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OrderLinePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OrderLinePage is a page of OrderLine rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OrderLinePage struct {
+	Rows []*types.OrderLine
+	Next *OrderLinePageKey
+}
+
+// ProductFields specifies which Product fields to select
+type ProductFields struct {
+	Id   bool
+	Name bool
+}
+
+// ToStringSlice converts ProductFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f ProductFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Name {
+		fields = append(fields, "name")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f ProductFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a ProductFields with all fields selected
+func (ProductFields) All() ProductFields {
+	return ProductFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (ProductFields) Minimal() ProductFields {
+	return ProductFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (ProductFields) WithoutAudit() ProductFields {
+	return ProductFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// ProductOrderByField represents a field that can be used for ordering
+type ProductOrderByField string
+
+const (
+	ProductOrderById   ProductOrderByField = "id"
+	ProductOrderByName ProductOrderByField = "name"
+)
+
+// ProductOrderBy specifies ordering for Product queries
+type ProductOrderBy struct {
+	Field ProductOrderByField
+	Desc  bool
+}
+
+// ProductGetOptions contains options for Product GetOne operations
+type ProductGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields ProductFields
+}
+
+// ProductFindOptions contains options for Product Find operations
+type ProductFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields ProductFields
+	// OrderBy specifies sorting order
+	OrderBy []ProductOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// ProductSortField is a field FindPage orders Product rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type ProductSortField string
+
+const (
+	ProductSortById   ProductSortField = "id"
+	ProductSortByName ProductSortField = "name"
+)
+
+// ProductSort is the order FindPage reads Product rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type ProductSort struct {
+	Field ProductSortField
+	Desc  bool
+}
+
+// ParseProductSort reads a sort as a page request writes it, "name" or
+// "-name": an error for a field Product cannot be sorted by.
+func ParseProductSort(text string) (ProductSort, error) {
+	parsed := ProductSort{Field: ProductSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case ProductSortById, ProductSortByName:
+		return parsed, nil
+	}
+	return ProductSort{}, fmt.Errorf("orm: Product sorts by id and name, not %q", text)
+}
+
+// ProductPageKey is the position of a Product row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type ProductPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *ProductPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Product key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// productPageKeyOf is row's key: its id.
+func productPageKeyOf(row *types.Product) *ProductPageKey {
+	key := &ProductPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// ProductPageOptions are FindPage's options.
+type ProductPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields ProductFields
+	// Sort is the order the rows are read in.
+	Sort ProductSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *ProductPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// ProductPage is a page of Product rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type ProductPage struct {
+	Rows []*types.Product
+	Next *ProductPageKey
+}
+
 // ========================================
 // Filters and Update Structs
 // ========================================
@@ -338,6 +692,9 @@ type OrderPage struct {
 type OrderFilter struct {
 	Id       *UUIDFilter
 	PlacedAt *DateTimeFilter
+	// ReferencedByOrderLineOrder filters on the presence or absence of a
+	// OrderLine whose order points at this row.
+	ReferencedByOrderLineOrder *ReferencedByFilter
 }
 
 // OrderUpdate provides fields that can be updated
@@ -460,6 +817,363 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			} else {
 				conditions = append(conditions, `"order".placed_at IS NOT NULL`)
 			}
+		}
+	}
+	if f.ReferencedByOrderLineOrder != nil {
+		probe := `SELECT 1 FROM order_line WHERE order_line.order_id = "order".id`
+		if f.ReferencedByOrderLineOrder.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+
+	return conditions
+}
+
+// OrderLineFilter provides filtering for OrderLine queries
+type OrderLineFilter struct {
+	Id       *UUIDFilter
+	Quantity *Int64Filter
+	Note     *StringFilter
+	// OrderID allows filtering by foreign key
+	OrderID *UUIDFilter
+	// ProductID allows filtering by foreign key
+	ProductID *UUIDFilter
+}
+
+// OrderLineUpdate provides fields that can be updated
+type OrderLineUpdate struct {
+	Quantity    *types.GenericInt64
+	Note        *string
+	NoteSetNull bool
+	// OrderID allows updating the foreign key for order
+	OrderID *types.IdentityUUID
+	// ProductID allows updating the foreign key for product
+	ProductID        *types.IdentityUUID
+	ProductIDSetNull bool
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewOrderLineSnapshotUpdate maps every mutable field from a complete
+// OrderLine value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewOrderLineSnapshotUpdate(input *types.OrderLine) *OrderLineUpdate {
+	update := &OrderLineUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Quantity = &input.Quantity
+	var zeroNote string
+	if input.Note == zeroNote {
+		update.NoteSetNull = true
+	} else {
+		update.Note = &input.Note
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *OrderLineUpdate) ApplyTo(row *types.OrderLine) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Quantity != nil {
+		row.Quantity = *u.Quantity
+	}
+	if u.NoteSetNull {
+		var zeroNote string
+		row.Note = zeroNote
+	} else if u.Note != nil {
+		row.Note = *u.Note
+	}
+	if u.OrderID != nil {
+		row.Order.Id = u.OrderID
+	}
+	if u.ProductIDSetNull {
+		row.Product = nil
+	} else if u.ProductID != nil {
+		if row.Product == nil {
+			row.Product = &types.Product{}
+		}
+		row.Product.Id = u.ProductID
+	}
+}
+
+// OrderLineFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OrderLineFilterConditions(filter *OrderLineFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OrderLineFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *OrderLineFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`order_line.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `order_line.id IS NULL`)
+			} else {
+				conditions = append(conditions, `order_line.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Quantity != nil {
+		if f.Quantity.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity = $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Eq)
+		}
+		if f.Quantity.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity > $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Gt)
+		}
+		if f.Quantity.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity >= $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Gte)
+		}
+		if f.Quantity.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity < $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Lt)
+		}
+		if f.Quantity.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity <= $%d`, paramNum))
+			*args = append(*args, *f.Quantity.Lte)
+		}
+		if f.Quantity.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity >= $%d`, paramNum))
+			*args = append(*args, f.Quantity.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.quantity <= $%d`, paramNum))
+			*args = append(*args, f.Quantity.Between.Max)
+		}
+	}
+	if f.Note != nil {
+		if f.Note.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.note = $%d`, paramNum))
+			*args = append(*args, *f.Note.Eq)
+		}
+		if len(f.Note.In) > 0 {
+			placeholders := make([]string, len(f.Note.In))
+			for i, value := range f.Note.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`order_line.note IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Note.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.note ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Note.ILike+"%")
+		}
+	}
+	if f.OrderID != nil {
+		if f.OrderID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.order_id = $%d`, paramNum))
+			*args = append(*args, f.OrderID.Eq.ToUUID())
+		}
+		if len(f.OrderID.In) > 0 {
+			placeholders := make([]string, len(f.OrderID.In))
+			for i, id := range f.OrderID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`order_line.order_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.OrderID.IsNull != nil {
+			if *f.OrderID.IsNull {
+				conditions = append(conditions, `order_line.order_id IS NULL`)
+			} else {
+				conditions = append(conditions, `order_line.order_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.ProductID != nil {
+		if f.ProductID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`order_line.product_id = $%d`, paramNum))
+			*args = append(*args, f.ProductID.Eq.ToUUID())
+		}
+		if len(f.ProductID.In) > 0 {
+			placeholders := make([]string, len(f.ProductID.In))
+			for i, id := range f.ProductID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`order_line.product_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.ProductID.IsNull != nil {
+			if *f.ProductID.IsNull {
+				conditions = append(conditions, `order_line.product_id IS NULL`)
+			} else {
+				conditions = append(conditions, `order_line.product_id IS NOT NULL`)
+			}
+		}
+	}
+
+	return conditions
+}
+
+// ProductFilter provides filtering for Product queries
+type ProductFilter struct {
+	Id   *UUIDFilter
+	Name *StringFilter
+	// ReferencedByOrderLineProduct filters on the presence or absence of a
+	// OrderLine whose product points at this row.
+	ReferencedByOrderLineProduct *ReferencedByFilter
+}
+
+// ProductUpdate provides fields that can be updated
+type ProductUpdate struct {
+	Name *string
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewProductSnapshotUpdate maps every mutable field from a complete
+// Product value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewProductSnapshotUpdate(input *types.Product) *ProductUpdate {
+	update := &ProductUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Name = &input.Name
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *ProductUpdate) ApplyTo(row *types.Product) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Name != nil {
+		row.Name = *u.Name
+	}
+}
+
+// ProductFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func ProductFilterConditions(filter *ProductFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a ProductFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *ProductFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`product.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`product.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `product.id IS NULL`)
+			} else {
+				conditions = append(conditions, `product.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Name != nil {
+		if f.Name.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`product."name" = $%d`, paramNum))
+			*args = append(*args, *f.Name.Eq)
+		}
+		if len(f.Name.In) > 0 {
+			placeholders := make([]string, len(f.Name.In))
+			for i, value := range f.Name.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`product."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Name.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`product."name" ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Name.ILike+"%")
+		}
+	}
+	if f.ReferencedByOrderLineProduct != nil {
+		probe := `SELECT 1 FROM order_line WHERE order_line.product_id = product.id`
+		if f.ReferencedByOrderLineProduct.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
 		}
 	}
 

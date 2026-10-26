@@ -23,13 +23,15 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
+| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
+| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row | |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
 | `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
 
-D53 and D68 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68 and D80 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -51,6 +53,9 @@ Every argument is optional:
 | `maxBackoff` | the longest a failed message waits, however many times it failed; the backoff or more, and an hour unless set, or the backoff when that is longer. Set it to the backoff for a wait that never grows |
 | `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
 | `retain` | how long a done message stays in the table before a worker removes it, as `168h`; a week unless set. `0s` keeps none: completing a message deletes it |
+| `key` | the message's field that keys it, a required scalar or enum field; it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
+| `onDuplicate` | what an enqueue does when a message of its key waits: `append` adds another, as a queue without a key does; `replace` overwrites the one that waits; `skip` keeps it and adds none. `append` unless set |
+| `serialize` | `true` holds the queue to one claim per key at a time |
 
 Every duration is whole seconds as Go writes one: `90s`, `10m`, `1h30m`
 or `168h`, with no days. After its attempt `n` fails, a message waits
@@ -85,6 +90,92 @@ A partial index on `due_at` of the ready messages and one on
 message, so its `updated_at` is when it was done.
 [Schema migrations](/superschematic/reference/migrations/) plan the table
 as any table, in each dialect the service lists.
+
+## One message per key
+
+A message's `key` names the field of the message that says what it is
+about: the order, the product, the account. `onDuplicate` keeps one
+message waiting per key, and `serialize` lets one worker at a time handle
+a key. In the acme shop, `shop-db`'s `StockLow` does both:
+
+<Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="StockLow" />
+
+A message waits while it is `ready`: due now, or after a failure's
+backoff. One a worker holds, `claimed`, is not waiting, so a message
+enqueued while one of its key runs waits beside it for the next run: the
+one that runs read the row before the change.
+
+- `replace` overwrites the waiting message with the new one: every field
+  but the key, one the new message leaves out taking its column's
+  default; it is due at once, with no attempts and no last error. It
+  keeps its ID and when it was first enqueued. A burst of changes leaves
+  one message, the latest.
+- `skip` keeps the waiting message as it is and adds none.
+- `append`, the default, adds every message, as a queue without a key
+  does.
+
+A partial unique index of the waiting messages by key,
+`uq_<table>_ready_key` (`uq_stock_low_queue_ready_key`), holds the rule, and the enqueue ends with
+`ON CONFLICT (key) WHERE state = 'ready'`, which every language's client
+appends, so a message one language enqueues dedupes against another's. A
+claimed message that fails, or is given back by a stopping worker, while
+a newer message of its key waits gives way to it: it is `done`, its error
+kept in `last_error`, and the newer one runs in its place.
+
+`serialize: true` holds a key to one claim at a time: a claim takes no
+message whose key another live claim holds, and of a key's waiting
+messages takes the first due. A message whose claim expired, because its
+worker died, is claimed again before the others of its key. A partial
+unique index of the claimed messages by key, `uq_<table>_claimed_key`,
+holds it whatever two workers do at once: on Postgres, a claim that loses
+that race takes nothing that time, and the worker claims again.
+
+On a queue's table that exists, the [migration plan](/superschematic/reference/migrations/)
+that adds a key builds these indexes. The step that builds the index of
+waiting messages first marks `done` every waiting message of a key but
+one, the latest under `replace` and the earliest under `skip`, a
+destructive hazard. It is a compat hazard too: a server built from the
+previous version enqueues without `ON CONFLICT`, so once the index is
+built its enqueue of a message whose key a message waits under fails,
+with the write it was part of, until the rollout replaces it.
+
+## Enqueue on a change
+
+`@enqueueOnChange` on a DB table enqueues a message of a queue of the same
+schema after a write to the table's rows, whatever writes them: a
+repository, a bulk import, a script or `psql`. The database runs it, in
+the writer's transaction, so the message commits with the write. In the
+acme shop, an order put back to placed is fulfilled again:
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="@enqueueOnChange<OrderPlaced, Order>" to="})" />
+
+| Option | What it sets |
+| --- | --- |
+| `on` | the writes that enqueue: `insert`, `update` and `delete`. An insert and an update enqueue from the row as written, a delete from the row as it was |
+| `fields` | the fields whose change makes an update enqueue, compared with `IS DISTINCT FROM`; every update enqueues unless set. A relation is its key's column |
+| `when` | conditions the row must meet, all of them: `{ field, isNull: true }`, `{ field, notNull: true }` or `{ field, equals: literal }`, the literal an enum's member, a text, a number or a boolean |
+| `message` | each field of the message the trigger sets, and the table's field whose value it takes |
+
+The build checks the declaration against the table and the queue: each
+field has a column, a null test is of a nullable field, a literal fits
+its field, and each field of the message takes a table's field of its
+type, or of a relation's key. A required field of the message takes a
+value the row always has, so one from a nullable field needs a `notNull`
+condition on it, and every required field it leaves out has its
+column's default: a list, a time, a `Default<T, V>` the column carries
+([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
+schema default, which the trigger writes. `when` names fields rather
+than SQL, since the trigger is written for Postgres and SQLite alike.
+
+On Postgres the trigger is a function, `<table>_enqueue_<queue>`, and the
+trigger that runs it after each write, as a
+[versioned table's](/superschematic/reference/versioned-tables/) history
+triggers are. On SQLite it is a trigger per write. The insert ends with
+the queue's `ON CONFLICT`, so with `replace` or `skip` repeated changes
+of a row keep one waiting message, and the trigger's and your code's
+messages dedupe against each other. A migration plan adds, replaces and
+drops the trigger with the declaration; the rows a table holds when the
+trigger is added enqueue nothing until they change.
 
 ## Enqueue a message
 
@@ -377,7 +468,10 @@ superschematic stack queue drop Dev shop-db.OrderPlaced 8a41c6e2-7d3b-4f19-a0c5-
 
 A retry or a drop that names a message that is not dead, one a worker
 already took again or one that is not in the queue, changes none of the
-messages it names and says what each such one is. `--format json` prints
+messages it names and says what each such one is. On a queue that keeps
+one waiting message per key, a retry leaves dead a message whose key a
+message waits under, and of the dead messages of one key retries the one
+that died last. `--format json` prints
 the result as JSON.
 
 Each command resolves the environment from your schemas and runs the

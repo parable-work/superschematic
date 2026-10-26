@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "expanded": "419f407291d1e3608296f6784051777215e67c380a3eaeb33e813be5a702949b",
+  "from": "419f407291d1e3608296f6784051777215e67c380a3eaeb33e813be5a702949b",
+  "hash": "59b0aa1b83f65aa7f60a457dafb1b6a557bb1d277f6dd5081508985dcc39b6cf",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_enqueue_order_shipped ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_enqueue_order_shipped()"
+      ],
+      "subject": "function/order_enqueue_order_shipped",
+      "transactional": true
+    }
+  ],
+  "to": "19401bf8aae7f4aa7406a0a2e0c0aa8e749c1b0a084706073018f62bcd4bd754",
+  "toModel": null,
+  "version": 1
+}

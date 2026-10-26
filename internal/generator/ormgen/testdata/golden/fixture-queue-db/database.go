@@ -22,14 +22,18 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool  *pgxpool.Pool
-	Order *OrderRepository
+	pool      *pgxpool.Pool
+	Order     *OrderRepository
+	OrderLine *OrderLineRepository
+	Product   *ProductRepository
 }
 
 // Tx represents a database transaction with repositories
 type Tx struct {
-	tx    pgx.Tx
-	Order *OrderRepository
+	tx        pgx.Tx
+	Order     *OrderRepository
+	OrderLine *OrderLineRepository
+	Product   *ProductRepository
 }
 
 // Config holds database configuration
@@ -59,6 +63,8 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 
 	// Initialize repositories
 	db.Order = &OrderRepository{db: db}
+	db.OrderLine = &OrderLineRepository{db: db}
+	db.Product = &ProductRepository{db: db}
 
 	return db, nil
 }
@@ -79,6 +85,8 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 
 	// Initialize repositories
 	db.Order = &OrderRepository{db: db}
+	db.OrderLine = &OrderLineRepository{db: db}
+	db.Product = &ProductRepository{db: db}
 
 	return db, nil
 }
@@ -93,9 +101,29 @@ func (db *Database) GetOrderRepository() OrderRepositoryInterface {
 	return db.Order
 }
 
+// GetOrderLineRepository returns the OrderLine repository interface.
+func (db *Database) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return db.OrderLine
+}
+
+// GetProductRepository returns the Product repository interface.
+func (db *Database) GetProductRepository() ProductRepositoryInterface {
+	return db.Product
+}
+
 // GetOrderRepository returns the Order transaction repository interface.
 func (tx *Tx) GetOrderRepository() OrderRepositoryInterface {
 	return tx.Order
+}
+
+// GetOrderLineRepository returns the OrderLine transaction repository interface.
+func (tx *Tx) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return tx.OrderLine
+}
+
+// GetProductRepository returns the Product transaction repository interface.
+func (tx *Tx) GetProductRepository() ProductRepositoryInterface {
+	return tx.Product
 }
 
 // Transaction executes a function within a database transaction
@@ -109,6 +137,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 
 	// Initialize transaction repositories with parent database reference
 	txWrapper.Order = &OrderRepository{tx: tx, txDB: db}
+	txWrapper.OrderLine = &OrderLineRepository{tx: tx, txDB: db}
+	txWrapper.Product = &ProductRepository{tx: tx, txDB: db}
 
 	defer func() {
 		if p := recover(); p != nil {

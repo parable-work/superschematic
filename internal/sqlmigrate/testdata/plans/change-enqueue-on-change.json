@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "from": "419f407291d1e3608296f6784051777215e67c380a3eaeb33e813be5a702949b",
+  "hash": "3e6b6fbf984a101e245f3380a82f1dde0f6d5ea3a19e9c5e44c11dcea992a86e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_enqueue_order_shipped() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of OrderShipped after a write to order (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.note IS DISTINCT FROM NEW.note OR OLD.total IS DISTINCT FROM NEW.total) THEN\n    RETURN NULL;\n  END IF;\n  IF TG_OP = 'DELETE' THEN\n    INSERT INTO order_shipped_queue (order_id, note) VALUES (OLD.id, OLD.note)\n      ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n    RETURN NULL;\n  END IF;\n  INSERT INTO order_shipped_queue (order_id, note) VALUES (NEW.id, NEW.note)\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_enqueue_order_shipped",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER trg_order_enqueue_order_shipped ON \"order\"",
+        "CREATE TRIGGER trg_order_enqueue_order_shipped\n  AFTER INSERT OR UPDATE OR DELETE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_enqueue_order_shipped()"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped",
+      "transactional": true
+    }
+  ],
+  "to": "0bf82884c4a63bcce07969c4e23b12f8b91b748caa81d8535ead2b31315b6a4f",
+  "toModel": null,
+  "version": 1
+}
