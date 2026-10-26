@@ -409,3 +409,81 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 	}
 	return raw
 }
+
+// A behavior's namespace operations (D77) are typed once per module,
+// whichever behavior declares them and however many types compose it: its
+// <B><Op>Params and <B><Op>Result, <B>NamespaceOperations, <B>VetoCode,
+// is<B>NamespaceVeto and <B>NamespaceClient with its factory, which calls
+// behaviors.invoke in the namespace it binds. No schema's types or client
+// hold them, and a behavior with none gets none of it.
+func TestNamespaceOperations(t *testing.T) {
+	reg := registry.New(naming.Default())
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: json.RawMessage(`{"name": "acme.Chatter",
+		"fields": [{"name": "seen", "volatile": true}],
+		"operations": [
+			{"name": "markSeen", "writes": true, "beside": true, "log": false, "asks": "read", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": {"type": "object"}},
+			{"name": "unseen", "description": "What the caller has not seen.", "scope": "namespace",
+				"paramsSchema": {"type": "object", "additionalProperties": false, "properties": {"limit": {"type": "integer"}}},
+				"resultSchema": {"type": "object", "additionalProperties": false, "required": ["count"], "properties": {"count": {"type": "integer"}}}},
+			{"name": "sweep", "scope": "namespace", "writes": true,
+				"paramsSchema": {"type": "object", "additionalProperties": false, "required": ["before"], "properties": {"before": {"type": "integer"}}},
+				"resultSchema": true}
+		],
+		"vetoes": [{"code": "not_seen"}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	room := func(name, typeName string) string {
+		return `{"kind": "General", "name": "` + name + `", "types": {"` + typeName + `": {"name": "` + typeName + `", "role": "EmbeddedStruct",
+  "behaviors": [{"name": "acme.Chatter"}], "fields": [{"name": "title", "typeRef": {"name": "string"}}]}}}`
+	}
+	module, err := Generate([]*ir.Schema{loadDocument(t, reg, room("rooms", "Room")), loadDocument(t, reg, room("halls", "Hall"))}, Options{Registry: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(module)
+	for _, want := range []string{
+		"// Behavior acme.Chatter, across a namespace: AcmeChatterNamespaceClient, acmeChatterNamespaceClient.\n",
+		"/** The parameters of acme.Chatter's unseen, across the schemas of a namespace that compose it: What the caller has not seen. */\nexport type AcmeChatterUnseenParams = {",
+		"export type AcmeChatterUnseenResult = { count: number };",
+		"/** The parameters of acme.Chatter's sweep, across the schemas of a namespace that compose it. */",
+		"export type AcmeChatterSweepResult = unknown;",
+		"export type AcmeChatterNamespaceOperations = {\n  unseen: { scope: 'namespace'; params: AcmeChatterUnseenParams; result: AcmeChatterUnseenResult };\n  sweep: { scope: 'namespace'; params: AcmeChatterSweepParams; result: AcmeChatterSweepResult };\n};",
+		"export type AcmeChatterVetoCode = 'not_seen';",
+		"export function isAcmeChatterNamespaceVeto(error: unknown, codes?: AcmeChatterVetoCode | ReadonlyArray<AcmeChatterVetoCode>): error is EngineVeto {\n  return isVeto(error, 'acme.Chatter', codes);\n}",
+		"  unseen(params?: AcmeChatterUnseenParams, options?: Omit<CallOptions, 'namespace'>): Promise<AcmeChatterUnseenResult>;",
+		"  sweep(params: AcmeChatterSweepParams, options?: Omit<CallOptions, 'namespace'>): Promise<AcmeChatterSweepResult>;",
+		"export function acmeChatterNamespaceClient(client: EngineClient, namespace?: string): AcmeChatterNamespaceClient {",
+		"      return client.behaviors.invoke<AcmeChatterUnseenResult>('acme.Chatter', 'unseen', params ?? {}, namespace === undefined ? options : { ...options, namespace });",
+		"      return client.behaviors.invoke<AcmeChatterSweepResult>('acme.Chatter', 'sweep', params, namespace === undefined ? options : { ...options, namespace });",
+		// The beside operation that asks read is an instance operation.
+		"  markSeen: { scope: 'instance'; params: RoomMarkSeenParams; result: RoomMarkSeenResult };",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the module lacks %q:\n%s", want, text)
+		}
+	}
+	if n := strings.Count(text, "export type AcmeChatterUnseenParams"); n != 1 {
+		t.Errorf("AcmeChatterUnseenParams is exported %d times; two types composing the behavior share one", n)
+	}
+	for _, unwanted := range []string{"RoomUnseen", "HallUnseen", "RoomSweep", "unseen: { scope: 'instance'", "'unseen' |", "invokeSchema<AcmeChatter", "client.instances.invoke<AcmeChatter"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("a namespace operation is the type's (%q):\n%s", unwanted, text)
+		}
+	}
+
+	// A module whose behaviors declare no namespace operation gets no
+	// namespace client.
+	plain, err := Generate(loadSchemas(t, coreRegistry(t), jobsSchemas), Options{Registry: coreRegistry(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "NamespaceClient") {
+		t.Error("a module without namespace operations has a namespace client")
+	}
+}

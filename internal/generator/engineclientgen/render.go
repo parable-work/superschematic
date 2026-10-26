@@ -36,6 +36,15 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 			return nil, err
 		}
 	}
+	behaviors, err := namespaceBehaviors(models)
+	if err != nil {
+		return nil, err
+	}
+	for _, behavior := range behaviors {
+		if err := m.namespaceBehavior(behavior); err != nil {
+			return nil, err
+		}
+	}
 	if m.ts.UsesJSONObject {
 		m.uses["JSONObject"] = true
 	}
@@ -44,10 +53,14 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 	out.WriteString("//\n")
 	out.WriteString("// Typed wrappers over the engine's client: each schema's instances, create\n")
 	out.WriteString("// input and patches, and its behaviors' create parameters, preconditions,\n")
-	out.WriteString("// operations, signals and veto codes, as their configs narrow them.\n")
+	out.WriteString("// operations, signals and veto codes, as their configs narrow them; then\n")
+	out.WriteString("// each composed behavior's namespace operations, which belong to no schema.\n")
 	out.WriteString("//\n")
 	for _, model := range models {
 		fmt.Fprintf(&out, "// Schema %s: %s, %s.\n", model.name, model.client, codegen.ToCamelCase(model.client))
+	}
+	for _, behavior := range behaviors {
+		fmt.Fprintf(&out, "// Behavior %s, across a namespace: %s, %s.\n", behavior.name, behavior.client, codegen.ToCamelCase(behavior.client))
 	}
 	out.WriteString("\n")
 	client := names.EngineNpmPackage + "/client"
@@ -116,6 +129,13 @@ type operationInfo struct {
 
 func (op operationInfo) schemaScope() bool {
 	return op.declaration.Scope == registry.OperationScopeSchema
+}
+
+// namespaceScope reports whether a declared operation runs across a
+// namespace (D77): it belongs to its behavior, not the type, so no schema's
+// types or client hold it.
+func namespaceScope(op registry.BehaviorOperation) bool {
+	return op.Scope == registry.OperationScopeNamespace
 }
 
 // paramsOptional reports whether an operation's parameters require
@@ -531,12 +551,16 @@ func (m *module) preconditions(s *schemaModel) (string, error) {
 }
 
 // operations writes each operation's parameters and result, then
-// <T>Operations and <T>InstanceOperation.
+// <T>Operations and <T>InstanceOperation. A behavior's namespace
+// operations are not the type's: namespaceBehavior writes them once.
 func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 	owner := "schema " + s.name
 	var ops []operationInfo
 	for _, behavior := range s.behaviors {
 		for _, declared := range behavior.Declaration.Operations {
+			if namespaceScope(declared) {
+				continue
+			}
 			for _, member := range clientMembers {
 				if declared.Name == member {
 					return nil, fmt.Errorf("engine-client: %s: behavior %s's operation %s is named like the wrapper's own %s", owner, behavior.Declaration.Name, declared.Name, member)

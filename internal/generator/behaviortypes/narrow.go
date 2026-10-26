@@ -295,9 +295,12 @@ var commentsMessageResults = []string{"post", "begin", "finish", "interrupt", "e
 // allows none, and edit.
 var commentsBlocksGiven = []string{"post", "finish", "edit"}
 
-// Comments (D77): the count of messages, the threads' counts and who is
-// composing are always there, every instance starting with an empty
-// conversation; when the latest message stood is absent while none has.
+// Comments (D77): the count of messages, the threads' counts, who is
+// composing and the reader's unread count are always there, every instance
+// starting with an empty conversation; when the latest message stood is
+// absent while none has. A message's stand and listMessages' readUpTo are
+// as declared, optional. Its namespace operations (inbox, claimDeliveries,
+// settleDeliveries) belong to no type, and no config narrows them.
 // A block is one of the kinds post's parameters declare, and a message's
 // record is post's result with its blocks typed so: <Base>CommentBlock
 // and <Base>CommentMessage, which every operation that returns a record
@@ -399,6 +402,7 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 			"properties": map[string]any{"open": integer(), "resolved": integer()},
 		}, true},
 		typedField{"composing", map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, true},
+		typedField{"unread", integer(), true},
 	)
 }
 
