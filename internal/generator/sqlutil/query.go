@@ -355,7 +355,13 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 			if c.Required || c.Key {
 				nullability = "NOT NULL"
 			}
-			columns[i] = c.Name + " " + strings.TrimSpace(c.Type+" "+c.Class.SQLType) + " " + nullability
+			// A foreign key's column has no DDL type of its own in the
+			// model; its class names the key's.
+			typ := c.Type
+			if typ == "" {
+				typ = c.Class.SQLType
+			}
+			columns[i] = c.Name + " " + typ + " " + nullability
 		}
 		shapes[t.Name] = t.Name + "(" + strings.Join(columns, ", ") + ")"
 	}

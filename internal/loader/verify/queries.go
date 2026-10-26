@@ -67,6 +67,9 @@ func checkQueries(schema *ir.Schema, r *Result) {
 				r.errorf(td.Owner, "%s: %s names the dialect %q; a query runs on postgres or sqlite", td.Name, where, d)
 			}
 		}
+		if !def.RunsOn("postgres") {
+			r.errorf(td.Owner, "%s: %s runs on %s alone; a query is verified and run on Postgres, so its dialects list postgres", td.Name, where, strings.Join(def.Dialects, ", "))
+		}
 		params := checkQueryType(schema, td, def.Params, "params", r)
 		row := checkQueryType(schema, td, def.Row, "row", r)
 		if params == nil || row == nil {

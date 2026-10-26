@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "statements": [
+    {
+      "id": "totals/0",
+      "params": [
+        {
+          "type": "text",
+          "typeName": "text"
+        },
+        {
+          "type": "uuid[]",
+          "typeName": "_uuid",
+          "element": "uuid"
+        }
+      ],
+      "columns": [
+        {
+          "name": "name",
+          "type": "text",
+          "typeName": "text",
+          "table": "line",
+          "column": "name",
+          "notNull": true
+        },
+        {
+          "name": "total",
+          "type": "numeric",
+          "typeName": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "totals/1",
+      "error": "column \"amout\" does not exist (at character 12)"
+    }
+  ]
+}

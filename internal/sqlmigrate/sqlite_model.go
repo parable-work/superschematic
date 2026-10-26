@@ -36,6 +36,12 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	if err := sqliteRefusals(out, types); err != nil {
 		return nil, err
 	}
+	// A declared query is verified and run on Postgres alone (D86).
+	for _, td := range schema.Queries() {
+		if td.Query.RunsOn(string(SQLite)) {
+			return nil, fmt.Errorf("sqlmigrate: query %s runs on the sqlite dialect, which no query is verified or run on yet: limit it to postgres (dialects: [\"postgres\"]), or build the service for postgres alone (outputs.sql.dialects: [\"postgres\"])", td.Query.Name)
+		}
+	}
 
 	ns := newPGNamespace()
 	var errs []error
