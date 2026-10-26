@@ -80,6 +80,11 @@ func TestRenderGoldens(t *testing.T) {
 		// them (D64).
 		{name: "cloudflare-web-staging", env: webEnvironment,
 			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
+		// The site serving shop-storefront on its origin (D91): the site's
+		// SITE_ORIGIN, its service binding to shop-storefront's Worker and
+		// the script first for the API's path.
+		{name: "cloudflare-origin-staging", env: originWebEnvironment,
+			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},
 		{name: "demo-preview", env: func(*testing.T) *ir.ResolvedEnvironment { return previewEnvironment(8, true) },

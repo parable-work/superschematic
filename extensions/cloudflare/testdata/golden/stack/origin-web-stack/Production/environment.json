@@ -1,0 +1,617 @@
+{
+  "version": 1,
+  "stack": "origin-web-stack",
+  "environment": "Production",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef",
+    "workersSubdomain": "acme"
+  },
+  "domain": "acme.dev",
+  "dns": {
+    "platform": "cloudflare",
+    "values": {
+      "zone": "acme.dev",
+      "zoneId": "0123456789abcdef0123456789abcdef"
+    }
+  },
+  "deployables": [
+    {
+      "name": "shop-storefront",
+      "kind": "server",
+      "platform": "cloudflare.workers",
+      "services": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "origins": [
+        "storefront-web"
+      ],
+      "resourceName": "origin-web-stack-production-shop-storefront",
+      "address": "https://origin-web-stack-production-shop-storefront",
+      "bindings": [
+        {
+          "field": "CART_TTL_DAYS",
+          "source": "literal",
+          "value": "30",
+          "default": true
+        }
+      ]
+    },
+    {
+      "name": "shop-storefront-sweep-carts",
+      "kind": "job",
+      "platform": "cloudflare.cron",
+      "services": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "job": {
+        "api": "shop-storefront",
+        "name": "SweepCarts",
+        "schedule": "30 2 * * *",
+        "timeZone": "UTC",
+        "timeoutSeconds": 240,
+        "retries": 2
+      },
+      "settings": {
+        "logs": false
+      },
+      "resourceName": "origin-web-stack-production-shop-storefront-sweep-carts",
+      "bindings": [
+        {
+          "field": "CART_TTL_DAYS",
+          "source": "literal",
+          "value": "30",
+          "default": true
+        }
+      ]
+    },
+    {
+      "name": "storefront-web",
+      "kind": "site",
+      "platform": "cloudflare.sites",
+      "services": [
+        {
+          "name": "storefront-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/storefront-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html",
+        "origin": [
+          {
+            "service": "shop-storefront",
+            "server": "shop-storefront",
+            "path": "/api/shop-storefront"
+          }
+        ]
+      },
+      "exposed": true,
+      "resourceName": "origin-web-stack-production-storefront-web",
+      "address": "https://storefront-web.acme.dev",
+      "publicAddress": "https://storefront-web.acme.dev",
+      "bindings": [
+        {
+          "field": "shop-storefront",
+          "source": "derived",
+          "value": {
+            "binding": {
+              "name": "SITE_API_SHOP_STOREFRONT",
+              "worker": {
+                "$output": {
+                  "resource": "shop-storefront.worker",
+                  "name": "name"
+                }
+              }
+            },
+            "url": "https://storefront-web.acme.dev/api/shop-storefront"
+          },
+          "edge": "site:storefront-web->shop-storefront"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "site:storefront-web->shop-storefront",
+      "kind": "site",
+      "from": "storefront-web",
+      "to": "shop-storefront",
+      "service": {
+        "name": "shop-storefront",
+        "kind": "API"
+      },
+      "connector": "cloudflare.site-workers",
+      "field": "shop-storefront"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "shop-storefront-sweep-carts.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront-sweep-carts.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "shop-storefront-sweep-carts.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "shop-storefront-sweep-carts.version",
+          "shop-storefront-sweep-carts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
+        "id": "shop-storefront-sweep-carts.schedule",
+        "type": "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "schedules": [
+            {
+              "cron": "30 2 * * *"
+            }
+          ],
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront-sweep-carts.worker",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront-sweep-carts.deployment",
+          "shop-storefront-sweep-carts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
+        "id": "shop-storefront-sweep-carts.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "CART_TTL_DAYS",
+              "text": "30",
+              "type": "plain_text"
+            },
+            {
+              "name": "SUPERSCHEMATIC_BUNDLE",
+              "text": "{bundle-digest}",
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/shop-storefront-sweep-carts/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront-sweep-carts/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront-sweep-carts/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "shop-storefront-sweep-carts.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront-sweep-carts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
+        "id": "shop-storefront-sweep-carts.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "origin-web-stack-production-shop-storefront-sweep-carts",
+          "observability": {
+            "enabled": false,
+            "logs": {
+              "enabled": false,
+              "invocationLogs": false
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
+        "id": "shop-storefront-sweep-carts.workflow",
+        "type": "cloudflare:index/workflow:Workflow",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "className": "JobRun",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront-sweep-carts.worker",
+              "name": "name"
+            }
+          },
+          "workflowName": "origin-web-stack-production-shop-storefront-sweep-carts"
+        },
+        "dependsOn": [
+          "shop-storefront-sweep-carts.deployment",
+          "shop-storefront-sweep-carts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront-sweep-carts"
+        ]
+      },
+      {
+        "id": "shop-storefront.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "shop-storefront.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "shop-storefront.version",
+          "shop-storefront.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "CART_TTL_DAYS",
+              "text": "30",
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "shop-storefront.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "origin-web-stack-production-shop-storefront",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "storefront-web.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "storefront-web.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "storefront-web.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "storefront-web.version",
+          "storefront-web.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "storefront-web"
+        ]
+      },
+      {
+        "id": "storefront-web.domain",
+        "type": "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "hostname": "storefront-web.acme.dev",
+          "service": {
+            "$output": {
+              "resource": "storefront-web.worker",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "storefront-web.worker"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "storefront-web"
+        ]
+      },
+      {
+        "id": "storefront-web.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "assets": {
+            "config": {
+              "htmlHandling": "none",
+              "notFoundHandling": "none",
+              "runWorkerFirst": [
+                "/__superschematic/*",
+                "/api/shop-storefront",
+                "/api/shop-storefront/*"
+              ]
+            },
+            "directory": "artifacts/storefront-web/{site-digest}"
+          },
+          "bindings": [
+            {
+              "name": "ASSETS",
+              "type": "assets"
+            },
+            {
+              "name": "SITE_CONFIG",
+              "text": "{\"apis\":{\"shop-storefront\":{\"url\":\"https://storefront-web.acme.dev/api/shop-storefront\"}}}",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_FALLBACK",
+              "text": "index.html",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_ORIGIN",
+              "text": "[{\"path\":\"/api/shop-storefront\",\"binding\":\"SITE_API_SHOP_STOREFRONT\"}]",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_API_SHOP_STOREFRONT",
+              "service": {
+                "$output": {
+                  "resource": "shop-storefront.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "site.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gVGhlIHNjcmlwdCBvZiBhIHN0YXRpYyBzaXRlJ3MgV29ya2VyIG9uIENsb3VkZmxhcmUgKGRvY3Mvc3RhY2stbW9kZWwubWQsCi8vIHNlY3Rpb24gMTguOCwgRDY0KS4gVGhlIGNsb3VkZmxhcmUgZXh0ZW5zaW9uIGVtYmVkcyBpdCwgc28gZXZlcnkgc2l0ZSdzCi8vIFdvcmtlciBydW5zIHRoZXNlIGJ5dGVzLCBpbiBldmVyeSByZWxlYXNlLiBDbG91ZGZsYXJlIHNlcnZlcyBhIGZpbGUgb2YgdGhlCi8vIHNpdGUncyBidWlsZCBhcyBhIHN0YXRpYyBhc3NldCB3aXRob3V0IHJ1bm5pbmcgaXQ7IGl0IHJ1bnMgZm9yIGEgcGF0aAovLyB0aGF0IG5hbWVzIG5vIGZpbGUsIGFuZCBmaXJzdCBmb3IgZXZlcnkgcGF0aCB1bmRlciAvX19zdXBlcnNjaGVtYXRpYy8KLy8gYW5kIHVuZGVyIGVhY2ggQVBJIG9mIHRoZSBzaXRlJ3Mgb3JpZ2luLgovLwovLyBJdCBhbnN3ZXJzIGEgR0VUIG9yIGEgSEVBRCBvZjoKLy8gICAtIC9fX3N1cGVyc2NoZW1hdGljL2NvbmZpZy5qc29uIHdpdGggU0lURV9DT05GSUcsIHRoZSBzaXRlJ3MgY29uZmlnIGZvcgovLyAgICAgaXRzIGVudmlyb25tZW50LCB3aGljaCBuYW1lcyBlYWNoIEFQSSBpdCBjYWxscyB3aXRoIGl0cyBwdWJsaWMKLy8gICAgIGFkZHJlc3MsIG5ldmVyIGNhY2hlZDsKLy8gICAtIGEgZGlyZWN0b3J5IG9mIHRoZSBidWlsZCB3aXRoIGl0cyBpbmRleC5odG1sLCBhcyBzdGFjayBkZXYncyBmaWxlCi8vICAgICBzZXJ2ZXIgZG9lcywgc2luY2UgdGhlIGFzc2V0cyBtYXRjaCBhIHBhdGggdG8gYSBmaWxlIGV4YWN0bHkKLy8gICAgIChodG1sSGFuZGxpbmc6IG5vbmUpOwovLyAgIC0gYW55IG90aGVyIHBhdGggd2l0aCBTSVRFX0ZBTExCQUNLLCB0aGUgYnVpbGQncyBzaW5nbGUtcGFnZSBmYWxsYmFjaywKLy8gICAgIGF0IDIwMCwgb3IgNDA0IHdoZW4gdGhlIHNpdGUgaGFzIG5vbmUuCi8vIEFueSBvdGhlciBtZXRob2QgZ2V0cyA0MDUuCi8vCi8vIEEgc2l0ZSB3aXRoIGFuIG9yaWdpbiAoRDkxKSBuYW1lcyBlYWNoIEFQSSBvZiBpdCBpbiBTSVRFX09SSUdJTiwgYSBKU09OCi8vIGxpc3Qgb2Yge3BhdGgsIGJpbmRpbmd9IG9yIHtwYXRoLCB1cmx9LiBBIHJlcXVlc3QgZm9yIGFuIEFQSSdzIHBhdGgsIG9yCi8vIGFueSBwYXRoIHVuZGVyIGl0LCB3aXRoIGFueSBtZXRob2QsIGdvZXMgdG8gdGhlIEFQSSdzIFdvcmtlciB0aHJvdWdoIHRoZQovLyBzZXJ2aWNlIGJpbmRpbmcsIG9yIHRvIHRoZSBBUEkncyBwdWJsaWMgYWRkcmVzcywgd2l0aCB0aGUgcGF0aCB0YWtlbgovLyBvZmYsIHRoZSBxdWVyeSBrZXB0LCB0aGUgYnJvd3NlcidzIEhvc3Qgb24gdGhlIFVSTCBhIGJpbmRpbmcgY2FycmllcywKLy8gYW5kIFgtRm9yd2FyZGVkLUhvc3QsIC1Qcm90bywgLVByZWZpeCBhbmQgLUZvciBzZXQsIGFzIHN0YWNrIGRldidzIHByb3h5Ci8vIGZvcndhcmRzIGl0IChEODIpOyBhIHJlZGlyZWN0IHdpdGhpbiB0aGUgQVBJJ3Mgcm91dGVzIGdldHMgdGhlIHBhdGggYmFjay4KCmNvbnN0IENPTkZJR19QQVRIID0gJy9fX3N1cGVyc2NoZW1hdGljL2NvbmZpZy5qc29uJzsKCi8qKiBUaGUgQVBJcyBvZiB0aGUgc2l0ZSdzIG9yaWdpbiwgcmVhZCBmcm9tIFNJVEVfT1JJR0lOIG9uY2UgcGVyIGlzb2xhdGUuICovCmxldCBvcmlnaW47CgpleHBvcnQgZGVmYXVsdCB7CiAgYXN5bmMgZmV0Y2gocmVxdWVzdCwgZW52KSB7CiAgICBjb25zdCB1cmwgPSBuZXcgVVJMKHJlcXVlc3QudXJsKTsKICAgIGNvbnN0IGFwaSA9IG9yaWdpbkFQSShlbnYsIHVybC5wYXRobmFtZSk7CiAgICBpZiAoYXBpKSByZXR1cm4gZm9yd2FyZChyZXF1ZXN0LCBlbnYsIHVybCwgYXBpKTsKICAgIGlmIChyZXF1ZXN0Lm1ldGhvZCAhPT0gJ0dFVCcgJiYgcmVxdWVzdC5tZXRob2QgIT09ICdIRUFEJykgewogICAgICByZXR1cm4gdGV4dCg0MDUsICdtZXRob2Qgbm90IGFsbG93ZWQnLCB7IGFsbG93OiAnR0VULCBIRUFEJyB9KTsKICAgIH0KICAgIGlmICh1cmwucGF0aG5hbWUgPT09IENPTkZJR19QQVRIKSB7CiAgICAgIHJldHVybiBuZXcgUmVzcG9uc2UocmVxdWVzdC5tZXRob2QgPT09ICdIRUFEJyA/IG51bGwgOiBlbnYuU0lURV9DT05GSUcsIHsKICAgICAgICBoZWFkZXJzOiB7ICdjb250ZW50LXR5cGUnOiAnYXBwbGljYXRpb24vanNvbicsICdjYWNoZS1jb250cm9sJzogJ25vLXN0b3JlJyB9LAogICAgICB9KTsKICAgIH0KICAgIGNvbnN0IGluZGV4ID0gYXdhaXQgYXNzZXQoZW52LCByZXF1ZXN0LCB1cmwucGF0aG5hbWUucmVwbGFjZSgvXC8/JC91LCAnL2luZGV4Lmh0bWwnKSk7CiAgICBpZiAoaW5kZXgpIHJldHVybiBpbmRleDsKICAgIGlmIChlbnYuU0lURV9GQUxMQkFDSykgewogICAgICBjb25zdCBmYWxsYmFjayA9IGF3YWl0IGFzc2V0KGVudiwgcmVxdWVzdCwgYC8ke2Vudi5TSVRFX0ZBTExCQUNLfWApOwogICAgICBpZiAoZmFsbGJhY2spIHJldHVybiBmYWxsYmFjazsKICAgIH0KICAgIHJldHVybiB0ZXh0KDQwNCwgJ25vdCBmb3VuZCcpOwogIH0sCn07CgovKiogVGhlIEFQSSBvZiB0aGUgc2l0ZSdzIG9yaWdpbiB3aG9zZSBwYXRoIGhvbGRzIHBhdGhuYW1lLCBvciB1bmRlZmluZWQuICovCmZ1bmN0aW9uIG9yaWdpbkFQSShlbnYsIHBhdGhuYW1lKSB7CiAgaWYgKCFlbnYuU0lURV9PUklHSU4pIHJldHVybiB1bmRlZmluZWQ7CiAgb3JpZ2luID8/PSBKU09OLnBhcnNlKGVudi5TSVRFX09SSUdJTik7CiAgcmV0dXJuIG9yaWdpbi5maW5kKChhcGkpID0+IHBhdGhuYW1lID09PSBhcGkucGF0aCB8fCBwYXRobmFtZS5zdGFydHNXaXRoKGAke2FwaS5wYXRofS9gKSk7Cn0KCi8qKiBUaGUgcmVxdWVzdCBmb3J3YXJkZWQgdG8gdGhlIEFQSSdzIHNlcnZlciwgdGhlIEFQSSdzIHBhdGggdGFrZW4gb2ZmLiAqLwphc3luYyBmdW5jdGlvbiBmb3J3YXJkKHJlcXVlc3QsIGVudiwgdXJsLCBhcGkpIHsKICBjb25zdCByZXN0ID0gdXJsLnBhdGhuYW1lLnNsaWNlKGFwaS5wYXRoLmxlbmd0aCkgfHwgJy8nOwogIGNvbnN0IHRhcmdldCA9IGFwaS5iaW5kaW5nID8gbmV3IFVSTChyZXN0ICsgdXJsLnNlYXJjaCwgdXJsLm9yaWdpbikgOiBuZXcgVVJMKGFwaS51cmwucmVwbGFjZSgvXC8kL3UsICcnKSArIHJlc3QgKyB1cmwuc2VhcmNoKTsKICBjb25zdCBoZWFkZXJzID0gbmV3IEhlYWRlcnMocmVxdWVzdC5oZWFkZXJzKTsKICBpZiAoIWFwaS5iaW5kaW5nKSBoZWFkZXJzLmRlbGV0ZSgnaG9zdCcpOwogIGhlYWRlcnMuc2V0KCd4LWZvcndhcmRlZC1ob3N0JywgdXJsLmhvc3QpOwogIGhlYWRlcnMuc2V0KCd4LWZvcndhcmRlZC1wcm90bycsIHVybC5wcm90b2NvbC5zbGljZSgwLCAtMSkpOwogIGhlYWRlcnMuc2V0KCd4LWZvcndhcmRlZC1wcmVmaXgnLCBhcGkucGF0aCk7CiAgY29uc3QgY2xpZW50ID0gcmVxdWVzdC5oZWFkZXJzLmdldCgnY2YtY29ubmVjdGluZy1pcCcpOwogIGlmIChjbGllbnQpIGhlYWRlcnMuc2V0KCd4LWZvcndhcmRlZC1mb3InLCBjbGllbnQpOwogIGNvbnN0IGluaXQgPSB7IG1ldGhvZDogcmVxdWVzdC5tZXRob2QsIGhlYWRlcnMsIHJlZGlyZWN0OiAnbWFudWFsJyB9OwogIGlmIChyZXF1ZXN0Lm1ldGhvZCAhPT0gJ0dFVCcgJiYgcmVxdWVzdC5tZXRob2QgIT09ICdIRUFEJykgaW5pdC5ib2R5ID0gcmVxdWVzdC5ib2R5OwogIGNvbnN0IHJlc3BvbnNlID0gYXBpLmJpbmRpbmcgPyBhd2FpdCBlbnZbYXBpLmJpbmRpbmddLmZldGNoKHRhcmdldCwgaW5pdCkgOiBhd2FpdCBmZXRjaCh0YXJnZXQsIGluaXQpOwogIGNvbnN0IGxvY2F0aW9uID0gcmVzcG9uc2UuaGVhZGVycy5nZXQoJ2xvY2F0aW9uJyk7CiAgaWYgKGxvY2F0aW9uID09PSBudWxsKSByZXR1cm4gcmVzcG9uc2U7CiAgY29uc3QgYW5zd2VyID0gbmV3IFJlc3BvbnNlKHJlc3BvbnNlLmJvZHksIHJlc3BvbnNlKTsKICBhbnN3ZXIuaGVhZGVycy5zZXQoJ2xvY2F0aW9uJywgcHJlZml4ZWQobG9jYXRpb24sIGFwaS5wYXRoLCB1cmwsIHRhcmdldCkpOwogIHJldHVybiBhbnN3ZXI7Cn0KCi8qKgogKiBBIHJlZGlyZWN0J3MgbG9jYXRpb24gd2l0aCB0aGUgQVBJJ3MgcGF0aCBwdXQgYmFjaywgd2hlbiBpdCBwb2ludHMKICogd2l0aGluIHRoZSBBUEkncyByb3V0ZXM6IGEgcGF0aC1hYnNvbHV0ZSBsb2NhdGlvbiwgb3Igb25lIG9uIHRoZSBzaXRlJ3MKICogaG9zdCBvciB0aGUgc2VydmVyJ3MuIEFueSBvdGhlciBsb2NhdGlvbiBpcyBsZWZ0IGFzIGl0IGlzLgogKi8KZnVuY3Rpb24gcHJlZml4ZWQobG9jYXRpb24sIHByZWZpeCwgc2l0ZSwgdGFyZ2V0KSB7CiAgbGV0IHU7CiAgdHJ5IHsKICAgIHUgPSBuZXcgVVJMKGxvY2F0aW9uLCB0YXJnZXQpOwogIH0gY2F0Y2ggewogICAgcmV0dXJuIGxvY2F0aW9uOwogIH0KICBjb25zdCBwYXRoQWJzb2x1dGUgPSBsb2NhdGlvbi5zdGFydHNXaXRoKCcvJykgJiYgIWxvY2F0aW9uLnN0YXJ0c1dpdGgoJy8vJyk7CiAgaWYgKCFwYXRoQWJzb2x1dGUgJiYgdS5ob3N0ICE9PSBzaXRlLmhvc3QgJiYgdS5ob3N0ICE9PSB0YXJnZXQuaG9zdCkgcmV0dXJuIGxvY2F0aW9uOwogIHJldHVybiBwcmVmaXggKyB1LnBhdGhuYW1lICsgdS5zZWFyY2ggKyB1Lmhhc2g7Cn0KCi8qKiBUaGUgc2l0ZSdzIGZpbGUgYXQgcGF0aCwgYXMgdGhlIGFzc2V0cyBzZXJ2ZSBpdCwgb3IgdW5kZWZpbmVkIHdoZW4gdGhlcmUgaXMgbm9uZS4gKi8KYXN5bmMgZnVuY3Rpb24gYXNzZXQoZW52LCByZXF1ZXN0LCBwYXRoKSB7CiAgY29uc3QgdXJsID0gbmV3IFVSTChyZXF1ZXN0LnVybCk7CiAgdXJsLnBhdGhuYW1lID0gcGF0aDsKICB1cmwuc2VhcmNoID0gJyc7CiAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBlbnYuQVNTRVRTLmZldGNoKG5ldyBSZXF1ZXN0KHVybCwgeyBtZXRob2Q6IHJlcXVlc3QubWV0aG9kLCBoZWFkZXJzOiByZXF1ZXN0LmhlYWRlcnMgfSkpOwogIHJldHVybiByZXNwb25zZS5zdGF0dXMgPT09IDQwNCA/IHVuZGVmaW5lZCA6IHJlc3BvbnNlOwp9CgovKiogQSBwbGFpbi10ZXh0IGFuc3dlci4gKi8KZnVuY3Rpb24gdGV4dChzdGF0dXMsIGJvZHksIGhlYWRlcnMgPSB7fSkgewogIHJldHVybiBuZXcgUmVzcG9uc2UoYCR7Ym9keX1cbmAsIHsgc3RhdHVzLCBoZWFkZXJzOiB7ICdjb250ZW50LXR5cGUnOiAndGV4dC9wbGFpbjsgY2hhcnNldD11dGYtOCcsIC4uLmhlYWRlcnMgfSB9KTsKfQo=",
+              "contentType": "application/javascript+module",
+              "name": "site.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "storefront-web.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.worker",
+          "storefront-web.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "storefront-web"
+        ]
+      },
+      {
+        "id": "storefront-web.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "origin-web-stack-production-storefront-web",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.worker"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "storefront-web"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "shop-storefront-sweep-carts.worker",
+        "shop-storefront.worker",
+        "storefront-web.worker"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-storefront",
+        "shop-storefront-sweep-carts"
+      ],
+      "resources": [
+        "shop-storefront-sweep-carts.deployment",
+        "shop-storefront-sweep-carts.schedule",
+        "shop-storefront-sweep-carts.version",
+        "shop-storefront-sweep-carts.workflow",
+        "shop-storefront.deployment",
+        "shop-storefront.version"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "storefront-web"
+      ],
+      "resources": [
+        "storefront-web.deployment",
+        "storefront-web.version"
+      ]
+    },
+    {
+      "step": "exposure",
+      "resources": [
+        "storefront-web.domain"
+      ]
+    }
+  ]
+}
