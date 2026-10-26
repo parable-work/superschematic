@@ -1389,9 +1389,7 @@ impl<'e> Tools<'e> {
                 ),
             ));
         }
-        let Some(record) = tool.record() else {
-            return None;
-        };
+        let record = tool.record()?;
         let action = if tool.writes {
             SchemaAction::Write
         } else {
