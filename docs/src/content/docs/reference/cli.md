@@ -202,7 +202,8 @@ service's `package.json` or `tsconfig.json`, the naming file, the base
 tsconfig or a new service directory discovers the services again and
 re-checks them all. It never exits on errors, and stops at Ctrl-C.
 
-It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files of each
+It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files and the
+`queries.lock` of each
 service outside `node_modules`, `dist`, `target` and hidden directories,
 the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
 file `--naming` names. It polls rather than subscribing to file events: a
