@@ -62,7 +62,10 @@ takes the version-graph core too: `bun run build` in
 `cargo` is missing, and `scripts/versiongraph-archive.sh --prebuilt`
 stages its static archive for a Go binary. A schema whose types compose
 engine behaviors needs the engine's Node-API addon, which a checkout still
-builds with Rust (`scripts/engine-napi.sh`).
+builds with Rust (`scripts/engine-napi.sh`). An API's
+[app](/superschematic/guides/stacks/#apps) is the project's own Rust program,
+which `stack dev` builds with cargo, so a project with one needs Rust too:
+no prebuilt stands in for the project's code.
 
 `SUPERSCHEMATIC_PREBUILT_URL` points the scripts at another copy of the
 prebuilt releases, a URL or a directory holding `<tag>/<file>`

@@ -10943,6 +10943,7 @@ This entry adds:
 | The proxy passes WebSocket upgrades, and streams each answer as it is written, through Go's `httputil.ReverseProxy` with `FlushInterval: -1`, so Vite's and Bun's hot reload, and an API's server-sent stream, work through it; it reaches the dev server at `localhost`, which a dev server that listens on `localhost` binds to IPv6 alone as often as to IPv4 | a proxy that buffers, which holds a stream back; dialing `127.0.0.1`, which misses Bun's and Vite's default listener on `::1` |
 | The dev server is a process of the environment: its output is printed with the site's name in front, `stack dev` waits until it answers HTTP on its port, and its exit stops the environment, as a server's does | a process left to fail silently, which leaves a proxy answering 502 |
 | A site built in `stack dev`, without `dev` or with `--build-sites`, keeps D55's file server and each API's own address, as a deploy serves it | the proxy for every site, which would stop `stack dev` exercising the CORS a deploy relies on |
+| The proxy serves the APIs a site `calls` and nothing else; an API's app (D78) keeps its own origin under `stack dev`, as on a deploy. An app serves its own pages and signs its users in on its own origin, and a site's browser code calls APIs through their SDKs, never an app | the app under the site's origin too, `/app/<name>`, which no site calls and which would rewrite the paths of an app's own pages and redirects |
 | The browser SDK's lighter path is `lazyValidation`: each namespace imports its types package's types alone and loads the package's validators and parsers with a dynamic `import()` its first call awaits. The checks and the parsing do not change; a bundler that splits code puts them and superscalar's WebAssembly module in a chunk the first call fetches. A React page on Vite: 3,227 kB (1,108 kB gzipped) in its entry chunk without it, 241 kB (75 kB gzipped) with it, and 3,024 kB (1,041 kB gzipped) on the first call | an option to skip the checks for a trusted front end, whose responses still need superscalar to parse a date-time field, so dropping it means a second parser of every type graph, unions and dependency types among them, in JavaScript; a JavaScript build of the common scalars, a second implementation of the Rust core outside superscalar, which the parity tests could not hold to it; lazy loading inside superscalar, whose API is synchronous and whose repository this one does not change |
 | `lazyValidation` is an option of the TypeScript SDK, off unless set, refused on another language's SDK | lazy loading in every SDK, which changes every generated namespace and gains a server nothing |
 | The prebuilt Rust build products are two families, each keyed by a digest of its inputs: superscalar's Go binding with its static archive and its TypeScript binding with the napi addon and the browser and workerd builds, by `superscalar.pin` and `tools.env`'s Rust and wasm-pack; and the version-graph core's static archive and wasm32 module, by its sources, as git lists them, and Rust | one key for both, which republishes superscalar's for every change to the version graph; the engine's archive and addon too, which no TypeScript project without engine types needs (left) |
@@ -11000,6 +11001,11 @@ Status: built.
   `file://` URL, ran `make cli`, built the HTTP runtime and the
   version-graph package, and ran `stack dev` for a new TypeScript project
   with a React site.
+
+An API's app (D78) is the project's own Rust program, built with cargo in
+`stack dev` and the deploy, so the path without Rust does not cover a
+project with one: no prebuilt stands in for a project's own code, and the
+two families hold the checkout's Rust dependencies alone.
 
 Left: the engine's archive and Node-API addon prebuilt, for a TypeScript
 project whose types compose behaviors; the first publish and its pin,
