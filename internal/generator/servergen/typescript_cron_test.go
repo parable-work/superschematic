@@ -47,14 +47,16 @@ func tsCronGenerated(repoRoot string) map[string]string {
 // workers.d.ts beside main.ts, which stack dev still runs, and no fetch.ts;
 // its tsconfig.json type-checks scheduled.ts. CompileReports' scheduled.ts
 // awaits its API's secret per try, runs two tries of two seconds, and logs
-// each. ts-reports' server, on an image in Edge, gets none of them.
-// Regenerate with:
+// each. ts-reports lists the memory store ts-cache, which Edge turns off:
+// scheduled.ts holds it disabled and imports no Redis entry (D75).
+// ts-reports' server, on an image in Edge, gets none of them. Regenerate
+// with:
 //
 //	go test ./internal/generator/servergen -run TestTypeScriptCronEntrypointGolden -update
 func TestTypeScriptCronEntrypointGolden(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, tsFakePaths(repoRoot), tsReports, tsCronStack)
+	f.build(t, repoRoot, tsFakePaths(repoRoot), "ts-cache", tsReports, tsCronStack)
 	compareGoldens(t, tsGoldenRoot, tsCronGenerated(repoRoot))
 
 	out := filepath.Join(repoRoot, "schemas", "dist")
@@ -62,10 +64,30 @@ func TestTypeScriptCronEntrypointGolden(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(job, servergen.TypeScriptFetchFile)); err == nil {
 		t.Errorf("the job's package has %s", servergen.TypeScriptFetchFile)
 	}
+	checkScheduledStoreDisabled(t, filepath.Join(job, servergen.TypeScriptScheduledFile))
 	server := servergen.ServerDir(out, tsCronStack, tsReports)
 	for _, file := range []string{servergen.TypeScriptScheduledFile, servergen.TypeScriptFetchFile, servergen.TypeScriptBundleFile} {
 		if _, err := os.Stat(filepath.Join(server, file)); err == nil {
 			t.Errorf("ts-reports' server, on an image, has %s", file)
+		}
+	}
+}
+
+// checkScheduledStoreDisabled checks that the scheduled.ts at file holds
+// ts-cache as a disabled store and never imports the HTTP runtime's ./redis
+// entry, which a Worker cannot run (D75).
+func checkScheduledStoreDisabled(t *testing.T, file string) {
+	t.Helper()
+	scheduled, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(scheduled, []byte("const tsCacheStore = disabledMemoryStore('ts-cache');")) {
+		t.Errorf("scheduled.ts does not hold ts-cache disabled:\n%s", scheduled)
+	}
+	for _, refused := range []string{"/redis", "openRedisMemoryStore"} {
+		if bytes.Contains(scheduled, []byte(refused)) {
+			t.Errorf("scheduled.ts holds %s, the Redis entry a Worker never reaches:\n%s", refused, scheduled)
 		}
 	}
 }
@@ -281,8 +303,12 @@ func TestTypeScriptCronRefusals(t *testing.T) {
 // job CompileReports: each try fails until REPORT_FAILURES tries have
 // failed, counted per isolate, and with REPORT_FAILURES hang it waits until
 // its signal aborts. It reads its secret, as a try must to log the token's
-// length.
-const tsReportsImplementation = `import type { Constructor, JobsConstructor } from '@schemas/ts-reports-api';
+// length. Each try publishes cartChanged on ts-cache through the store's
+// TypeScript definitions, which its scaffold's package.json depends on, and
+// logs whether the store took it: Edge holds the store disabled (D75).
+const tsReportsImplementation = `import { MemoryStoreUnavailableError, signal as wake } from '@superschematic/http-runtime';
+import { cartChanged } from '@schemas/ts-cache-types';
+import type { Constructor, JobsConstructor } from '@schemas/ts-reports-api';
 
 export const create: Constructor = () => ({
   reports: {
@@ -297,7 +323,14 @@ let tries = 0;
 export const createJobs: JobsConstructor = deps => ({
   async compileReports(signal) {
     tries++;
-    deps.logger.info('compiling reports', { try: tries, tokenLength: deps.config.REPORT_TOKEN.reveal().length });
+    const published = await cartChanged.for('reports').publish(deps.tsCache, wake).then(
+      () => true,
+      err => {
+        if (err instanceof MemoryStoreUnavailableError) return false;
+        throw err;
+      },
+    );
+    deps.logger.info('compiling reports', { try: tries, tokenLength: deps.config.REPORT_TOKEN.reveal().length, published });
     if (deps.config.REPORT_FAILURES === 'hang') {
       await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
     }
@@ -311,6 +344,9 @@ export const createJobs: JobsConstructor = deps => ({
 // implementation; scheduled.ts type-checks against the HTTP runtime's
 // ./workers entry and workers.d.ts; bun bundle.ts writes main.js, its
 // source map and superscalar's WebAssembly module, and --check passes.
+// ts-reports' implementation publishes on ts-cache through the store's
+// definitions, which its scaffold depends on; scheduled.ts holds the store
+// disabled, and the bundle holds no Redis client (D75).
 // Under the runtime's pinned workerd, the bundle's scheduled handler runs
 // as a Cron Trigger fires it (testdata/workerd/cron): a run that succeeds,
 // one that succeeds on its retry, one whose tries all fail and one whose
@@ -338,7 +374,7 @@ func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, paths, tsReports, tsCronStack)
+	f.build(t, repoRoot, paths, "ts-cache", tsReports, tsCronStack)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	impl := naming.Default().TypeScriptImplementationDir(repoRoot, tsReports)
 	if err := os.WriteFile(filepath.Join(impl, "index.ts"), []byte(tsReportsImplementation), 0o644); err != nil {
@@ -369,9 +405,15 @@ func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`from"cloudflare:workers"`, `"./superscalar_wasm_bg.wasm"`, "//# sourceMappingURL=main.js.map"} {
+	for _, want := range []string{`from"cloudflare:workers"`, `"./superscalar_wasm_bg.wasm"`, "//# sourceMappingURL=main.js.map", `"ts-cache"`} {
 		if !bytes.Contains(main, []byte(want)) {
 			t.Errorf("main.js does not hold %s", want)
+		}
+	}
+	checkScheduledStoreDisabled(t, filepath.Join(pkg, servergen.TypeScriptScheduledFile))
+	for _, refused := range []string{"@redis/client", "node-redis", "openRedisMemoryStore"} {
+		if bytes.Contains(main, []byte(refused)) {
+			t.Errorf("main.js holds %s, the Redis client a Worker never reaches", refused)
 		}
 	}
 	if output := run(pkg, bun, "bundle.ts", "--check"); !strings.Contains(output, "bundle (checked): main.js") {
@@ -413,7 +455,7 @@ func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 		"try 1 of CompileReports fails",
 		`timed out after 2s, the job's timeout`,
 		`"msg":"compiling reports"`,
-		`"tokenLength":7`,
+		`"tokenLength":7,"published":false`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("workerd's output does not hold %s:\n%s", want, output)
