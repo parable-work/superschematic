@@ -410,7 +410,7 @@ func (r *UtensilRepository) batchRecipeByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -488,7 +488,7 @@ func (r *UtensilRepository) batchRefByIDs(ctx context.Context, ids []types.Ident
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -1069,6 +1069,30 @@ func (r *UtensilRepository) FindMany(ctx context.Context, filter *UtensilFilter,
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *UtensilRepository) findRelated(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) ([]*types.Utensil, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := utensilFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, UtensilAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "utensil")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildUtensilOrderByClause(opts.OrderBy, `utensil`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM utensil%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // utensilFieldStrings are the columns fields selects, in OrderedMembers

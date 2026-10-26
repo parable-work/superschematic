@@ -160,7 +160,7 @@ func (r *RecipeCommitRepository) batchRootByIDs(ctx context.Context, ids []types
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -238,7 +238,7 @@ func (r *RecipeCommitRepository) batchRefByIDs(ctx context.Context, ids []types.
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -316,7 +316,7 @@ func (r *RecipeCommitRepository) batchParentCommitByIDs(ctx context.Context, ids
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -1075,6 +1075,30 @@ func (r *RecipeCommitRepository) FindMany(ctx context.Context, filter *RecipeCom
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *RecipeCommitRepository) findRelated(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitFindOptions) ([]*types.RecipeCommit, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := recipeCommitFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, RecipeCommitAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_commit")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildRecipeCommitOrderByClause(opts.OrderBy, `recipe_commit`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM recipe_commit%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // recipeCommitFieldStrings are the columns fields selects, in OrderedMembers

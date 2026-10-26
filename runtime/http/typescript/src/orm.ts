@@ -44,9 +44,20 @@ older key under the current one. No filter holds such a column; updateMany
 cannot set one, and upsertOne can only by the primary key, since each
 row's envelope is bound to that row's key.
 
-Field selection, include and one-to-many loading, and the @versioned
-history readers are the Go ORM's alone for now; a relation's rows load
-through the target's getManyByIds.
+A read selects some members and includes relations (D90), as the Go ORM's
+field selection and hydration read them: select lists the members a row
+holds, and include loads a to-one relation's row, under the relation's
+field, and a one-to-many relation's rows, a @hasMany field's or those of
+another table's relation that points at the row, each with what to read of
+it in turn. A relation's rows load in one statement for all of a read's
+rows, the target's find with no count, and leave a soft-deleted target
+out. A filter reaches through a to-one relation, its member the target's
+filter, and anyOf ORs filters of the same table.
+
+A projection (D90) is read through a repository of its own, which a
+table's reads run over the view: getOne, findOne, findMany and findPage.
+
+The @versioned history readers are the Go ORM's alone for now.
 */
 
 /** A column of a table, as a types package's ./orm entry describes it: a RowField, and what the repositories write and filter. */
@@ -81,7 +92,11 @@ export interface TableColumn extends RowField {
 export interface TableStatements {
   readonly columns: string;
   readonly qualifiedColumns: string;
+  /** One column of a selection, the column %s, unquoted, qualified as qualifiedColumns qualifies each (D90). */
+  readonly selectColumn?: string;
   readonly getOne: string;
+  /** The columns %s of the row whose key is $1 (D90). */
+  readonly getOneFields?: string;
   readonly getMany: string;
   readonly live: string;
   readonly liveWhere: string;
@@ -139,6 +154,9 @@ export interface Clauses {
   readonly orderTerm: string;
   readonly limit: string;
   readonly offset: string;
+  /** What joins an anyOf's filters, and what wraps a filter's conditions and then the filters, %s (D90). */
+  readonly or?: string;
+  readonly group?: string;
 }
 
 /** A unique key an upsert is keyed by: its conflict target and the assignment of an update that sets nothing. */
@@ -177,6 +195,32 @@ export interface TableDefinition {
   /** The unique keys by name, their fields joined by ",". */
   readonly uniqueKeys: Readonly<Record<string, UniqueKeyDefinition>>;
   readonly referencedBy?: readonly ReferenceDefinition[];
+  /** The to-one relations a read includes and a filter reaches through, in column order (D90). */
+  readonly relations?: readonly RelationDefinition[];
+  /** The one-to-many relations a read includes (D90). */
+  readonly many?: readonly ManyDefinition[];
+}
+
+/** A to-one relation of a table to another of its database (D90). */
+export interface RelationDefinition {
+  /** The relation field: the member a read includes the target's row under, and a filter reaches through. */
+  readonly field: string;
+  /** The row's member that holds the foreign key, <field>Id. */
+  readonly column: string;
+  /** The member of the ORM that holds the target's repository. */
+  readonly target: string;
+  /** A filter through the relation: the foreign key in the keys of the target's rows of the WHERE %s. */
+  readonly probe: string;
+}
+
+/** A one-to-many relation of a table (D90): the rows of another table whose foreign key holds a row's key. */
+export interface ManyDefinition {
+  /** The member a read includes the rows under. */
+  readonly name: string;
+  /** The member of the ORM that holds the other table's repository. */
+  readonly target: string;
+  /** The other table's member that holds the foreign key, <field>Id. */
+  readonly column: string;
 }
 
 /** How nearest orders rows, on a database with a vector column (D84). */
@@ -193,6 +237,8 @@ export interface OrmDefinition {
   readonly nearest?: NearestDefinition;
   /** The rows findMany and findPage read unless told. */
   readonly defaultLimit: number;
+  /** The rows a one-to-many include reads of a relation for a read's rows, as the Go ORM's hydration does (D90). */
+  readonly manyLimit?: number;
   /** The CTE a versioned table's hard delete sets the history actor through, and the statement that clears it. */
   readonly historyActorCTE: string;
   readonly clearHistoryActor: string;
@@ -325,6 +371,70 @@ export interface ReferencedByFilter {
   readonly includeDeleted?: boolean;
 }
 
+/**
+ * A relation a read includes (D90), as a table's ./orm entry types it: the
+ * target's row, the target's own relations, and how many rows a row has of
+ * it: one, one or none (a relation that may be null, or a soft-deletable
+ * target, whose deleted rows a read leaves out), or many.
+ */
+export interface Related<Row, Relations, Kind extends 'one' | 'optional' | 'many'> {
+  readonly row: Row;
+  readonly relations: Relations;
+  readonly kind: Kind;
+}
+
+/** What a read includes: each relation by its member, true for its rows, or what to read of them. */
+export type IncludeOf<R> = {
+  readonly [K in keyof R]?: R[K] extends Related<infer Row, infer Nested, 'one' | 'optional' | 'many'> ? boolean | ReadOptions<Row, Nested> : never;
+};
+
+/** What a read selects and includes (D90): the members its rows hold, every one unless set, and the relations it loads. */
+export interface ReadOptions<Row = unknown, R = unknown> {
+  /** The members each row holds; the foreign key of a relation the read includes is read too, and left out of the row. */
+  readonly select?: readonly (keyof Row & string)[];
+  /** The relations each row holds, loaded with one statement per relation for all of the read's rows. */
+  readonly include?: IncludeOf<R>;
+}
+
+/** The row a read with options O resolves to: the members it selects, and the relations it includes. */
+export type Loaded<Row, R, O> = Selected<Row, O extends { readonly select: infer S } ? S : undefined> &
+  IncludedOf<R, O extends { readonly include: infer I } ? I : undefined>;
+
+type Selected<Row, S> = S extends readonly (infer M)[] ? Pick<Row, M & keyof Row> : Row;
+
+type IncludedOf<R, I> = I extends object
+  ? { -readonly [K in keyof I & keyof R as I[K] extends false | null | undefined ? never : K]: LoadedRelated<R[K], I[K]> }
+  : unknown;
+
+type LoadedRelated<Rel, Spec> =
+  Rel extends Related<infer Row, infer Nested, infer Kind>
+    ? Kind extends 'many'
+      ? Loaded<Row, Nested, Spec>[]
+      : Kind extends 'optional'
+        ? Loaded<Row, Nested, Spec> | null
+        : Loaded<Row, Nested, Spec>
+    : never;
+
+/**
+ * A read's options O, refused where they name an option T does not have,
+ * or include a relation R does not have, at any depth: a read's options
+ * are inferred as they are written, so the check an object literal takes
+ * against its type is written out here.
+ */
+export type Checked<O, T, R> = O &
+  { readonly [K in Exclude<keyof O, keyof T>]: never } &
+  (O extends { readonly include: infer I } ? { readonly include: CheckedInclude<I, R> } : unknown);
+
+type CheckedInclude<I, R> = {
+  readonly [K in keyof I]: K extends keyof R
+    ? R[K] extends Related<infer Row, infer Nested, 'one' | 'optional' | 'many'>
+      ? I[K] extends object
+        ? Checked<I[K], ReadOptions<Row, Nested>, Nested>
+        : I[K]
+      : never
+    : never;
+};
+
 /** The order of findOne and findMany: a column's member, ascending or descending. */
 export interface OrderBy<F extends string> {
   readonly field: F;
@@ -332,7 +442,7 @@ export interface OrderBy<F extends string> {
 }
 
 /** The options of findOne and findMany. */
-export interface FindOptions<F extends string> {
+export interface FindOptions<F extends string, Row = unknown, R = unknown> extends ReadOptions<Row, R> {
   /** The order, by each column in turn. */
   readonly orderBy?: readonly OrderBy<F>[];
   /** At most this many rows, 100 unless set; findMany alone. */
@@ -350,7 +460,7 @@ export interface PageSortOf<S extends string> {
 }
 
 /** The options of findPage. */
-export interface PageOptions<S extends string, K> {
+export interface PageOptions<S extends string, K, Row = unknown, R = unknown> extends ReadOptions<Row, R> {
   /** The order; the key ascending unless set. */
   readonly sort?: PageSortOf<S>;
   /** The key of the last row of the page before; the first page without it. */
@@ -367,18 +477,46 @@ export interface RowPage<R, K> {
   readonly next: K | null;
 }
 
-/** The repository of a table. */
-export interface Repository<Row, Create, Update, Filter, OrderField extends string, SortField extends string, UniqueKey extends readonly string[], Key, PageKey> {
+/**
+ * The reads of a table, and of a projection (D90). Each read's options
+ * may select members and include relations, and its rows hold what they
+ * name: Loaded<Row, Relations, O>.
+ */
+export interface ReadRepository<Row, Filter, OrderField extends string, SortField extends string, Key, PageKey, Relations = unknown> {
   /** The live row whose key is id; NotFoundError when there is none. */
-  getOne(id: Key): Promise<Row>;
+  getOne<const O extends ReadOptions<Row, Relations> = {}>(id: Key, options?: Checked<O, ReadOptions<Row, Relations>, Relations>): Promise<Loaded<Row, Relations, O>>;
   /** The live rows whose keys are among ids, by key, in its wire form; a key no live row holds is absent. */
   getManyByIds(ids: readonly Key[]): Promise<Map<Key, Row>>;
   /** The first row filter finds, in the options' order, or null. */
-  findOne(filter?: Filter | null, options?: FindOptions<OrderField>): Promise<Row | null>;
+  findOne<const O extends FindOptions<OrderField, Row, Relations> = {}>(
+    filter?: Filter | null,
+    options?: Checked<O, FindOptions<OrderField, Row, Relations>, Relations>
+  ): Promise<Loaded<Row, Relations, O> | null>;
   /** The rows filter finds, in the options' order, a limit of them at a time, and how many it finds in all. */
-  findMany(filter?: Filter | null, options?: FindOptions<OrderField>): Promise<{ rows: Row[]; total: number }>;
+  findMany<const O extends FindOptions<OrderField, Row, Relations> = {}>(
+    filter?: Filter | null,
+    options?: Checked<O, FindOptions<OrderField, Row, Relations>, Relations>
+  ): Promise<{ rows: Loaded<Row, Relations, O>[]; total: number }>;
   /** A page of the rows filter finds, in the sort's order, after the key of the page before (D60, amended). */
-  findPage(filter?: Filter | null, options?: PageOptions<SortField, PageKey>): Promise<RowPage<Row, PageKey>>;
+  findPage<const O extends PageOptions<SortField, PageKey, Row, Relations> = {}>(
+    filter?: Filter | null,
+    options?: Checked<O, PageOptions<SortField, PageKey, Row, Relations>, Relations>
+  ): Promise<RowPage<Loaded<Row, Relations, O>, PageKey>>;
+}
+
+/** The repository of a table. */
+export interface Repository<
+  Row,
+  Create,
+  Update,
+  Filter,
+  OrderField extends string,
+  SortField extends string,
+  UniqueKey extends readonly string[],
+  Key,
+  PageKey,
+  Relations = unknown,
+> extends ReadRepository<Row, Filter, OrderField, SortField, Key, PageKey, Relations> {
   /** Inserts a row; an optional member left unset takes its column's default. */
   createOne(input: Create): Promise<Row>;
   /** Inserts the rows in one statement, DEFAULT for each column a row leaves unset that another sets. */
@@ -452,8 +590,18 @@ export interface VectorRepository<Row, Filter, VectorField extends string> {
 }
 
 /** The repository of a soft-deletable table, which can remove a row too. */
-export interface SoftDeleteRepository<Row, Create, Update, Filter, OrderField extends string, SortField extends string, UniqueKey extends readonly string[], Key, PageKey>
-  extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey> {
+export interface SoftDeleteRepository<
+  Row,
+  Create,
+  Update,
+  Filter,
+  OrderField extends string,
+  SortField extends string,
+  UniqueKey extends readonly string[],
+  Key,
+  PageKey,
+  Relations = unknown,
+> extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey, Relations> {
   /** Removes the row whose key is id, deleted or not; NotFoundError when there is none. */
   hardDeleteOne(id: Key): Promise<void>;
 }
@@ -547,18 +695,157 @@ async function run(runner: Runner, text: string, values: unknown[]): Promise<{ r
 
 type Values = Record<string, unknown>;
 
+/** What a read selects and includes, as the runtime reads it: a member of include is true or the options of a relation's read. */
+interface ReadSpec {
+  readonly select?: readonly string[];
+  readonly include?: Readonly<Record<string, unknown>>;
+}
+
+/** The columns a read selects, in order, and the members the caller selected, which every other column member leaves the rows for. */
+interface Selection {
+  readonly columns: readonly TableColumn[];
+  readonly kept?: ReadonlySet<string>;
+}
+
 /** The repository of one table over a runner, acting as user. */
 class TableRepository {
   private readonly encrypted: readonly TableColumn[];
+  /** The repositories of the ORM's tables, by member, which an include reads through (D90). */
+  peers: Readonly<Record<string, TableRepository>> = {};
 
   constructor(
     private readonly orm: OrmDefinition,
-    private readonly def: TableDefinition,
+    readonly def: TableDefinition,
     private readonly runner: Runner,
     private readonly user: string | undefined,
     private readonly keys: FieldKeyring | undefined
   ) {
     this.encrypted = def.columns.filter(c => c.encrypted);
+  }
+
+  private peer(member: string): TableRepository {
+    const peer = this.peers[member];
+    if (!peer) throw new Error(`orm: ${this.def.name}'s relation reads ${member}, which the ORM has no repository of`);
+    return peer;
+  }
+
+  /** Whether options select or include anything: the reads that do list their columns as the Go ORM's field selection does. */
+  private static selects(options: ReadSpec): boolean {
+    return options.select !== undefined || options.include !== undefined;
+  }
+
+  /**
+   * The columns a read selects (D90), as the Go ORM's field selection
+   * lists them: the members select names, or every one, then the foreign
+   * key of each to-one relation it includes, and need, in column order;
+   * then the key, last, when a one-to-many relation it includes maps its
+   * rows by it, an encrypted column is opened under it, or a page's next
+   * key holds it (page).
+   */
+  private selection(options: ReadSpec, need: readonly string[], page: boolean): Selection {
+    const include = options.include ?? {};
+    const relations = this.def.relations ?? [];
+    const many = this.def.many ?? [];
+    for (const name of Object.keys(include)) {
+      if (!relations.some(r => r.field === name) && !many.some(m => m.name === name)) {
+        const names = [...relations.map(r => r.field), ...many.map(m => m.name)];
+        throw new Error(`orm: ${this.def.name} includes ${names.length ? names.join(', ') : 'no relation'}, not ${JSON.stringify(name)}`);
+      }
+    }
+    const wanted = new Set<string>();
+    if (options.select) {
+      for (const member of options.select) {
+        if (!this.def.columns.some(c => c.name === member)) throw new Error(`orm: ${this.def.name} selects its members, not ${JSON.stringify(member)}`);
+        wanted.add(member);
+      }
+    } else {
+      for (const column of this.def.columns) wanted.add(column.name);
+    }
+    for (const rel of relations) if (include[rel.field]) wanted.add(rel.column);
+    for (const member of need) wanted.add(member);
+    const columns = this.def.columns.filter(c => wanted.has(c.name));
+    const key = this.keyColumn();
+    const keyed = page || many.some(m => include[m.name]) || columns.some(c => c.encrypted);
+    if (keyed && !wanted.has(key.name)) columns.push(key);
+    return { columns, kept: options.select ? new Set(options.select) : undefined };
+  }
+
+  /** The text of a selection: each column as selectColumn qualifies it. */
+  private selectText(selection: Selection): string {
+    const format = this.def.statements.selectColumn;
+    if (format === undefined) throw new Error(`orm: ${this.def.name}'s definition predates select and include; regenerate its types package`);
+    return selection.columns.map(c => fill(format, columnKey(c.column))).join(', ');
+  }
+
+  /** rows with each column member the caller did not select taken out: what a read reads only to include or open with. */
+  private strip(rows: Values[], selection: Selection): void {
+    const kept = selection.kept;
+    if (!kept) return;
+    for (const row of rows) {
+      for (const column of selection.columns) if (!kept.has(column.name)) delete row[column.name];
+    }
+  }
+
+  /**
+   * The rows filter finds, as findMany reads them with no count, at most
+   * limit, with the relations spec includes and need's members besides
+   * what it selects: an include's read of a relation's rows (D90). The
+   * caller strips them once it has mapped them.
+   */
+  private async related(filter: Values, spec: ReadSpec, need: readonly string[], limit: number): Promise<{ rows: Values[]; selection: Selection }> {
+    const selection = this.selection(spec, need, false);
+    const args: unknown[] = [];
+    const where = this.liveWhere(this.whereOf(this.conditions(filter, args, 0)), false);
+    const s = this.def.statements;
+    const { rows } = await run(this.runner, fill(s.findMany, this.selectText(selection), where, '', fill(this.clauses.limit, limit)), args);
+    const decoded = rows.map(row => this.decode(row));
+    await this.hydrate(decoded, spec.include);
+    return { rows: decoded, selection };
+  }
+
+  /**
+   * Loads the relations include names into rows (D90), as the Go ORM
+   * hydrates them: each to-one relation in column order, with one read of
+   * the rows the rows' foreign keys name, then each one-to-many relation,
+   * with one read of the rows whose foreign key holds one of the rows'
+   * keys. A key no live row holds leaves the relation null; a row with no
+   * related rows holds an empty list.
+   */
+  private async hydrate(rows: Values[], include: Readonly<Record<string, unknown>> | undefined): Promise<void> {
+    if (!include) return;
+    const specOf = (value: unknown): ReadSpec => (value === true ? {} : (value as ReadSpec));
+    for (const rel of this.def.relations ?? []) {
+      if (!include[rel.field]) continue;
+      const ids = distinct(rows.map(row => row[rel.column]));
+      const found = new Map<unknown, Values>();
+      if (ids.length > 0) {
+        const target = this.peer(rel.target);
+        const key = target.def.key;
+        const read = await target.related({ [key]: { in: ids } }, specOf(include[rel.field]), [key], ids.length);
+        for (const row of read.rows) found.set(row[key], row);
+        target.strip(read.rows, read.selection);
+      }
+      for (const row of rows) {
+        const id = row[rel.column];
+        row[rel.field] = id === null || id === undefined ? null : (found.get(id) ?? null);
+      }
+    }
+    for (const many of this.def.many ?? []) {
+      if (!include[many.name]) continue;
+      const keys = distinct(rows.map(row => row[this.def.key]));
+      const groups = new Map<unknown, Values[]>();
+      if (keys.length > 0) {
+        const child = this.peer(many.target);
+        const read = await child.related({ [many.column]: { in: keys } }, specOf(include[many.name]), [many.column], this.orm.manyLimit ?? 1000000);
+        for (const row of read.rows) {
+          const group = groups.get(row[many.column]);
+          if (group) group.push(row);
+          else groups.set(row[many.column], [row]);
+        }
+        child.strip(read.rows, read.selection);
+      }
+      for (const row of rows) row[many.name] = groups.get(row[this.def.key]) ?? [];
+    }
   }
 
   private get clauses(): Clauses {
@@ -715,6 +1002,18 @@ class TableRepository {
         }
       }
     }
+    // A filter through a to-one relation (D90): the foreign key in the
+    // keys of the target's live rows its filter finds.
+    for (const rel of this.def.relations ?? []) {
+      const through = filter[rel.field] as Values | null | undefined;
+      if (through === undefined || through === null) continue;
+      const target = this.peer(rel.target);
+      const before = args.length;
+      const inner = target.conditions(through, args, n);
+      n += args.length - before;
+      if (target.def.softDelete) inner.push(target.def.statements.liveCondition);
+      conditions.push(fill(rel.probe, target.whereOf(inner)));
+    }
     for (const ref of this.def.referencedBy ?? []) {
       const probe = filter[ref.filter] as { exists?: boolean; includeDeleted?: boolean } | null | undefined;
       if (!probe) continue;
@@ -729,10 +1028,36 @@ class TableRepository {
         args.push(likePattern(term));
       }
     }
+    // anyOf ORs filters of the table (D90), each one's conditions ANDed.
+    // A filter of no condition keeps every row, and so does the whole,
+    // whose parameters then go too; it is the last condition, so no
+    // placeholder follows theirs.
+    const anyOf = filter.anyOf as readonly (Values | null | undefined)[] | null | undefined;
+    if (anyOf && anyOf.length > 0) {
+      const start = args.length;
+      const branches: string[] = [];
+      let every = false;
+      for (const branch of anyOf) {
+        const before = args.length;
+        const inner = this.conditions(branch, args, n);
+        n += args.length - before;
+        if (inner.length === 0) {
+          every = true;
+          continue;
+        }
+        branches.push(fill(this.group, inner.join(c.and)));
+      }
+      if (every) args.length = start;
+      else conditions.push(fill(this.group, branches.join(c.or ?? ' OR ')));
+    }
     return conditions;
   }
 
-  private whereOf(conditions: readonly string[]): string {
+  private get group(): string {
+    return this.clauses.group ?? '(%s)';
+  }
+
+  whereOf(conditions: readonly string[]): string {
     return conditions.length === 0 ? '' : this.clauses.where + conditions.join(this.clauses.and);
   }
 
@@ -752,11 +1077,26 @@ class TableRepository {
     return this.clauses.orderBy + terms.join(', ');
   }
 
-  async getOne(id: unknown): Promise<Values> {
+  async getOne(id: unknown, options: ReadSpec = {}): Promise<Values> {
     const s = this.def.statements;
-    const { rows } = await run(this.runner, s.getOne + s.live, [this.encode(id, this.keyColumn(), 'key')]);
+    let text = s.getOne;
+    let selection: Selection | undefined;
+    if (TableRepository.selects(options)) {
+      if (s.getOneFields === undefined) throw new Error(`orm: ${this.def.name}'s definition predates select and include; regenerate its types package`);
+      selection = this.selection(options, [], false);
+      text = fill(s.getOneFields, this.selectText(selection));
+    }
+    const { rows } = await run(this.runner, text + s.live, [this.encode(id, this.keyColumn(), 'key')]);
     if (rows.length === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
-    return this.decode(rows[0]!);
+    return (await this.loaded(rows, options, selection))[0]!;
+  }
+
+  /** rows decoded, with the relations options include, and only the members it selects. */
+  private async loaded(rows: readonly Record<string, unknown>[], options: ReadSpec, selection: Selection | undefined): Promise<Values[]> {
+    const decoded = rows.map(row => this.decode(row));
+    await this.hydrate(decoded, options.include);
+    if (selection) this.strip(decoded, selection);
+    return decoded;
   }
 
   async getManyByIds(ids: readonly unknown[]): Promise<Map<unknown, Values>> {
@@ -781,15 +1121,20 @@ class TableRepository {
     return out;
   }
 
-  async findOne(filter: Values | null | undefined, options: FindOptions<string> = {}): Promise<Values | null> {
+  async findOne(filter: Values | null | undefined, options: FindOptions<string> & ReadSpec = {}): Promise<Values | null> {
+    // A read that selects or includes lists its columns, as the Go ORM's
+    // field selection does; one that does neither selects every column.
+    const selection = TableRepository.selects(options) ? this.selection(options, [], false) : undefined;
     const args: unknown[] = [];
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, 0)), options.includeDeleted);
     const s = this.def.statements;
-    const { rows } = await run(this.runner, fill(s.findOne, s.columns, where, this.orderBy(options.orderBy)), args);
-    return rows.length === 0 ? null : this.decode(rows[0]!);
+    const columns = selection ? this.selectText(selection) : s.columns;
+    const { rows } = await run(this.runner, fill(s.findOne, columns, where, this.orderBy(options.orderBy)), args);
+    return rows.length === 0 ? null : (await this.loaded(rows, options, selection))[0]!;
   }
 
-  async findMany(filter: Values | null | undefined, options: FindOptions<string> = {}): Promise<{ rows: Values[]; total: number }> {
+  async findMany(filter: Values | null | undefined, options: FindOptions<string> & ReadSpec = {}): Promise<{ rows: Values[]; total: number }> {
+    const selection = TableRepository.selects(options) ? this.selection(options, [], false) : undefined;
     const args: unknown[] = [];
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, 0)), options.includeDeleted);
     const c = this.clauses;
@@ -800,11 +1145,12 @@ class TableRepository {
     // The count first, as the Go ORM runs it.
     const counted = await run(this.runner, fill(s.count, where), args);
     const total = Number((counted.rows[0] as { count?: unknown } | undefined)?.count ?? 0);
-    const { rows } = await run(this.runner, fill(s.findMany, s.qualifiedColumns, where, this.orderBy(options.orderBy), limitOffset), args);
-    return { rows: rows.map(row => this.decode(row)), total };
+    const columns = selection ? this.selectText(selection) : s.qualifiedColumns;
+    const { rows } = await run(this.runner, fill(s.findMany, columns, where, this.orderBy(options.orderBy), limitOffset), args);
+    return { rows: await this.loaded(rows, options, selection), total };
   }
 
-  async findPage(filter: Values | null | undefined, options: PageOptions<string, Values> = {}): Promise<RowPage<Values, Values>> {
+  async findPage(filter: Values | null | undefined, options: PageOptions<string, Values> & ReadSpec = {}): Promise<RowPage<Values, Values>> {
     if (options.limit !== undefined && options.limit < 0) throw new Error(`orm: a page of ${this.def.name} rows holds 1 or more, not ${options.limit}`);
     const limit = options.limit ? options.limit : this.orm.defaultLimit;
     const key = this.keyColumn();
@@ -837,7 +1183,11 @@ class TableRepository {
     }
     let order = fill(s.pageOrder, column.qualified, direction);
     if (!byKey) order += fill(s.pageTiebreak, direction);
-    const { rows } = await run(this.runner, fill(s.page, s.qualifiedColumns, this.whereOf(conditions), order, limit + 1), args);
+    // A page reads its rows' keys whatever it selects: the next key holds
+    // the last one's.
+    const selection = TableRepository.selects(options) ? this.selection(options, [], true) : undefined;
+    const columns = selection ? this.selectText(selection) : s.qualifiedColumns;
+    const { rows } = await run(this.runner, fill(s.page, columns, this.whereOf(conditions), order, limit + 1), args);
     if (rows.length === 0 && options.after && !byKey) {
       // A key whose row no longer exists places no row: only then is the
       // page empty without being the last.
@@ -846,10 +1196,15 @@ class TableRepository {
         throw new PageKeyError(`no ${this.def.name} row has the key's ${this.def.key}`);
       }
     }
+    // The relations load for every row read, the one past the page among
+    // them, as the Go ORM's FindPage loads them; the next key is read
+    // before the members the caller did not select leave the rows.
     const decoded = rows.map(row => this.decode(row));
-    if (decoded.length <= limit) return { rows: decoded, next: null };
+    await this.hydrate(decoded, options.include);
     const kept = decoded.slice(0, limit);
-    return { rows: kept, next: { [this.def.key]: kept[limit - 1]![this.def.key] } };
+    const next = decoded.length > limit ? { [this.def.key]: kept[limit - 1]![this.def.key] } : null;
+    if (selection) this.strip(kept, selection);
+    return { rows: kept, next };
   }
 
   async nearest(field: string, vector: readonly number[], options: NearestOptions<Values> = {}): Promise<Neighbour<Values>[]> {
@@ -1152,12 +1507,27 @@ function jsonNull(column: TableColumn): boolean {
   return Boolean((column.json || column.jsonText) && column.required);
 }
 
+/** The values of values that are neither null nor undefined, each once, in order. */
+function distinct(values: readonly unknown[]): unknown[] {
+  const seen = new Set<unknown>();
+  const out: unknown[] = [];
+  for (const value of values) {
+    if (value === null || value === undefined || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 function repositories(orm: OrmDefinition, runner: Runner, user: string | undefined, keys: FieldKeyring | undefined): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
     out[member] = new TableRepository(orm, def, runner, user, keys);
   }
+  // An include and a filter through a relation read the target through
+  // its repository on the same runner, acting as the same user (D90).
+  for (const repository of Object.values(out)) repository.peers = out;
   return out;
 }
 

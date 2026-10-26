@@ -489,7 +489,7 @@ export interface ProjectionDef {
   joins?: ProjectionJoin[];
   migration: string;
   name: string;
-  pool: string;
+  pool?: string;
   predicates?: ProjectionPredicate[];
   source: string;
 }

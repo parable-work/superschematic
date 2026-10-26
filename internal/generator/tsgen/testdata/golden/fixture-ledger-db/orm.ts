@@ -15,11 +15,17 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -70,6 +76,8 @@ export interface AccountFilter {
   referencedByEntryTransfer?: ReferencedByFilter;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly AccountFilter[];
 }
 
 /** The members findOne and findMany order rows of Account by. */
@@ -86,6 +94,12 @@ export interface AccountPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Account includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface AccountRelations {
+  readonly entriesByAccount: Related<EntryRow, EntryRelations, 'many'>;
+  readonly entriesByTransfer: Related<EntryRow, EntryRelations, 'many'>;
+}
+
 /** The repository of Account. */
 export type AccountRepository = Repository<
   AccountRow,
@@ -96,7 +110,8 @@ export type AccountRepository = Repository<
   AccountSortField,
   AccountUniqueKey,
   T.IdentityUUID,
-  AccountPageKey
+  AccountPageKey,
+  AccountRelations
 >;
 
 /** The account table, as the runtime reads and writes it. */
@@ -118,7 +133,9 @@ export const accountTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\"",
     qualifiedColumns: "\"account\".\"id\", \"account\".\"name\", \"account\".\"code\", \"account\".\"opened_on\", \"account\".\"mailing_address\", \"account\".\"created_at\", \"account\".\"created_by\", \"account\".\"updated_at\", \"account\".\"updated_by\"",
+    selectColumn: "\"account\".\"%s\"",
     getOne: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id = $1",
+    getOneFields: "SELECT %s FROM account WHERE id = $1",
     getMany: "SELECT \"id\", \"name\", \"code\", \"opened_on\", \"mailing_address\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\" FROM account WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -153,6 +170,10 @@ export const accountTable: TableDefinition = {
   referencedBy: [
     { filter: "referencedByEntryAccount", probe: "SELECT 1 FROM entry WHERE entry.account_id = account.id", live: " AND entry.deleted_at IS NULL" },
     { filter: "referencedByEntryTransfer", probe: "SELECT 1 FROM entry WHERE entry.transfer_id = account.id", live: " AND entry.deleted_at IS NULL" },
+  ],
+  many: [
+    { name: "entriesByAccount", target: "entry", column: "accountId" },
+    { name: "entriesByTransfer", target: "entry", column: "transferId" },
   ],
 };
 
@@ -226,6 +247,12 @@ export interface EntryFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows whose account is a Account row the filter finds (D90). */
+  account?: AccountFilter;
+  /** The rows whose transfer is a Account row the filter finds; a row whose transfer is null is not among them (D90). */
+  transfer?: AccountFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly EntryFilter[];
 }
 
 /** The members findOne and findMany order rows of Entry by. */
@@ -242,6 +269,12 @@ export interface EntryPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Entry includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface EntryRelations {
+  readonly account: Related<AccountRow, AccountRelations, 'one'>;
+  readonly transfer: Related<AccountRow, AccountRelations, 'optional'>;
+}
+
 /** The repository of Entry. */
 export type EntryRepository = SoftDeleteRepository<
   EntryRow,
@@ -252,7 +285,8 @@ export type EntryRepository = SoftDeleteRepository<
   EntrySortField,
   EntryUniqueKey,
   T.IdentityUUID,
-  EntryPageKey
+  EntryPageKey,
+  EntryRelations
 >;
 
 /** The entry table, as the runtime reads and writes it. */
@@ -282,7 +316,9 @@ export const entryTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
     qualifiedColumns: "\"entry\".\"id\", \"entry\".\"account_id\", \"entry\".\"transfer_id\", \"entry\".\"amount_cents\", \"entry\".\"booked_on\", \"entry\".\"kind\", \"entry\".\"memo\", \"entry\".\"external_id\", \"entry\".\"tags\", \"entry\".\"metadata\", \"entry\".\"reviewed_at\", \"entry\".\"created_at\", \"entry\".\"created_by\", \"entry\".\"updated_at\", \"entry\".\"updated_by\", \"entry\".\"deleted_at\", \"entry\".\"deleted_by\"",
+    selectColumn: "\"entry\".\"%s\"",
     getOne: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id = $1",
+    getOneFields: "SELECT %s FROM entry WHERE id = $1",
     getMany: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -315,6 +351,10 @@ export const entryTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = EXCLUDED.account_id" },
   },
+  relations: [
+    { field: "account", column: "accountId", target: "account", probe: "entry.account_id IN (SELECT account.id FROM account%s)" },
+    { field: "transfer", column: "transferId", target: "account", probe: "entry.transfer_id IN (SELECT account.id FROM account%s)" },
+  ],
 };
 
 /** The repositories of fixture-ledger-db, by table. */
@@ -349,6 +389,8 @@ export const fixtureLedgerDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -357,6 +399,7 @@ export const fixtureLedgerDbOrm: OrmDefinition = {
     offset: " OFFSET %d",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

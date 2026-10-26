@@ -11716,3 +11716,97 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D90. A read includes relations and selects members in both ORMs, a filter reaches through a relation and ORs filters, and a projection is read through a repository of its own
+
+A finance app's views read a transaction with its account and provider,
+its category and that category's parent, its business, its person and its
+notes. The TypeScript repositories (D79) read one table at a time: field
+selection, include and one-to-many loading were the Go ORM's alone, and a
+relation's rows loaded through the target's `getManyByIds`, so every list
+endpoint stitched rows by hand. The dashboard's filter "the category is X,
+or its parent is X" needs a condition through a relation and an OR, and
+neither ORM had either. A flat list model, a transaction with its account
+name and its category's colour and parent, was a `@projection` the ORMs
+never read: a projection was never a language type, and its view bound to
+session settings for external Arrow readers.
+
+This entry adds:
+- `select` and `include` on every read of a TypeScript repository, to-one
+  and one-to-many, nested, the rows typed by them;
+- a filter through a to-one relation, and `anyOf`, in both ORMs;
+- a projection's row type and a read-only repository over its view, in
+  both ORMs, a projection without a pool, and a projection as an API
+  view's `@source`.
+
+### Relations and selection
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A read's options take `select`, the members each row holds, and `include`, each relation by its member, `true` or `{ select, include }` in turn: `findPage(filter, { include: { category: { include: { parent: true } }, account: true } })`. `getOne`, `findOne`, `findMany` and `findPage` take both. | Go's `Fields` struct, a flag per column and a `<Field>Nested` selection, which reads as a struct literal in Go and as noise in TypeScript. A select that holds relations too (`select: { category: { ... } }`), which mixes a row's members with what loads beside them. |
+| `true` is the target's columns and no relation of its own. The Go ORM's default nested selection stays every column and every relation, hydrated in turn under its cycle guard; the same selection in each sends the same statements. | Go's default in TypeScript, which loads every relation reachable from the row and whose row type would have to spell each one out. |
+| `orm.ts` types the rows: per table `<T>Relations`, each relation a `Related<Row, Relations, Kind>`, its kind `one`, `optional` (a relation that may be null, or a soft-deletable target, whose deleted rows a read leaves out) or `many`. A read's options are a `const` type parameter, and its rows `Loaded<Row, Relations, O>`: `Pick` of the selected members, and each included relation as its kind holds it, nested. `Checked` refuses an option, a relation or a member the table does not have at any depth, which a generic parameter would otherwise take silently, and the runtime throws on each too. | A row typed `Row & Record<string, unknown>`, which checks nothing. Overloads per shape, which cannot nest. |
+| A relation loads in one statement for all of a read's rows: the target's find, no count, its filter the keys the rows name (`{ id: { in } }`) or, for one-to-many, the rows' keys in the source's foreign key, at most `sqlutil.ManyLimit` (Go's 1000000) rows. The Go ORM's hydration ran `FindMany`, a count first, for each relation; it now runs `findRelated`, the same select with no count, so a page of 50 rows with five relations is six statements in both. `TestReadParityOfGoAndTypeScriptOnPostgres` holds the two to it. | A JOIN per to-one relation, which changes every statement's FROM and select list, needs an alias per level of a path, and cannot load one-to-many without multiplying rows. Keeping the count in both, a statement per relation that reads nothing. |
+| A read that selects or includes lists its columns as the Go ORM's field selection does: the selected members, the foreign key of each to-one relation it includes, and a column `need`s, in column order, then the key, last, when a one-to-many relation maps its rows by it, an encrypted column opens under it (D85) or a page's next key holds it. Each column is `TableStatements.SelectColumn`, `"table"."%s"`, as `buildSelectFieldsTyped` writes it. The rows then drop the members the caller did not select. | Leaving them in the row, which its type does not name and a response would carry. |
+| A to-one include reads the target's key whatever its `select`, to map the rows; Go maps by `Id`, and a nested selection without it maps none. `findPage` loads the relations of every row it reads, the one past the page among them, as the Go ORM's does, so the two send the same `IN` list. | |
+| A soft-deleted target is null in TypeScript, and a key-only stub in Go, as before: the include leaves deleted rows out as a find does. | Loading it, which a row that points at a retired category might want; `includeDeleted` per include can follow. |
+| One-to-many relations are a table's `@hasMany` fields, which Go loads too, and the to-one relations of other tables that point at it, which no field holds, `sqlutil.ToMany`: named for the source in the plural (`notes`), with `By` and the field when the source points at the table twice or the plural is taken (`lineItemsBySubCategory`), else the reference's filter name. A reference a `@hasMany` field holds is named by the field alone. | `@hasMany` alone, which the finance schema declares for no note. The filter's name, `referencedByNoteLineItem`, for every one. |
+
+### Filters through a relation, and anyOf
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A filter's member named for a to-one relation, `Category *CategoryFilter` in Go and `category?: CategoryFilter` in TypeScript, is the target's filter: one condition, `line_item.category_id IN (SELECT category.id FROM category WHERE <its conditions> AND category.deleted_at IS NULL)` (`sqlutil.ToOne.Probe`). The subquery names the target by its table and nothing outside it, so a relation of a table to itself, and a path of them (`{ category: { parent: { name } } }`), reads each level's own rows, and the target's conditions are its own filter's, `conditions` reused. | A LEFT JOIN, which changes the FROM of every statement and needs an alias per level. A correlated EXISTS, which names the outer row, so the target's conditions would need an alias at each level to keep a self relation's inner table from shadowing the outer. |
+| A row whose foreign key is null is not kept, and neither is one whose target is soft-deleted: the filter finds live targets, as a find does. | Following the outer read's `includeDeleted`. |
+| `AnyOf []XFilter` and `anyOf: XFilter[]` keep the rows any of the filters finds: each filter's conditions ANDed in parentheses, ORed, as the last condition, after the relation filters, the references and the search. A filter of no condition keeps every row, and the whole then adds none, its parameters dropped; an empty `anyOf` adds none, as `in` with no values does. Both ORMs number each branch's placeholders after the last, so `UpdateMany`'s and `DeleteMany`'s, which follow the assignments, hold too. | `or`, and an `and` beside it, which a filter's members already are. An empty `anyOf` that keeps nothing, against `in`'s rule. |
+| A filter through a relation sits in a page's WHERE beside the keyset, which it leaves as it is; a page sorts by the table's own columns. A sort by a joined column is a projection's. | Sorting through a relation, which a keyset would have to read through the same path. |
+
+### Projections
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `pool` is optional. A projection without one is a plain view beside the service's tables: created as its name alone, in `outputs.sql.sourceSchema` when set, with no `CREATE SCHEMA`; its migration pair is `<stamp>_<name>_projection` and its Arrow and docs files `<name>.*`; a migration plan names it in its schema, or by its name alone (`sqlmigrate.View.Schema`). Verification refuses one named as a table. It binds a setting only if a rule does. | A `@view` decorator beside `@projection`, a second declaration of one thing. A required pool, which puts a list model in a schema of its own for readers it does not have. |
+| A projection whose columns read its source's key, or that collapses by one column, has a key (`sqlutil.ViewKey`), and both ORMs read it: the row type is the class, `TransactionListRow` in `./orm` and `orm.TransactionListRow`, a struct of the ORM's package, and the repository the reads of a table over the view, `getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage` in TypeScript (`ReadRepository`, with `select`), `GetOne`, `FindOne`, `FindMany` and `FindPage` in Go. A projection with neither key has no repository. | The row in the types package, where an API would take it for a response type, and which the type generators keep to tables and payloads. `@key` on a projection column, which the view's source already states. |
+| `sqlutil.ViewsOf` models the view as a table, each field a column named as sqlgen names it, of its declared type, filtered and sorted as a table's column of that type (`ClassifyColumn`, `FilterKind`, `sortableColumn`), and `TableStatementsOf` writes its statements, whose reads both ORMs run, qualified by the view's name and reading from its pool-qualified name. | A statement writer for views, which would drift from the tables'. |
+| Go reads a projection through `db.<Projection>()` over the pool and `<Projection>In(tx)` in a transaction, over a querier of the pool's and the transaction's `Query`; `projections.go` holds the rows, filters, sorts, pages and repositories. | A field of `Database` and a getter on `TxInterface`, which every table's repository edits share. |
+| An API view may take a projection as its `@source`: verification holds each field to the projection's column of its name and type, as to a table's. The TypeScript reader resolves a cross-service `@source` class's decorators by its own service's kind, so a projection's, or a table's, `@column` no longer fails an API's load. | |
+
+Status: built.
+- **The model:** `TestRelationsOfAFinanceSchema` and
+  `TestViewsOfAProjection` (sqlutil) over `fixture-finances-db`, modeled
+  on the finance draft: line items on accounts at providers, under a
+  soft-deletable category and its parent, a business and a person, with
+  soft-deletable notes, `Account.lineItems` a `@hasMany`, and the
+  `TransactionListRow` projection without a pool.
+- **Go:** ormgen's goldens (`AnyOf`, the relation filters,
+  `findRelated`); `TestFinancesOnPostgres`, a filter through a relation
+  and two deep, one that leaves out a null and a soft-deleted category,
+  `AnyOf` and one with an empty branch, the dashboard's list as one
+  `FindPage` over two pages with its account and provider, its category
+  and parent, its business and its person loaded, a deleted category's
+  stub, a `@hasMany` include, and the projection's `FindPage` on joined
+  columns, its next page, `GetOne`, `FindMany` and a transaction.
+- **TypeScript:** `TestIncludeAndSelectTypeTheRows` type-checks a read's
+  rows against its options, each kind, nested, and refuses an unknown
+  relation, member and option; `TestRepositoriesOnPostgres`'s
+  `finances.test.ts`, the same reads, the dashboard's page in eight
+  statements with no count, a selection's statement, a soft-deleted and
+  an unset target, both kinds of one-to-many include, and the
+  projection's reads; the regenerated tsgen goldens and acme-shop's
+  `orm.ts`.
+- **Parity:** `TestReadParityOfGoAndTypeScriptOnPostgres`, 48 statements
+  over 30 calls alike, the includes' among them, and
+  `TestTableParityOfGoAndTypeScriptOnPostgres` as before.
+- **Projections:** `TestProjectionWithoutPool` (sqlgen),
+  `TestProjectionWithoutPoolPassesVerification` and the refusal of one
+  named as a table, and `TestAPIViewSourcedFromAProjection`, an API view
+  `@source(TransactionListRow)` whose package and the database's
+  type-check together.
+
+Left: `materialized: true` and a `refresh` method; the Go ORM's include of
+the references no `@hasMany` field holds, which its row types have no
+member for; `includeDeleted` per include, and an order or a limit of a
+one-to-many include's rows; include in `nearest`; selection on a
+projection's read in Go; the Go ORM's `FindOne`, which loads no
+`@hasMany` relation, where TypeScript's `findOne` does; a sort through a
+relation; the `@versioned` history readers in TypeScript.

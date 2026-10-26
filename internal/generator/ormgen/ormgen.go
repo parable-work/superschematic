@@ -175,6 +175,10 @@ type ORMOutput struct {
 	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
 	// told (sqlutil.DefaultLimit).
 	DefaultLimit int
+
+	// Projections are the schema's projections with a key, which
+	// projections.go reads through read-only repositories (D90).
+	Projections []ProjectionRepository
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -260,6 +264,11 @@ type Repository struct {
 	// SearchText, sqlutil.SearchConditionOf; empty without search fields.
 	SearchCondition string
 
+	// PathRelations are the to-one relations a filter reaches through
+	// (D90), sqlutil's ToOne: the filter's <Field> keeps the rows whose
+	// relation points at a live row its target's filter finds.
+	PathRelations []PathRelation
+
 	// EncryptedFields are the table's Encrypted<T> fields (D85), which
 	// encrypted.go seals and opens; GeneratesKey is a table whose create
 	// generates a UUID key the input leaves unset, since each envelope is
@@ -281,6 +290,13 @@ type Repository struct {
 	NeedsReflect            bool
 	NeedsPgtype             bool
 	HasJSONUnionCollections bool
+}
+
+// PathRelation is a to-one relation a filter reaches through (D90):
+// sqlutil's, with its member of the filter, GoField.
+type PathRelation struct {
+	sqlutil.ToOne
+	GoField string
 }
 
 // UniqueKey is a key UpsertOne may be keyed by: sqlutil's, with the Go
@@ -854,6 +870,14 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	for i, q := range queues {
 		queueRepositories[i] = Repository{Fields: q.Fields}
 	}
+	// So does a projection's column, which it reads (D90).
+	projections, err := projectionRepositories(schema, opts.Dependencies, scalarMap, unionNames)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range projections {
+		queueRepositories = append(queueRepositories, Repository{Fields: p.Fields})
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -977,6 +1001,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		HasEncryptedFields:       hasEncryptedFields,
 		DefaultLimit:             sqlutil.DefaultLimit,
+		Projections:              projections,
 	}
 
 	return output, nil
@@ -1584,6 +1609,9 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	}
 	repo.SortFields = sortFields(repo.Fields)
 	repo.SearchCondition = sqlutil.SearchConditionOf(table)
+	for _, rel := range table.ToOne {
+		repo.PathRelations = append(repo.PathRelations, PathRelation{ToOne: rel, GoField: codegen.ToPascalCase(rel.Field)})
+	}
 	for _, field := range repo.Fields {
 		if field.IsEncrypted {
 			repo.EncryptedFields = append(repo.EncryptedFields, field)

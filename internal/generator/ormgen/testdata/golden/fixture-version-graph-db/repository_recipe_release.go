@@ -416,7 +416,7 @@ func (r *RecipeReleaseRepository) batchRootByIDs(ctx context.Context, ids []type
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -494,7 +494,7 @@ func (r *RecipeReleaseRepository) batchCommitByIDs(ctx context.Context, ids []ty
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -1091,6 +1091,30 @@ func (r *RecipeReleaseRepository) FindMany(ctx context.Context, filter *RecipeRe
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *RecipeReleaseRepository) findRelated(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) ([]*types.RecipeRelease, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := recipeReleaseFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, RecipeReleaseAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_release")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildRecipeReleaseOrderByClause(opts.OrderBy, `recipe_release`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM recipe_release%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // recipeReleaseFieldStrings are the columns fields selects, in OrderedMembers

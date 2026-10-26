@@ -15,11 +15,17 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -79,6 +85,8 @@ export interface TenantFilter {
   referencedByTenantUserTenant?: ReferencedByFilter;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly TenantFilter[];
 }
 
 /** The members findOne and findMany order rows of Tenant by. */
@@ -95,6 +103,11 @@ export interface TenantPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Tenant includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface TenantRelations {
+  readonly users: Related<TenantUserRow, TenantUserRelations, 'many'>;
+}
+
 /** The repository of Tenant. */
 export type TenantRepository = Repository<
   TenantRow,
@@ -105,7 +118,8 @@ export type TenantRepository = Repository<
   TenantSortField,
   TenantUniqueKey,
   T.IdentityUUID,
-  TenantPageKey
+  TenantPageKey,
+  TenantRelations
 >;
 
 /** The tenant table, as the runtime reads and writes it. */
@@ -129,7 +143,9 @@ export const tenantTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\"",
     qualifiedColumns: "\"tenant\".\"created_at\", \"tenant\".\"updated_at\", \"tenant\".\"id\", \"tenant\".\"name\", \"tenant\".\"slug\", \"tenant\".\"email\", \"tenant\".\"status\", \"tenant\".\"is_active\", \"tenant\".\"seat_count\", \"tenant\".\"metadata\", \"tenant\".\"_version\"",
+    selectColumn: "\"tenant\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE id = $1",
+    getOneFields: "SELECT %s FROM tenant WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"slug\", \"email\", \"status\", \"is_active\", \"seat_count\", \"metadata\", \"_version\" FROM tenant WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -163,6 +179,9 @@ export const tenantTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByTenantUserTenant", probe: "SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id", live: " AND tenant_user.deleted_at IS NULL" },
+  ],
+  many: [
+    { name: "users", target: "tenantUser", column: "tenantId" },
   ],
 };
 
@@ -201,6 +220,10 @@ export interface TenantUserFilter {
   tenantId?: UuidFilter<T.IdentityUUID>;
   displayName?: StringFilter<string> & NullFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose tenant is a Tenant row the filter finds (D90). */
+  tenant?: TenantFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly TenantUserFilter[];
 }
 
 /** The members findOne and findMany order rows of TenantUser by. */
@@ -217,6 +240,11 @@ export interface TenantUserPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of TenantUser includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface TenantUserRelations {
+  readonly tenant: Related<TenantRow, TenantRelations, 'one'>;
+}
+
 /** The repository of TenantUser. */
 export type TenantUserRepository = SoftDeleteRepository<
   TenantUserRow,
@@ -227,7 +255,8 @@ export type TenantUserRepository = SoftDeleteRepository<
   TenantUserSortField,
   TenantUserUniqueKey,
   T.IdentityUUID,
-  TenantUserPageKey
+  TenantUserPageKey,
+  TenantUserRelations
 >;
 
 /** The tenant_user table, as the runtime reads and writes it. */
@@ -248,7 +277,9 @@ export const tenantUserTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\"",
     qualifiedColumns: "\"tenant_user\".\"created_at\", \"tenant_user\".\"updated_at\", \"tenant_user\".\"id\", \"tenant_user\".\"tenant_id\", \"tenant_user\".\"display_name\", \"tenant_user\".\"deleted_at\", \"tenant_user\".\"deleted_by\", \"tenant_user\".\"_version\"",
+    selectColumn: "\"tenant_user\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE id = $1",
+    getOneFields: "SELECT %s FROM tenant_user WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"tenant_id\", \"display_name\", \"deleted_at\", \"deleted_by\", \"_version\" FROM tenant_user WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -281,6 +312,9 @@ export const tenantUserTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "tenant,displayName": { conflict: "(tenant_id, display_name) WHERE deleted_at IS NULL", keep: "tenant_id = EXCLUDED.tenant_id" },
   },
+  relations: [
+    { field: "tenant", column: "tenantId", target: "tenant", probe: "tenant_user.tenant_id IN (SELECT tenant.id FROM tenant%s)" },
+  ],
 };
 
 /** The repositories of fixture-db, by table. */
@@ -315,6 +349,8 @@ export const fixtureDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -323,6 +359,7 @@ export const fixtureDbOrm: OrmDefinition = {
     offset: " OFFSET %d",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

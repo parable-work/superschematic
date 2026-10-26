@@ -152,7 +152,7 @@ func (r *RecipePatchRepository) batchCommitByIDs(ctx context.Context, ids []type
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -663,6 +663,30 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *RecipePatchRepository) findRelated(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchFindOptions) ([]*types.RecipePatch, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := recipePatchFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, RecipePatchAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_patch")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildRecipePatchOrderByClause(opts.OrderBy, `recipe_patch`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM recipe_patch%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // recipePatchFieldStrings are the columns fields selects, in OrderedMembers

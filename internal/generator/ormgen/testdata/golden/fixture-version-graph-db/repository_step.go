@@ -514,7 +514,7 @@ func (r *StepRepository) batchRecipeByIDs(ctx context.Context, ids []types.Ident
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -592,7 +592,7 @@ func (r *StepRepository) batchRefByIDs(ctx context.Context, ids []types.Identity
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -1340,6 +1340,30 @@ func (r *StepRepository) FindMany(ctx context.Context, filter *StepFilter, opts 
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *StepRepository) findRelated(ctx context.Context, filter *StepFilter, opts *StepFindOptions) ([]*types.Step, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := stepFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, StepAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "step")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildStepOrderByClause(opts.OrderBy, `step`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM step%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // stepFieldStrings are the columns fields selects, in OrderedMembers

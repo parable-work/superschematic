@@ -39,8 +39,10 @@ type repositoryCase struct {
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
 // the repositories; fixture-vault-db's Encrypted<T> fields (D85), sealed,
-// opened, refused and resealed; and fixture-vectors-db's decimals, vectors
-// and nearest (D84), on the Postgres with pgvector.
+// opened, refused and resealed; fixture-finances-db's reads (D90), a
+// filter through a relation, anyOf, select and include, and a projection's
+// repository; and fixture-vectors-db's decimals, vectors and nearest
+// (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -90,6 +92,14 @@ var repositoryCases = []repositoryCase{
 		"deleting a category clears the references SET NULL names, and keeps their rows",
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
+	}},
+	{fixture: "fixture-finances-db", files: []string{"finances.test.ts"}, tests: []string{
+		"a filter through a to-one relation leaves out a row whose relation is null or soft-deleted",
+		"anyOf ORs filters, and a filter of no member keeps every row",
+		"the dashboard's transaction list is one findPage, each row with its relations",
+		"select reads the members it names, and an include reads the foreign key it needs without keeping it",
+		"a to-one include of a soft-deleted or unset target is null, and one-to-many includes map each row's rows",
+		"the TransactionListRow projection reads through findPage, filtered on joined columns",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

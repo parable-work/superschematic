@@ -21,7 +21,9 @@ service's config lists, and regenerates it on every change:
 
 - SQL DDL for Postgres and SQLite, and the migration plan between two
   versions of a database
-- the Go ORM: typed repositories, filters, pages and transactions
+- the Go ORM and the TypeScript repositories: typed repositories,
+  filters, pages, transactions, and reads that select columns and include
+  related rows
 - request and response types, and the decoders that validate them, in
   Go, TypeScript, Python and Rust
 - the HTTP server: routing, argument decoding, validation, permission
@@ -63,7 +65,7 @@ breaks your code, the type checker of each language points at the line.
 | A fixed set of values | an `enum` | the enum in each language, checked on decode | nothing | [Modeling types](/superschematic/guides/modeling-types/#enums) |
 | A table | an abstract class in a DB schema, with a `@key` | the DDL, a Go repository, the types | nothing | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
 | A generated key | `@key id: AutoGenerate<Identity.UUID>` | the database's default on insert | nothing | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
-| A foreign key, one-to-many | `Relation<T, { onDelete }>`, `HasMany<T>` | the constraint, and the ORM's reads across it | nothing | [Database tables](/superschematic/guides/database-tables/#relations) |
+| A foreign key, one-to-many | `Relation<T, { onDelete }>`, `HasMany<T>` | the constraint, both ORMs' reads that include the related rows, and filters through a relation | nothing | [Database tables](/superschematic/guides/database-tables/#relations) |
 | A unique column, an index | `@unique`, `@index<T>([...], { unique })` | the constraint or index | nothing | [Database tables](/superschematic/guides/database-tables/#indexes) |
 | Text search over a table | `@searchField` on the fields to search | a trigram-indexed `search_text` column | nothing | [Database tables](/superschematic/guides/database-tables/#text-search) |
 | A nested object in a column | `@jsonField` on the class or field | a `JSONB` column, typed in every language | nothing | [Database tables](/superschematic/guides/database-tables/#json-columns) |
@@ -71,7 +73,7 @@ breaks your code, the type checker of each language points at the line.
 | Tables and columns of your own names | `@table("lineItem")`, `@column("createdAt")` | the quoted names in the DDL and every name derived from them, both ORMs, renames in a migration plan | nothing | [Database tables](/superschematic/guides/database-tables/#table-and-column-names) |
 | Every past version of a row | `@versioned` | a history table, triggers, history readers, writes fenced by version | nothing | [Versioned tables](/superschematic/reference/versioned-tables/) |
 | Branches, commits and merges over a set of tables | `@versionGraph`, `@graphMember` | the graph's tables and an engine in each language | nothing | [Version graphs](/superschematic/reference/version-graphs/) |
-| A read-only SQL view | `@projection`, `@join`, `@column` | the view, and the ORM's reads of it | nothing | [Projections](/superschematic/reference/projections/) |
+| A read-only SQL view | `@projection`, `@join`, `@column` | the view, its row type and a read-only repository in both ORMs, and an API view's `@source` | nothing | [Projections](/superschematic/reference/projections/) |
 | A schema change on a database that holds data | the next version of the DB schema | `migrate plan`: expand and contract steps, each with its hazards | the review of the plan | [Migrations](/superschematic/reference/migrations/) |
 
 ## APIs

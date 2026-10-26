@@ -15,11 +15,17 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, NullFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateTimeFilter, NullFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -50,6 +56,8 @@ export interface RoleFilter {
   name?: StringFilter<string>;
   /** The rows a UserRoleGrant row's role points at, or none does. */
   referencedByUserRoleGrantRole?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RoleFilter[];
 }
 
 /** The members findOne and findMany order rows of Role by. */
@@ -66,6 +74,11 @@ export interface RolePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Role includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RoleRelations {
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
+}
+
 /** The repository of Role. */
 export type RoleRepository = Repository<
   RoleRow,
@@ -76,7 +89,8 @@ export type RoleRepository = Repository<
   RoleSortField,
   RoleUniqueKey,
   T.IdentityUUID,
-  RolePageKey
+  RolePageKey,
+  RoleRelations
 >;
 
 /** The role table, as the runtime reads and writes it. */
@@ -92,7 +106,9 @@ export const roleTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"name\", \"permissions\"",
     qualifiedColumns: "\"role\".\"id\", \"role\".\"name\", \"role\".\"permissions\"",
+    selectColumn: "\"role\".\"%s\"",
     getOne: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE id = $1",
+    getOneFields: "SELECT %s FROM role WHERE id = $1",
     getMany: "SELECT \"id\", \"name\", \"permissions\" FROM role WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -125,6 +141,9 @@ export const roleTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
+  ],
+  many: [
+    { name: "userRoleGrants", target: "userRoleGrant", column: "roleId" },
   ],
 };
 
@@ -169,6 +188,10 @@ export interface SessionFilter {
   expiresAt?: DateTimeFilter<T.TemporalDateTime>;
   lastSeenAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is a User row the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly SessionFilter[];
 }
 
 /** The members findOne and findMany order rows of Session by. */
@@ -185,6 +208,11 @@ export interface SessionPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Session includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface SessionRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+}
+
 /** The repository of Session. */
 export type SessionRepository = Repository<
   SessionRow,
@@ -195,7 +223,8 @@ export type SessionRepository = Repository<
   SessionSortField,
   SessionUniqueKey,
   T.IdentityUUID,
-  SessionPageKey
+  SessionPageKey,
+  SessionRelations
 >;
 
 /** The "session" table, as the runtime reads and writes it. */
@@ -215,7 +244,9 @@ export const sessionTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
     qualifiedColumns: "\"session\".\"id\", \"session\".\"user_id\", \"session\".\"token_hash\", \"session\".\"created_at\", \"session\".\"expires_at\", \"session\".\"last_seen_at\", \"session\".\"revoked_at\"",
+    selectColumn: "\"session\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"session\" WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -246,6 +277,9 @@ export const sessionTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "\"session\".user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -283,6 +317,8 @@ export interface UserFilter {
   referencedByUserCredentialUser?: ReferencedByFilter;
   /** The rows a UserRoleGrant row's user points at, or none does. */
   referencedByUserRoleGrantUser?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserFilter[];
 }
 
 /** The members findOne and findMany order rows of User by. */
@@ -299,6 +335,13 @@ export interface UserPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRelations {
+  readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
+  readonly userCredentials: Related<UserCredentialRow, UserCredentialRelations, 'many'>;
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
+}
+
 /** The repository of User. */
 export type UserRepository = Repository<
   UserRow,
@@ -309,7 +352,8 @@ export type UserRepository = Repository<
   UserSortField,
   UserUniqueKey,
   T.IdentityUUID,
-  UserPageKey
+  UserPageKey,
+  UserRelations
 >;
 
 /** The "user" table, as the runtime reads and writes it. */
@@ -326,7 +370,9 @@ export const userTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"email\", \"display_name\", \"created_at\"",
     qualifiedColumns: "\"user\".\"id\", \"user\".\"email\", \"user\".\"display_name\", \"user\".\"created_at\"",
+    selectColumn: "\"user\".\"%s\"",
     getOne: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"user\" WHERE id = $1",
     getMany: "SELECT \"id\", \"email\", \"display_name\", \"created_at\" FROM \"user\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -361,6 +407,11 @@ export const userTable: TableDefinition = {
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
     { filter: "referencedByUserCredentialUser", probe: "SELECT 1 FROM user_credential WHERE user_credential.user_id = \"user\".id" },
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
+  ],
+  many: [
+    { name: "sessions", target: "session", column: "userId" },
+    { name: "userCredentials", target: "userCredential", column: "userId" },
+    { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
   ],
 };
 
@@ -403,6 +454,10 @@ export interface UserCredentialFilter {
   passwordChangedAt?: DateTimeFilter<T.TemporalDateTime>;
   disabledAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   pendingAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is a User row the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserCredentialFilter[];
 }
 
 /** The members findOne and findMany order rows of UserCredential by. */
@@ -419,6 +474,11 @@ export interface UserCredentialPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of UserCredential includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserCredentialRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+}
+
 /** The repository of UserCredential. */
 export type UserCredentialRepository = Repository<
   UserCredentialRow,
@@ -429,7 +489,8 @@ export type UserCredentialRepository = Repository<
   UserCredentialSortField,
   UserCredentialUniqueKey,
   T.IdentityUUID,
-  UserCredentialPageKey
+  UserCredentialPageKey,
+  UserCredentialRelations
 >;
 
 /** The user_credential table, as the runtime reads and writes it. */
@@ -448,7 +509,9 @@ export const userCredentialTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
     qualifiedColumns: "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+    selectColumn: "\"user_credential\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_credential WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -479,6 +542,9 @@ export const userCredentialTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_credential.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -512,6 +578,12 @@ export interface UserRoleGrantFilter {
   userId?: UuidFilter<T.IdentityUUID>;
   roleId?: UuidFilter<T.IdentityUUID>;
   grantedAt?: DateTimeFilter<T.TemporalDateTime>;
+  /** The rows whose user is a User row the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows whose role is a Role row the filter finds (D90). */
+  role?: RoleFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserRoleGrantFilter[];
 }
 
 /** The members findOne and findMany order rows of UserRoleGrant by. */
@@ -528,6 +600,12 @@ export interface UserRoleGrantPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of UserRoleGrant includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRoleGrantRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+  readonly role: Related<RoleRow, RoleRelations, 'one'>;
+}
+
 /** The repository of UserRoleGrant. */
 export type UserRoleGrantRepository = Repository<
   UserRoleGrantRow,
@@ -538,7 +616,8 @@ export type UserRoleGrantRepository = Repository<
   UserRoleGrantSortField,
   UserRoleGrantUniqueKey,
   T.IdentityUUID,
-  UserRoleGrantPageKey
+  UserRoleGrantPageKey,
+  UserRoleGrantRelations
 >;
 
 /** The user_role_grant table, as the runtime reads and writes it. */
@@ -555,7 +634,9 @@ export const userRoleGrantTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
     qualifiedColumns: "\"user_role_grant\".\"id\", \"user_role_grant\".\"user_id\", \"user_role_grant\".\"role_id\", \"user_role_grant\".\"granted_at\"",
+    selectColumn: "\"user_role_grant\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_role_grant WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -586,6 +667,10 @@ export const userRoleGrantTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_role_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "role", column: "roleId", target: "role", probe: "user_role_grant.role_id IN (SELECT role.id FROM role%s)" },
+  ],
 };
 
 /** The repositories of fixture-user-model-db, by table. */
@@ -623,6 +708,8 @@ export const fixtureUserModelDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -631,6 +718,7 @@ export const fixtureUserModelDbOrm: OrmDefinition = {
     offset: " OFFSET %d",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

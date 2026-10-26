@@ -15,6 +15,12 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
@@ -52,6 +58,8 @@ export interface ApiCredentialFilter {
   id?: UuidFilter<T.IdentityUUID>;
   service?: StringFilter<string>;
   rotatedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ApiCredentialFilter[];
 }
 
 /** The members findOne and findMany order rows of ApiCredential by. */
@@ -68,6 +76,10 @@ export interface ApiCredentialPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of ApiCredential includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ApiCredentialRelations {
+}
+
 /** The repository of ApiCredential. */
 export type ApiCredentialRepository = Repository<
   ApiCredentialRow,
@@ -78,7 +90,8 @@ export type ApiCredentialRepository = Repository<
   ApiCredentialSortField,
   ApiCredentialUniqueKey,
   T.IdentityUUID,
-  ApiCredentialPageKey
+  ApiCredentialPageKey,
+  ApiCredentialRelations
 > & EncryptedRepository;
 
 /** The api_credential table, as the runtime reads and writes it. */
@@ -95,7 +108,9 @@ export const apiCredentialTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"service\", \"secret\", \"rotated_at\"",
     qualifiedColumns: "\"api_credential\".\"id\", \"api_credential\".\"service\", \"api_credential\".\"secret\", \"api_credential\".\"rotated_at\"",
+    selectColumn: "\"api_credential\".\"%s\"",
     getOne: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE id = $1",
+    getOneFields: "SELECT %s FROM api_credential WHERE id = $1",
     getMany: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -170,6 +185,8 @@ export interface PlaidItemFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly PlaidItemFilter[];
 }
 
 /** The members findOne and findMany order rows of PlaidItem by. */
@@ -186,6 +203,10 @@ export interface PlaidItemPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of PlaidItem includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface PlaidItemRelations {
+}
+
 /** The repository of PlaidItem. */
 export type PlaidItemRepository = SoftDeleteRepository<
   PlaidItemRow,
@@ -196,7 +217,8 @@ export type PlaidItemRepository = SoftDeleteRepository<
   PlaidItemSortField,
   PlaidItemUniqueKey,
   T.IdentityUUID,
-  PlaidItemPageKey
+  PlaidItemPageKey,
+  PlaidItemRelations
 > & EncryptedRepository;
 
 /** The plaid_item table, as the runtime reads and writes it. */
@@ -217,7 +239,9 @@ export const plaidItemTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\"",
     qualifiedColumns: "\"plaid_item\".\"id\", \"plaid_item\".\"item_id\", \"plaid_item\".\"institution\", \"plaid_item\".\"access_token\", \"plaid_item\".\"webhook_secret\", \"plaid_item\".\"created_at\", \"plaid_item\".\"updated_at\", \"plaid_item\".\"deleted_at\"",
+    selectColumn: "\"plaid_item\".\"%s\"",
     getOne: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE id = $1",
+    getOneFields: "SELECT %s FROM plaid_item WHERE id = $1",
     getMany: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -286,6 +310,8 @@ export const fixtureVaultDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -294,6 +320,7 @@ export const fixtureVaultDbOrm: OrmDefinition = {
     offset: " OFFSET %d",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

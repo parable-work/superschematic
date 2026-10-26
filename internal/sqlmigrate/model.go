@@ -295,7 +295,9 @@ type Trigger struct {
 
 // View is a projection view.
 type View struct {
-	// Schema is the view's pool; Name its name inside it.
+	// Schema is the view's pool; Name its name inside it. A view without a
+	// pool is created beside the tables (D90), in outputs.sql.sourceSchema
+	// or, empty, the search_path's schema.
 	Schema string `json:"schema"`
 	Name   string `json:"name"`
 	// Owner is the role the view is created as (outputs.sql.viewOwner);

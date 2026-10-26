@@ -417,7 +417,7 @@ func (r *NoteRepository) batchRecipeByIDs(ctx context.Context, ids []types.Ident
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -495,7 +495,7 @@ func (r *NoteRepository) batchRefByIDs(ctx context.Context, ids []types.Identity
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -1123,6 +1123,30 @@ func (r *NoteRepository) FindMany(ctx context.Context, filter *NoteFilter, opts 
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *NoteRepository) findRelated(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := noteFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, NoteAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "note")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildNoteOrderByClause(opts.OrderBy, `note`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM note%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // noteFieldStrings are the columns fields selects, in OrderedMembers

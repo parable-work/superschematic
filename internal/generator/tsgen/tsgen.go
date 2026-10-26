@@ -540,7 +540,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if !opts.NoPostgres {
-		if output.ORM, err = typeScriptORM(schema, opts, output); err != nil {
+		// A projection's row is the ORM's type alone (D90): its fields'
+		// types are written as a table's are, and no ./types entry holds it.
+		projections := convertTypes(codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleProjection), output.Scalars, enumLookup, unionNames)
+		if output.ORM, err = typeScriptORM(schema, opts, output, projections); err != nil {
 			return nil, err
 		}
 	}

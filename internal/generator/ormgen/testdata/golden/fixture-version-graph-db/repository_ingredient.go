@@ -476,7 +476,7 @@ func (r *IngredientRepository) batchRecipeByIDs(ctx context.Context, ids []types
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -554,7 +554,7 @@ func (r *IngredientRepository) batchRefByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -1199,6 +1199,30 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *IngredientRepository) findRelated(ctx context.Context, filter *IngredientFilter, opts *IngredientFindOptions) ([]*types.Ingredient, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := ingredientFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, IngredientAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "ingredient")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildIngredientOrderByClause(opts.OrderBy, `ingredient`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM ingredient%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // ingredientFieldStrings are the columns fields selects, in OrderedMembers

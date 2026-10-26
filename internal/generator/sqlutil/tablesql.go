@@ -20,6 +20,10 @@ type TableStatements struct {
 	// QualifiedColumns is every column qualified by the table, each part in
 	// double quotes ("review"."title"): what FindMany and FindPage select.
 	QualifiedColumns string
+	// SelectColumn is one column of a selection, the column %s, unquoted,
+	// qualified as QualifiedColumns qualifies it: what a read that selects
+	// some columns, or includes a relation, lists (D90).
+	SelectColumn string
 
 	// GetOne reads the row whose key is $1; GetOneFields the columns %s of
 	// it. GetMany reads the rows whose key is one of %s, the placeholders.
@@ -193,6 +197,9 @@ type Clauses struct {
 	// Placeholder is the parameter $%d, and Default the value of a column a
 	// row of a batch insert leaves unset.
 	Placeholder, Default string
+	// Or joins the branches of a filter's anyOf, and Group wraps a branch's
+	// conditions and then the branches, %s, in parentheses (D90).
+	Or, Group string
 	// Where begins a WHERE of conditions joined by And. OrderBy begins an
 	// ORDER BY of terms joined by ", ", each an OrderTerm: the column %s
 	// and its direction %s, ASC or DESC. Limit and Offset end a FindMany:
@@ -221,6 +228,8 @@ func PostgresClauses() Clauses {
 		PageKey:     "page_key.%s",
 		Placeholder: "$%d",
 		Default:     "DEFAULT",
+		Or:          " OR ",
+		Group:       "(%s)",
 		Where:       " WHERE ",
 		And:         " AND ",
 		OrderBy:     " ORDER BY ",
@@ -241,7 +250,7 @@ func (c Clauses) AllClauses() []NamedStatement {
 		{"in", c.In}, {"isNull", c.IsNull}, {"isNotNull", c.IsNotNull}, {"search", c.Search},
 		{"exists", c.Exists}, {"notExists", c.NotExists},
 		{"set", c.Set}, {"setNull", c.SetNull}, {"pageKey", c.PageKey},
-		{"placeholder", c.Placeholder}, {"default", c.Default},
+		{"placeholder", c.Placeholder}, {"default", c.Default}, {"or", c.Or}, {"group", c.Group},
 		{"where", c.Where}, {"and", c.And}, {"orderBy", c.OrderBy}, {"orderTerm", c.OrderTerm},
 		{"limit", c.Limit}, {"offset", c.Offset},
 	}
@@ -261,6 +270,7 @@ func TableStatementsOf(table *TableModel) TableStatements {
 	s := TableStatements{
 		Columns:          list,
 		QualifiedColumns: strings.Join(qualified, ", "),
+		SelectColumn:     `"` + table.Name + `"."%s"`,
 		GetOne:           "SELECT " + list + " FROM " + t + " WHERE " + key + " = $1",
 		GetOneFields:     "SELECT %s FROM " + t + " WHERE " + key + " = $1",
 		GetMany:          "SELECT " + list + " FROM " + t + " WHERE " + key + " IN (%s)",
@@ -402,7 +412,7 @@ func SearchConditionOf(table *TableModel) string {
 // that hold the two ORMs to them.
 func (s TableStatements) AllStatements() []NamedStatement {
 	return []NamedStatement{
-		{"columns", s.Columns}, {"qualifiedColumns", s.QualifiedColumns},
+		{"columns", s.Columns}, {"qualifiedColumns", s.QualifiedColumns}, {"selectColumn", s.SelectColumn},
 		{"getOne", s.GetOne}, {"getOneFields", s.GetOneFields}, {"getMany", s.GetMany},
 		{"live", s.Live}, {"liveWhere", s.LiveWhere}, {"liveCondition", s.LiveCondition},
 		{"findOne", s.FindOne}, {"findMany", s.FindMany}, {"count", s.Count},

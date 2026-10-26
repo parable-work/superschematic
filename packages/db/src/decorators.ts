@@ -121,9 +121,13 @@ export interface ProjectionCollapse {
 }
 
 export interface ProjectionOptions {
-  /** The Postgres schema the view is created in; readers address it as `pool.name`. */
-  readonly pool: string;
-  /** The view's name inside the pool. */
+  /**
+   * The Postgres schema the view is created in; readers address it as
+   * `pool.name`. Unset creates the view beside the service's tables, as a
+   * plain view the ORMs read (D90).
+   */
+  readonly pool?: string;
+  /** The view's name inside the pool, or beside the tables. */
   readonly name: string;
   /**
    * The 14-digit version stamp of the generated migration. An applied
@@ -145,7 +149,8 @@ export interface ProjectionOptions {
  * are the view's columns; each reads `base.<field>` unless `@column` says
  * otherwise. superschematic generates the Postgres view, its migration and
  * its Arrow schema from this one declaration. Only DB schemas declare
- * projections, and a projection is never a table or a language type.
+ * projections. A projection is never a table: the ORMs read it as a row
+ * type of its own, through a read-only repository (D90).
  */
 export function projection<TSource>(_options: ProjectionOptions): ClassDecorator {
   return noopClassDecorator;

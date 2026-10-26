@@ -147,7 +147,7 @@ func (r *StockRepository) batchShelfByIDs(ctx context.Context, ids []types.Ident
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&ShelfFilter{
 			Id: &UUIDFilter{
@@ -626,6 +626,30 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *StockRepository) findRelated(ctx context.Context, filter *StockFilter, opts *StockFindOptions) ([]*types.Stock, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := stockFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, StockAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "stock")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildStockOrderByClause(opts.OrderBy, `stock`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM stock%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // stockFieldStrings are the columns fields selects, in OrderedMembers

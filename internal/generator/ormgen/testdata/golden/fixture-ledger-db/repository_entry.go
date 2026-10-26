@@ -177,7 +177,7 @@ func (r *EntryRepository) batchAccountByIDs(ctx context.Context, ids []types.Ide
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&AccountFilter{
 			Id: &UUIDFilter{
@@ -255,7 +255,7 @@ func (r *EntryRepository) batchTransferByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&AccountFilter{
 			Id: &UUIDFilter{
@@ -1164,6 +1164,37 @@ func (r *EntryRepository) FindMany(ctx context.Context, filter *EntryFilter, opt
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *EntryRepository) findRelated(ctx context.Context, filter *EntryFilter, opts *EntryFindOptions) ([]*types.Entry, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := entryFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, EntryAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "entry")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildEntryOrderByClause(opts.OrderBy, `entry`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM entry%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // entryFieldStrings are the columns fields selects, in OrderedMembers

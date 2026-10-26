@@ -15,11 +15,17 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -63,6 +69,12 @@ export interface CoverFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CoverFilter[];
 }
 
 /** The members findOne and findMany order rows of Cover by. */
@@ -79,6 +91,12 @@ export interface CoverPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Cover includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CoverRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Cover. */
 export type CoverRepository = Repository<
   CoverRow,
@@ -89,7 +107,8 @@ export type CoverRepository = Repository<
   CoverSortField,
   CoverUniqueKey,
   T.IdentityUUID,
-  CoverPageKey
+  CoverPageKey,
+  CoverRelations
 >;
 
 /** The cover table, as the runtime reads and writes it. */
@@ -109,7 +128,9 @@ export const coverTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"cover\".\"id\", \"cover\".\"recipe_id\", \"cover\".\"photo_url\", \"cover\".\"entity_key\", \"cover\".\"ref_id\", \"cover\".\"deleted_on_ref\", \"cover\".\"_version\"",
+    selectColumn: "\"cover\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE id = $1",
+    getOneFields: "SELECT %s FROM cover WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -140,6 +161,10 @@ export const coverTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "cover.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "cover.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -191,6 +216,12 @@ export interface IngredientFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly IngredientFilter[];
 }
 
 /** The members findOne and findMany order rows of Ingredient by. */
@@ -207,6 +238,12 @@ export interface IngredientPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Ingredient includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface IngredientRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Ingredient. */
 export type IngredientRepository = Repository<
   IngredientRow,
@@ -217,7 +254,8 @@ export type IngredientRepository = Repository<
   IngredientSortField,
   IngredientUniqueKey,
   T.IdentityUUID,
-  IngredientPageKey
+  IngredientPageKey,
+  IngredientRelations
 >;
 
 /** The ingredient table, as the runtime reads and writes it. */
@@ -239,7 +277,9 @@ export const ingredientTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"ingredient\".\"id\", \"ingredient\".\"recipe_id\", \"ingredient\".\"step_key\", \"ingredient\".\"quantity\", \"ingredient\".\"substitutes\", \"ingredient\".\"entity_key\", \"ingredient\".\"ref_id\", \"ingredient\".\"deleted_on_ref\", \"ingredient\".\"_version\"",
+    selectColumn: "\"ingredient\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE id = $1",
+    getOneFields: "SELECT %s FROM ingredient WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -270,6 +310,10 @@ export const ingredientTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "ingredient.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "ingredient.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -317,6 +361,12 @@ export interface NoteFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly NoteFilter[];
 }
 
 /** The members findOne and findMany order rows of Note by. */
@@ -333,6 +383,12 @@ export interface NotePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Note includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface NoteRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Note. */
 export type NoteRepository = Repository<
   NoteRow,
@@ -343,7 +399,8 @@ export type NoteRepository = Repository<
   NoteSortField,
   NoteUniqueKey,
   T.IdentityUUID,
-  NotePageKey
+  NotePageKey,
+  NoteRelations
 >;
 
 /** The note table, as the runtime reads and writes it. */
@@ -364,7 +421,9 @@ export const noteTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"note\".\"id\", \"note\".\"recipe_id\", \"note\".\"reply_to\", \"note\".\"body\", \"note\".\"entity_key\", \"note\".\"ref_id\", \"note\".\"deleted_on_ref\", \"note\".\"_version\"",
+    selectColumn: "\"note\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE id = $1",
+    getOneFields: "SELECT %s FROM note WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -395,6 +454,10 @@ export const noteTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "note.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "note.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -441,6 +504,8 @@ export interface RecipeFilter {
   referencedByTastingRecipe?: ReferencedByFilter;
   /** The rows a Utensil row's recipe points at, or none does. */
   referencedByUtensilRecipe?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeFilter[];
 }
 
 /** The members findOne and findMany order rows of Recipe by. */
@@ -457,6 +522,19 @@ export interface RecipePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Recipe includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeRelations {
+  readonly covers: Related<CoverRow, CoverRelations, 'many'>;
+  readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
+  readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeReleases: Related<RecipeReleaseRow, RecipeReleaseRelations, 'many'>;
+  readonly steps: Related<StepRow, StepRelations, 'many'>;
+  readonly tastings: Related<TastingRow, TastingRelations, 'many'>;
+  readonly utensils: Related<UtensilRow, UtensilRelations, 'many'>;
+}
+
 /** The repository of Recipe. */
 export type RecipeRepository = Repository<
   RecipeRow,
@@ -467,7 +545,8 @@ export type RecipeRepository = Repository<
   RecipeSortField,
   RecipeUniqueKey,
   T.IdentityUUID,
-  RecipePageKey
+  RecipePageKey,
+  RecipeRelations
 >;
 
 /** The recipe table, as the runtime reads and writes it. */
@@ -484,7 +563,9 @@ export const recipeTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"title\", \"created_at\", \"created_by\"",
     qualifiedColumns: "\"recipe\".\"id\", \"recipe\".\"title\", \"recipe\".\"created_at\", \"recipe\".\"created_by\"",
+    selectColumn: "\"recipe\".\"%s\"",
     getOne: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe WHERE id = $1",
     getMany: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -524,6 +605,17 @@ export const recipeTable: TableDefinition = {
     { filter: "referencedByStepRecipe", probe: "SELECT 1 FROM step WHERE step.recipe_id = recipe.id" },
     { filter: "referencedByTastingRecipe", probe: "SELECT 1 FROM tasting WHERE tasting.recipe_id = recipe.id" },
     { filter: "referencedByUtensilRecipe", probe: "SELECT 1 FROM utensil WHERE utensil.recipe_id = recipe.id" },
+  ],
+  many: [
+    { name: "covers", target: "cover", column: "recipeId" },
+    { name: "ingredients", target: "ingredient", column: "recipeId" },
+    { name: "notes", target: "note", column: "recipeId" },
+    { name: "recipeCommits", target: "recipeCommit", column: "rootId" },
+    { name: "recipeRefs", target: "recipeRef", column: "rootId" },
+    { name: "recipeReleases", target: "recipeRelease", column: "rootId" },
+    { name: "steps", target: "step", column: "recipeId" },
+    { name: "tastings", target: "tasting", column: "recipeId" },
+    { name: "utensils", target: "utensil", column: "recipeId" },
   ],
 };
 
@@ -589,6 +681,14 @@ export interface RecipeCommitFilter {
   referencedByRecipeReleaseCommit?: ReferencedByFilter;
   /** The rows a RecipeSnapshotEntry row's commit points at, or none does. */
   referencedByRecipeSnapshotEntryCommit?: ReferencedByFilter;
+  /** The rows whose root is a Recipe row the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows whose parentCommit is a RecipeCommit row the filter finds; a row whose parentCommit is null is not among them (D90). */
+  parentCommit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeCommitFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeCommit by. */
@@ -605,6 +705,19 @@ export interface RecipeCommitPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RecipeCommit includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeCommitRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+  readonly parentCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipePatches: Related<RecipePatchRow, RecipePatchRelations, 'many'>;
+  readonly recipeRefsByBaseCommit: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeRefsByHeadCommit: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeReleases: Related<RecipeReleaseRow, RecipeReleaseRelations, 'many'>;
+  readonly recipeSnapshotEntries: Related<RecipeSnapshotEntryRow, RecipeSnapshotEntryRelations, 'many'>;
+}
+
 /** The repository of RecipeCommit. */
 export type RecipeCommitRepository = Repository<
   RecipeCommitRow,
@@ -615,7 +728,8 @@ export type RecipeCommitRepository = Repository<
   RecipeCommitSortField,
   RecipeCommitUniqueKey,
   T.IdentityUUID,
-  RecipeCommitPageKey
+  RecipeCommitPageKey,
+  RecipeCommitRelations
 >;
 
 /** The recipe_commit table, as the runtime reads and writes it. */
@@ -638,7 +752,9 @@ export const recipeCommitTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\"",
     qualifiedColumns: "\"recipe_commit\".\"id\", \"recipe_commit\".\"root_id\", \"recipe_commit\".\"ref_id\", \"recipe_commit\".\"parent_commit_id\", \"recipe_commit\".\"message\", \"recipe_commit\".\"schema_epoch\", \"recipe_commit\".\"content_hash\", \"recipe_commit\".\"sequence\", \"recipe_commit\".\"created_at\", \"recipe_commit\".\"created_by\"",
+    selectColumn: "\"recipe_commit\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_commit WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -676,6 +792,19 @@ export const recipeCommitTable: TableDefinition = {
     { filter: "referencedByRecipeRefHeadCommit", probe: "SELECT 1 FROM recipe_ref WHERE recipe_ref.head_commit_id = recipe_commit.id", live: " AND recipe_ref.deleted_at IS NULL" },
     { filter: "referencedByRecipeReleaseCommit", probe: "SELECT 1 FROM recipe_release WHERE recipe_release.commit_id = recipe_commit.id" },
     { filter: "referencedByRecipeSnapshotEntryCommit", probe: "SELECT 1 FROM recipe_snapshot_entry WHERE recipe_snapshot_entry.commit_id = recipe_commit.id" },
+  ],
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_commit.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "recipe_commit.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+    { field: "parentCommit", column: "parentCommitId", target: "recipeCommit", probe: "recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
+  many: [
+    { name: "recipeCommits", target: "recipeCommit", column: "parentCommitId" },
+    { name: "recipePatches", target: "recipePatch", column: "commitId" },
+    { name: "recipeRefsByBaseCommit", target: "recipeRef", column: "baseCommitId" },
+    { name: "recipeRefsByHeadCommit", target: "recipeRef", column: "headCommitId" },
+    { name: "recipeReleases", target: "recipeRelease", column: "commitId" },
+    { name: "recipeSnapshotEntries", target: "recipeSnapshotEntry", column: "commitId" },
   ],
 };
 
@@ -722,6 +851,10 @@ export interface RecipePatchFilter {
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
   operation?: StringFilter<T.RecipePatchOperation>;
+  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipePatchFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipePatch by. */
@@ -738,6 +871,11 @@ export interface RecipePatchPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RecipePatch includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipePatchRelations {
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
+}
+
 /** The repository of RecipePatch. */
 export type RecipePatchRepository = Repository<
   RecipePatchRow,
@@ -748,7 +886,8 @@ export type RecipePatchRepository = Repository<
   RecipePatchSortField,
   RecipePatchUniqueKey,
   T.IdentityUUID,
-  RecipePatchPageKey
+  RecipePatchPageKey,
+  RecipePatchRelations
 >;
 
 /** The recipe_patch table, as the runtime reads and writes it. */
@@ -768,7 +907,9 @@ export const recipePatchTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\"",
     qualifiedColumns: "\"recipe_patch\".\"id\", \"recipe_patch\".\"commit_id\", \"recipe_patch\".\"entity_kind\", \"recipe_patch\".\"entity_key\", \"recipe_patch\".\"entity_id\", \"recipe_patch\".\"entity_version\", \"recipe_patch\".\"operation\"",
+    selectColumn: "\"recipe_patch\".\"%s\"",
     getOne: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_patch WHERE id = $1",
     getMany: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -799,6 +940,9 @@ export const recipePatchTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id" },
   },
+  relations: [
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_patch.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -872,6 +1016,16 @@ export interface RecipeRefFilter {
   referencedByTastingRef?: ReferencedByFilter;
   /** The rows a Utensil row's ref points at, or none does. */
   referencedByUtensilRef?: ReferencedByFilter;
+  /** The rows whose root is a Recipe row the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose parentRef is a live RecipeRef row the filter finds; a row whose parentRef is null is not among them (D90). */
+  parentRef?: RecipeRefFilter;
+  /** The rows whose baseCommit is a RecipeCommit row the filter finds; a row whose baseCommit is null is not among them (D90). */
+  baseCommit?: RecipeCommitFilter;
+  /** The rows whose headCommit is a RecipeCommit row the filter finds; a row whose headCommit is null is not among them (D90). */
+  headCommit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeRefFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeRef by. */
@@ -888,6 +1042,22 @@ export interface RecipeRefPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RecipeRef includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeRefRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly parentRef: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+  readonly baseCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly headCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly covers: Related<CoverRow, CoverRelations, 'many'>;
+  readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
+  readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly steps: Related<StepRow, StepRelations, 'many'>;
+  readonly tastings: Related<TastingRow, TastingRelations, 'many'>;
+  readonly utensils: Related<UtensilRow, UtensilRelations, 'many'>;
+}
+
 /** The repository of RecipeRef. */
 export type RecipeRefRepository = SoftDeleteRepository<
   RecipeRefRow,
@@ -898,7 +1068,8 @@ export type RecipeRefRepository = SoftDeleteRepository<
   RecipeRefSortField,
   RecipeRefUniqueKey,
   T.IdentityUUID,
-  RecipeRefPageKey
+  RecipeRefPageKey,
+  RecipeRefRelations
 >;
 
 /** The recipe_ref table, as the runtime reads and writes it. */
@@ -925,7 +1096,9 @@ export const recipeRefTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\"",
     qualifiedColumns: "\"recipe_ref\".\"id\", \"recipe_ref\".\"root_id\", \"recipe_ref\".\"parent_ref_id\", \"recipe_ref\".\"base_commit_id\", \"recipe_ref\".\"head_commit_id\", \"recipe_ref\".\"name\", \"recipe_ref\".\"sealed_at\", \"recipe_ref\".\"created_at\", \"recipe_ref\".\"created_by\", \"recipe_ref\".\"updated_at\", \"recipe_ref\".\"updated_by\", \"recipe_ref\".\"deleted_at\", \"recipe_ref\".\"deleted_by\", \"recipe_ref\".\"_version\"",
+    selectColumn: "\"recipe_ref\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_ref WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -968,6 +1141,22 @@ export const recipeRefTable: TableDefinition = {
     { filter: "referencedByTastingRef", probe: "SELECT 1 FROM tasting WHERE tasting.ref_id = recipe_ref.id" },
     { filter: "referencedByUtensilRef", probe: "SELECT 1 FROM utensil WHERE utensil.ref_id = recipe_ref.id" },
   ],
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_ref.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "parentRef", column: "parentRefId", target: "recipeRef", probe: "recipe_ref.parent_ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+    { field: "baseCommit", column: "baseCommitId", target: "recipeCommit", probe: "recipe_ref.base_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+    { field: "headCommit", column: "headCommitId", target: "recipeCommit", probe: "recipe_ref.head_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
+  many: [
+    { name: "covers", target: "cover", column: "refId" },
+    { name: "ingredients", target: "ingredient", column: "refId" },
+    { name: "notes", target: "note", column: "refId" },
+    { name: "recipeCommits", target: "recipeCommit", column: "refId" },
+    { name: "recipeRefs", target: "recipeRef", column: "parentRefId" },
+    { name: "steps", target: "step", column: "refId" },
+    { name: "tastings", target: "tasting", column: "refId" },
+    { name: "utensils", target: "utensil", column: "refId" },
+  ],
 };
 
 /**
@@ -1007,6 +1196,12 @@ export interface RecipeReleaseFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   _version?: NumberFilter<number>;
+  /** The rows whose root is a Recipe row the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeReleaseFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeRelease by. */
@@ -1023,6 +1218,12 @@ export interface RecipeReleasePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RecipeRelease includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeReleaseRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
+}
+
 /** The repository of RecipeRelease. */
 export type RecipeReleaseRepository = Repository<
   RecipeReleaseRow,
@@ -1033,7 +1234,8 @@ export type RecipeReleaseRepository = Repository<
   RecipeReleaseSortField,
   RecipeReleaseUniqueKey,
   T.IdentityUUID,
-  RecipeReleasePageKey
+  RecipeReleasePageKey,
+  RecipeReleaseRelations
 >;
 
 /** The recipe_release table, as the runtime reads and writes it. */
@@ -1054,7 +1256,9 @@ export const recipeReleaseTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\"",
     qualifiedColumns: "\"recipe_release\".\"id\", \"recipe_release\".\"root_id\", \"recipe_release\".\"commit_id\", \"recipe_release\".\"created_at\", \"recipe_release\".\"created_by\", \"recipe_release\".\"updated_at\", \"recipe_release\".\"updated_by\", \"recipe_release\".\"_version\"",
+    selectColumn: "\"recipe_release\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_release WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1086,6 +1290,10 @@ export const recipeReleaseTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "root": { conflict: "(root_id)", keep: "root_id = EXCLUDED.root_id" },
   },
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_release.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_release.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -1127,6 +1335,10 @@ export interface RecipeSnapshotEntryFilter {
   entityKey?: UuidFilter<T.IdentityUUID>;
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
+  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeSnapshotEntryFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeSnapshotEntry by. */
@@ -1143,6 +1355,11 @@ export interface RecipeSnapshotEntryPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RecipeSnapshotEntry includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeSnapshotEntryRelations {
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
+}
+
 /** The repository of RecipeSnapshotEntry. */
 export type RecipeSnapshotEntryRepository = Repository<
   RecipeSnapshotEntryRow,
@@ -1153,7 +1370,8 @@ export type RecipeSnapshotEntryRepository = Repository<
   RecipeSnapshotEntrySortField,
   RecipeSnapshotEntryUniqueKey,
   T.IdentityUUID,
-  RecipeSnapshotEntryPageKey
+  RecipeSnapshotEntryPageKey,
+  RecipeSnapshotEntryRelations
 >;
 
 /** The recipe_snapshot_entry table, as the runtime reads and writes it. */
@@ -1172,7 +1390,9 @@ export const recipeSnapshotEntryTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\"",
     qualifiedColumns: "\"recipe_snapshot_entry\".\"id\", \"recipe_snapshot_entry\".\"commit_id\", \"recipe_snapshot_entry\".\"entity_kind\", \"recipe_snapshot_entry\".\"entity_key\", \"recipe_snapshot_entry\".\"entity_id\", \"recipe_snapshot_entry\".\"entity_version\"",
+    selectColumn: "\"recipe_snapshot_entry\".\"%s\"",
     getOne: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_snapshot_entry WHERE id = $1",
     getMany: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1203,6 +1423,9 @@ export const recipeSnapshotEntryTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id" },
   },
+  relations: [
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_snapshot_entry.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -1266,6 +1489,12 @@ export interface StepFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly StepFilter[];
 }
 
 /** The members findOne and findMany order rows of Step by. */
@@ -1282,6 +1511,12 @@ export interface StepPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Step includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface StepRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Step. */
 export type StepRepository = Repository<
   StepRow,
@@ -1292,7 +1527,8 @@ export type StepRepository = Repository<
   StepSortField,
   StepUniqueKey,
   T.IdentityUUID,
-  StepPageKey
+  StepPageKey,
+  StepRelations
 >;
 
 /** The step table, as the runtime reads and writes it. */
@@ -1319,7 +1555,9 @@ export const stepTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"step\".\"id\", \"step\".\"recipe_id\", \"step\".\"position\", \"step\".\"instruction\", \"step\".\"timings\", \"step\".\"scratch\", \"step\".\"created_at\", \"step\".\"created_by\", \"step\".\"updated_at\", \"step\".\"updated_by\", \"step\".\"entity_key\", \"step\".\"ref_id\", \"step\".\"deleted_on_ref\", \"step\".\"_version\"",
+    selectColumn: "\"step\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE id = $1",
+    getOneFields: "SELECT %s FROM step WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1351,6 +1589,10 @@ export const stepTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "step.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "step.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -1440,6 +1682,12 @@ export interface TastingFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly TastingFilter[];
 }
 
 /** The members findOne and findMany order rows of Tasting by. */
@@ -1456,6 +1704,12 @@ export interface TastingPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Tasting includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface TastingRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Tasting. */
 export type TastingRepository = Repository<
   TastingRow,
@@ -1466,7 +1720,8 @@ export type TastingRepository = Repository<
   TastingSortField,
   TastingUniqueKey,
   T.IdentityUUID,
-  TastingPageKey
+  TastingPageKey,
+  TastingRelations
 >;
 
 /** The tasting table, as the runtime reads and writes it. */
@@ -1498,7 +1753,9 @@ export const tastingTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"tasting\".\"id\", \"tasting\".\"recipe_id\", \"tasting\".\"taster\", \"tasting\".\"salty\", \"tasting\".\"score\", \"tasting\".\"servings\", \"tasting\".\"tasted_on\", \"tasting\".\"tasted_at\", \"tasting\".\"served_at\", \"tasting\".\"rested\", \"tasting\".\"verdict\", \"tasting\".\"remarks\", \"tasting\".\"tags\", \"tasting\".\"helpers\", \"tasting\".\"bites\", \"tasting\".\"entity_key\", \"tasting\".\"ref_id\", \"tasting\".\"deleted_on_ref\", \"tasting\".\"_version\"",
+    selectColumn: "\"tasting\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE id = $1",
+    getOneFields: "SELECT %s FROM tasting WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1529,6 +1786,10 @@ export const tastingTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "tasting.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "tasting.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -1573,6 +1834,12 @@ export interface UtensilFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UtensilFilter[];
 }
 
 /** The members findOne and findMany order rows of Utensil by. */
@@ -1589,6 +1856,12 @@ export interface UtensilPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Utensil includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UtensilRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+}
+
 /** The repository of Utensil. */
 export type UtensilRepository = Repository<
   UtensilRow,
@@ -1599,7 +1872,8 @@ export type UtensilRepository = Repository<
   UtensilSortField,
   UtensilUniqueKey,
   T.IdentityUUID,
-  UtensilPageKey
+  UtensilPageKey,
+  UtensilRelations
 >;
 
 /** The utensil table, as the runtime reads and writes it. */
@@ -1619,7 +1893,9 @@ export const utensilTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"utensil\".\"id\", \"utensil\".\"recipe_id\", \"utensil\".\"name\", \"utensil\".\"entity_key\", \"utensil\".\"ref_id\", \"utensil\".\"deleted_on_ref\", \"utensil\".\"_version\"",
+    selectColumn: "\"utensil\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE id = $1",
+    getOneFields: "SELECT %s FROM utensil WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1650,6 +1926,10 @@ export const utensilTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
     "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "utensil.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "utensil.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /** The repositories of fixture-version-graph-db, by table. */
@@ -1694,6 +1974,8 @@ export const fixtureVersionGraphDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -1702,6 +1984,7 @@ export const fixtureVersionGraphDbOrm: OrmDefinition = {
     offset: " OFFSET %d",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

@@ -29,6 +29,13 @@ does. You never write, edit or duplicate:
   Dockerfiles, deploy scripts, CI.
 - Anything under the output root, `<schemas-root>/dist/`: it is rewritten
   on every build.
+- Joins to read related rows, or stitching them together in code: a
+  repository read includes relations (`include: { category: { include:
+  { parent: true } } }`, Go's nested `Fields`), selects members, and a
+  filter reaches through a to-one relation (`{ category: { parentId: {
+  in: ids } } }`, `anyOf` for an OR); a flat list is a `@projection`,
+  which both ORMs read through a repository of its own
+  (`deps.orm.transactionListRow.findPage(...)`).
 
 You do write:
 
@@ -55,7 +62,7 @@ The **kind** decides what a class means:
 | Kind | A class is | Imports | Generates |
 | --- | --- | --- | --- |
 | `General` | a plain type shared by services; with `@envVars`, a service's settings | `@superschematic/schema`, `superscalar` | types, env loader |
-| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, types |
+| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, TypeScript repositories, types |
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
 | `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |

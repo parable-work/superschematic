@@ -571,6 +571,37 @@ func (r *ShelfRepository) FindMany(ctx context.Context, filter *ShelfFilter, opt
 	return results, totalCount, nil
 }
 
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *ShelfRepository) findRelated(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) ([]*types.Shelf, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := shelfFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, ShelfAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "shelf")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildShelfOrderByClause(opts.OrderBy, `shelf`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM shelf%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+}
+
 // shelfFieldStrings are the columns fields selects, in OrderedMembers
 // order so FK columns match scan order, and the primary key when fields
 // hydrates a hasMany relation, which maps the children by it.

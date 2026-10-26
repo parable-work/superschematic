@@ -365,7 +365,7 @@ func (r *TenantUserRepository) batchTenantByIDs(ctx context.Context, ids []types
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&TenantFilter{
 			Id: &UUIDFilter{
@@ -937,6 +937,37 @@ func (r *TenantUserRepository) FindMany(ctx context.Context, filter *TenantUserF
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *TenantUserRepository) findRelated(ctx context.Context, filter *TenantUserFilter, opts *TenantUserFindOptions) ([]*types.TenantUser, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := tenantUserFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, TenantUserAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "tenant_user")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildTenantUserOrderByClause(opts.OrderBy, `tenant_user`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM tenant_user%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // tenantUserFieldStrings are the columns fields selects, in OrderedMembers

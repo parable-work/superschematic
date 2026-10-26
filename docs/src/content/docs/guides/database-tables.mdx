@@ -183,8 +183,29 @@ In the row types a relation holds the related row (`Order.Customer` is a
 `User` in Go). To write one, give it the related row's id:
 `Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`. A
 TypeScript repository's row holds the related row's key instead,
-`customerId`, which its create, update and filter take too; the related
-rows load in one read through the target's `getManyByIds`.
+`customerId`, which its create, update and filter take too; a read
+includes the related row under the relation's field
+([Relations in a read](#relations-in-a-read)).
+
+A filter reaches through a to-one relation: its member named for the
+relation, `Customer` in Go and `customer` in TypeScript, is the target's
+filter, and keeps the rows whose relation points at a live row that filter
+finds. It is one condition, the foreign key in the keys of the target's
+rows, so a row whose relation is null is not kept, and neither is one
+whose target is soft-deleted. A path goes as deep as the relations do:
+`{ category: { parent: { name: { eq: 'Food' } } } }`. `AnyOf` (`anyOf`)
+keeps the rows any of its filters finds, beside the filter's other
+members, so "the category is X or its parent is X" is one filter:
+
+```ts
+const filter = {
+  anyOf: [{ categoryId: { in: ids } }, { category: { parentId: { in: ids } } }],
+  date: { gte: start, lt: end },
+};
+```
+
+A filter of `anyOf` with no member keeps every row, and so does an empty
+`anyOf`, as `in` with no values adds no condition.
 
 ## One-to-many
 
@@ -198,6 +219,15 @@ The ORM loads the lines when the read asks for them, through the nested
 field selection of the order's options:
 
 <Snippet file="go/shop-orders/orders.go" symbol="withLines" />
+
+A TypeScript read loads them with `include: { lines: true }`. It also
+loads the rows of any other table's relation that points at a row, with no
+`HasMany` field: a table's include names each such relation for its
+table in the plural, `reviews` for `Review.product`, or with `By` and the
+field when that table points at the row through more than one, as a line
+item's category and sub-category point at a category,
+`lineItemsByCategory` and `lineItemsBySubCategory`
+([Relations in a read](#relations-in-a-read)).
 
 ## Indexes
 
@@ -643,9 +673,70 @@ filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
 filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
 alike, and whose `ILike` Postgres refuses on JSONB.
 
-The repositories do not select fields, load one-to-many relations or read
-a `@versioned` table's history yet; the Go ORM does. SQLite repositories
-are not built.
+The repositories do not read a `@versioned` table's history yet; the Go
+ORM does. SQLite repositories are not built.
+
+### Relations in a read
+
+A read's options select members and include relations (D90), in
+`getOne`, `findOne`, `findMany` and `findPage` alike, and the rows it
+resolves to are typed by them:
+
+```ts
+const page = await deps.orm.lineItem.findPage(filter, {
+  include: {
+    account: { include: { provider: true } },
+    category: { select: ['id', 'name'], include: { parent: true } },
+    notes: true,
+  },
+  sort: { field: 'date', desc: true },
+  limit: 50,
+});
+page.rows[0].category?.parent?.name; // string | undefined
+```
+
+- `select` lists the members each row holds; unset, a row holds every
+  column. A relation the read includes reads its foreign key too, which a
+  row that did not select it leaves out.
+- `include` names each relation by its field, or a one-to-many relation
+  by its name, `true` for its rows' columns or `{ select, include }` for
+  what to read of them, at any depth. A to-one relation's row is the
+  member, typed one row, or `| null` for a relation that may be null or a
+  soft-deletable target, whose deleted rows a read leaves out. A
+  one-to-many relation's rows are a list, empty when none.
+- Each relation loads in one statement for all of the read's rows, the
+  target's find with no count, as the Go ORM's hydration reads it: a page
+  of 50 rows with five relations is six statements.
+
+An option, a member or a relation the table does not have fails to type
+check, and throws at run time.
+
+The Go ORM selects and loads relations through `Fields`, as above: a
+field's flag selects its column, and a relation's `<Field>Nested` selection
+loads the related row. Its default nested selection of a relation is every
+column and every relation in turn, where TypeScript's `true` is the
+target's columns alone. The two send the same statements for the same
+selection.
+
+### Reading a projection
+
+A [projection](/superschematic/reference/projections/) whose columns
+include its source's key, or the one column it collapses by, is read
+through a repository of its own: its row is the projection's name, its
+members the projection's fields, and it has the reads of a table,
+`getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage`, its filter
+and sorts over the view's columns:
+
+```ts
+const list = await deps.orm.transactionListRow.findPage(
+  { parentCategoryId: { in: ids }, accountName: { ilike: 'card' } },
+  { sort: { field: 'date', desc: true }, limit: 50 }
+);
+```
+
+In Go the projection's row is a struct of the ORM's package, and
+`db.TransactionListRow()` reads it over the pool, and
+`orm.TransactionListRowIn(tx)` in a transaction.
 
 ## Raw SQL
 

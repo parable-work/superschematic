@@ -453,6 +453,12 @@ type TableModel struct {
 	// ReferencedBy are the to-one relations of other tables, and of this
 	// one, that point at the table, sorted by filter name.
 	ReferencedBy []Reference
+
+	// ToOne are the table's to-one relations to the tables of its schema,
+	// in column order, and ToMany its one-to-many relations, which a read
+	// includes and a filter reaches through (D90, attachRelations).
+	ToOne  []ToOne
+	ToMany []ToMany
 }
 
 // ColumnModel is a column of a table.
@@ -664,6 +670,7 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 		tables = append(tables, table)
 	}
 	attachReferences(tables)
+	attachRelations(tables)
 	return tables, nil
 }
 

@@ -1001,6 +1001,11 @@ type ChunkFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
 	Note *StringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []ChunkFilter
 }
 
 // ChunkUpdate provides fields that can be updated
@@ -1134,6 +1139,30 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1146,6 +1175,11 @@ type LedgerLineFilter struct {
 	Confidence *DecimalFilter
 	Quantity   *DecimalFilter
 	BookedAt   *DateTimeFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LedgerLineFilter
 }
 
 // LedgerLineUpdate provides fields that can be updated
@@ -1542,6 +1576,30 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1551,6 +1609,11 @@ type PassageFilter struct {
 	Title *StringFilter
 	Topic *StringFilter
 	Rates *ArrayStringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []PassageFilter
 }
 
 // PassageUpdate provides fields that can be updated
@@ -1736,6 +1799,30 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1743,6 +1830,11 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 type TextEmbeddingFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []TextEmbeddingFilter
 }
 
 // TextEmbeddingUpdate provides fields that can be updated
@@ -1856,6 +1948,30 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 			} else {
 				conditions = append(conditions, `text_embedding.text IS NOT NULL`)
 			}
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 
