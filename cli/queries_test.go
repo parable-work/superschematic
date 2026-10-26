@@ -180,6 +180,17 @@ func TestQueriesVerifyRefusesAServiceOfAnotherKind(t *testing.T) {
 	assert.Contains(t, err.Error(), "queries verify: shop-common is of kind General; a DB service declares queries")
 }
 
+// TestCheckWatchStampsTheQueriesLock: check --watch re-checks a service
+// whose queries.lock queries verify rewrote.
+func TestCheckWatchStampsTheQueriesLock(t *testing.T) {
+	serviceDir := prepareQueriesService(t)
+	c, err := newChecker(&app{}, "", serviceDir)
+	require.NoError(t, err)
+	stamps := c.snapshot()
+	_, ok := stamps[filepath.Join(serviceDir, queryverify.LockFile)]
+	assert.True(t, ok, "the snapshot stamps %s", queryverify.LockFile)
+}
+
 // TestCheckHoldsQueriesToTheirLock: with no database, check refuses a
 // query its service's queries.lock does not hold, or holds for other SQL.
 func TestCheckHoldsQueriesToTheirLock(t *testing.T) {
