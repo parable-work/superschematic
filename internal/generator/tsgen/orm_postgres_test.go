@@ -38,8 +38,9 @@ type repositoryCase struct {
 // column through the codec; fixture-user-model-db's user model tables,
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
-// the repositories; and fixture-vectors-db's decimals, vectors and nearest
-// (D84), on the Postgres with pgvector.
+// the repositories; fixture-vault-db's Encrypted<T> fields (D85), sealed,
+// opened, refused and resealed; and fixture-vectors-db's decimals, vectors
+// and nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -88,6 +89,13 @@ var repositoryCases = []repositoryCase{
 		"deleting a category clears the references SET NULL names, and keeps their rows",
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
+	}},
+	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
+		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",
+		"a wrong key, no key and an envelope moved to another row fail with FieldEncryptionError",
+		"updateMany and an upsert on another key than the primary key cannot set an encrypted field; an upsert on the primary key can",
+		"no filter holds an encrypted field, and the DDL bounds the plaintext, not the envelope",
+		"reencrypt reseals the envelopes of an older key under the current one, and the older key can then leave the secret",
 	}},
 }
 

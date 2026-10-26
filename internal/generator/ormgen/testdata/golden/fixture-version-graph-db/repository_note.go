@@ -1504,7 +1504,7 @@ func (r *NoteRepository) CreateOne(ctx context.Context, input *types.Note) (*typ
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := noteUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1514,7 +1514,7 @@ func (r *NoteRepository) CreateOne(ctx context.Context, input *types.Note) (*typ
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := noteUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1661,7 +1661,7 @@ func (r *NoteRepository) UpsertOne(ctx context.Context, input *types.Note, on No
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := noteUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1671,7 +1671,7 @@ func (r *NoteRepository) UpsertOne(ctx context.Context, input *types.Note, on No
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := noteUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1859,7 +1859,7 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := noteUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1868,7 +1868,7 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := noteUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

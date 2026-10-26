@@ -153,7 +153,14 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	if cfg := validateConfigExpr(fd); cfg != "" {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
-	if fd.Secret {
+	switch {
+	case fd.EncryptedAtRest:
+		// Encrypted<T> implies Secret<T> (D85). The name is @superschematic/db's;
+		// @superschematic/api's Encrypted, an operation set's base, never
+		// meets it in one file.
+		e.importSymbol(naming.Active().Specifier("@superschematic/db"), "Encrypted")
+		expr = fmt.Sprintf("Encrypted<%s>", expr)
+	case fd.Secret:
 		expr = fmt.Sprintf("%s<%s>", e.use("Secret"), expr)
 	}
 

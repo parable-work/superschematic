@@ -89,8 +89,15 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
 		svc.Vectors = hasVectorColumns(schema)
+		svc.FieldKeys = outputs.EncryptionKey()
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
+			if td.SQLName != "" {
+				if svc.QueueTables == nil {
+					svc.QueueTables = map[string]string{}
+				}
+				svc.QueueTables[td.Name] = sqlutil.QueueTableName(td)
+			}
 			if td.Queue.Dedupes() {
 				if svc.QueueKeys == nil {
 					svc.QueueKeys = map[string]string{}

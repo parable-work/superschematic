@@ -177,7 +177,7 @@ func (a *projectionAliases) column(ref string) (alias string, col *Column, err e
 	if table == nil {
 		return "", nil, fmt.Errorf("%q names unknown alias %q", ref, alias)
 	}
-	col = findIndexColumn(table.Columns, field)
+	col = fieldColumn(table, field)
 	if col == nil {
 		return "", nil, fmt.Errorf("%q: table %s has no column for field %q", ref, table.Name, field)
 	}

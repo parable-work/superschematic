@@ -69,13 +69,17 @@ func ElementType(typeName string, scalarTypes map[string]string) string {
 // JSON document (D83). A T[][] is never a native multi-dimensional array:
 // Postgres requires those to be rectangular, and a list of lists is often
 // ragged. A list is a native array of its element's type. A nil schema
-// knows no @jsonField class.
+// knows no @jsonField class. An Encrypted<T> field's column is TEXT, its
+// ciphertext's envelope (D85).
 //
 // A field's Validate rules narrow its element's type (D84): a decimal with
 // a precision is NUMERIC(p,s), and an Embedding.Vector with dimensions is
 // pgvector's vector(n). An Embedding.Vector without dimensions keeps the
 // TEXT its scalar's missing SQL type falls back to.
 func ColumnType(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]string) string {
+	if field.EncryptedAtRest {
+		return "TEXT"
+	}
 	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays || IsJSONFieldType(schema, field.TypeRef.Name) {
 		return "JSONB"
 	}

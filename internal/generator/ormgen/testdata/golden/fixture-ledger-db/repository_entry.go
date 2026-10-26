@@ -1698,7 +1698,7 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := entryUUIDValue(input.Account.Id); ok && relID != zeroId {
-			fields = append(fields, "account_id")
+			fields = append(fields, `account_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1709,7 +1709,7 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 		var zeroId types.IdentityUUID
 		if input.Transfer != nil {
 			if relID, ok := entryUUIDValue(input.Transfer.Id); ok && relID != zeroId {
-				fields = append(fields, "transfer_id")
+				fields = append(fields, `transfer_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -1969,7 +1969,7 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := entryUUIDValue(input.Account.Id); ok && relID != zeroId {
-			fields = append(fields, "account_id")
+			fields = append(fields, `account_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1980,7 +1980,7 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 		var zeroId types.IdentityUUID
 		if input.Transfer != nil {
 			if relID, ok := entryUUIDValue(input.Transfer.Id); ok && relID != zeroId {
-				fields = append(fields, "transfer_id")
+				fields = append(fields, `transfer_id`)
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				values = append(values, relID.ToUUID())
@@ -2343,7 +2343,7 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: account (FK: account_id)
 		{
-			cell := batchInsertCell{column: "account_id"}
+			cell := batchInsertCell{column: `account_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := entryUUIDValue(input.Account.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -2352,7 +2352,7 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 		}
 		// Relationship: transfer (FK: transfer_id)
 		{
-			cell := batchInsertCell{column: "transfer_id"}
+			cell := batchInsertCell{column: `transfer_id`}
 			var zeroId types.IdentityUUID
 			if input.Transfer != nil {
 				if relID, ok := entryUUIDValue(input.Transfer.Id); ok && relID != zeroId {

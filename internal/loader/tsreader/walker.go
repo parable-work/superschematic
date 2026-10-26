@@ -1136,8 +1136,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 		JsonField:       info.jsonField,
 		HasMany:         info.hasMany,
 		ManyToMany:      info.manyToMany,
-		Secret:          info.secret,
+		Secret:          info.secret || info.encryptedAtRest,
 		Encrypted:       info.encrypted,
+		EncryptedAtRest: info.encryptedAtRest,
 	}
 	if info.relation {
 		fd.Relation = &ir.RelationDef{Type: info.ref.Name, OnDelete: info.relationOnDelete}
@@ -1534,6 +1535,9 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	if info.search {
 		return nil, nil, errorAtNode(method.Type, "SearchQuery marks an operation's argument, not its result")
 	}
+	if info.encryptedAtRest {
+		return nil, nil, errorAtNode(method.Type, "Encrypted<T> marks a stored field of a DB table; a request or a response carries the value itself, and EncryptedField<T> encrypts a request body")
+	}
 	if info.sortBy != nil {
 		return nil, nil, errorAtNode(method.Type, "SortBy marks an operation's argument, not its result")
 	}
@@ -1604,6 +1608,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 	}
 	if info.platformDefault {
 		return nil, "", errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
+	}
+	if info.encryptedAtRest {
+		return nil, "", errorAtNode(p, "Encrypted<T> marks a stored field of a DB table; an argument carries the value itself, and EncryptedField<T> encrypts a request body")
 	}
 	if info.fileUpload != nil {
 		return nil, "", errorAtNode(p, "FileUpload is a field of the operation's input type, which travels as multipart/form-data; an argument is no file")

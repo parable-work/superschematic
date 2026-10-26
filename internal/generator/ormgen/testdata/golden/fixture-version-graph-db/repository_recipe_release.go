@@ -1451,7 +1451,7 @@ func (r *RecipeReleaseRepository) CreateOne(ctx context.Context, input *types.Re
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeReleaseUUIDValue(input.Root.Id); ok && relID != zeroId {
-			fields = append(fields, "root_id")
+			fields = append(fields, `root_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1461,7 +1461,7 @@ func (r *RecipeReleaseRepository) CreateOne(ctx context.Context, input *types.Re
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeReleaseUUIDValue(input.Commit.Id); ok && relID != zeroId {
-			fields = append(fields, "commit_id")
+			fields = append(fields, `commit_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1588,7 +1588,7 @@ func (r *RecipeReleaseRepository) UpsertOne(ctx context.Context, input *types.Re
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeReleaseUUIDValue(input.Root.Id); ok && relID != zeroId {
-			fields = append(fields, "root_id")
+			fields = append(fields, `root_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1598,7 +1598,7 @@ func (r *RecipeReleaseRepository) UpsertOne(ctx context.Context, input *types.Re
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := recipeReleaseUUIDValue(input.Commit.Id); ok && relID != zeroId {
-			fields = append(fields, "commit_id")
+			fields = append(fields, `commit_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1757,7 +1757,7 @@ func (r *RecipeReleaseRepository) CreateMany(ctx context.Context, inputs []*type
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: root (FK: root_id)
 		{
-			cell := batchInsertCell{column: "root_id"}
+			cell := batchInsertCell{column: `root_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeReleaseUUIDValue(input.Root.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1766,7 +1766,7 @@ func (r *RecipeReleaseRepository) CreateMany(ctx context.Context, inputs []*type
 		}
 		// Relationship: commit (FK: commit_id)
 		{
-			cell := batchInsertCell{column: "commit_id"}
+			cell := batchInsertCell{column: `commit_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeReleaseUUIDValue(input.Commit.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

@@ -25,6 +25,29 @@ const (
 
 var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+// sqlIdentifier is a table or column name @table and @column take (D85):
+// letters, digits and underscores, not starting with a digit, which every
+// statement quotes where Postgres and SQLite need it (QuoteIdentifier).
+var sqlIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// sqlIdentifierArg reads the one SQL identifier decorator takes.
+func sqlIdentifierArg(decorator string, args []any) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("%s takes exactly one name", decorator)
+	}
+	name, ok := args[0].(string)
+	if !ok {
+		return "", ArgErrorf(0, "%s takes a string literal", decorator)
+	}
+	if !sqlIdentifier.MatchString(name) {
+		return "", ArgErrorf(0, "%s(%q): a name is letters, digits and underscores, not starting with a digit", decorator, name)
+	}
+	if len(name) > sqlutil.PostgresIdentifierLimit {
+		return "", ArgErrorf(0, "%s(%q) is %d bytes, over PostgreSQL's %d-byte limit", decorator, name, len(name), sqlutil.PostgresIdentifierLimit)
+	}
+	return name, nil
+}
+
 // coreDecorators returns one DecoratorSpec per (name, target) the tsreader
 // walker used to switch on. Each Apply sets the typed IR field the walker's
 // case arm set and returns the same error text for the same bad input. The
@@ -92,6 +115,23 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			return nil
 		},
 	})
+	// The table a DB type is stored in, in place of its name in snake case
+	// (D85).
+	specs = append(specs, DecoratorSpec{
+		Name: "table", Packages: []string{pkgDB}, Target: TargetType,
+		Kinds: []string{string(ir.SchemaKindDB)},
+		Apply: func(n Node, args []any, _ Site) error {
+			name, err := sqlIdentifierArg("@table", args)
+			if err != nil {
+				return err
+			}
+			if n.Type.SQLName != "" {
+				return fmt.Errorf("a class takes one @table")
+			}
+			n.Type.SQLName = name
+			return nil
+		},
+	})
 	// Raw SQL the DB service runs after its own objects (D83).
 	specs = append(specs, DecoratorSpec{
 		Name: "rawSql", Packages: []string{pkgDB}, Target: TargetType,
@@ -145,6 +185,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	fieldFlag("uiHidden", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.UIHidden = true })
 	fieldFlag("internalMetadata", []string{pkgSchema}, func(f *ir.FieldDef) { f.InternalMetadata = true })
 	fieldFlag("virtual", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Virtual = true })
+	fieldFlag("decrypted", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Decrypted = true })
 	fieldFlag("sourceMustProject", []string{pkgDB}, func(f *ir.FieldDef) { f.SourceMustProject = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "conflictUnit", Packages: []string{pkgDB}, Target: TargetField,

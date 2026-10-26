@@ -315,7 +315,9 @@ type {{ $typeName }}OrderByField string
 
 const (
 	{{- range .Fields }}
+	{{- if not .IsEncrypted }}
 	{{ $typeName }}OrderBy{{ toGoName .Name }} {{ $typeName }}OrderByField = "{{ .DBName }}"
+	{{- end }}
 	{{- end }}
 )
 

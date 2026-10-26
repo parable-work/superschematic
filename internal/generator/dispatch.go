@@ -494,6 +494,9 @@ func writeSQLiteDDL(schema *ir.Schema, opts sqlgen.Options, dir string) error {
 
 // generateORM emits the Go ORM for DB schemas.
 func (r run) generateORM() error {
+	if err := r.checkEncryptionKey(); err != nil {
+		return err
+	}
 	// Dependencies name the imported unions a JSONB field decodes through,
 	// and their types modules get replace lines in the ORM's go.mod.
 	deps, err := r.loadDependencySchemas()
@@ -709,9 +712,21 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		}
 		if orm != "" {
 			// Deps holds the database's repositories, from its types'
-			// ./orm entry (D79).
+			// ./orm entry (D79), which open with the keys of its
+			// Encrypted<T> fields, which the API's config holds (D85).
 			tsDeps.ORM = orm
 			tsDeps.DatabaseTypesPackage = r.Options.Naming.NpmTypesPackage(tsDeps.Database)
+			schema, err := r.LoadDependency(tsDeps.Database)
+			if err != nil {
+				return nil, nil, fmt.Errorf("generator: load %s, the database of %s: %w", tsDeps.Database, r.Config.Name, err)
+			}
+			keys, err := r.fieldKeysField(tsDeps.Database, schema)
+			if err != nil {
+				return nil, nil, err
+			}
+			if keys != nil {
+				tsDeps.ORMFieldKeys = keys.Name
+			}
 		}
 	}
 	if e := apiOutput.Engine; e != nil {
@@ -766,8 +781,12 @@ func (r run) databaseDialect() (string, error) {
 // typeScriptDeps returns what the TypeScript API's Deps holds beside its
 // config and logger (D51): a pg Pool for the API's database, its authDb or
 // its one DB-kind dependency, a client of each calls entry's TypeScript
-// SDK, the HTTP runtime's Bucket per buckets entry (D54), and its MemoryStore per memory store it lists (D75). A callee whose config the build has must generate that
-// SDK; the database needs nothing generated, since the pool is pg's.
+// SDK, the HTTP runtime's Bucket per buckets entry (D54), and its
+// MemoryStore per memory store it lists (D75), with the package of the
+// store's definitions, which the implementation's scaffold depends on,
+// when its outputs write them. A callee whose config the build has must
+// generate that SDK; the database needs nothing generated, since the pool
+// is pg's.
 func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 	var deps tsrestgen.DepsInfo
 	if db, _, ok := r.Schema.Database(); ok {
@@ -803,7 +822,15 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 		deps.Buckets = append(deps.Buckets, tsrestgen.DepsBucket{Service: b.Name, Field: tsutil.ToCamelCase(b.Name)})
 	}
 	for _, m := range r.Schema.MemoryStores {
-		deps.MemoryStores = append(deps.MemoryStores, tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)})
+		store := tsrestgen.DepsMemoryStore{Service: m.Name, Field: tsutil.ToCamelCase(m.Name)}
+		definitions, _, err := r.memoryStoreDefinitions(m.Name, LangTypeScript)
+		if err != nil {
+			return deps, err
+		}
+		if definitions {
+			store.Definitions = r.Options.Naming.NpmTypesPackage(m.Name)
+		}
+		deps.MemoryStores = append(deps.MemoryStores, store)
 	}
 	if r.Schema.RateLimitStore != nil {
 		deps.RateLimitStore = r.Schema.RateLimitStore.Name
@@ -1192,6 +1219,19 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.Database = db
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
+		// The ORM opens with the keys of the database's Encrypted<T>
+		// fields, which the API's config holds (D85).
+		keys, err := r.fieldKeysField(db, schema)
+		if err != nil {
+			return deps, nil, err
+		}
+		if keys != nil && output.EnvConfig != nil {
+			for _, f := range output.EnvConfig.Fields {
+				if f.Key == keys.Name {
+					deps.FieldKeys = f.GoName
+				}
+			}
+		}
 		if db != output.UpstreamSchema {
 			roots = append(roots, schema)
 		}
@@ -1254,17 +1294,13 @@ func (r run) goMemoryStores() ([]apigen.DepsMemoryStore, error) {
 		}
 		seen[ref.Name] = true
 		m := apigen.DepsMemoryStore{Service: ref.Name, Field: goutil.GoPublicIdentifier(ref.Name)}
-		definitions := true
-		if r.Options.DependencyConfig != nil {
-			if cfg, ok := r.Options.DependencyConfig(ref.Name); ok {
-				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
-				if err != nil {
-					return nil, fmt.Errorf("generator: schema config for %s: %w", ref.Name, err)
-				}
-				definitions = outputs.TypesEnabled(LangGo)
-			}
+		// A build that cannot see the store's config takes its Go
+		// definitions all the same, as Go's always have.
+		enabled, known, err := r.memoryStoreDefinitions(ref.Name, LangGo)
+		if err != nil {
+			return nil, err
 		}
-		if definitions && r.Options.LoadDependency != nil {
+		if (enabled || !known) && r.Options.LoadDependency != nil {
 			schema, err := r.LoadDependency(ref.Name)
 			if err != nil {
 				return nil, fmt.Errorf("generator: load %s, a memory store %s lists: %w", ref.Name, r.Config.Name, err)
@@ -1278,6 +1314,32 @@ func (r run) goMemoryStores() ([]apigen.DepsMemoryStore, error) {
 	}
 	slices.SortFunc(stores, func(a, b apigen.DepsMemoryStore) int { return strings.Compare(a.Service, b.Service) })
 	return stores, nil
+}
+
+// memoryStoreDefinitions reports whether the build of store, a memory
+// store the API lists, writes its definitions in lang (D75), which the
+// API's implementation then depends on: its outputs.types.<lang>, and
+// known reports whether the build has the store's config to tell. A
+// TypeScript or Rust manifest that names a package no build writes fails
+// its install, so those take no definitions the build cannot see. A config
+// the build cannot read is one it cannot see: the store's own build
+// reports why.
+func (r run) memoryStoreDefinitions(store, lang string) (enabled, known bool, err error) {
+	var cfg *schemaconfig.SchemaConfig
+	if r.Options.DependencyConfig != nil {
+		cfg, _ = r.Options.DependencyConfig(store)
+	}
+	if cfg == nil && r.Options.LoadDependencyConfig != nil {
+		cfg, _ = r.Options.LoadDependencyConfig(store)
+	}
+	if cfg == nil {
+		return false, false, nil
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return false, false, fmt.Errorf("generator: schema config for %s: %w", store, err)
+	}
+	return outputs.TypesEnabled(lang), true, nil
 }
 
 // checkWorkerQueues refuses a worker of api whose queue is no @queue class
@@ -1458,19 +1520,33 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 // the pool is the runtime's, unless the API declares workers, whose
 // messages are the database's Rust types (rustQueueTypes, D65); and the
 // HTTP runtime's Bucket per buckets entry (D54), which needs nothing
-// generated either.
+// generated either; and its MemoryStore per memory store it lists (D75),
+// with the crate of the store's definitions, which the implementation's
+// scaffold depends on, when its outputs write them.
 func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
 	for _, b := range r.Schema.Buckets {
 		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
 	}
+	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	for _, m := range r.Schema.MemoryStores {
-		deps.MemoryStores = append(deps.MemoryStores, rustrestgen.DepsMemoryStore{Service: m.Name, Field: rustrestgen.DepsField(m.Name)})
+		store := rustrestgen.DepsMemoryStore{Service: m.Name, Field: rustrestgen.DepsField(m.Name)}
+		definitions, _, err := r.memoryStoreDefinitions(m.Name, LangRust)
+		if err != nil {
+			return deps, err
+		}
+		if definitions {
+			path, err := naming.RelPath(apiDir, TypesDir(r.Options.OutputRoot, LangRust, m.Name))
+			if err != nil {
+				return deps, fmt.Errorf("generator: the Rust definitions of %s from %s: %w", m.Name, r.Config.Name, err)
+			}
+			store.Definitions, store.DefinitionsPath = r.Options.Naming.RustTypesCrate(m.Name), path
+		}
+		deps.MemoryStores = append(deps.MemoryStores, store)
 	}
 	if r.Schema.RateLimitStore != nil {
 		deps.RateLimitStore = r.Schema.RateLimitStore.Name
 	}
-	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if db, _, ok := r.Schema.Database(); ok {
 		deps.Database = db
 		if err := r.rustQueueTypes(db, apiDir, &deps); err != nil {

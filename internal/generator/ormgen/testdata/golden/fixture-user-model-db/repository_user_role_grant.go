@@ -1086,7 +1086,7 @@ func (r *UserRoleGrantRepository) CreateOne(ctx context.Context, input *types.Us
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userRoleGrantUUIDValue(input.User.Id); ok && relID != zeroId {
-			fields = append(fields, "user_id")
+			fields = append(fields, `user_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1096,7 +1096,7 @@ func (r *UserRoleGrantRepository) CreateOne(ctx context.Context, input *types.Us
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userRoleGrantUUIDValue(input.Role.Id); ok && relID != zeroId {
-			fields = append(fields, "role_id")
+			fields = append(fields, `role_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1205,7 +1205,7 @@ func (r *UserRoleGrantRepository) UpsertOne(ctx context.Context, input *types.Us
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userRoleGrantUUIDValue(input.User.Id); ok && relID != zeroId {
-			fields = append(fields, "user_id")
+			fields = append(fields, `user_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1215,7 +1215,7 @@ func (r *UserRoleGrantRepository) UpsertOne(ctx context.Context, input *types.Us
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userRoleGrantUUIDValue(input.Role.Id); ok && relID != zeroId {
-			fields = append(fields, "role_id")
+			fields = append(fields, `role_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -1344,7 +1344,7 @@ func (r *UserRoleGrantRepository) CreateMany(ctx context.Context, inputs []*type
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: user (FK: user_id)
 		{
-			cell := batchInsertCell{column: "user_id"}
+			cell := batchInsertCell{column: `user_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := userRoleGrantUUIDValue(input.User.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1353,7 +1353,7 @@ func (r *UserRoleGrantRepository) CreateMany(ctx context.Context, inputs []*type
 		}
 		// Relationship: role (FK: role_id)
 		{
-			cell := batchInsertCell{column: "role_id"}
+			cell := batchInsertCell{column: `role_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := userRoleGrantUUIDValue(input.Role.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

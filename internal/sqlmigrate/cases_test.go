@@ -301,6 +301,21 @@ var planCases = []planCase{
 	{name: "rename-table-with-dependents", after: func(s *ir.Schema) { renameType(s, "Order", "Purchase") },
 		renames:       []Rename{{From: "order", To: "purchase"}},
 		readersBefore: []Read{{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"}}},
+	// A changed @table or @column renames the table or the column, with
+	// what is named after them, as a --rename would (D85).
+	{name: "rename-table-by-override", after: func(s *ir.Schema) { typeNamed(s, "Order").SQLName = "purchaseOrder" },
+		readersBefore: []Read{{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"}}},
+	{name: "rename-column-by-override", after: func(s *ir.Schema) {
+		fieldNamed(s, "Customer", "email").SQLName = "emailAddress"
+		fieldNamed(s, "Order", "customer").SQLName = "customerId"
+	}},
+	{name: "rename-versioned-table-by-override", noSQLite: "sqlite does not support @versioned",
+		before: func(s *ir.Schema) { versioned(s, "Order", nil) },
+		after: func(s *ir.Schema) {
+			versioned(s, "Order", nil)
+			typeNamed(s, "Order").SQLName = "purchaseOrder"
+			fieldNamed(s, "Order", "note").SQLName = "orderNote"
+		}},
 	{name: "rename-versioned-table", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) },
 		after: func(s *ir.Schema) {
@@ -521,6 +536,17 @@ var planCases = []planCase{
 	{name: "drop-enqueue-on-change",
 		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
 		after:  func(s *ir.Schema) { shipQueue(s, shipKey) }},
+	// @table names the queue's table and @column its key's column (D85):
+	// the plan renames both, with the key's indexes, and replaces the
+	// trigger, which is named after the queue's table.
+	{name: "rename-queue-by-override",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			typeNamed(s, "OrderShipped").SQLName = "orderShipments"
+			fieldNamed(s, "OrderShipped", "orderId").SQLName = "orderId"
+		}},
 	// SQLite drops a table's triggers with it, so its rebuild creates them
 	// again.
 	{name: "enqueue-on-change-rebuilt",

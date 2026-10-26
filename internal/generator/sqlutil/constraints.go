@@ -53,10 +53,12 @@ func IsNumberType(columnType string) bool {
 	return isIntegerType(columnType)
 }
 
-// scalarColumn reports whether field's column holds one value of its own:
-// not a list, a map or a JSON value.
+// scalarColumn reports whether field's column holds one value of its own,
+// as the database sees it: not a list, a map or a JSON value, and not an
+// Encrypted<T> field's ciphertext (D85), whose Validate rules bound the
+// plaintext, which the decoders check, and never the text stored.
 func scalarColumn(field *ir.FieldDef, columnType string) bool {
-	return !field.JsonField && !field.TypeRef.IsArray && !field.TypeRef.IsMap &&
+	return !field.EncryptedAtRest && !field.JsonField && !field.TypeRef.IsArray && !field.TypeRef.IsMap &&
 		!strings.HasSuffix(columnType, "[]") && sqlTypeBase(columnType) != "JSONB"
 }
 
@@ -68,7 +70,7 @@ func scalarColumn(field *ir.FieldDef, columnType string) bool {
 //   - an optional field: its column defaults to NULL, which the ORMs write
 //     for a value left unset, and the Go ORM leaves an optional zero out of
 //     an insert;
-//   - a key, a list, a map or a JSON value;
+//   - a key, a list, a map, a JSON value or an Encrypted<T> field;
 //   - a column whose type is not text, a boolean or a number, such as a
 //     UUID, a time or a duration, whose stored form is not the form V is
 //     written in.
@@ -128,9 +130,9 @@ type Check struct {
 // ColumnCheck returns the check of field's column, named column and of
 // type columnType: a scalar enum column's members (enum is the field's
 // enum, nil when its type is none), or a scalar number or text column's
-// Validate bounds. ok is false when the column has none: a list, a map or
-// a JSON value, a pattern (which the dialects' regular expressions do not
-// read alike), and any other rule.
+// Validate bounds. ok is false when the column has none: a list, a map, a
+// JSON value or an Encrypted<T> field, a pattern (which the dialects'
+// regular expressions do not read alike), and any other rule.
 func ColumnCheck(field *ir.FieldDef, column, columnType string, enum *ir.EnumDef) (Check, bool) {
 	if !scalarColumn(field, columnType) {
 		return Check{}, false

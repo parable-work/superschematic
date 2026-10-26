@@ -123,6 +123,10 @@ type TypeDef struct {
 	// materialized as a relational table.
 	JsonField bool `json:"jsonField,omitempty" yaml:"jsonField,omitempty"`
 
+	// SQLName is the table a DB table type is stored in, from
+	// @table("name") (D85). Empty means the type's name in snake case.
+	SQLName string `json:"sqlName,omitempty" yaml:"sqlName,omitempty"`
+
 	// StrictJSON (@strictJSON) makes every generated decoder of this type,
 	// in Go, TypeScript, Python and Rust, reject a key the type does not
 	// declare and a required field that is absent or null. It applies to
@@ -524,6 +528,22 @@ type FieldDef struct {
 	// Encrypted marks this field/operation as requiring encrypted payload
 	// transport (@encrypted).
 	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
+
+	// EncryptedAtRest marks a DB table field whose column holds ciphertext
+	// (Encrypted<T>, D85): the ORMs encrypt it on write and decrypt it on
+	// read with the DB service's field keys. It implies Secret. Unrelated
+	// to Encrypted, which is a request body's envelope (D20).
+	EncryptedAtRest bool `json:"encryptedAtRest,omitempty" yaml:"encryptedAtRest,omitempty"`
+
+	// Decrypted marks a field of a @source view that carries the plaintext
+	// of its source's Encrypted<T> field (@decrypted, D85), an opt-in a view
+	// needs to hold such a field at all.
+	Decrypted bool `json:"decrypted,omitempty" yaml:"decrypted,omitempty"`
+
+	// SQLName is the column a DB table field is stored in, from
+	// @column("name") (D85): a to-one relation's foreign key column itself.
+	// Empty means the field's name in snake case (with _id for a relation).
+	SQLName string `json:"sqlName,omitempty" yaml:"sqlName,omitempty"`
 
 	// Filterable marks this endpoint as accepting bracket-notation filter
 	// query parameters (@filterable). When true, the generated handler parses

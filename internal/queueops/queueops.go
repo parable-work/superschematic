@@ -18,6 +18,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // Version is the version of the document and of the result.
@@ -59,6 +60,11 @@ type Request struct {
 	// per key (D80), whose retry leaves each key one ready message; empty
 	// for every other queue.
 	Key string
+
+	// Table is the queue's table, unquoted, as sqlutil.QueueTableName
+	// names it, @table's name among them (D85); empty takes the name of a
+	// queue whose class has no @table.
+	Table string
 }
 
 // document is the runner's queue document (migrate.QueueDocument).
@@ -108,7 +114,11 @@ func Document(req Request) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("operation %q is not dead, retry or drop", req.Operation)
 	}
-	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(sqlgen.QueueTableName(req.Queue)), req.Key)
+	table := req.Table
+	if table == "" {
+		table = sqlgen.QueueTableName(&ir.TypeDef{Name: req.Queue})
+	}
+	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Key)
 	doc := document{
 		Version:   Version,
 		Service:   req.Service,

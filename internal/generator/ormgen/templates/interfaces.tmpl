@@ -54,6 +54,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- if .HasSoftDelete }}
 	HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
 	{{- end }}
+	{{- if .EncryptedFields }}
+	Reencrypt(ctx context.Context, batch int) (int, error)
+	{{- end }}
 	{{- if .VectorFields }}
 	Nearest(ctx context.Context, field {{ .TypeName }}VectorField, vector types.EmbeddingVector, opts *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error)
 	{{- end }}
@@ -255,6 +258,12 @@ func (r *NoOp{{ .Name }}) DeleteMany(_ context.Context, _ *{{ .TypeName }}Filter
 
 func (r *NoOp{{ .Name }}) HardDeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) error {
 	return nil
+}
+{{- end }}
+{{- if .EncryptedFields }}
+
+func (r *NoOp{{ .Name }}) Reencrypt(_ context.Context, _ int) (int, error) {
+	return 0, nil
 }
 {{- end }}
 {{- if .VectorFields }}

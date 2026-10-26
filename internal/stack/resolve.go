@@ -273,6 +273,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkDatabaseDialects()
 	r.orderRollout()
 	r.bindConfig()
+	r.checkFieldKeys()
 	if r.failed() {
 		return nil
 	}

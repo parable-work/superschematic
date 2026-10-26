@@ -84,7 +84,7 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 			if source == nil || queueDef == nil || queueDef.Queue == nil {
 				return nil, fmt.Errorf("@enqueueOnChange(%s) on %s: no table of %s or no queue %s", def.Queue, td.Name, td.Name, def.Queue)
 			}
-			queue := byName[queueDef.Name+"/"+QueueTableName(queueDef.Name)]
+			queue := byName[queueDef.Name+"/"+QueueTableName(queueDef)]
 			if queue == nil {
 				return nil, fmt.Errorf("@enqueueOnChange(%s) on %s: queue %s has no table", def.Queue, td.Name, def.Queue)
 			}
@@ -212,7 +212,7 @@ func (t EnqueueTrigger) Trigger() Trigger {
 // delete, as it was.
 func (t EnqueueTrigger) FunctionSQL() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE OR REPLACE FUNCTION %s() RETURNS trigger AS $$\nBEGIN\n", t.FunctionName)
+	fmt.Fprintf(&b, "CREATE OR REPLACE FUNCTION %s() RETURNS trigger AS $$\nBEGIN\n", sqlutil.QuoteIdentifier(t.FunctionName))
 	fmt.Fprintf(&b, "  -- Enqueues a message of %s after a write to %s (D80).\n", t.Queue, t.Table)
 	if len(t.Fields) > 0 {
 		fmt.Fprintf(&b, "  IF TG_OP = 'UPDATE' AND NOT (%s) THEN\n    RETURN NULL;\n  END IF;\n", t.changed("IS DISTINCT FROM"))

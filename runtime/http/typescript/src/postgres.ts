@@ -321,11 +321,20 @@ export {
 } from './pgcodec.js';
 export type { RowField, TypeParsers, ValueCodec } from './pgcodec.js';
 
+// The envelopes of a table's Encrypted<T> fields (D85), which the
+// repositories seal and open with the DB service's field keys, and the
+// SecretValue a read holds each one in.
+export { FIELD_ENVELOPE_VERSION, FieldEncryptionError, FieldKeyring, fieldKeyId, newRowKey, parseFieldKeys } from './fieldcrypt.js';
+export type { FieldCell, FieldEncryptionReason, FieldKeys } from './fieldcrypt.js';
+export { SECRET_MASK, SecretValue, revealed } from './secret.js';
+export type { Revealable } from './secret.js';
+
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
 export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, fill, ormOf } from './orm.js';
 export type {
   Actor,
+  EncryptedRepository,
   BoolFilter,
   Clauses,
   DateFilter,
@@ -342,6 +351,7 @@ export type {
   Orm,
   OrmDefinition,
   OrmMembers,
+  OrmOptions,
   OrmPool,
   OrmQueryConfig,
   OrmQueryResult,

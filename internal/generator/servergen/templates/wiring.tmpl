@@ -74,7 +74,7 @@ exactly as a server does.
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
 	defer {{ .Var }}Pool.Close()
-	{{ .Var }}, err := {{ .Package }}.ConnectWithPool({{ .Var }}Pool)
+	{{ .Var }}, err := {{ .Package }}.ConnectWithPool({{ .Var }}Pool{{ if .FieldKeys }}, {{ .Package }}.WithFieldKeys({{ .FieldKeys }}){{ end }})
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}

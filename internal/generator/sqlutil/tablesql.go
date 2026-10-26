@@ -102,6 +102,18 @@ type TableStatements struct {
 	// tells a fenced write's miss from a conflict.
 	Version string
 
+	// Stale and Reseal re-encrypt a table's Encrypted<T> columns under the
+	// current key (D85); empty for a table without one. Stale reads the
+	// key and the encrypted columns of the rows, deleted ones too, a column
+	// of which another key sealed: $1 is the current key's envelope
+	// prefix, a LIKE pattern, and $2 how many, in key order. Reseal sets
+	// each encrypted column, in order, from $1, on the row whose key is the
+	// parameter after them, when each still holds what Stale read, the
+	// parameters after that: a write between the two, which sealed under
+	// the current key, is left as it is.
+	Stale  string
+	Reseal string
+
 	// Nearest reads the rows nearest a vector (D84): the columns %s, the
 	// distance %s as _distance, the WHERE %s, the ORDER BY the distance %s
 	// again, which a vector index of its metric serves, and the limit %d.
@@ -267,28 +279,31 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		VersionFence:     " AND " + VersionColumn + " = $%d",
 		Returning:        " RETURNING " + list,
 		UpdateMany:       "UPDATE " + t + " SET %s%s",
-		UpdatedAt:        strings.Replace(PostgresClauses().Set, "%s", QuoteIdentifier("updated_at"), 1),
-		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", QuoteIdentifier("updated_by"), 1),
+		UpdatedAt:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedAt), 1),
+		UpdatedBy:        strings.Replace(PostgresClauses().Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
 		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = $1",
 	}
 	upsertGuard := ""
 	if table.SoftDelete {
-		s.Live = " AND deleted_at IS NULL"
-		s.LiveWhere = " WHERE deleted_at IS NULL"
-		s.LiveCondition = t + ".deleted_at IS NULL"
+		// The audit columns are the fields', as @column names them (D85).
+		deletedAt, deletedBy := table.AuditQuoted(AuditDeletedAt), table.AuditQuoted(AuditDeletedBy)
+		s.Live = " AND " + deletedAt + " IS NULL"
+		s.LiveWhere = " WHERE " + deletedAt + " IS NULL"
+		s.LiveCondition = t + "." + deletedAt + " IS NULL"
 		s.Version += s.Live
 		upsertGuard = " WHERE " + s.LiveCondition
 		if table.DeletedBy {
-			s.SoftDelete = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2 WHERE " + key + " = $3 AND deleted_at IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2 WHERE " + key + " = $3 AND _version = $4 AND deleted_at IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET deleted_at = $1, deleted_by = $2%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2 WHERE " + key + " = $3 AND _version = $4 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1, " + deletedBy + " = $2%s"
 		} else {
-			s.SoftDelete = "UPDATE " + t + " SET deleted_at = $1 WHERE " + key + " = $2 AND deleted_at IS NULL"
-			s.SoftDeleteIfVersion = "UPDATE " + t + " SET deleted_at = $1 WHERE " + key + " = $2 AND _version = $3 AND deleted_at IS NULL"
-			s.SoftDeleteMany = "UPDATE " + t + " SET deleted_at = $1%s"
+			s.SoftDelete = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + deletedAt + " = $1 WHERE " + key + " = $2 AND _version = $3 AND " + deletedAt + " IS NULL"
+			s.SoftDeleteMany = "UPDATE " + t + " SET " + deletedAt + " = $1%s"
 		}
 	}
 	s.Upsert = "INSERT INTO " + t + " (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s" + upsertGuard + " RETURNING " + list
+	s.Stale, s.Reseal = resealStatements(table, t, key)
 	if len(table.VectorColumns()) > 0 {
 		s.Nearest = "SELECT %s, %s AS " + NearestDistance + " FROM " + t + "%s ORDER BY %s LIMIT %d"
 	}
@@ -302,6 +317,27 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		s.DeleteMany = "DELETE FROM " + t + "%s"
 	}
 	return s
+}
+
+// resealStatements are Stale and Reseal of table, whose name is t and key
+// column key, both quoted; empty for a table without an Encrypted<T>
+// column.
+func resealStatements(table *TableModel, t, key string) (stale, reseal string) {
+	encrypted := table.EncryptedColumns()
+	if len(encrypted) == 0 {
+		return "", ""
+	}
+	selected := []string{key}
+	var older, sets, guards []string
+	for i, c := range encrypted {
+		selected = append(selected, c.Quoted)
+		older = append(older, c.Quoted+" NOT LIKE $1")
+		sets = append(sets, fmt.Sprintf("%s = $%d", c.Quoted, i+1))
+		guards = append(guards, fmt.Sprintf("%s IS NOT DISTINCT FROM $%d", c.Quoted, len(encrypted)+2+i))
+	}
+	stale = "SELECT " + strings.Join(selected, ", ") + " FROM " + t + " WHERE " + strings.Join(older, " OR ") + " ORDER BY " + key + " LIMIT $2"
+	reseal = "UPDATE " + t + " SET " + strings.Join(sets, ", ") + fmt.Sprintf(" WHERE %s = $%d AND ", key, len(encrypted)+1) + strings.Join(guards, " AND ")
+	return stale, reseal
 }
 
 // ColumnStatements are a column's parts of a table's statements: Qualified
@@ -348,7 +384,7 @@ func ReferenceProbeOf(table *TableModel, ref Reference) ReferenceProbe {
 		NotExists: PostgresClauses().NotExists,
 	}
 	if ref.SourceSoftDelete {
-		p.Live = " AND " + ref.SourceTable + ".deleted_at IS NULL"
+		p.Live = " AND " + ref.SourceTable + "." + ref.SourceDeletedAt + " IS NULL"
 	}
 	return p
 }
@@ -379,6 +415,7 @@ func (s TableStatements) AllStatements() []NamedStatement {
 		{"softDelete", s.SoftDelete}, {"softDeleteIfVersion", s.SoftDeleteIfVersion}, {"softDeleteMany", s.SoftDeleteMany},
 		{"delete", s.Delete}, {"deleteIfVersion", s.DeleteIfVersion}, {"deleteMany", s.DeleteMany},
 		{"version", s.Version}, {"nearest", s.Nearest},
+		{"stale", s.Stale}, {"reseal", s.Reseal},
 	}
 }
 

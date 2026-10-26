@@ -1997,7 +1997,7 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2007,7 +2007,7 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2256,7 +2256,7 @@ func (r *TastingRepository) UpsertOne(ctx context.Context, input *types.Tasting,
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2266,7 +2266,7 @@ func (r *TastingRepository) UpsertOne(ctx context.Context, input *types.Tasting,
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2628,7 +2628,7 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -2637,7 +2637,7 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

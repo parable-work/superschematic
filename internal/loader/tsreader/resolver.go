@@ -51,6 +51,10 @@ type typeInfo struct {
 	secret           bool
 	queryParam       bool
 	encrypted        bool
+	// encryptedAtRest is set by @superschematic/db's Encrypted<T> (D85),
+	// a stored field's ciphertext; encrypted is EncryptedField<T>'s
+	// request envelope.
+	encryptedAtRest bool
 
 	// references is set by RefersTo<T, Target, C> (D61): the target and
 	// the config's members as written.
@@ -95,7 +99,7 @@ type typeInfo struct {
 var wrapperNames = map[string]bool{
 	"Default": true, "PlatformDefault": true, "Nullable": true, "Validate": true, "Secret": true,
 	"Relation": true, "HasMany": true, "ManyToMany": true, "AutoGenerate": true,
-	"JsonField": true, "QueryParam": true, "EncryptedField": true,
+	"JsonField": true, "QueryParam": true, "EncryptedField": true, "Encrypted": true,
 	"RefersTo": true, "SearchQuery": true, "SortBy": true,
 	"FileUpload": true, "FileDownload": true,
 }
@@ -459,6 +463,10 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 		info.queryParam = true
 	case "EncryptedField":
 		info.encrypted = true
+	case "Encrypted":
+		// @superschematic/api's Encrypted is an operation set's base class,
+		// which takes no type argument, so only db's wrapper reaches here.
+		info.encryptedAtRest = true
 	case "RefersTo":
 		if info.references != nil {
 			return nil, errorAtNode(node, "RefersTo is written once on a value; this one already refers to %s", info.references.Type)

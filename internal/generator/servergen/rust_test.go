@@ -248,7 +248,10 @@ impl CatalogImplementation for Catalog {
 // flaky fails its first time, and slow never finishes. Its manual route,
 // exportLevel, answers the level as CSV, with the warehouse its Deps'
 // config holds and the request's id, which the router hands the handler
-// in its RequestContext (D51).
+// in its RequestContext (D51). Setting a level publishes LEVEL_CHANGED on
+// rs-cache through the store's Rust definitions, which its scaffold's
+// Cargo.toml depends on, and carries on while the store is unavailable
+// (D75).
 const rustStockImplementation = `use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -257,6 +260,7 @@ use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::Request;
 use axum::response::Response;
+use schemas_rs_cache_types::LEVEL_CHANGED;
 use schemas_rs_stock_api::database_types::{self, StockLow};
 use schemas_rs_stock_api::types;
 use schemas_rs_stock_api::{
@@ -264,6 +268,7 @@ use schemas_rs_stock_api::{
     ManualRoutes, ReservationsImplementation, ReservationsReserveStockArgs, Workers,
 };
 use superschematic_http_runtime::bucket::SignedUrlOptions;
+use superschematic_http_runtime::memorystore::{MemoryStoreError, Signal};
 use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
 
@@ -396,6 +401,11 @@ impl LevelsImplementation for Levels {
     }
 
     async fn set_level(&self, _ctx: RequestContext, args: LevelsSetLevelArgs) -> Result<types::LevelView, ApiError> {
+        let changed = LEVEL_CHANGED.for_(&args.sku).map_err(|err| ApiError::bad_request(err.to_string()))?;
+        match changed.publish(&*self.deps.rs_cache, &Signal).await {
+            Ok(()) | Err(MemoryStoreError::Unavailable) => {}
+            Err(err) => return Err(ApiError::internal(err.to_string())),
+        }
         Ok(level(&self.deps, args.sku, 0.0))
     }
 }

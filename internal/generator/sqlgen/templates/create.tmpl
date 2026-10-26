@@ -24,7 +24,7 @@ CREATE TABLE {{ $table.QuotedName }} (
   UNIQUE ({{ join . ", " }}){{ end }}
 {{- end }}
 {{- range $table.Checks }},
-  CONSTRAINT {{ .Name }} CHECK ({{ .Expression }})
+  CONSTRAINT {{ quote .Name }} CHECK ({{ .Expression }})
 {{- end }}
 );
 {{- if $table.SearchFields }}
@@ -66,16 +66,16 @@ CREATE TABLE {{ $history.QuotedDefaultPartition }} PARTITION OF {{ $history.Quot
 {{ end -}}
 
 {{- if eq $history.PartitionBy "month" }}
-CREATE INDEX {{ $history.VersionIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
+CREATE INDEX {{ quote $history.VersionIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
 {{- else }}
-CREATE UNIQUE INDEX {{ $history.UniqueIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
+CREATE UNIQUE INDEX {{ quote $history.UniqueIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
 {{- end }}
-CREATE INDEX {{ $history.RecordedIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, recorded_at);
+CREATE INDEX {{ quote $history.RecordedIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, recorded_at);
 {{- if gt $history.RetentionDays 0 }}
 -- The prune function filters on recorded_at alone; the index above leads with
 -- the row key and cannot serve it, so retention would seq-scan the whole
 -- history table on every pass.
-CREATE INDEX {{ $history.RetentionIndexName }} ON {{ $history.QuotedName }} (recorded_at);
+CREATE INDEX {{ quote $history.RetentionIndexName }} ON {{ $history.QuotedName }} (recorded_at);
 {{- end }}
 
 COMMENT ON TABLE {{ $history.QuotedName }} IS 'Version history for {{ $history.SourceTableName }}';
@@ -88,7 +88,7 @@ COMMENT ON TABLE {{ $history.QuotedName }} IS 'Version history for {{ $history.S
 {{- range $fk := $table.ForeignKeys }}
 
 ALTER TABLE {{ $table.QuotedName }}
-  ADD CONSTRAINT {{ $fk.ConstraintName }}
+  ADD CONSTRAINT {{ quote $fk.ConstraintName }}
   FOREIGN KEY ({{ $fk.QuotedColumn }})
   REFERENCES {{ $fk.QuotedRefTable }}({{ $fk.QuotedRefColumn }})
   ON DELETE {{ if $fk.OnDelete }}{{ $fk.OnDelete }}{{ else }}CASCADE{{ end }};
@@ -101,15 +101,15 @@ ALTER TABLE {{ $table.QuotedName }}
 {{- range $jt := .JoinTables }}
 
 ALTER TABLE {{ $jt.QuotedName }}
-  ADD CONSTRAINT {{ $jt.LeftConstraintName }}
+  ADD CONSTRAINT {{ quote $jt.LeftConstraintName }}
   FOREIGN KEY ({{ $jt.QuotedLeftColumn }})
-  REFERENCES {{ $jt.QuotedLeftTable }}(id)
+  REFERENCES {{ $jt.QuotedLeftTable }}({{ $jt.QuotedLeftRef }})
   ON DELETE CASCADE;
 
 ALTER TABLE {{ $jt.QuotedName }}
-  ADD CONSTRAINT {{ $jt.RightConstraintName }}
+  ADD CONSTRAINT {{ quote $jt.RightConstraintName }}
   FOREIGN KEY ({{ $jt.QuotedRightColumn }})
-  REFERENCES {{ $jt.QuotedRightTable }}(id)
+  REFERENCES {{ $jt.QuotedRightTable }}({{ $jt.QuotedRightRef }})
   ON DELETE CASCADE;
 {{- end }}
 {{- end }}
@@ -121,12 +121,12 @@ ALTER TABLE {{ $jt.QuotedName }}
 {{- if $table.Indexes }}
 {{- range $idx := $table.Indexes }}
 
-CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ $idx.Elements }}){{ if $idx.With }} WITH ({{ $idx.With }}){{ end }}{{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
+CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ quote $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ $idx.Elements }}){{ if $idx.With }} WITH ({{ $idx.With }}){{ end }}{{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
 {{- end }}
 {{- end }}
 {{- if $table.SearchFields }}
 
-CREATE INDEX idx_{{ $table.Name }}_search_trgm ON {{ $table.QuotedName }} USING GIN (search_text gin_trgm_ops);
+CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }} USING GIN (search_text gin_trgm_ops);
 {{- end }}
 {{- end }}
 {{- if .HistoryTables }}

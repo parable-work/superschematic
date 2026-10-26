@@ -1,9 +1,13 @@
 # A TypeScript API whose one job, CompileReports, ts-cron-stack's Edge
 # places on stacktest's fake cron platform, whose artifact is a bundle as
 # Cloudflare's Cron Triggers' is (D64). Its config holds a secret and a
-# setting with a default, which its job reads.
+# setting with a default, which its job reads. It lists the memory store
+# ts-cache, which Edge turns off, so the job's scheduled.ts holds it
+# disabled and imports no Redis client (D75).
 name: ts-reports
 kind: API
+memoryStores:
+  - { name: ts-cache, kind: MemoryStore }
 outputs:
   types:
     typescript: { enabled: true }
