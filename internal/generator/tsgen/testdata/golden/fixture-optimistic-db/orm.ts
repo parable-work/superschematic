@@ -195,7 +195,7 @@ export interface StockFilter {
   ingredient?: StringFilter<string>;
   quantity?: NumberFilter<T.GenericInt64>;
   _version?: NumberFilter<number>;
-  /** The rows whose shelf is a live Shelf row the filter finds (D90). */
+  /** The rows whose shelf is among the live Shelf rows the filter finds (D90). */
   shelf?: ShelfFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly StockFilter[];

@@ -1202,9 +1202,9 @@ type TenantUserFilter struct {
 	Version     *Int64Filter
 	// TenantID allows filtering by foreign key
 	TenantID *UUIDFilter
-	// Tenant keeps the rows whose tenant is a Tenant row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Tenant rows it finds.
+	// Tenant keeps the rows whose tenant is among the Tenant rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Tenant *TenantFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other

@@ -220,7 +220,7 @@ export interface TenantUserFilter {
   tenantId?: UuidFilter<T.IdentityUUID>;
   displayName?: StringFilter<string> & NullFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose tenant is a Tenant row the filter finds (D90). */
+  /** The rows whose tenant is among the Tenant rows the filter finds (D90). */
   tenant?: TenantFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly TenantUserFilter[];

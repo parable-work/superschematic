@@ -184,7 +184,7 @@ export const {{.Const}}: TableDefinition = {
 {{- range .Views}}
 
 /**
- * A row of the {{.Relation}} view, the {{.Type}} projection (D90){{if .Doc}}: {{tsDoc .Doc " * "}}{{else}}.{{end}}
+ * A row of the {{.Relation}} view (D90){{if .Doc}}: {{tsDoc .Doc " * "}}{{else}}.{{end}}
  */
 export interface {{.Type}} {
 {{- range .Columns}}

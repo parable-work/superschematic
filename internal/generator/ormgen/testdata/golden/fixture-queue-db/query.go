@@ -915,13 +915,13 @@ type OrderLineFilter struct {
 	OrderID *UUIDFilter
 	// ProductID allows filtering by foreign key
 	ProductID *UUIDFilter
-	// Order keeps the rows whose order is a Order row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Order rows it finds.
+	// Order keeps the rows whose order is among the Order rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Order *OrderFilter
-	// Product keeps the rows whose product is a Product row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Product rows it finds, so a row whose product is null is not kept.
+	// Product keeps the rows whose product is among the Product rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose product is null is not kept.
 	Product *ProductFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other

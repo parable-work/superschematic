@@ -65,6 +65,9 @@ var corpus = []roundtripFixture{
 	// SQL projection views: every row rule form, joins, @column in both
 	// forms of the source and the collapse.
 	{name: "fixture-projection", dir: tsFixtures + "/fixture-projection", native: FormatTS},
+	// A projection without a pool, beside the tables (D90), over joins
+	// through a joined table.
+	{name: "fixture-finances-db", dir: tsFixtures + "/fixture-finances-db", native: FormatTS},
 	// Arrays of arrays (T[][]) in a General type, a DB table and an API's
 	// request body, argument and response.
 	{name: "fixture-nested-arrays", dir: tsFixtures + "/fixture-nested-arrays", native: FormatTS},

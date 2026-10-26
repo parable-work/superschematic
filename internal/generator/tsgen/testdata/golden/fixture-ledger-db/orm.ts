@@ -247,9 +247,9 @@ export interface EntryFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
-  /** The rows whose account is a Account row the filter finds (D90). */
+  /** The rows whose account is among the Account rows the filter finds (D90). */
   account?: AccountFilter;
-  /** The rows whose transfer is a Account row the filter finds; a row whose transfer is null is not among them (D90). */
+  /** The rows whose transfer is among the Account rows the filter finds; a row whose transfer is null is not among them (D90). */
   transfer?: AccountFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly EntryFilter[];

@@ -201,7 +201,7 @@ export interface LineItemFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
-  /** The rows whose category is a Category row the filter finds; a row whose category is null is not among them (D90). */
+  /** The rows whose category is among the Category rows the filter finds; a row whose category is null is not among them (D90). */
   category?: CategoryFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly LineItemFilter[];

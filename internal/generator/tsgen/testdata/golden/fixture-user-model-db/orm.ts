@@ -188,7 +188,7 @@ export interface SessionFilter {
   expiresAt?: DateTimeFilter<T.TemporalDateTime>;
   lastSeenAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
-  /** The rows whose user is a User row the filter finds (D90). */
+  /** The rows whose user is among the User rows the filter finds (D90). */
   user?: UserFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly SessionFilter[];
@@ -454,7 +454,7 @@ export interface UserCredentialFilter {
   passwordChangedAt?: DateTimeFilter<T.TemporalDateTime>;
   disabledAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   pendingAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
-  /** The rows whose user is a User row the filter finds (D90). */
+  /** The rows whose user is among the User rows the filter finds (D90). */
   user?: UserFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly UserCredentialFilter[];
@@ -578,9 +578,9 @@ export interface UserRoleGrantFilter {
   userId?: UuidFilter<T.IdentityUUID>;
   roleId?: UuidFilter<T.IdentityUUID>;
   grantedAt?: DateTimeFilter<T.TemporalDateTime>;
-  /** The rows whose user is a User row the filter finds (D90). */
+  /** The rows whose user is among the User rows the filter finds (D90). */
   user?: UserFilter;
-  /** The rows whose role is a Role row the filter finds (D90). */
+  /** The rows whose role is among the Role rows the filter finds (D90). */
   role?: RoleFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly UserRoleGrantFilter[];

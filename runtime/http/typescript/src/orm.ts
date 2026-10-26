@@ -767,6 +767,7 @@ class TableRepository {
     const key = this.keyColumn();
     const keyed = page || many.some(m => include[m.name]) || columns.some(c => c.encrypted);
     if (keyed && !wanted.has(key.name)) columns.push(key);
+    if (columns.length === 0) throw new Error(`orm: a read of ${this.def.name} selects no member`);
     return { columns, kept: options.select ? new Set(options.select) : undefined };
   }
 

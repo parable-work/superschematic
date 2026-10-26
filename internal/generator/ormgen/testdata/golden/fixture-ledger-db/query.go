@@ -1101,13 +1101,13 @@ type EntryFilter struct {
 	AccountID *UUIDFilter
 	// TransferID allows filtering by foreign key
 	TransferID *UUIDFilter
-	// Account keeps the rows whose account is a Account row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Account rows it finds.
+	// Account keeps the rows whose account is among the Account rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Account *AccountFilter
-	// Transfer keeps the rows whose transfer is a Account row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Account rows it finds, so a row whose transfer is null is not kept.
+	// Transfer keeps the rows whose transfer is among the Account rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose transfer is null is not kept.
 	Transfer *AccountFilter
 	// SearchText keeps the rows whose search fields hold each of its words,
 	// in any case (D62): its runs of characters that are not White_Space,

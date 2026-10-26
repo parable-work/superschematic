@@ -278,3 +278,14 @@ func strPtr(s string) *string { return &s }
 func int64Ptr(n int64) *int64 { return &n }
 func boolPtr(b bool) *bool    { return &b }
 `
+
+// TestSettingBoundProjectionCompiles generates, builds and vets the ORM
+// module for fixture-projection (D90), whose AppPreference view binds
+// session settings and collapses by its key, slotKey: its repository reads
+// an enum, a JSON value, a list and nullable columns as a table's does.
+func TestSettingBoundProjectionCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	runORMModule(t, generateORMModule(t, "fixture-projection"))
+}

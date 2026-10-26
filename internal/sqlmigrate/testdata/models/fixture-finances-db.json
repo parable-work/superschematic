@@ -1,0 +1,717 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "citext",
+    "pg_trgm",
+    "pgcrypto"
+  ],
+  "service": "fixture-finances-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Account.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Account.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "slug",
+          "origin": "Account.slug",
+          "type": "CITEXT"
+        },
+        {
+          "name": "provider_id",
+          "origin": "Account.provider",
+          "type": "UUID"
+        },
+        {
+          "name": "business_id",
+          "nullable": true,
+          "origin": "Account.business",
+          "type": "UUID"
+        },
+        {
+          "name": "owner_id",
+          "nullable": true,
+          "origin": "Account.owner",
+          "type": "UUID"
+        }
+      ],
+      "comment": "An account at a provider, which may belong to a business and a person.\nIts line items load through @hasMany, as the Go ORM loads them too.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "business_id"
+          ],
+          "name": "fk_account_business_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "business"
+        },
+        {
+          "columns": [
+            "owner_id"
+          ],
+          "name": "fk_account_owner_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        },
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "name": "fk_account_provider_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "provider"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_account_provider"
+        }
+      ],
+      "kind": "entity",
+      "name": "account",
+      "origin": "Account",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "account_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "account_slug_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Business.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Business.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "slug",
+          "origin": "Business.slug",
+          "type": "CITEXT"
+        }
+      ],
+      "comment": "A business the household runs, which some spending belongs to.",
+      "kind": "entity",
+      "name": "business",
+      "origin": "Business",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "business_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "business_slug_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Category.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Category.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "slug",
+          "origin": "Category.slug",
+          "type": "CITEXT"
+        },
+        {
+          "name": "color",
+          "origin": "Category.color",
+          "type": "TEXT"
+        },
+        {
+          "name": "parent_id",
+          "nullable": true,
+          "origin": "Category.parent",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Category.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A category of spending, under a parent category or none. A retired\ncategory is soft-deleted: a read leaves it out, and so does an include\nof a line item's category, and a filter through one.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "parent_id"
+          ],
+          "name": "fk_category_parent_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "parent_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_category_parent"
+        }
+      ],
+      "kind": "entity",
+      "name": "category",
+      "origin": "Category",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "category_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "category_slug_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "LineItem.id",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "date",
+          "origin": "LineItem.date",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "name",
+          "origin": "LineItem.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "description",
+          "nullable": true,
+          "origin": "LineItem.description",
+          "type": "TEXT"
+        },
+        {
+          "name": "amount",
+          "origin": "LineItem.amount",
+          "type": "BIGINT"
+        },
+        {
+          "name": "account_id",
+          "origin": "LineItem.account",
+          "type": "UUID"
+        },
+        {
+          "name": "category_id",
+          "nullable": true,
+          "origin": "LineItem.category",
+          "type": "UUID"
+        },
+        {
+          "name": "sub_category_id",
+          "nullable": true,
+          "origin": "LineItem.subCategory",
+          "type": "UUID"
+        },
+        {
+          "name": "business_id",
+          "nullable": true,
+          "origin": "LineItem.business",
+          "type": "UUID"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "origin": "LineItem.user",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "LineItem.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "generated": "COALESCE(\"name\", '') || ' ' || COALESCE(description, '')",
+          "name": "search_text",
+          "nullable": true,
+          "type": "TEXT"
+        }
+      ],
+      "comment": "One line of an account: a signed amount on a date, filed under a\ncategory and a sub-category, a business and a person.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "account_id"
+          ],
+          "name": "fk_line_item_account_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        },
+        {
+          "columns": [
+            "business_id"
+          ],
+          "name": "fk_line_item_business_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "business"
+        },
+        {
+          "columns": [
+            "category_id"
+          ],
+          "name": "fk_line_item_category_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        },
+        {
+          "columns": [
+            "sub_category_id"
+          ],
+          "name": "fk_line_item_sub_category_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_line_item_user_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "category_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_line_item_category"
+        },
+        {
+          "columns": [
+            "date"
+          ],
+          "method": "BTREE",
+          "name": "idx_line_item_date"
+        },
+        {
+          "columns": [
+            "search_text"
+          ],
+          "method": "GIN",
+          "name": "idx_line_item_search_trgm",
+          "opclass": "gin_trgm_ops"
+        }
+      ],
+      "kind": "entity",
+      "name": "line_item",
+      "origin": "LineItem",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "line_item_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Note.id",
+          "type": "UUID"
+        },
+        {
+          "name": "line_item_id",
+          "origin": "Note.lineItem",
+          "type": "UUID"
+        },
+        {
+          "name": "content",
+          "origin": "Note.content",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Note.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Note.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A note on a line item, soft-deleted when withdrawn. A line item's notes\nload through the relation that points at it, with no field of its own.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "line_item_id"
+          ],
+          "name": "fk_note_line_item_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "line_item"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "line_item_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_note_line_item"
+        }
+      ],
+      "kind": "entity",
+      "name": "note",
+      "origin": "Note",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Provider.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Provider.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "slug",
+          "origin": "Provider.slug",
+          "type": "CITEXT"
+        }
+      ],
+      "comment": "The bank or card issuer an account is held at.",
+      "kind": "entity",
+      "name": "provider",
+      "origin": "Provider",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "provider_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "provider_slug_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "User.id",
+          "type": "UUID"
+        },
+        {
+          "name": "email",
+          "origin": "User.email",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "User.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "User.createdAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A household's finances, as the dashboard of a finance app reads them\n(D90): line items on accounts, each at a provider, filed under a\ncategory and its parent, a business and a person, with notes. A read\nincludes a line item's relations, a filter reaches through them, and a\nprojection reads the same rows flat.\nA person of the household.",
+      "kind": "entity",
+      "name": "user",
+      "origin": "User",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "user_email_key"
+        }
+      ]
+    }
+  ],
+  "version": 1,
+  "views": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "date",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "name",
+          "type": "TEXT"
+        },
+        {
+          "name": "description",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "amount",
+          "type": "BIGINT"
+        },
+        {
+          "name": "account_id",
+          "type": "UUID"
+        },
+        {
+          "name": "account_name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "provider_name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "category_id",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "category_name",
+          "nullable": true,
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "category_color",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "parent_category_id",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "parent_category_name",
+          "nullable": true,
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "business_id",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "business_name",
+          "nullable": true,
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "user_name",
+          "nullable": true,
+          "type": "VARCHAR(80)"
+        }
+      ],
+      "definition": [
+        "CREATE VIEW transaction_list WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.id,\n  base.\"date\",\n  base.\"name\",\n  base.description,\n  base.amount,\n  base.account_id,\n  account.\"name\" AS account_name,\n  provider.\"name\" AS provider_name,\n  base.category_id,\n  category.\"name\" AS category_name,\n  category.color AS category_color,\n  category.parent_id AS parent_category_id,\n  parent.\"name\" AS parent_category_name,\n  base.business_id,\n  business.\"name\" AS business_name,\n  base.user_id,\n  person.\"name\" AS user_name\nFROM line_item AS base\n  INNER JOIN account AS account ON base.account_id = account.id\n  INNER JOIN provider AS provider ON account.provider_id = provider.id\n  LEFT JOIN category AS category ON base.category_id = category.id\n  LEFT JOIN category AS parent ON category.parent_id = parent.id\n  LEFT JOIN business AS business ON base.business_id = business.id\n  LEFT JOIN \"user\" AS person ON base.user_id = person.id\n",
+        "COMMENT ON VIEW transaction_list IS 'The dashboard''s transaction list, flat (D90): a line item with its account and provider, its category and that category''s parent, its business and its person, as one row. A plain view in the service''s own schema, which binds no session setting, read through the ORMs'' read-only repository.'"
+      ],
+      "name": "transaction_list",
+      "origin": "TransactionListRow",
+      "reads": [
+        {
+          "column": "id",
+          "table": "account"
+        },
+        {
+          "column": "name",
+          "table": "account"
+        },
+        {
+          "column": "provider_id",
+          "table": "account"
+        },
+        {
+          "column": "id",
+          "table": "business"
+        },
+        {
+          "column": "name",
+          "table": "business"
+        },
+        {
+          "column": "color",
+          "table": "category"
+        },
+        {
+          "column": "id",
+          "table": "category"
+        },
+        {
+          "column": "name",
+          "table": "category"
+        },
+        {
+          "column": "parent_id",
+          "table": "category"
+        },
+        {
+          "column": "account_id",
+          "table": "line_item"
+        },
+        {
+          "column": "amount",
+          "table": "line_item"
+        },
+        {
+          "column": "business_id",
+          "table": "line_item"
+        },
+        {
+          "column": "category_id",
+          "table": "line_item"
+        },
+        {
+          "column": "date",
+          "table": "line_item"
+        },
+        {
+          "column": "description",
+          "table": "line_item"
+        },
+        {
+          "column": "id",
+          "table": "line_item"
+        },
+        {
+          "column": "name",
+          "table": "line_item"
+        },
+        {
+          "column": "user_id",
+          "table": "line_item"
+        },
+        {
+          "column": "id",
+          "table": "provider"
+        },
+        {
+          "column": "name",
+          "table": "provider"
+        },
+        {
+          "column": "id",
+          "table": "user"
+        },
+        {
+          "column": "name",
+          "table": "user"
+        }
+      ],
+      "schema": ""
+    }
+  ]
+}

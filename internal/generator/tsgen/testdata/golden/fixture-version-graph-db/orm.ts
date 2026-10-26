@@ -69,9 +69,9 @@ export interface CoverFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly CoverFilter[];
@@ -216,9 +216,9 @@ export interface IngredientFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly IngredientFilter[];
@@ -361,9 +361,9 @@ export interface NoteFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly NoteFilter[];
@@ -681,11 +681,11 @@ export interface RecipeCommitFilter {
   referencedByRecipeReleaseCommit?: ReferencedByFilter;
   /** The rows a RecipeSnapshotEntry row's commit points at, or none does. */
   referencedByRecipeSnapshotEntryCommit?: ReferencedByFilter;
-  /** The rows whose root is a Recipe row the filter finds (D90). */
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
   root?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
-  /** The rows whose parentCommit is a RecipeCommit row the filter finds; a row whose parentCommit is null is not among them (D90). */
+  /** The rows whose parentCommit is among the RecipeCommit rows the filter finds; a row whose parentCommit is null is not among them (D90). */
   parentCommit?: RecipeCommitFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeCommitFilter[];
@@ -851,7 +851,7 @@ export interface RecipePatchFilter {
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
   operation?: StringFilter<T.RecipePatchOperation>;
-  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipePatchFilter[];
@@ -1016,13 +1016,13 @@ export interface RecipeRefFilter {
   referencedByTastingRef?: ReferencedByFilter;
   /** The rows a Utensil row's ref points at, or none does. */
   referencedByUtensilRef?: ReferencedByFilter;
-  /** The rows whose root is a Recipe row the filter finds (D90). */
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
   root?: RecipeFilter;
-  /** The rows whose parentRef is a live RecipeRef row the filter finds; a row whose parentRef is null is not among them (D90). */
+  /** The rows whose parentRef is among the live RecipeRef rows the filter finds; a row whose parentRef is null is not among them (D90). */
   parentRef?: RecipeRefFilter;
-  /** The rows whose baseCommit is a RecipeCommit row the filter finds; a row whose baseCommit is null is not among them (D90). */
+  /** The rows whose baseCommit is among the RecipeCommit rows the filter finds; a row whose baseCommit is null is not among them (D90). */
   baseCommit?: RecipeCommitFilter;
-  /** The rows whose headCommit is a RecipeCommit row the filter finds; a row whose headCommit is null is not among them (D90). */
+  /** The rows whose headCommit is among the RecipeCommit rows the filter finds; a row whose headCommit is null is not among them (D90). */
   headCommit?: RecipeCommitFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeRefFilter[];
@@ -1196,9 +1196,9 @@ export interface RecipeReleaseFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   _version?: NumberFilter<number>;
-  /** The rows whose root is a Recipe row the filter finds (D90). */
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
   root?: RecipeFilter;
-  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeReleaseFilter[];
@@ -1335,7 +1335,7 @@ export interface RecipeSnapshotEntryFilter {
   entityKey?: UuidFilter<T.IdentityUUID>;
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
-  /** The rows whose commit is a RecipeCommit row the filter finds (D90). */
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeSnapshotEntryFilter[];
@@ -1489,9 +1489,9 @@ export interface StepFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly StepFilter[];
@@ -1682,9 +1682,9 @@ export interface TastingFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly TastingFilter[];
@@ -1834,9 +1834,9 @@ export interface UtensilFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
-  /** The rows whose recipe is a Recipe row the filter finds (D90). */
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
   recipe?: RecipeFilter;
-  /** The rows whose ref is a live RecipeRef row the filter finds (D90). */
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly UtensilFilter[];

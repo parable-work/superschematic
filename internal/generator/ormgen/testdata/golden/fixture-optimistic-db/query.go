@@ -914,9 +914,9 @@ type StockFilter struct {
 	Version    *Int64Filter
 	// ShelfID allows filtering by foreign key
 	ShelfID *UUIDFilter
-	// Shelf keeps the rows whose shelf is a live Shelf row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Shelf rows it finds.
+	// Shelf keeps the rows whose shelf is among the live Shelf rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Shelf *ShelfFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other

@@ -1343,9 +1343,9 @@ type SessionFilter struct {
 	RevokedAt  *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
-	// User keeps the rows whose user is a User row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// User rows it finds.
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	User *UserFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -1991,9 +1991,9 @@ type UserCredentialFilter struct {
 	PendingAt         *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
-	// User keeps the rows whose user is a User row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// User rows it finds.
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	User *UserFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -2339,13 +2339,13 @@ type UserRoleGrantFilter struct {
 	UserID *UUIDFilter
 	// RoleID allows filtering by foreign key
 	RoleID *UUIDFilter
-	// User keeps the rows whose user is a User row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// User rows it finds.
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	User *UserFilter
-	// Role keeps the rows whose role is a Role row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Role rows it finds.
+	// Role keeps the rows whose role is among the Role rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Role *RoleFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other

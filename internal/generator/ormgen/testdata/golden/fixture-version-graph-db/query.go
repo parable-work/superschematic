@@ -3052,13 +3052,13 @@ type CoverFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -3391,13 +3391,13 @@ type IngredientFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -3790,13 +3790,13 @@ type NoteFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -4457,17 +4457,17 @@ type RecipeCommitFilter struct {
 	RefID *UUIDFilter
 	// ParentCommitID allows filtering by foreign key
 	ParentCommitID *UUIDFilter
-	// Root keeps the rows whose root is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Root *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
-	// ParentCommit keeps the rows whose parentCommit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds, so a row whose parentCommit is null is not kept.
+	// ParentCommit keeps the rows whose parentCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose parentCommit is null is not kept.
 	ParentCommit *RecipeCommitFilter
 	// ReferencedByRecipeCommitParentCommit filters on the presence or absence of a
 	// RecipeCommit whose parentCommit points at this row.
@@ -5018,9 +5018,9 @@ type RecipePatchFilter struct {
 	Operation     *StringFilter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
-	// Commit keeps the rows whose commit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds.
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Commit *RecipeCommitFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -5364,21 +5364,21 @@ type RecipeRefFilter struct {
 	BaseCommitID *UUIDFilter
 	// HeadCommitID allows filtering by foreign key
 	HeadCommitID *UUIDFilter
-	// Root keeps the rows whose root is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Root *RecipeFilter
-	// ParentRef keeps the rows whose parentRef is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds, so a row whose parentRef is null is not kept.
+	// ParentRef keeps the rows whose parentRef is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose parentRef is null is not kept.
 	ParentRef *RecipeRefFilter
-	// BaseCommit keeps the rows whose baseCommit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds, so a row whose baseCommit is null is not kept.
+	// BaseCommit keeps the rows whose baseCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose baseCommit is null is not kept.
 	BaseCommit *RecipeCommitFilter
-	// HeadCommit keeps the rows whose headCommit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds, so a row whose headCommit is null is not kept.
+	// HeadCommit keeps the rows whose headCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose headCommit is null is not kept.
 	HeadCommit *RecipeCommitFilter
 	// ReferencedByCoverRef filters on the presence or absence of a
 	// Cover whose ref points at this row.
@@ -5990,13 +5990,13 @@ type RecipeReleaseFilter struct {
 	RootID *UUIDFilter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
-	// Root keeps the rows whose root is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Root *RecipeFilter
-	// Commit keeps the rows whose commit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds.
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Commit *RecipeCommitFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -6331,9 +6331,9 @@ type RecipeSnapshotEntryFilter struct {
 	EntityVersion *Int64Filter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
-	// Commit keeps the rows whose commit is a RecipeCommit row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeCommit rows it finds.
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Commit *RecipeCommitFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -6644,13 +6644,13 @@ type StepFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -7211,13 +7211,13 @@ type TastingFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
@@ -7938,13 +7938,13 @@ type UtensilFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
-	// Recipe keeps the rows whose recipe is a Recipe row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Recipe rows it finds.
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Recipe *RecipeFilter
-	// Ref keeps the rows whose ref is a live RecipeRef row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// RecipeRef rows it finds.
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
 	Ref *RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other

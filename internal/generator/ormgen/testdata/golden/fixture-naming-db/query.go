@@ -1050,9 +1050,9 @@ type LineItemFilter struct {
 	UpdatedAt   *DateTimeFilter
 	// CategoryID allows filtering by foreign key
 	CategoryID *UUIDFilter
-	// Category keeps the rows whose category is a Category row the
-	// filter finds (D90): one condition, the foreign key in the keys of the
-	// Category rows it finds, so a row whose category is null is not kept.
+	// Category keeps the rows whose category is among the Category rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose category is null is not kept.
 	Category *CategoryFilter
 	// SearchText keeps the rows whose search fields hold each of its words,
 	// in any case (D62): its runs of characters that are not White_Space,

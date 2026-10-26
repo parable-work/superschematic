@@ -38,3 +38,31 @@ func TestAPIViewSourcedFromAProjection(t *testing.T) {
 		{name: "fixture-finances-api", schema: api, deps: map[string]*ir.Schema{"fixture-finances-db": db}},
 	})
 }
+
+// TestASettingBoundProjectionHasARepository type-checks fixture-projection's
+// package (D90): AppPreference's view binds session settings and collapses
+// by slotKey, its key, and its repository reads an enum, a JSON value, a
+// list and nullable columns as a table's does.
+func TestASettingBoundProjectionHasARepository(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-projection"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := `import type { AppPreference, AppPreferenceSortField, FixtureProjectionOrm } from './orm';
+
+declare const orm: FixtureProjectionOrm;
+
+export async function preferences(): Promise<AppPreference[]> {
+  return orm.transaction(async tx => {
+    await tx.exec("SELECT set_config('app.account_id', $1, true)", ['0f8b6c4e-1b2a-4c3d-9e8f-123456789abc']);
+    const sort: AppPreferenceSortField = 'slotKey';
+    const page = await tx.appPreference.findPage({ scope: { in: ['user' as never] }, branchName: { isNull: true } }, { sort: { field: sort } });
+    return page.rows;
+  });
+}
+`
+	buildTSPackages(t, []tsPackageCase{{name: "fixture-projection", schema: schema, extra: map[string]string{"projection.check.ts": check}}})
+}

@@ -42,7 +42,7 @@ type ProjectionRepository struct {
 // Comment is the row struct's doc comment: what it is, then the class's
 // comment, each line commented.
 func (p ProjectionRepository) Comment() string {
-	out := "// " + p.TypeName + " is a row of the " + p.Relation + " view, the " + p.TypeName + " projection (D90)."
+	out := "// " + p.TypeName + " is a row of the " + p.Relation + " view (D90)."
 	if p.Doc != "" {
 		out += "\n//"
 		for _, line := range strings.Split(p.Doc, "\n") {

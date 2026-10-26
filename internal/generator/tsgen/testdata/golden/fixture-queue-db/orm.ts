@@ -179,9 +179,9 @@ export interface OrderLineFilter {
   productId?: UuidFilter<T.IdentityUUID> & NullFilter;
   quantity?: NumberFilter<T.GenericInt64>;
   note?: StringFilter<string> & NullFilter;
-  /** The rows whose order is a Order row the filter finds (D90). */
+  /** The rows whose order is among the Order rows the filter finds (D90). */
   order?: OrderFilter;
-  /** The rows whose product is a Product row the filter finds; a row whose product is null is not among them (D90). */
+  /** The rows whose product is among the Product rows the filter finds; a row whose product is null is not among them (D90). */
   product?: ProductFilter;
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly OrderLineFilter[];
