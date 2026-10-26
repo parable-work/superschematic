@@ -477,6 +477,8 @@ pub struct TicketComments {
     pub threads: TicketCommentsThreads,
     /// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
     pub composing: Vec<String>,
+    /// The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+    pub unread: i64,
 }
 
 /// TicketCommentsThreads types TicketComments.threads.

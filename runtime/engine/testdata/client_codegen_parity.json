@@ -160,7 +160,8 @@
                   "action"
                 ],
                 "maxBodyLength": 2000,
-                "resolvePermission": "tasks.resolve"
+                "resolvePermission": "tasks.resolve",
+                "deliverPermission": "tasks.deliver"
               }
             },
             {

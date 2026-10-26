@@ -199,6 +199,8 @@ export interface TicketBehaviors {
     readonly threads: { open: number; resolved: number };
     /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
     readonly composing: string[];
+    /** The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here. */
+    readonly unread: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */

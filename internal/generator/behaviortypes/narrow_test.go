@@ -131,3 +131,35 @@ func TestCommentsComposingAndSignals(t *testing.T) {
 		t.Errorf("draft's data requires %v", required)
 	}
 }
+
+// Comments' unread field is the reader's count, always there (D77, step 3);
+// a message's stand and listMessages' readUpTo are optional, as declared.
+func TestCommentsReadState(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Comments")
+	target := Target{Schema: "notes", Base: "Note", Document: ir.NewSchema("notes", ir.SchemaKindGeneral), Instance: &ir.TypeDef{Name: "Note"}}
+	n, err := Narrow(declaration, nil, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unread := n.Fields["unread"]
+	var r TSRenderer
+	if got := r.Render(WithoutDescription(unread.Schema), ""); !unread.Present || got != "number" {
+		t.Errorf("unread is %s (present %v), want a number on every read", got, unread.Present)
+	}
+	var message map[string]any
+	for _, alias := range n.Aliases {
+		if alias.Name == "NoteCommentMessage" {
+			message, _ = alias.Schema.(map[string]any)
+		}
+	}
+	if properties, _ := message["properties"].(map[string]any); properties["stand"] == nil {
+		t.Errorf("NoteCommentMessage has no stand: %v", message)
+	}
+	if required, _ := message["required"].([]any); slices.Contains(required, any("stand")) {
+		t.Error("a message's stand is required; a composing message has none")
+	}
+	if _, err := at(n.Results["listMessages"], "properties", "readUpTo"); err != nil {
+		t.Errorf("listMessages: %v", err)
+	}
+}
