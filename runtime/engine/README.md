@@ -5095,8 +5095,8 @@ name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
 tool's handle is authored with `@mcp`; the engine derives one from the
 same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
-tools derive, or an engine tool's hides the tool with its reason in
-`hiddenReason`; the engine's tools keep theirs. A tool the access policy
+tools derive, or an engine tool's hides the tool (`hiddenBy` `handle`,
+below); the engine's tools keep theirs. A tool the access policy
 refuses the principal is hidden too, with that reason: a schema's tool
 asks what its call asks, and `define_schema` and the namespace tools,
 which name their schema or namespace only when called, ask a listing
@@ -5118,8 +5118,11 @@ the deployment hides is offered to no one, and the filter is asked only
 of a tool nothing else hides.
 
 ```json
-{"hidden": true, "hiddenReason": "the access policy refuses reader write on Item", "hiddenBy": ["policy", "handle"]}
-``` `requiresAuth` is
+{"hidden": true, "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)", "hiddenBy": ["policy", "handle"]}
+```
+
+Here the handle, `supplier_contract_amendment_request_withdraw_sign_off`,
+has 53 characters. A tool's `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance

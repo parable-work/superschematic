@@ -566,7 +566,17 @@ a policy for each of `Payments.openPayment`, `capturePayment`,
 calls them through the API or in-process, and no agent is offered them.
 A hidden tool reads `hidden: true` with its reason, and a call by its
 MCP handle is a tool the namespace does not have; the operation itself
-still runs through the engine's API.
+still runs through the engine's API. The build refuses a name no
+composed behavior declares, and the engine document adds, wherever
+`Payments` is composed, its service operations: `listPaymentActions` and
+`recordPaymentEvent`, which a provider's adapter calls, and
+`settleRefundFor`, which a refunded instance calls on its refund. An
+engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
+is given. Three generated servers, in Go, Rust and TypeScript, list the
+same tools with the same policies over one commerce database
+(`TestCommerceServersAnswerOneScriptAlike`), and
+[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
+says why each of these operations asks.
 
 The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
 the generators' `tools/schema.json` does not write: each cause the
@@ -590,18 +600,9 @@ engine found, in this order, and `hiddenReason` is the first one's.
 
 A tool hidden by `deployment` and `handle` keeps the deployment's reason.
 A client that shows the engine's operations outside MCP, as the Topcoat
-console does, offers one hidden by `handle` alone and refuses one hidden
-by `policy` or `archived`. The build refuses a name no
-composed behavior declares, and the engine document adds, wherever
-`Payments` is composed, its service operations: `listPaymentActions` and
-`recordPaymentEvent`, which a provider's adapter calls, and
-`settleRefundFor`, which a refunded instance calls on its refund. An
-engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
-is given. Three generated servers, in Go, Rust and TypeScript, list the
-same tools with the same policies over one commerce database
-(`TestCommerceServersAnswerOneScriptAlike`), and
-[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
-says why each of these operations asks.
+console does, offers one hidden by `handle` (or `filter`) alone, drops
+one hidden by `deployment`, and refuses any other.
+
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under
@@ -659,7 +660,7 @@ A distribution's own invocation policy is
 | Field | Core default | Rule |
 | --- | --- | --- |
 | `Extension` | | the registering extension; required |
-| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`) |
+| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`), nor `hiddenBy`, which the engine's hidden record uses |
 | `Values` | `auto`, `ask` | at least one; lowercase letters, digits, `_` and `-`, starting with a letter; each once; in the order `tools/index.ts` lists them |
 | `Default` | `auto` | one of `Values` |
 

@@ -90,7 +90,7 @@ func TestTheConsolePagesTheEngine(t *testing.T) {
 	t.Run("pages", func(t *testing.T) {
 		cargoTestCrateWith(t, engineService, enginePagesAppTest, crateOptions{
 			before:  map[string]map[string]any{engineDatabase: engineDatabaseHiding("Approvals.listSignOffs")},
-			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest},
+			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest + toolOfferTest},
 		})
 	})
 }
@@ -149,6 +149,34 @@ pub async fn panel_form_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         operation_form(schema: "Note".to_owned(), id: Some(id), seq: None, operation: post, values: values, hidden: vec!["thread".to_owned()])
     })
+}
+`
+
+// toolOfferTest, appended to engine_pages.rs, holds tool_offer to the
+// engine's hiddenBy: a tool hidden for MCP's limits alone is offered, the
+// deployment's is none, and every other cause, a missing list, an empty
+// one or a cause the pages do not know is refused, so the pages fail
+// closed.
+const toolOfferTest = `
+#[cfg(test)]
+mod tool_offer_tests {
+    use super::{Offer, tool_offer};
+    use serde_json::json;
+
+    #[test]
+    fn a_tool_is_offered_only_when_mcps_limits_alone_hide_it() {
+        let refused = |reason: &str| Some(Offer::Refused(reason.to_owned()));
+        assert_eq!(tool_offer(&json!({"hidden": false, "handle": "note_post"})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "its MCP handle", "hiddenBy": ["handle"]})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "a filter", "hiddenBy": ["filter"]})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "tools.hidden", "hiddenBy": ["deployment", "handle"]})), None);
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "the policy", "hiddenBy": ["policy", "handle"]})), refused("the policy"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "archived", "hiddenBy": ["archived"]})), refused("archived"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "a quota", "hiddenBy": ["quota", "handle"]})), refused("a quota"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "no list"})), refused("no list"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "empty", "hiddenBy": []})), refused("empty"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenBy": [7]})), refused("The engine does not offer this operation"));
+    }
 }
 `
 

@@ -604,6 +604,7 @@ describe('invocation policies', () => {
   test("the tool options are checked as the compiler's registry checks them", () => {
     const refusal = (tools: TestEngineOptions['tools']) => thrown(() => openTestEngine({ tools }), TypeError).message;
     assert.match(refusal({ invocationPolicy: { key: 'handle', values: ['auto'], default: 'auto' } }), /key "handle" is a key @mcp already uses/);
+    assert.match(refusal({ invocationPolicy: { key: 'hiddenBy', values: ['auto'], default: 'auto' } }), /key "hiddenBy" is a key @mcp already uses/);
     assert.match(refusal({ invocationPolicy: { key: '9lives', values: ['auto'], default: 'auto' } }), /must be a letter followed by/);
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: [], default: 'auto' } }), /lists no values/);
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: ['Never', 'never', 'never'], default: 'always' } }), /"Never" must be lowercase.*never is listed twice.*default "always" is not one of/);

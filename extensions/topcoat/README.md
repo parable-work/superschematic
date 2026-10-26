@@ -1753,7 +1753,9 @@ lacks, or the deployment hides (`deployment`, from
 (`policy`) or that writes in an archived namespace (`archived`) is 403
 with the engine's reason, and one the engine hides from MCP alone, for a
 handle MCP would refuse (`handle`), is offered. The engine asks the
-policy of that one too, so a caller it refuses has no form.
+policy of that one too, so a caller it refuses has no form. A hidden
+tool whose causes the console does not know, or that lists none, is
+refused: the console fails closed.
 
 | The engine refuses | The page answers |
 | --- | --- |

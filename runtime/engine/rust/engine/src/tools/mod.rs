@@ -520,9 +520,18 @@ impl<'e> Tools<'e> {
         check_principal(principal)?;
         let namespace = self.engine.namespaces().resolve(target.namespace)?;
         let tools = self.tool_set(principal, &namespace)?;
+        // Whether the namespace is archived is read once for the document,
+        // not once per tool that writes.
+        let archived = self.engine.namespaces().archived(&namespace)?;
         let mut definitions = Vec::new();
         for tool in &tools {
-            definitions.push(self.definition(principal, &namespace, tool, target.filter)?);
+            definitions.push(self.definition(
+                principal,
+                &namespace,
+                archived,
+                tool,
+                target.filter,
+            )?);
         }
         let mut out = Map::new();
         out.insert("$schema".into(), Value::from(TOOL_SCHEMA));
@@ -1253,10 +1262,12 @@ impl<'e> Tools<'e> {
     // its operation is still offered through the API; the filter only of a
     // tool nothing else hides. A hidden tool's `hiddenBy` lists each cause
     // in [`HiddenBy`]'s order, and `hiddenReason` is the first one's.
+    // `archived` is whether the namespace is archived.
     fn definition(
         &self,
         principal: &Principal,
         namespace: &str,
+        archived: bool,
         tool: &ToolSpec,
         filter: Option<&dyn ToolFilter>,
     ) -> Result<Value> {
@@ -1265,7 +1276,7 @@ impl<'e> Tools<'e> {
         let guidance = self.tool_guidance(tool)?;
         let mut hidden = tool.hidden.clone();
         if !hidden.iter().any(|(by, _)| *by == HiddenBy::Deployment) {
-            hidden.extend(self.refusal(principal, namespace, tool)?);
+            hidden.extend(self.refusal(principal, namespace, archived, tool));
         }
         if hidden.is_empty()
             && filter.is_some_and(|filter| !filter.keeps(principal, &tool.summary(), namespace))
@@ -1340,33 +1351,32 @@ impl<'e> Tools<'e> {
     }
 
     // refusal is why the policy hides a tool from the principal: the
-    // namespace is archived, or the access policy refuses the call.
+    // namespace is archived (`archived`, read once per document), or the
+    // access policy refuses the call.
     fn refusal(
         &self,
         principal: &Principal,
         namespace: &str,
+        archived: bool,
         tool: &ToolSpec,
-    ) -> Result<Option<(HiddenBy, String)>> {
+    ) -> Option<(HiddenBy, String)> {
         let engine = self.engine;
-        if tool.writes
-            && !tool.kind.acts_on_namespaces()
-            && engine.namespaces().archived(namespace)?
-        {
-            return Ok(Some((
+        if tool.writes && !tool.kind.acts_on_namespaces() && archived {
+            return Some((
                 HiddenBy::Archived,
                 format!(
                     "namespace {namespace} is archived: it refuses every write until it is unarchived"
                 ),
-            )));
+            ));
         }
         if let Some((action, operation)) = tool.kind.listing() {
             if engine
                 .access
                 .allows_listing(principal, action, namespace, operation)
             {
-                return Ok(None);
+                return None;
             }
-            return Ok(Some((
+            return Some((
                 HiddenBy::Policy,
                 format!(
                     "the access policy refuses {} {}",
@@ -1377,10 +1387,10 @@ impl<'e> Tools<'e> {
                             format!("{} ({}) of namespaces", action.as_str(), operation.as_str()),
                     }
                 ),
-            )));
+            ));
         }
         let Some(record) = tool.record() else {
-            return Ok(None);
+            return None;
         };
         let action = if tool.writes {
             SchemaAction::Write
@@ -1393,9 +1403,9 @@ impl<'e> Tools<'e> {
             .access
             .allows_operation(principal, action, namespace, &record.name, operation)
         {
-            return Ok(None);
+            return None;
         }
-        Ok(Some((
+        Some((
             HiddenBy::Policy,
             format!(
                 "the access policy refuses {} {} on {}{}",
@@ -1404,7 +1414,7 @@ impl<'e> Tools<'e> {
                 record.name,
                 operation.map_or(String::new(), |operation| format!(" ({operation})"))
             ),
-        )))
+        ))
     }
 
     // arguments is a tool's argument schema, with the vendor keys at its

@@ -1198,6 +1198,8 @@ fn the_tool_options_are_checked_as_the_compilers_registry_checks_them() {
     };
     assert!(refusal_of(policy("handle", &["auto"], "auto"))
         .contains("key \"handle\" is a key @mcp already uses"));
+    assert!(refusal_of(policy("hiddenBy", &["auto"], "auto"))
+        .contains("key \"hiddenBy\" is a key @mcp already uses"));
     assert!(
         refusal_of(policy("9lives", &["auto"], "auto")).contains("must be a letter followed by")
     );
