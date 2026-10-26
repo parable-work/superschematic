@@ -628,7 +628,7 @@ func (c ORMColumn) Flags() string {
 	}
 	flag(c.Sortable, "sortable")
 	if c.Dimensions > 0 {
-		b.WriteString(fmt.Sprintf(", dimensions: %d", c.Dimensions))
+		fmt.Fprintf(&b, ", dimensions: %d", c.Dimensions)
 	}
 	return b.String()
 }
