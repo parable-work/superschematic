@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "2d414850cabc252279dbcb84f32afb3061d52c495cf560d9106c99c0710ee8a8",
+  "hash": "4981636de267557920defeff5fa08862233e322bf7fbb366b87983b1b3c6a17a",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/column/ship_to",
+          "reason": "The change rewrites order and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/order/column/ship_to"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/ship_to",
+          "reason": "Order.shipTo changes from TEXT to JSONB: servers built from the previous version still read and write TEXT.",
+          "subject": "table/order/column/ship_to"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/ship_to",
+          "reason": "Order.shipTo changes from TEXT to JSONB: the cast fails on a value JSONB cannot hold.",
+          "subject": "table/order/column/ship_to"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\"\n  ALTER COLUMN ship_to TYPE JSONB USING ship_to::JSONB"
+      ],
+      "subject": "table/order/column/ship_to",
+      "transactional": true
+    }
+  ],
+  "to": "b1c6264a6d9791918254baf646827e764da1be71a78f41cd1194132f2c1c5300",
+  "toModel": null,
+  "version": 1
+}

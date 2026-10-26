@@ -72,8 +72,9 @@ var queueParitySubtests = []string{
 //     at a time, the messages the other two completed past the retention,
 //     and leaves one done within it and a dead one;
 //   - UnreadableRowFailsAlone: for each side, a claim of a good message and
-//     a row whose JSON column holds no JSON returns the good one and fails
-//     the other alone, recording Unreadable, so the batch is not stranded;
+//     a row whose JSON column holds no address returns the good one and
+//     fails the other alone, recording Unreadable, so the batch is not
+//     stranded;
 //   - Base62UUIDsGoHyphenated: each side enqueues a message whose UUID is
 //     base62, which every side writes hyphenated and reads back as the same
 //     UUID;
@@ -1190,10 +1191,12 @@ func TestQueueParity(t *testing.T) {
 }
 
 // testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL
-// writes a row whose ship_to, a JSON column, holds no JSON. The side's
-// claim of both returns the good message alone; the bad row, claimed and
-// unread, is failed with Unreadable and why, ready again after one
-// attempt, and its batch is not stranded.
+// writes a row whose ship_to, a JSON column, holds no address: on
+// Postgres, whose JSONB column refuses text that is not JSON (D83), a JSON
+// string; on SQLite, text that is not JSON. The side's claim of both
+// returns the good message alone; the bad row, claimed and unread, is
+// failed with Unreadable and why, ready again after one attempt, and its
+// batch is not stranded.
 func testUnreadableRowFailsAlone(t *testing.T) {
 	for _, name := range []string{"Go", "TypeScript", "Rust"} {
 		t.Run(name, func(t *testing.T) {
@@ -1202,7 +1205,7 @@ func testUnreadableRowFailsAlone(t *testing.T) {
 			const good, bad = "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e", "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
 			s.enqueue(orderJSON(good))
 			p.exec(p.dialectSQL(
-				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ($1::uuid, 'low', 1, '{not json')",
+				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ($1::uuid, 'low', 1, '\"no address\"')",
 				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES (?1, 'low', 1, '{not json')",
 			), bad)
 			claims := s.claim(5)

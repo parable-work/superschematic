@@ -68,6 +68,14 @@ go build -trimpath -buildvcs=false -o ../../bin/superschematic .
 static archive, so it runs without `CGO_LDFLAGS`; compiling the Go code it
 generates still needs them (above).
 
+`make cli` builds the binary, and the migration runner beside it, with no
+Rust toolchain: where `cargo` is missing, `scripts/superscalar-dep.sh`
+downloads superscalar's archive prebuilt, checks it against the digest
+the checkout pins, and stages it where the build expects it (D82;
+[a TypeScript project without Rust](/superschematic/install/typescript/#a-typescript-project-without-rust)).
+`scripts/versiongraph-archive.sh` does the same for the version-graph
+core's archive.
+
 ## Write a schema
 
 A schemas root holds `superschematic.toml` and one directory per service

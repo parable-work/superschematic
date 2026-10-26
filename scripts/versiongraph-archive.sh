@@ -11,7 +11,14 @@
 #
 # Usage:
 #   scripts/versiongraph-archive.sh            # build and stage, print the -L flag
+#   scripts/versiongraph-archive.sh --prebuilt # download it prebuilt and stage it
 #   scripts/versiongraph-archive.sh --print    # print the -L flag only
+#
+# --prebuilt builds nothing and needs no Rust (D82): it downloads the
+# archive the prebuilt-deps workflow built from these sources with
+# RUST_VERSION, checks it against the manifest prebuilt.pin pins, and
+# stages it and its stamp as a build does (scripts/prebuilt_deps.py).
+# Without cargo on PATH, a run with no argument does the same.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,10 +30,14 @@ goos="$(go env GOOS)"
 goarch="$(go env GOARCH)"
 DEST="$GO_DIR/lib/${goos}_${goarch}"
 
+prebuilt=0
 case "${1:-}" in
   --print)
     echo "-L$DEST"
     exit 0
+    ;;
+  --prebuilt)
+    prebuilt=1
     ;;
   "")
     ;;
@@ -35,6 +46,15 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+if [ "$prebuilt" = "0" ] && ! command -v cargo >/dev/null 2>&1; then
+  echo "versiongraph-archive: cargo is not on PATH, so the archive comes prebuilt (D82)" >&2
+  prebuilt=1
+fi
+if [ "$prebuilt" = "1" ]; then
+  python3 "$ROOT/scripts/prebuilt_deps.py" fetch versiongraph --only versiongraph-archive
+  echo "-L$DEST"
+  exit 0
+fi
 
 # Go binaries link this archive beside superscalar's, so both are built
 # with tools.env's RUST_VERSION (scripts/superscalar-dep.sh says why).

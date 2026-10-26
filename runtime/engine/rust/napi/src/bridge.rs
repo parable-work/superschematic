@@ -1611,6 +1611,10 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
                 operation.unchanged();
                 Ok(None)
             }
+            "signal" => {
+                operation.signal(text(args, 0), arg(args, 1))?;
+                Ok(None)
+            }
             _ => Err(refused()),
         }
     }

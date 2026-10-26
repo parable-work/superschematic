@@ -10,7 +10,7 @@
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the operations @paginated cannot page, the service
 // clauses an operation cannot take,
-// @index placement and keys, each type's
+// @index placement, keys and options, @rawSql's placement and SQL, each type's
 // behaviors against their declarations, each type's @display against the
 // type and its Workflow, each RefersTo against its target and the
 // operation that lists it, each SearchQuery against its operation, each
@@ -239,6 +239,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
+	checkIndexOptions(schema, r)
+	checkRawSQL(schema, r)
 	checkSearchColumns(schema, r)
 	reg := in.registry()
 	checkBehaviors(schema, reg, r)

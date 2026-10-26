@@ -1,5 +1,5 @@
 # superscalar checkout scripts/superscalar-dep.sh stands up at the pinned commit.
-third_party/
+/third_party
 
 # Go build output.
 *.test

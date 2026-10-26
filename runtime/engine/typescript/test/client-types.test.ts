@@ -47,6 +47,30 @@ export type Checks = [
   Holds<[ServiceTokenSource] extends [client.ServiceCredential['token']] ? true : false>,
 ];
 
+// subscriptions is never called: tsc holds what events.subscribe returns
+// for each kind of options. A subscription is typed to hand out signals
+// (D77) whenever its options may ask for them: `signals: true`, and a
+// `signals` known only as a boolean, which the server answers with
+// signals when it is true.
+export function subscriptions(events: client.EngineClient['events'], flag: boolean, options: client.SubscribeOptions): void {
+  type WithSignals = client.EventSubscription<client.StreamMessage | client.SignalMessage>;
+  const signals = events.subscribe({ signals: true });
+  const maybe = events.subscribe({ after: 'head', signals: flag });
+  const given = events.subscribe(options);
+  const none = events.subscribe({ signals: false });
+  const plain = events.subscribe({ after: 'head' });
+  const bare = events.subscribe();
+  const checks: [
+    Holds<Equal<typeof signals, WithSignals>>,
+    Holds<Equal<typeof maybe, WithSignals>>,
+    Holds<Equal<typeof given, WithSignals>>,
+    Holds<Equal<typeof none, client.EventSubscription>>,
+    Holds<Equal<typeof plain, client.EventSubscription>>,
+    Holds<Equal<typeof bare, client.EventSubscription>>,
+  ] = [true, true, true, true, true, true];
+  void checks;
+}
+
 test('the built client imports only its own modules', () => {
   const directory = new URL('../dist/client/', import.meta.url);
   const files = readdirSync(directory).filter((name) => name.endsWith('.js'));

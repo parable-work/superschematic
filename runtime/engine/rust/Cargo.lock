@@ -1777,6 +1777,8 @@ name = "superschematic-engine-addon"
 version = "0.0.0"
 dependencies = [
  "napi-build",
+ "serde_json",
+ "superschematic-engine",
  "superschematic-engine-behaviors",
  "superschematic-engine-commerce",
  "superschematic-engine-napi",

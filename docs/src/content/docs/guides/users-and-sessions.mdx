@@ -36,6 +36,12 @@ The rules, which the build checks in every schema form:
 - A role table has a `@unique` text `name` and a `permissions` list of
   strings.
 - Both tables have one `@key`.
+- Registration and the administration routes write a user's key, login
+  and name alone, so every other field of the `User` table is optional,
+  generated, a timestamp the DDL defaults to now, or has a `Default<T, V>`
+  its column carries: text, a number, a boolean or an enum member, such as
+  `active: Default<boolean, false>`
+  ([Columns](/superschematic/guides/database-tables/#columns)).
 
 A schema without the traits builds exactly as before.
 

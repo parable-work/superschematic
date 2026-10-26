@@ -204,7 +204,10 @@ for a map field inside an input type Go keys a value `field[key]` where
 TypeScript and Python key it `field.key`. A map argument is keyed
 `name[key]` in all three. The Python SDK checks with the generated types package,
 pydantic for the types and `validate_all` for the constraints, so it
-needs that package installed. The Rust SDK checks an input against the
+needs that package installed. A TypeScript SDK whose API sets
+`lazyValidation` loads its checks, and superscalar with them, on its first
+call, which keeps them out of a browser page's first load
+([static sites](/superschematic/guides/static-sites/#load-superscalar-on-the-first-call)). The Rust SDK checks an input against the
 schema before sending too, and fails with one `SDKError::Config` message
 that names each path.
 

@@ -12,7 +12,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -54,6 +56,10 @@ type Model struct {
 	// so a change to a member's content columns can be reported (the
 	// history hazard) with the graph's schema epoch.
 	Graphs []*Graph `json:"graphs,omitempty"`
+
+	// RawSQL is the raw SQL the schema declares for the dialect (@rawSql,
+	// D83), in the order it runs, which the schema alone decides.
+	RawSQL []*RawSQL `json:"rawSql,omitempty"`
 }
 
 // TableKind says what declared a table.
@@ -86,6 +92,9 @@ type Table struct {
 	Uniques     []*Constraint `json:"uniques,omitempty"`
 	ForeignKeys []*ForeignKey `json:"foreignKeys,omitempty"`
 	Indexes     []*Index      `json:"indexes,omitempty"`
+	// Checks are the CHECK constraints the fields' enums and Validate rules
+	// give their columns (D83).
+	Checks []*Check `json:"checks,omitempty"`
 
 	// PartitionBy is the partition clause of a partitioned table, as
 	// create.sql writes it after PARTITION BY ("RANGE (recorded_at)").
@@ -176,6 +185,62 @@ type Index struct {
 	Unique  bool   `json:"unique,omitempty"`
 	// Where is a partial index's predicate, without WHERE.
 	Where string `json:"where,omitempty"`
+	// Expression is the raw expression the index covers instead of its
+	// columns, which are then the columns of its keys (D83).
+	Expression string `json:"expression,omitempty"`
+	// InTransaction builds the index, on a table the plan does not create,
+	// inside its step's transaction rather than concurrently (D83).
+	InTransaction bool `json:"inTransaction,omitempty"`
+}
+
+// Check is a CHECK constraint over one column (D83): the values an enum
+// column holds, or the bounds of a Validate rule, ANDed. The dialect
+// renders its predicate (sqlutil.Check.Expression).
+type Check struct {
+	Name   string `json:"name"`
+	Column string `json:"column"`
+	// In lists the values an enum column holds, in declaration order. A
+	// plan widens an enum's check in expand and narrows it in contract.
+	In []string `json:"in,omitempty"`
+	// Min and Max bound a number column, MinLength and MaxLength a text
+	// column's length in characters.
+	Min       *float64 `json:"min,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	MinLength *int     `json:"minLength,omitempty"`
+	MaxLength *int     `json:"maxLength,omitempty"`
+}
+
+// spec is the check's rule as sqlutil renders it.
+func (c *Check) spec() sqlutil.Check {
+	return sqlutil.Check{Column: c.Column, In: c.In, Min: c.Min, Max: c.Max, MinLength: c.MinLength, MaxLength: c.MaxLength}
+}
+
+// sameRule reports whether two checks hold their columns to the same rule,
+// whatever the columns' names.
+func sameRule(a, b *Check) bool {
+	eqF := func(x, y *float64) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
+	eqI := func(x, y *int) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
+	return slices.Equal(a.In, b.In) && eqF(a.Min, b.Min) && eqF(a.Max, b.Max) && eqI(a.MinLength, b.MinLength) && eqI(a.MaxLength, b.MaxLength)
+}
+
+// RawSQL is a piece of raw SQL the schema declares (@rawSql, D83). A plan
+// runs it when it is new or its checksum changes, and its down when the
+// schema no longer declares it.
+type RawSQL struct {
+	ID string `json:"id"`
+	// Origin is the type that declares it.
+	Origin string `json:"origin,omitempty"`
+	// Position is where it runs: "tables", after the tables and before the
+	// indexes, or "indexes", after every object the schema declares.
+	Position string `json:"position"`
+	// After is the piece it runs right after, or empty.
+	After string `json:"after,omitempty"`
+	// Statements are the piece's statements and Down its down's, each
+	// without its semicolon.
+	Statements []string `json:"statements"`
+	Down       []string `json:"down,omitempty"`
+	// Checksum is the SHA-256 of the statements (sqlutil.StatementsChecksum).
+	Checksum string `json:"checksum"`
 }
 
 // Partition is a partition of a partitioned table.

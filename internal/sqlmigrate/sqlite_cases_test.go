@@ -355,7 +355,7 @@ func sqliteTypesSchema() *ir.Schema {
 func sqliteModelFixtures(t *testing.T) map[string]*ir.Schema {
 	t.Helper()
 	fixtures := map[string]*ir.Schema{"types-db": sqliteTypesSchema()}
-	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-user-model-db", "fixture-queue-db"} {
+	for _, name := range []string{"fixture-list-defaults-db", "fixture-nested-arrays-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db"} {
 		fixtures[name] = planCase{base: sqlgenFixtures + "/" + name}.load(t, nil)
 	}
 	fixtures["shop-db"] = planCase{}.load(t, sqliteShop)

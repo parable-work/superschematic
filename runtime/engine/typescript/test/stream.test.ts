@@ -552,5 +552,49 @@ for (const backend of backends) {
       await client.ended;
       assert.equal(engine.events.watching, 0);
     });
+
+    test('a stream with signals=1 sends each signal as an event with no id, and one without sends none', async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } }, { metaSchema: openMetaSchema(), behaviors: ['test.Chatter'] });
+      const chat = schemaDocument('Chat', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: { Chat: Record<string, unknown> } };
+      chat.types.Chat.behaviors = [{ name: 'test.Chatter' }];
+      await engine.schemas.define(alice, chat);
+      await engine.schemas.publish(alice, 'Chat');
+      await engine.instances.create(alice, 'Chat', { title: 'Desk' }, { id: 'c1' });
+      const signals = await open(`${base}/namespaces/default/events?after=head&signals=1`);
+      const plain = await open(`${base}/namespaces/default/events?after=head`);
+      await signals.until((frame) => frame.event === 'ready');
+      await plain.until((frame) => frame.event === 'ready');
+      const sent = await fetch(`${base}/namespaces/default/schemas/Chat/instances/c1/signals/test.Chatter/typing`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer bob', 'content-type': 'application/json' },
+        body: JSON.stringify({ thread: 1 }),
+      });
+      assert.equal(sent.status, 204);
+      assert.equal(await sent.text(), '');
+      const [signal] = (await signals.until((frame) => frame.event === 'signal')).filter((frame) => frame.event === 'signal');
+      assert.equal(signal?.id, undefined, 'a signal carries no id');
+      assert.deepEqual({ ...JSON.parse(signal?.data as string), at: 0 }, {
+        namespace: 'default',
+        schema: 'Chat',
+        instanceId: 'c1',
+        behavior: 'test.Chatter',
+        name: 'typing',
+        data: { thread: 1 },
+        from: 'bob',
+        at: 0,
+      });
+      // An operation's signal after its commit, beside its event; the
+      // stream without signals sends the event alone.
+      await engine.instances.invoke(alice, 'Chat', 'c1', 'draft', { text: 'hello' });
+      await signals.until((frame) => frame.event === 'signal' && frame.data?.includes('hello') === true);
+      await signals.until(() => signals.events().length === 1);
+      await plain.until(() => plain.events().length === 1);
+      assert.deepEqual(
+        plain.frames.filter((frame) => frame.event === 'signal'),
+        [],
+        'no signal without signals=1'
+      );
+      assert.equal(signals.lastId(), plain.lastId(), 'a signal moves no cursor');
+    });
   });
 }

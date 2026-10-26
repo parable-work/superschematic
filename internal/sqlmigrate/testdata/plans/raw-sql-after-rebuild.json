@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "76ca7144daa1af3af104dad916d96c1c0d9cd9afeb1bb0fe4caecde11923631b",
+  "hash": "f4308857946163309670dbf90ddec787a2c2983e42ee0d67ee09ba05349426f6",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "setDefault",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN total SET DEFAULT 0"
+      ],
+      "subject": "table/order/column/total",
+      "transactional": true
+    }
+  ],
+  "to": "a94432f130daf5729dbfd0a5cf705a1f4badfbb90528f9764e44edec538564b1",
+  "toModel": null,
+  "version": 1
+}

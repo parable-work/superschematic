@@ -243,6 +243,14 @@ type SDKOutput struct {
 	// LoginNamespace is the namespace whose login signs a user in, empty
 	// when the API has none.
 	LoginNamespace string
+
+	// LazyValidation loads the types package's validators and parsers, and
+	// superscalar's WebAssembly core with them, with a dynamic import on a
+	// namespace's first call rather than when the SDK is imported
+	// (outputs.sdk.typescript.lazyValidation, D82): a browser bundle that
+	// splits code carries them in a chunk of their own. The build sets it
+	// from the API's config.
+	LazyValidation bool
 }
 
 // Generate generates TypeScript SDK from API output.

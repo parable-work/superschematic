@@ -20,6 +20,54 @@ Until they are published, resolve them from the checkout (`packages/` and
 the superscalar TypeScript binding). `examples/acme-schematic/schemas` shows
 the `tsconfig` paths.
 
+## A TypeScript project without Rust
+
+A project whose servers, jobs and sites are all TypeScript needs Go, Bun,
+Node and Docker, and no Rust (D82). The Rust build products a checkout
+takes, superscalar's static archive and TypeScript binding and the
+version-graph core, come prebuilt for linux and darwin on x64 and arm64,
+built from the commits the checkout pins by its prebuilt-deps workflow:
+
+```
+git clone https://github.com/parable-work/superschematic && cd superschematic
+scripts/superscalar-dep.sh --prebuilt
+make cli
+(cd runtime/http/typescript && bun install && bun run build)
+```
+
+1. `scripts/superscalar-dep.sh --prebuilt` downloads superscalar's Go
+   binding with its static archive, and its TypeScript binding with the
+   napi addon for your platform and the browser and workerd builds over
+   its WebAssembly core. It checks the manifest against the digest
+   `prebuilt.pin` pins and each file against the manifest, refuses any
+   that differs, and stages them under `third_party/superscalar` as a
+   build from source leaves them. With no `cargo` on `PATH`, the script
+   does this unasked, and so does `make cli`.
+2. `make cli` builds `bin/superschematic`, which links superscalar's
+   archive alone, and the migration runner, `bin/superschematic-migrate`,
+   which needs no cgo. Put `bin/` on `PATH`, or name the runner with
+   `SUPERSCHEMATIC_MIGRATE`, for `stack dev`.
+3. The HTTP runtime, `@superschematic/http-runtime`, is TypeScript: its
+   build links the superscalar binding the first step staged.
+
+Then `superschematic init --superschematic <checkout>` writes a schemas
+root whose naming file points at the checkout, and `superschematic stack
+dev` runs the project: Postgres in Docker, each TypeScript server on Bun,
+and each site's build, or its dev server
+([static sites](/superschematic/guides/static-sites/#with-a-dev-server)).
+
+A schema with a [version graph](/superschematic/reference/version-graphs/)
+takes the version-graph core too: `bun run build` in
+`runtime/versiongraph/typescript` stages its prebuilt wasm32 module when
+`cargo` is missing, and `scripts/versiongraph-archive.sh --prebuilt`
+stages its static archive for a Go binary. A schema whose types compose
+engine behaviors needs the engine's Node-API addon, which a checkout still
+builds with Rust (`scripts/engine-napi.sh`).
+
+`SUPERSCHEMATIC_PREBUILT_URL` points the scripts at another copy of the
+prebuilt releases, a URL or a directory holding `<tag>/<file>`
+(`scripts/prebuilt_deps.py` says how they are laid out).
+
 ## Install
 
 From `v0.1.0-alpha.1`:
@@ -110,8 +158,9 @@ checkout. The install resolves the whole workspace, so one schema with a
 version graph and no path breaks the install of every types package
 beside it. The version-graph package loads from its `dist/`: build it in
 the checkout first (`bun install && bun run build` in
-`runtime/versiongraph/typescript`, which needs cargo with the
-`wasm32-unknown-unknown` target). Its engine runs as `Engine`, whose
+`runtime/versiongraph/typescript`, which builds the core with cargo and
+its `wasm32-unknown-unknown` target, or without cargo stages the prebuilt
+module, as [above](#a-typescript-project-without-rust)). Its engine runs as `Engine`, whose
 operations return promises, or `SyncEngine`, over a driver that blocks,
 and keeps a graph in Postgres (`pg`) or SQLite (`node:sqlite` or
 `bun:sqlite`); see

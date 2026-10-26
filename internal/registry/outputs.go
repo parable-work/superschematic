@@ -294,6 +294,16 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if !knownTargetLanguages[lang] {
 			return nil, fmt.Errorf("outputs.sdk has unknown target language %q", lang)
 		}
+		value := outputs.sdkMember(lang, sdkLazyValidationKey)
+		if value == nil {
+			continue
+		}
+		if lang != LangTypeScript {
+			return nil, fmt.Errorf("outputs.sdk.%s sets %s, which only the TypeScript SDK takes: it loads superscalar's WebAssembly core in a browser (D82)", lang, sdkLazyValidationKey)
+		}
+		if _, ok := value.(bool); !ok {
+			return nil, fmt.Errorf("outputs.sdk.typescript.%s must be true or false", sdkLazyValidationKey)
+		}
 	}
 	// The API server and each SDK import the types package of their
 	// language, which only outputs.types generates. The API language is
@@ -398,6 +408,32 @@ func (o *Outputs) TypesEnabled(lang string) bool {
 // SDKEnabled reports whether the client SDK for lang is enabled.
 func (o *Outputs) SDKEnabled(lang string) bool {
 	return o != nil && o.SDK[lang].Enabled
+}
+
+// sdkLazyValidationKey is the member of outputs.sdk.typescript that loads
+// the SDK's validators lazily (D82).
+const sdkLazyValidationKey = "lazyValidation"
+
+// SDKLazyValidation reports whether outputs.sdk.typescript sets
+// lazyValidation: the TypeScript SDK loads its types package's validators
+// and parsers, and superscalar's WebAssembly core with them, on its first
+// call (D82).
+func (o *Outputs) SDKLazyValidation() bool {
+	lazy, _ := o.sdkMember(LangTypeScript, sdkLazyValidationKey).(bool)
+	return lazy
+}
+
+// sdkMember returns the member key of outputs.sdk.<lang> as written, or
+// nil.
+func (o *Outputs) sdkMember(lang, key string) any {
+	if o == nil || o.Raw["sdk"] == nil {
+		return nil
+	}
+	var sdk map[string]map[string]any
+	if err := json.Unmarshal(o.Raw["sdk"], &sdk); err != nil {
+		return nil
+	}
+	return sdk[lang][key]
 }
 
 // SQLMigrationsDir returns outputs.sql.migrationsDir, relative to the

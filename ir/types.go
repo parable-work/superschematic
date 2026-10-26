@@ -114,6 +114,11 @@ type TypeDef struct {
 	// Indexes lists database indexes defined on this type.
 	Indexes []IndexDef `json:"indexes,omitempty" yaml:"indexes,omitempty"`
 
+	// RawSQL lists the raw SQL the DB service declares on this type
+	// (@rawSql, D83). A piece belongs to the service, not the table: the
+	// type is only where it is written.
+	RawSQL []RawSQLDef `json:"rawSql,omitempty" yaml:"rawSql,omitempty"`
+
 	// JsonField marks this type as a JSON-only payload that should not be
 	// materialized as a relational table.
 	JsonField bool `json:"jsonField,omitempty" yaml:"jsonField,omitempty"`
@@ -651,9 +656,102 @@ type IndexDef struct {
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
+	// Method is the index's access method (D83): btree, gin, gist, brin,
+	// hnsw or ivfflat. Empty picks one from the key columns' types: GIST for
+	// ltree and geometric types, GIN for JSONB, arrays and tsvector, else
+	// BTREE.
+	Method string `json:"method,omitempty" yaml:"method,omitempty"`
+
+	// Ops is the operator class every key is indexed with ("gin_trgm_ops",
+	// "text_pattern_ops"). Empty is the method's default for each column.
+	Ops string `json:"ops,omitempty" yaml:"ops,omitempty"`
+
+	// Where makes the index partial: a raw SQL predicate, without WHERE, over
+	// the table's column names.
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+
+	// Expression indexes a raw SQL expression over the table's column names
+	// ("lower(email)") instead of the keys' columns. The keys then name the
+	// fields the expression reads, and the index's default name.
+	Expression string `json:"expression,omitempty" yaml:"expression,omitempty"`
+
+	// Concurrently false builds the index, on a table a migration plan does
+	// not create, inside the plan step's transaction, which blocks writes to
+	// the table while it builds. Nil or true builds it concurrently.
+	Concurrently *bool `json:"concurrently,omitempty" yaml:"concurrently,omitempty"`
+
 	// Origin is [OriginVersionGraph] for an index a version graph adds;
 	// empty for an authored index.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+}
+
+// Index access methods (IndexDef.Method).
+const (
+	IndexMethodBTree   = "btree"
+	IndexMethodGIN     = "gin"
+	IndexMethodGIST    = "gist"
+	IndexMethodBRIN    = "brin"
+	IndexMethodHNSW    = "hnsw"
+	IndexMethodIVFFlat = "ivfflat"
+)
+
+// IndexMethods lists every IndexDef.Method value.
+var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, IndexMethodBRIN, IndexMethodHNSW, IndexMethodIVFFlat}
+
+// HasTableOptions reports whether the index sets an option only a table's
+// index has (D83): a method, an operator class, a predicate, an expression
+// or the concurrency of its build. The engine indexes an engine type's
+// listed fields and reads none of them.
+func (idx IndexDef) HasTableOptions() bool {
+	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil
+}
+
+// RawSQLDef is a piece of raw SQL a DB service declares (@rawSql, D83):
+// statements its create.sql runs after the objects the schema declares,
+// which a migration plan records by id and checksum and runs again when
+// they change.
+type RawSQLDef struct {
+	// ID names the piece in the migration model: a lowercase identifier,
+	// unique in the service.
+	ID string `json:"id" yaml:"id"`
+
+	// Up is the SQL: one or more statements separated by semicolons, each of
+	// which can run again over what it made (CREATE ... IF NOT EXISTS,
+	// CREATE OR REPLACE, DROP ... IF EXISTS, ...), since a plan runs the
+	// piece again when it changes.
+	Up string `json:"up" yaml:"up"`
+
+	// Down is the SQL a plan runs when the piece is removed, under the same
+	// rules as Up. Empty runs nothing.
+	Down string `json:"down,omitempty" yaml:"down,omitempty"`
+
+	// After places the piece: RawSQLAfterTables runs it after the tables,
+	// before the indexes; RawSQLAfterIndexes, the default, after every object
+	// the schema declares; the id of another piece, right after that piece.
+	After string `json:"after,omitempty" yaml:"after,omitempty"`
+
+	// Dialects lists the dialects the piece runs on ("postgres", "sqlite").
+	// Empty runs it on every dialect the service is built for.
+	Dialects []string `json:"dialects,omitempty" yaml:"dialects,omitempty"`
+}
+
+// The positions of RawSQLDef.After that name no other piece.
+const (
+	RawSQLAfterTables  = "tables"
+	RawSQLAfterIndexes = "indexes"
+)
+
+// RunsOn reports whether the piece runs on dialect.
+func (r RawSQLDef) RunsOn(dialect string) bool {
+	if len(r.Dialects) == 0 {
+		return true
+	}
+	for _, d := range r.Dialects {
+		if d == dialect {
+			return true
+		}
+	}
+	return false
 }
 
 // RelationDef represents a foreign key relation to another type.
@@ -665,8 +763,9 @@ type RelationDef struct {
 	// Field is the foreign key field name. If empty, it is inferred by the generator.
 	Field string `json:"field,omitempty" yaml:"field,omitempty"`
 
-	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION). Empty
-	// means the generator default (CASCADE).
+	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION|SET
+	// NULL; SET NULL only on a relation that is not required). Empty means
+	// the generator default (CASCADE).
 	OnDelete string `json:"onDelete,omitempty" yaml:"onDelete,omitempty"`
 }
 

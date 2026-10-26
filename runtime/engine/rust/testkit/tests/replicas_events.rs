@@ -16,7 +16,8 @@
 //!   its waiters for what it may have missed, and they catch up by reading.
 //! - Without a listener at all (a replica opened with `listen: false`, or
 //!   a second process on one SQLite file) a stream catches up by reading at
-//!   each heartbeat.
+//!   each heartbeat, and still does while signals sent more often than a
+//!   heartbeat put its keepalive off (D77).
 //!
 //! Each case runs on Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`
 //! names one, in a schema of its own, and the ones a SQLite file can hold
@@ -37,11 +38,15 @@ use serde_json::{json, Value};
 use replicas_support::{
     all_events, as_replica, pause, replica_name, retrying, wait_for, Admin, Pause, PATIENCE,
 };
-use superschematic_engine::api::{start_stream, EventStream, Pull, StreamOptions};
+use superschematic_engine::api::{
+    start_stream, start_stream_with, EventStream, Pull, StreamOptions,
+};
 use superschematic_engine::storage::{Dialect, SqlValue};
 use superschematic_engine::{
-    BehaviorSet, CreateOptions, Engine, EngineEvent, Error, EventsAfter, ReadEvents, WriteOptions,
+    BehaviorSet, CreateOptions, Engine, EngineEvent, Error, EventsAfter, ReadEvents, SendSignal,
+    WriteOptions,
 };
+use superschematic_engine_testkit::behaviors::Chatter;
 use support::{alice, fixtures, publish, schema_document, targets, Target};
 
 /// Writing threads, alternating the two engines, and the writes each
@@ -543,6 +548,127 @@ fn without_a_listener_a_stream_catches_up_by_reading_at_each_heartbeat() {
             }
         }
         assert_eq!(seen.len(), 3, "{:?}: {seen:?}", target.dialect);
+        reader.shutdown();
+    }
+}
+
+// Stop sets its flag when it is dropped.
+struct Stop<'a>(&'a AtomicBool);
+
+impl Drop for Stop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn without_a_listener_signals_faster_than_the_heartbeat_put_off_no_read() {
+    for target in targets("without_a_listener_signals") {
+        // No listener on Postgres; on SQLite, a second engine on the file.
+        // The reader's own signals reach its streams either way.
+        let behaviors = || BehaviorSet::new().with(Chatter);
+        let writer = open(&target, behaviors(), &replica_name("writer"), false);
+        let reader = open(&target, behaviors(), &replica_name("reader"), false).shared();
+        publish(
+            &writer,
+            &item_document(json!([{"name": "test.Chatter"}])),
+            None,
+        );
+        create_in(&writer, None, "talked");
+        assert!(!reader.db().notifier().listening());
+        let heartbeat = Duration::from_millis(400);
+        let mut stream = start_stream_with(
+            &reader,
+            &StreamOptions {
+                page_size: None,
+                heartbeat_ms: Some(400),
+            },
+            &alice(),
+            &ReadEvents {
+                after: Some(EventsAfter::Head),
+                ..ReadEvents::default()
+            },
+            true,
+        )
+        .expect("a stream");
+        let mut opened = String::new();
+        while !opened.contains("event: ready") {
+            match stream.next(PATIENCE) {
+                Pull::Data(bytes) => opened.push_str(&String::from_utf8(bytes).unwrap()),
+                other => panic!("expected the stream to open, got {other:?}"),
+            }
+        }
+        // A client types every 100 ms, four times a heartbeat, until the
+        // stream has the writer's commit: each signal is a frame, which
+        // puts the stream's keepalive off.
+        let done = AtomicBool::new(false);
+        let (seen, signals, waited) = thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(Ordering::SeqCst) {
+                    reader
+                        .signals()
+                        .send(
+                            &alice(),
+                            &SendSignal {
+                                namespace: None,
+                                schema: "Item",
+                                instance_id: "talked",
+                                behavior: "test.Chatter",
+                                name: "typing",
+                                data: &json!({}),
+                            },
+                        )
+                        .expect("typing");
+                    thread::sleep(Duration::from_millis(100));
+                }
+            });
+            // The typing stops however this ends, a failed assertion too,
+            // so the scope can join its thread.
+            let _stop = Stop(&done);
+            // Signals flow before the commit, so the stream is caught up
+            // and hearing them when it comes.
+            thread::sleep(heartbeat);
+            let committed = Instant::now();
+            create_in(&writer, None, "polled");
+            let deadline = committed + PATIENCE;
+            let mut seen = Vec::new();
+            let mut signals = 0;
+            while !seen
+                .iter()
+                .any(|(_, instance): &(i64, Option<String>)| instance.as_deref() == Some("polled"))
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "{:?}: the commit never came, {signals} signals did",
+                    target.dialect
+                );
+                if let Pull::Data(bytes) = stream.next(PATIENCE) {
+                    let text = String::from_utf8(bytes).expect("UTF-8");
+                    signals += text.matches("event: signal").count();
+                    seen.extend(frame_events(&text));
+                }
+            }
+            (seen, signals, committed.elapsed())
+        });
+        assert!(
+            signals > 0,
+            "{:?}: no signal reached the stream",
+            target.dialect
+        );
+        assert_eq!(
+            seen.iter()
+                .map(|(_, instance)| instance.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("polled")],
+            "{:?}",
+            target.dialect
+        );
+        // Within about a heartbeat of the commit, signals or not.
+        assert!(
+            waited < heartbeat * 3,
+            "{:?}: the commit took {waited:?}",
+            target.dialect
+        );
         reader.shutdown();
     }
 }

@@ -317,7 +317,7 @@ func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) 
 		}
 		return valueClass(schema, key, sqlTypes)
 	}
-	column := sqlutil.ColumnType(fd, sqlTypes)
+	column := sqlutil.ColumnType(schema, fd, sqlTypes)
 	inJSONB := column == "JSONB"
 	if ref.IsMap {
 		if !inJSONB {

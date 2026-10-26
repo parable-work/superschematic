@@ -85,7 +85,7 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Comments.composing", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
 		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
@@ -182,6 +182,19 @@ func TestCoreBehaviors(t *testing.T) {
 		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {
 		t.Errorf("Branches operations = %v, want %v", branchOps, want)
 	}
+	// Comments' operations (D77): every writing one is beside the instance
+	// and logged but appendDraft, whose draft only signals carry; the reads
+	// are not beside.
+	var commentOps []string
+	for _, op := range comments.Operations {
+		commentOps = append(commentOps, fmt.Sprintf("%s:%v:%v:%v", op.Name, op.Writes, op.Beside, op.Logged()))
+	}
+	if want := []string{"post:true:true:true", "begin:true:true:true", "appendDraft:true:true:false", "finish:true:true:true", "interrupt:true:true:true",
+		"edit:true:true:true", "deleteMessage:true:true:true", "purge:true:true:true", "react:true:true:true", "unreact:true:true:true", "pin:true:true:true",
+		"unpin:true:true:true", "resolve:true:true:true", "reopen:true:true:true", "listMessages:false:false:true", "getMessage:false:false:true",
+		"listEdits:false:false:true", "listReactions:false:false:true"}; !slices.Equal(commentOps, want) {
+		t.Errorf("Comments operations (name:writes:beside:logged) = %v, want %v", commentOps, want)
+	}
 	// Every work-queue operation writes but countClaimable and checkReserve,
 	// which read; claimNext, countClaimable and expireHolder are schema-level.
 	reads := []string{"countClaimable", "checkReserve"}
@@ -264,7 +277,11 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, `{"states": ["a", "b"], "transitions": [{"from": "a", "to": "b"}], "outcomes": {"in review": "failure"}}`, "behavior Workflow config: "},
 		{comments, ``, ""},
 		{comments, `{}`, ""},
-		{comments, `{"maxBodyLength": 2000, "editWindowMs": 900000, "blocks": ["ref"], "moderatePermission": "comments.moderate", "pinPermission": "comments.pin", "resolvePermission": "comments.resolve"}`, ""},
+		{comments, `{"maxBodyLength": 2000, "editWindowMs": 900000, "composeTimeoutMs": 120000, "maxDrafts": 50, "blocks": ["ref"], "moderatePermission": "comments.moderate", "pinPermission": "comments.pin", "resolvePermission": "comments.resolve"}`, ""},
+		{comments, `{"composeTimeoutMs": 4999}`, "behavior Comments config: "},
+		{comments, `{"composeTimeoutMs": 3600001}`, "behavior Comments config: "},
+		{comments, `{"maxDrafts": 0}`, "behavior Comments config: "},
+		{comments, `{"maxDrafts": 51}`, "behavior Comments config: "},
 		{comments, `{"maxLength": 10}`, "behavior Comments config: "},
 		{comments, `{"maxBodyLength": 40001}`, "behavior Comments config: "},
 		{comments, `{"blocks": ["code"]}`, "behavior Comments config: "},
