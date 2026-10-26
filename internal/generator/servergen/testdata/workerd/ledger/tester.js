@@ -24,6 +24,17 @@
 //     registers here, ada, is the administrator; bob waits for approval,
 //     which ada gives; bob signs in with a cookie, and closes the books only
 //     once ada grants him the administrator's role.
+//   - The server sits on its site's origin (D91 with D92): the site's
+//     Worker, the script the cloudflare extension embeds, forwards
+//     /api/ts-ledger through its service binding to it, and the server's
+//     identity config is the runtime's defaults, no trusted origin and no
+//     cookie domain, and it answers no CORS. The page's config names the
+//     server on the site's address; ada and carol sign in with a cookie
+//     there, with Sec-Fetch-Site and with Origin alone, and get the
+//     host-only __Host-session cookie; ada closes the books with it and
+//     carol, who lacks ledger.close, may not; a sign-in and a cookie call
+//     from another origin are refused, and so is the page's sign-in sent to
+//     the server's own host.
 
 /** A call with a session cookie, which answers its status, its envelope's data or its problem (RFC 9457), and the session cookie it sets. */
 async function as(env, cookie, method, path, body) {
@@ -139,6 +150,7 @@ export default {
     check(run('c', 'flaky', 2) && run('d', 'poison', 2), `the retries ran ${JSON.stringify(s.runs)}`);
 
     await members(env);
+    await onTheSitesOrigin(env);
 
     console.log('the ledger under workerd: Postgres through Hyperdrive, nearest, an enqueue that commits with its transaction, and both workers drained at a firing');
   },
@@ -205,4 +217,97 @@ async function members(env) {
   expect(await as(env, signedIn.cookie, 'GET', 'api/auth/me'), 401, "bob's me after signing out");
 
   console.log("the ledger's members under workerd: a sign-in with a hash node:crypto wrote, the first member the administrator, an approval, cookie sessions and a permission-gated route");
+}
+
+/**
+ * ts-ledger on its site's origin (D91), through the site's Worker, as a
+ * browser on the site's page calls it: the cookie session needs no CORS,
+ * no trusted origin and no cookie domain.
+ */
+async function onTheSitesOrigin(env) {
+  const site = env.SITE_URL;
+  const expect = (r, status, what) => check(r.status === status, `${what} answered ${r.status} ${JSON.stringify(r.error ?? r.data)}, want ${status}`);
+  const noCORS = (r, what) =>
+    check(
+      r.headers.get('access-control-allow-origin') === null && r.headers.get('access-control-allow-credentials') === null,
+      `${what} answered CORS for ${r.headers.get('access-control-allow-origin')}`
+    );
+  const sameOrigin = { origin: site, 'sec-fetch-site': 'same-origin' };
+  const foreign = { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' };
+  const viaSite = async (method, path, { cookie, headers = {}, body } = {}) => {
+    const h = { ...headers };
+    if (cookie) h.cookie = cookie;
+    if (body !== undefined) h['content-type'] = 'application/json';
+    const response = await env.SITE.fetch(
+      new Request(`${site}${path}`, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'manual' })
+    );
+    const text = await response.text();
+    const parsed = text === '' ? {} : JSON.parse(text);
+    const set = response.headers.get('set-cookie');
+    return { status: response.status, headers: response.headers, parsed, data: parsed.data, error: response.ok ? undefined : parsed, cookie: set ? set.split(';')[0] : undefined, setCookie: set };
+  };
+  const hostOnlySession = (r, who) => {
+    const attributes = (r.setCookie ?? '').split(';').map(a => a.trim().toLowerCase());
+    check(
+      r.cookie?.startsWith('__Host-session=') &&
+        attributes.includes('secure') &&
+        attributes.includes('path=/') &&
+        attributes.includes('httponly') &&
+        !attributes.some(a => a.startsWith('domain=')),
+      `${who}'s session cookie is ${r.setCookie}, want __Host-session, Secure, HttpOnly, Path=/ and no Domain`
+    );
+  };
+
+  // The page's config names ts-ledger on the site's own origin.
+  const config = await viaSite('GET', '/__superschematic/config.json');
+  expect(config, 200, "the site's config");
+  check(config.parsed.apis?.['ts-ledger']?.url === `${site}/api/ts-ledger`, `the site's config is ${JSON.stringify(config.parsed)}, want ts-ledger at ${site}/api/ts-ledger`);
+
+  // ada signs in with a cookie on the site's origin, and closes the books with it.
+  const ada = await viaSite('POST', '/api/ts-ledger/api/auth/login', {
+    headers: sameOrigin,
+    body: { login: 'ada@example.com', password: 'ada the administrator', session: 'cookie' },
+  });
+  expect(ada, 200, "ada's sign-in on the site's origin");
+  hostOnlySession(ada, 'ada');
+  noCORS(ada, "ada's sign-in");
+  const me = await viaSite('GET', '/api/ts-ledger/api/auth/me', { cookie: ada.cookie, headers: sameOrigin });
+  expect(me, 200, "ada's me on the site's origin");
+  check(me.data.user.login === 'ada@example.com', `ada's me on the site's origin is ${JSON.stringify(me.data)}`);
+  const closed = await viaSite('POST', '/api/ts-ledger/api/books/close', { cookie: ada.cookie, headers: sameOrigin });
+  expect(closed, 200, "ada's closing of the books on the site's origin");
+  check(closed.data.closed === true, `ada closed the books on the site's origin with ${JSON.stringify(closed.data)}`);
+  noCORS(closed, "ada's closing of the books");
+
+  // carol signs in with the site's Origin alone, and holds no ledger.close.
+  const carol = await viaSite('POST', '/api/ts-ledger/api/auth/login', {
+    headers: { origin: site },
+    body: { login: 'carol@example.com', password: 'carol registered on bun', session: 'cookie' },
+  });
+  expect(carol, 200, "carol's sign-in on the site's origin with Origin alone");
+  hostOnlySession(carol, 'carol');
+  expect(await viaSite('POST', '/api/ts-ledger/api/books/close', { cookie: carol.cookie, headers: { origin: site } }), 403, "carol's closing of the books on the site's origin");
+
+  // Another origin's sign-in, and its call with ada's cookie, are refused.
+  const evil = await viaSite('POST', '/api/ts-ledger/api/auth/login', {
+    headers: foreign,
+    body: { login: 'ada@example.com', password: 'ada the administrator', session: 'cookie' },
+  });
+  expect(evil, 403, 'a sign-in from another origin');
+  check(evil.error?.code === 'cross_origin' && evil.cookie === undefined, `a sign-in from another origin failed with ${JSON.stringify(evil.error)} and cookie ${evil.setCookie}`);
+  const evilClose = await viaSite('POST', '/api/ts-ledger/api/books/close', { cookie: ada.cookie, headers: foreign });
+  expect(evilClose, 403, "another origin's closing of the books with ada's cookie");
+  check(evilClose.error?.code === 'cross_origin', `another origin's call failed with ${JSON.stringify(evilClose.error)}`);
+
+  // The page's sign-in sent to the server's own host is from another origin
+  // there, which no trusted origin admits: the site's origin is what lets the
+  // cookie session in.
+  const direct = await env.LEDGER.fetch('https://ts-ledger/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: site, 'sec-fetch-site': 'cross-site' },
+    body: JSON.stringify({ login: 'ada@example.com', password: 'ada the administrator', session: 'cookie' }),
+  });
+  check(direct.status === 403, `the page's sign-in at the server's own host answered ${direct.status} ${await direct.text()}, want 403`);
+
+  console.log("ts-ledger on its site's origin under workerd: a cookie sign-in and a permission-gated call through the site's Worker, a host-only __Host-session, no CORS, and another origin refused");
 }

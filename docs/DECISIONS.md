@@ -11807,6 +11807,20 @@ Status: built, proven offline.
   is refused, a cookie call keeps its query, a redirect gets its prefix
   back, the API's 404 and another provider's API, fetched at its public
   address, reach the page, and a path of no API is the fallback.
+- **Cloudflare with D92 (F10's Cloudflare acceptance):**
+  `TestTypeScriptHyperdriveUnderWorkerd` puts the site's Worker, running
+  `site.js`, in front of D92's generated ledger API under the pinned
+  workerd, an API over the user model on Postgres through a hyperdrive
+  binding, reached through the site's service binding: with the identity
+  runtime's defaults, no CORS, no trusted origin and no cookie domain, a
+  cookie sign-in on the site's origin, with `Sec-Fetch-Site` or `Origin`
+  alone, sets the host-only `__Host-session`, and a call gated on a
+  permission answers 200 with it, and 403 to a member without the
+  permission; a sign-in or a cookie call from another origin, and the
+  page's sign-in sent to the API's own host, are refused.
+  `TestWorkerdLedgerFixtureHoldsTheGoldenBindings` holds the fixture's
+  site Worker to its version's bindings, and the API's to no CORS
+  origins and no identity config.
 - **The runtime:** the Go identity runtime's
   `TestCookieSessionOnASitesOrigin` signs in with a cookie over its
   defaults with the site's `Host` and the forwarded headers, calls the
@@ -11825,8 +11839,8 @@ and client address a binding's request carries, and that a request's
 body streams through it. Also left: a site on Cloudflare in front of an
 API on gcp, which resolves and renders, though no environment gives two
 targets' values and a mixed deploy is D63's Left; a cookie sign-in
-through the site's Worker with the identity runtime on Workers, which
-D64's `NoIdentity` refused and D92 serves over Hyperdrive; an
+through the site's Worker on Cloudflare's runtime rather than the pinned
+workerd (D92's Left); an
 internet network endpoint group for an API of another provider behind a
 gcp site; the prefix on a redirect on gcp; acme-shop's stacks, which
 keep D82's proxy and their own addresses.
@@ -11972,8 +11986,10 @@ Left:
   origin.
 - A sign-in on Cloudflare's runtime rather than the pinned workerd: its
   CPU time at the default cost, and the cookie through a custom domain and
-  through D91's site Worker. Login's rate limit is each isolate's own, as
-  every rate limit on Workers is (section 18.15).
+  through D91's site Worker, which the pinned workerd runs in
+  `TestTypeScriptHyperdriveUnderWorkerd` (D91's Status). Login's rate
+  limit is each isolate's own, as every rate limit on Workers is (section
+  18.15).
 - An identity store over D1 or SQLite (D50).
 - A database on Hyperdrive in a parameterized environment; a
   least-privilege config per API; a separate migrator user.

@@ -21,8 +21,15 @@ type capnpBinding struct{ kind, value string }
 
 var (
 	capnpWorker      = regexp.MustCompile(`(?m)^const (\w+) :Workerd\.Worker = \(`)
-	capnpBindingLine = regexp.MustCompile(`\(name = "([A-Z0-9_]+)", (text|service|wrapped|hyperdrive) = ("[^"]*")?`)
+	capnpBindingLine = regexp.MustCompile(`\(name = "([A-Z0-9_]+)", (text|service|wrapped|hyperdrive) = ("(?:[^"\\]|\\.)*")?`)
 )
+
+// capnpUnquote is the contents of a Cap'n Proto text literal, its escapes
+// undone: the inverse of capnpText.
+func capnpUnquote(s string) string {
+	s = strings.TrimSuffix(strings.TrimPrefix(s, `"`), `"`)
+	return strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, "\n").Replace(s)
+}
 
 // workerdBindings reads each Worker's bindings from a workerd config.
 func workerdBindings(t *testing.T, path string) map[string]map[string]capnpBinding {
@@ -42,7 +49,7 @@ func workerdBindings(t *testing.T, path string) map[string]map[string]capnpBindi
 		worker := text[start[2]:start[3]]
 		out[worker] = map[string]capnpBinding{}
 		for _, m := range capnpBindingLine.FindAllStringSubmatch(text[start[0]:end], -1) {
-			out[worker][m[1]] = capnpBinding{kind: m[2], value: strings.Trim(m[3], `"`)}
+			out[worker][m[1]] = capnpBinding{kind: m[2], value: capnpUnquote(m[3])}
 		}
 	}
 	return out

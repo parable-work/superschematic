@@ -402,6 +402,14 @@ build's files under `superschematic/sites/<stack>/<site>/<hex>/` as the
 bundle store keeps a bundle's, writes no config, and fetches them back
 for the deploy to place.
 
+A site with an origin (D91, `PlatformSpec.ServesOrigin`) also binds
+`SITE_ORIGIN`, each API of the origin with its path, and a service
+binding `SITE_API_<API>` to each API's Worker, and runs `site.js` first
+for those paths, which it forwards through the binding with the prefix
+taken off; the site edge's connector derives the API's URL on the site's
+own address. The API's Worker stays internal. An API on another
+provider is fetched at its public address instead.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
@@ -473,9 +481,12 @@ Postgres database with a vector column on Hyperdrive, in Staging and
 Production, against its golden files; deploys it over the fake `Cloud`;
 migrates its origin through a stand-in `superschematic-migrate`, refusing
 an origin the config does not name; checks its workflow and bootstrap's
-origin secrets; holds servergen's workerd `ledger` fixture to its
-Staging bindings; and resolves finances-api over the user model with its
-`authDb` on Hyperdrive, and refuses it with the `authDb` on D1.
+origin secrets; holds servergen's workerd `ledger` fixture, the server
+behind its site's Worker on one origin (D91), to its bindings; and
+resolves finances-api over the user model with its `authDb` on
+Hyperdrive, and refuses it with the `authDb` on D1. It resolves
+`origin-web-stack`, the web fixture's site serving its API on its own
+origin, against its golden files.
 The job runner runs a fake Workflow through `stack run` and a deploy's
 jobs step, and reports an errored, a terminated and a missing one;
 the telemetry tests read the `OTEL_` bindings, the compatibility flag
@@ -486,7 +497,10 @@ them again from the Host it received.
 pinned workerd (`testdata/workerd/site`), which
 `bun install --frozen-lockfile` in `runtime/http/typescript/test/workerd`
 installs; it skips without it, unless `SUPERSCHEMATIC_REQUIRE_TS_CHECKS`
-is set. Bootstrap, the stores, the CI identity and the migration runner
+is set. `TestSiteOriginUnderWorkerd` runs it serving an origin
+(`testdata/workerd/origin`) in front of a stand-in API, and servergen's
+`TestTypeScriptHyperdriveUnderWorkerd` in front of the generated ledger
+API over Hyperdrive, signing in with a cookie on the site's origin. Bootstrap, the stores, the CI identity and the migration runner
 run against a fake `Cloud`, `gh` and provisioner, the runner with a
 stand-in for `superschematic-migrate`, and `Cloud` itself against a local
 stand-in for the REST and S3 APIs. Run it with `-update` to rewrite the golden

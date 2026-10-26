@@ -2394,7 +2394,10 @@ A site with an [origin](/superschematic/guides/static-sites/#one-origin)
 binding to each API's Worker, `SITE_API_<API>`, and runs its script first
 for those paths, which it forwards through the binding with the prefix
 taken off, as `stack dev`'s proxy does. Such an API's Worker is internal:
-no workers.dev address and no custom domain.
+no workers.dev address and no custom domain. An API over the user model
+whose `authDb` is on [Hyperdrive](#databases-on-hyperdrive) signs the page
+in with a cookie on the site's origin, with no `trustedOrigins`, no
+`cookie.domain` and no CORS.
 
 ## Generated CI
 

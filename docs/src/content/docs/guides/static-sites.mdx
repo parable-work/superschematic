@@ -439,4 +439,8 @@ the API's routes. Every method reaches the API; the site's own paths
 still take `GET` and `HEAD` alone. The API's Worker then needs no
 workers.dev address or custom domain: the binding admits the site's
 Worker, as a caller's admits it. It works at workers.dev and under a
-domain alike, since it needs no route on a zone.
+domain alike, since it needs no route on a zone. An API over the user
+model runs on Workers when its `authDb` is on
+[Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive), and
+signs the page in there with a cookie on the site's origin, with
+`trustedOrigins`, `cookie.domain` and CORS left unset.

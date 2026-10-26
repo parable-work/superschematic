@@ -176,7 +176,18 @@ try {
 //     first member who registers is the administrator, who approves the
 //     second and grants him the role a permission-gated route needs; and
 //     after the run, the server on Bun signs in a member whose hash the
-//     Worker wrote.
+//     Worker wrote;
+//   - behind its site's Worker, which runs the script the cloudflare
+//     extension embeds and forwards /api/ts-ledger to it through a service
+//     binding (D91, F10 on Cloudflare), the server, with the identity
+//     runtime's defaults, no trusted origin and no cookie domain, signs
+//     members in with a cookie on the site's origin and answers a
+//     permission-gated call with it, with no CORS: the cookie is the
+//     host-only __Host-session, and a sign-in or a call from another
+//     origin, or the page's sign-in sent to the server's own host, is
+//     refused. The cloudflare extension's
+//     TestWorkerdLedgerFixtureHoldsTheGoldenBindings holds the site's
+//     Worker to its version's bindings.
 func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -314,6 +325,10 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 	}
 	for src, dst := range map[string]string{
 		filepath.Join("testdata", "workerd", "ledger", "tester.js"): filepath.Join(run, "tester.js"),
+		filepath.Join("testdata", "workerd", "ledger", "assets.js"): filepath.Join(run, "assets.js"),
+		// The script every site's Worker runs, which the cloudflare
+		// extension embeds (D91).
+		filepath.Join(testpaths.RepoRoot(t), "extensions", "cloudflare", "site.js"): filepath.Join(run, "site.js"),
 		wasm: filepath.Join(run, "superscalar_wasm_bg.wasm"),
 	} {
 		data, err := os.ReadFile(src)
@@ -344,6 +359,7 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 		`"msg":"message failed and is dead: its retries are spent"`,
 		`"msg":"embedded","stack":"ts-ledger-stack","worker":"ts-ledger-embed-line-items","api":"ts-ledger","lineItem":"pen","category":"travel"`,
 		"the ledger's members under workerd: a sign-in with a hash node:crypto wrote, the first member the administrator, an approval, cookie sessions and a permission-gated route",
+		"ts-ledger on its site's origin under workerd: a cookie sign-in and a permission-gated call through the site's Worker, a host-only __Host-session, no CORS, and another origin refused",
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Errorf("workerd's output does not hold %s:\n%s", want, output)

@@ -6599,6 +6599,14 @@ the binding admits the site's Worker, which carries the browser's request
 and no service credential. A Workers route on the zone was not taken: it
 needs a zone, so no workers.dev, and the API would see its prefix.
 
+An API over the user model whose authDb is on Hyperdrive (section 18.6,
+D92) signs the page in on the site's origin with the identity runtime's
+defaults: its Worker sees the site's host, so the cross-origin check
+passes a same-origin login, and the `__Host-session` cookie, with no
+`Domain`, is the site's host's alone; no CORS, trusted origin or cookie
+domain is set. `TestTypeScriptHyperdriveUnderWorkerd` runs the site's
+script in front of such an API under the pinned workerd.
+
 Cloudflare runs the script only when no file matches, and first under
 `/__superschematic/` and each API's path. For a GET or a HEAD it answers
 `/__superschematic/config.json` with `SITE_CONFIG`, `application/json`
@@ -6859,7 +6867,10 @@ runtime tests run fixture bundles under the `workerd` binary.
   the bundles under workerd over a hyperdrive binding to a local
   Postgres.
 - An identity store over SQLite or D1 for a TypeScript API (D50). An
-  identity API on Workers is built over Hyperdrive (section 18.6, D92).
+  identity API on Workers is built over Hyperdrive (section 18.6, D92),
+  and its cookie session on a site's origin through the site's Worker
+  (section 18.8, D91) is proven under the pinned workerd, not yet on
+  Cloudflare.
 - A D1 deploy that has reached Cloudflare: the platform, the runner and
   the D1 driver are proven against the pins, a fake account and the fake
   D1, and `TestRealD1` has not run yet. acme-shop's `wishlist-stack` is
