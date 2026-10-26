@@ -91,6 +91,15 @@ var repositoryCases = []repositoryCase{
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
 	}},
+	{fixture: "fixture-queries-db", files: []string{"queries.test.ts"}, tests: []string{
+		"categoryTotals rolls a sub-category up to its parent, over a range and some accounts, its rows typed and decoded",
+		"timeBuckets reads every bucket of a range through generate_series, an empty one with zeros",
+		"transactionList pages newest first by its key, filters by its optional params, and answers the next key until the last page",
+		"accountLines orders by the fragment its enum names, the default when null, and refuses any other value",
+		"budgets read an exact decimal and a date as the wire holds them, and an optional parent",
+		"transferCandidates finds the other side of a move within the window",
+		"a query runs in a transaction, and sends the statement sqlutil writes, its parameters positional",
+	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",
 		"a wrong key, no key and an envelope moved to another row fail with FieldEncryptionError",

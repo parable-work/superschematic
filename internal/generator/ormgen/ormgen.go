@@ -175,6 +175,9 @@ type ORMOutput struct {
 	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
 	// told (sqlutil.DefaultLimit).
 	DefaultLimit int
+	// Queries are the database's declared queries (D86), which queries.go
+	// runs; none for a database that declares none.
+	Queries []Query
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -807,7 +810,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	schema = codegen.WithoutEngineTypes(schema)
 
 	tableTypes := tableTypeDefs(schema)
-	if len(tableTypes) == 0 && len(schema.Queues()) == 0 {
+	if len(tableTypes) == 0 && len(schema.Queues()) == 0 && len(schema.Queries()) == 0 {
 		return nil, nil
 	}
 
@@ -845,6 +848,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		return nil, err
 	}
 	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
+	if err != nil {
+		return nil, err
+	}
+	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -977,6 +984,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		HasEncryptedFields:       hasEncryptedFields,
 		DefaultLimit:             sqlutil.DefaultLimit,
+		Queries:                  queries,
 	}
 
 	return output, nil

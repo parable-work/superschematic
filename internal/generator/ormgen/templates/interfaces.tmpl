@@ -71,6 +71,9 @@ type DatabaseInterface interface {
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
 	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
+	{{- end }}
 }
 
 // TxInterface defines repository access within a transaction.
@@ -79,6 +82,9 @@ type TxInterface interface {
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
+	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
 	{{- end }}
 }
 
@@ -120,6 +126,25 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+{{- if .HasQueries }}
+
+// GetQueries returns the declared queries, each of which reads no rows.
+func (db *NoOpDatabase) GetQueries() *Queries {
+	return &Queries{runner: noOpQueryRunner{}}
+}
+
+// GetQueries returns the declared queries, each of which reads no rows.
+func (tx *NoOpTx) GetQueries() *Queries {
+	return &Queries{runner: noOpQueryRunner{}}
+}
+
+// noOpQueryRunner answers every declared query with no rows.
+type noOpQueryRunner struct{}
+
+func (noOpQueryRunner) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+{{- end }}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {

@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
+import { queriesOf, type QueryDefinition } from './queries.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -198,6 +199,8 @@ export interface OrmDefinition {
   readonly clearHistoryActor: string;
   /** The tables, by the member of the ORM that holds each one's repository. */
   readonly tables: Readonly<Record<string, TableDefinition>>;
+  /** The declared queries, by name, which the ORM's queries member runs (D86). */
+  readonly queries?: Readonly<Record<string, QueryDefinition>>;
 }
 
 /** What a repository runs a statement with: a pg Pool, PoolClient or Client. */
@@ -501,7 +504,7 @@ export type OrmTx<R> = R &
   };
 
 /** The members a repository's table may not take, which an ORM holds itself. */
-export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'transaction', 'query', 'exec'];
+export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'transaction', 'query', 'exec', 'queries'];
 
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
@@ -1161,6 +1164,12 @@ function repositories(orm: OrmDefinition, runner: Runner, user: string | undefin
   return out;
 }
 
+/** The ORM's queries member over runner, on a database that declares queries (D86). */
+function declaredQueries(orm: OrmDefinition, runner: Runner): { queries?: unknown } {
+  if (!orm.queries) return {};
+  return { queries: queriesOf(orm.queries, (text, values) => run(runner, text, values), orm.defaultLimit) };
+}
+
 function userOf(id: string | null | undefined): string | undefined {
   if (id === null || id === undefined || id === '') return undefined;
   if (uuidValue(id) === undefined) throw new Error(`orm: the acting user ${JSON.stringify(id)} is no UUID`);
@@ -1177,6 +1186,7 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefi
   };
   return {
     ...repositories(orm, runner, user, keys),
+    ...declaredQueries(orm, runner),
     actingUser: user,
     withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys),
     as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys),
@@ -1202,6 +1212,7 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: string | undefine
   const runner: Runner = { queryable: pool, inTransaction: false };
   return {
     ...repositories(orm, runner, acting, keys),
+    ...declaredQueries(orm, runner),
     actingUser: acting,
     withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys),
     as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys),

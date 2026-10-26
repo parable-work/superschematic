@@ -492,7 +492,9 @@ func queryPageStatements(text string, key []QueryField, args int, desc bool) (fi
 		order[i] = columns[i] + " " + direction
 		values[i] = fmt.Sprintf("$%d", args+i+1)
 	}
-	from := "SELECT * FROM (" + text + ") AS " + QueryPageAlias
+	// The subquery ends on a line of its own, so a comment on the query's
+	// last line ends before it.
+	from := "SELECT * FROM (" + text + "\n) AS " + QueryPageAlias
 	orderBy := " ORDER BY " + strings.Join(order, ", ") + " LIMIT %d"
 	first = from + orderBy
 	after = from + " WHERE (" + strings.Join(columns, ", ") + ") " + comparison + " (" + strings.Join(values, ", ") + ")" + orderBy
