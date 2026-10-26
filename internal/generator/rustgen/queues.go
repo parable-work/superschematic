@@ -99,6 +99,12 @@ type QueueField struct {
 	// a list of lists, or a JSON scalar, as the Go ORM marshals each.
 	JSON bool `json:"json,omitempty"`
 
+	// Shape is the kind of JSON value a JSON column holds for the field's
+	// type (sqlutil.QueueJSONShape), as queues.ts marks it: "object" or
+	// "list", or empty for a JSON scalar. The Rust client's types hold a
+	// claimed row to it already.
+	Shape string `json:"shape,omitempty"`
+
 	// List is a list the column holds as a Postgres array.
 	List bool `json:"list,omitempty"`
 
@@ -123,7 +129,10 @@ type QueueField struct {
 // QueueStatements are a queue's statements on Postgres
 // (sqlutil.QueueStatements), by the names queues.ts gives them.
 type QueueStatements struct {
-	Insert   string `json:"insert"`
+	Insert string `json:"insert"`
+	// Conflict ends an enqueue on a queue that keeps one ready message per
+	// key (D80); other queues have none.
+	Conflict string `json:"conflict,omitempty"`
 	Expire   string `json:"expire"`
 	Claim    string `json:"claim"`
 	Complete string `json:"complete"`
@@ -140,6 +149,7 @@ type QueueStatements struct {
 func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 	return QueueStatements{
 		Insert:   s.Insert,
+		Conflict: s.Conflict,
 		Expire:   s.Expire,
 		Claim:    s.Claim,
 		Complete: s.Complete,
@@ -214,11 +224,12 @@ func RustQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 			q.Descriptor.Fields = append(q.Descriptor.Fields, field)
 			columns = append(columns, field.Column)
 		}
-		q.Descriptor.Statements = queueStatements(sqlutil.PostgresQueueStatements(q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0))
+		spec := sqlutil.QueueSpecOf(td, q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0)
+		q.Descriptor.Statements = queueStatements(sqlutil.PostgresQueueStatements(spec))
 		if !sqlite {
 			q.SQLiteUnsupported = ""
 		} else if q.SQLiteUnsupported == "" {
-			statements := queueStatements(sqlutil.SQLiteQueueStatements(q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0))
+			statements := queueStatements(sqlutil.SQLiteQueueStatements(spec))
 			q.Descriptor.SQLiteStatements = &statements
 		}
 		if q.Unsupported == "" {
@@ -252,6 +263,9 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	anyJSON := sqlType == "JSON" || sqlType == "JSONB"
 	field.JSON = f.JsonField || ref.IsMap || ref.IsArrayOfArrays || (target != nil && target.JsonField) || (anyJSON && !ref.IsArray)
 	field.List = ref.IsArray && !field.JSON
+	if field.JSON {
+		field.Shape = sqlutil.QueueJSONShape(ref, target != nil)
+	}
 	switch {
 	case field.List && anyJSON:
 		return field, "is a list of JSON values, which a queue's message does not hold yet; hold it in a @jsonField type"

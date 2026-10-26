@@ -80,6 +80,12 @@ type QueueFieldInfo struct {
 	// scalar, as the Go ORM marshals each.
 	JSON bool
 
+	// Shape is the kind of JSON value a JSON column holds for the field's
+	// type (sqlutil.QueueJSONShape), which a claim holds the row to as Go's
+	// and Rust's types do: "object" or "list". Empty for a JSON scalar,
+	// which holds any value, and for a column that is not JSON.
+	Shape string
+
 	// List is a list the column holds as a Postgres array.
 	List bool
 
@@ -152,11 +158,12 @@ func TypeScriptQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 			q.Fields = append(q.Fields, field)
 			columns = append(columns, field.Column)
 		}
-		q.Statements = sqlutil.PostgresQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+		spec := sqlutil.QueueSpecOf(td, q.Table, columns, q.RetainSeconds > 0)
+		q.Statements = sqlutil.PostgresQueueStatements(spec)
 		if !sqlite {
 			q.SQLiteUnsupported = ""
 		} else if q.SQLiteUnsupported == "" {
-			statements := sqlutil.SQLiteQueueStatements(q.Table, columns, q.RetainSeconds > 0)
+			statements := sqlutil.SQLiteQueueStatements(spec)
 			q.SQLiteStatements = &statements
 		}
 		queues = append(queues, q)
@@ -182,6 +189,9 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	anyJSON := sqlType == "JSON" || sqlType == "JSONB"
 	field.JSON = f.JsonField || ref.IsMap || ref.IsArrayOfArrays || (target != nil && target.JsonField) || (anyJSON && !ref.IsArray)
 	field.List = ref.IsArray && !field.JSON
+	if field.JSON {
+		field.Shape = sqlutil.QueueJSONShape(ref, target != nil)
+	}
 	switch {
 	case field.List && anyJSON:
 		return field, "is a list of JSON values, which a queue's message does not hold yet; hold it in a @jsonField type"

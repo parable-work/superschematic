@@ -2,9 +2,11 @@ package verify
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -15,7 +17,9 @@ import (
 // a column holds, a scalar, an enum or a JSON value, never a reference to
 // a table, a key or a generated value, and take no name of a column the
 // queue keeps itself. Its table takes no other table's name, and its
-// arguments are what @queue takes (registry.CheckQueue).
+// arguments are what @queue takes (registry.CheckQueue). Its key, when it
+// has one, is a required field whose column a unique index can hold
+// (D80).
 func checkQueues(schema *ir.Schema, r *Result) {
 	queues := schema.Queues()
 	if len(queues) == 0 {
@@ -56,6 +60,7 @@ func checkQueues(schema *ir.Schema, r *Result) {
 		if other, clash := tables[table]; clash {
 			r.errorf(td.Owner, "%s's table is %s, the table of %s; rename one of them", where, table, other)
 		}
+		checkQueueKey(schema, td, r)
 		reserved := ir.QueueColumns()
 		for _, f := range td.Fields {
 			if f == nil {
@@ -77,6 +82,49 @@ func checkQueues(schema *ir.Schema, r *Result) {
 			}
 		}
 	}
+}
+
+// checkQueueKey checks a queue's key (D80): a field of its message that is
+// required, so every message has one, and a single scalar or enum, not a
+// list, a map or a JSON value, whose column an index compares by
+// equality, which a POINT and the PostGIS types are not.
+func checkQueueKey(schema *ir.Schema, td *ir.TypeDef, r *Result) {
+	if td.Queue == nil || td.Queue.Key == "" {
+		return
+	}
+	where := "queue " + td.Name
+	var key *ir.FieldDef
+	for _, f := range td.Fields {
+		if f != nil && f.Name == td.Queue.Key {
+			key = f
+		}
+	}
+	if key == nil {
+		r.errorf(td.Owner, "%s's key %q names no field of the message; name one of its fields, as key: %q", where, td.Queue.Key, firstFieldName(td))
+		return
+	}
+	_, union := schema.Unions[key.TypeRef.Name]
+	target := schema.Types[key.TypeRef.Name]
+	sqlType := strings.ToUpper(sqlutil.ColumnType(schema, key, sqlutil.ScalarSQLTypes(schema)))
+	switch {
+	case !key.Required:
+		r.errorf(td.Owner, "%s's key %s is optional; a key is a required field, so every message has one", where, key.Name)
+	case key.TypeRef.IsArray || key.TypeRef.IsMap || key.JsonField || union || (target != nil && target.JsonField) || sqlType == "JSONB" || sqlType == "JSON":
+		r.errorf(td.Owner, "%s's key %s is a list, a map or a JSON value; a key is one scalar or enum value", where, key.Name)
+	case sqlType == "POINT" || sqlType == "GEOGRAPHY" || sqlType == "GEOMETRY":
+		r.errorf(td.Owner, "%s's key %s is a %s column, which an index does not compare by equality; key the message by another field", where, key.Name, sqlType)
+	}
+}
+
+// firstFieldName is the name of a type's first field, for an example in an
+// error.
+func firstFieldName(td *ir.TypeDef) string {
+	for _, f := range td.Fields {
+		if f != nil {
+			return f.Name
+		}
+	}
+	return "id"
 }
 
 // checkWorkers checks an API service's workers (D53) in every form: only

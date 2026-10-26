@@ -10,7 +10,7 @@ import (
 // states of the IDs given, and a retry and a drop of the IDs given or of
 // every dead message, each touching dead messages alone.
 func TestPostgresQueueOperatorStatements(t *testing.T) {
-	s := PostgresQueueOperatorStatements(`"order_placed_queue"`)
+	s := PostgresQueueOperatorStatements(`"order_placed_queue"`, "")
 	want := map[string]string{
 		"dead": `SELECT q.id::text, q.attempts::bigint, COALESCE(q.last_error, ''),
   to_char(q.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),

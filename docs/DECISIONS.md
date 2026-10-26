@@ -11236,3 +11236,96 @@ opt-out of the checks; raw SQL that a plan knows to take down around a
 change to the columns it reads (a materialized view over a column a plan
 retypes fails the step, as Postgres refuses it); `SET DEFAULT`. The rule
 is reversible until the first release.
+
+## D80. A queue keys its messages, keeps one ready per key or one claim per key, and a table's trigger enqueues on a change
+
+A queue (D53) offered `retries`, `backoff`, `maxBackoff`, `lease` and
+`retain`, and every enqueue added a message. Two needs had no home:
+- **One waiting message per key.** A line item's embedding job is keyed
+  by the line item: re-categorizing it should replace the job that waits,
+  not add another.
+- **One running message per key.** A bank sync per Plaid item must not
+  run twice at once, since both runs read and advance one cursor.
+
+And enqueueing was code in each writer's transaction (D53), so a bulk
+import, a script or psql that changed a row enqueued nothing.
+
+This entry adds `key`, `onDuplicate` and `serialize` to `@queue`, and
+`@enqueueOnChange` on a DB table, a trigger that enqueues a message of a
+queue of the same schema after a write to the table's rows.
+
+### Keys, dedupe and serialization
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `key` names a required field of the message, one scalar or enum value, whose column the queue's indexes hold. It takes effect with `onDuplicate: "replace"` or `"skip"`, or `serialize: true`, and each of those needs it; a key with neither is refused, since it would do nothing. | An optional key, whose NULL a unique index lets repeat, so a message without one would dedupe and serialize nothing, silently. A key over several fields, which no need here asks for. |
+| "Pending" is `state = 'ready'`: a message no worker holds, due now or after its backoff. A partial unique index of the ready messages by key, `uq_<table>_ready_key`, keeps one per key, and the enqueue ends with `ON CONFLICT (key) WHERE state = 'ready'`, which Postgres and SQLite both read. A claimed message is not pending: an enqueue while one runs adds a ready message for the next run, since the one that runs read the old row. | Counting a claimed message as pending, which drops the change that came in while it ran. An index over every live state, which an enqueue during a run would violate. |
+| `replace` overwrites the ready message with the new one: every column of the message but the key, a field the new message leaves out taking its column's default; `due_at`, to the new one's, so due at once; `attempts`, to zero; and `last_error`, cleared. It keeps the row's `id` and `created_at`. A message that waits out a backoff is so made fresh: new data, its retries from the start. | Keeping the attempts, which spends a new message's retries on an old one's failures. Keeping `due_at`, which leaves fresh data waiting a stale backoff. A new row and a deleted old one, which changes the ID an operator follows. |
+| `skip` keeps the ready message as it is, its backoff included, and adds none. `append`, the default, adds one as before. | |
+| A claimed message that fails, or is released, while a ready message holds its key gives way: it is `done`, its cause in `last_error` on a fail, and the ready message, newer, runs in its place. With none waiting, it is ready again as on any queue. The fail and release statements decide in one `CASE ... WHEN EXISTS (a ready message of the key)`; a queue that keeps no done message prunes it with the others. | Going back to ready beside the newer message, which the unique index refuses. Deleting it, which SQLite's single UPDATE cannot do and which loses the cause. |
+| `serialize` holds a key to one claim at a time. A partial unique index of the claimed messages by key, `uq_<table>_claimed_key`, makes it hold whatever two workers do at once. The claim takes, of each key, only the head of its line: a message whose claim expired, else the first due ready one by `(due_at, id)`, the order a claim takes them in; and none while a claim of the key lives. A queue that serializes and appends indexes its ready messages by key too, `idx_<table>_ready_key`, which the head reads. | An advisory lock per key, which a claim's transaction releases when it commits while the claim lasts its lease. A `NOT EXISTS` with no index behind it, which two claims on different snapshots both pass. A claim inside a plpgsql function, a migration object per queue. |
+| On Postgres a claim whose snapshot missed a claim another worker was committing meets the claimed index's unique violation; a fail or release that missed an enqueue being committed meets the ready index's. Each client (the Go ORM, TypeScript's `postgresQueue`, Rust's `PostgresQueue`) reads SQLSTATE 23505 there: the claim takes nothing that time and the worker polls again, and the fail or release runs once more, when it sees the ready message and gives way. SQLite has one writer, which reads every claim and ready message of the key, and never meets either. | Single statements that cannot race: a fail as DELETE and INSERT ... ON CONFLICT in one statement, which SQLite has no form of; a claim as a function. Letting the violation reach the worker's log as a failed claim. |
+| The statements stay in one place, `sqlutil.QueueSpec`, which `PostgresQueueStatements` and `SQLiteQueueStatements` now take: a dedupe queue's `Conflict`, which each client appends after its VALUES, and its fail and release; a serialized queue's claim and SQLite due read. The Go ORM, the TypeScript types' `./queues` and the Rust descriptor carry them; the TypeScript `enqueue`'s signature does not change. | A statement per client, which the parity test exists to prevent. |
+| An operator's `stack queue retry` of a dedupe queue retries one dead message per key, the last to die, and none whose key a ready message holds; a retry of IDs that leaves one dead says so ("dead, and a ready message holds its key"). The document carries the key's column, which the stack's resolution reads from the queue. | A retry that makes every named message ready, which the unique index refuses, all or nothing. |
+
+### Migrations
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Adding a key is adding the indexes: the queue's table is a table to the planner (D27), and the model's table records the key, `onDuplicate` and `serialize` (`Table.Queue`), only for a queue with a key, so every other model and its hash stay as they were. | A table kind for queues, which changes every queue's model. |
+| Pending messages that already share a key are collapsed in the step that builds the ready index, before the build: every ready message of a key but one is marked `done`, with a last error that says why, keeping the one the queue's `onDuplicate` keeps, the latest enqueued under replace and the earliest under skip. On Postgres the build is CONCURRENTLY, so a server built from the previous version can enqueue a duplicate between the two statements, and the build fails (data-dependent: run the plan again; the step's recovery drops the invalid index). On SQLite the two run in one transaction under the write lock. The step is destructive: the messages it marks do not run. | Refusing the plan while duplicates exist, which an operator cannot fix by hand faster than the servers enqueue. Deleting them, which loses what they held. |
+| The ready index's step is a compat hazard: a server built from the previous version enqueues without ON CONFLICT, so once the index is built its enqueue of a message whose key a ready message holds fails, and its write with it, until the rollout replaces it. The claimed index's is data-dependent: it fails while two claims hold one key. | No hazard, since nothing breaks while no duplicate is enqueued. |
+
+### `@enqueueOnChange`
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@enqueueOnChange(Queue, { on, fields?, when?, message })` on a DB table, at most once per queue. `on` lists `insert`, `update` and `delete`; an insert and an update enqueue from the row as written, a delete from the row as it was. `fields` makes an update enqueue only when one of them changes, compared with IS DISTINCT FROM (SQLite's IS NOT); without it every update does. A relation is its key's column. | Requiring `fields` for an update, which forbids "any change" for no gain. |
+| `when` is a typed predicate: a list of `{ field, isNull: true }`, `{ field, notNull: true }` and `{ field, equals: literal }`, all of which hold, as `@projection`'s literal rules read. The trigger is written in two dialects, and the predicate names fields, which the loader checks (the field has a column, a null test is of a nullable field, an equals literal fits: an enum's member, a string for text, a whole number for an integer, a boolean for a boolean), and which each dialect renders (TRUE or 1). The loader also reads it: a required message field taken from a nullable column needs `notNull` on that column. Anything a typed rule cannot say belongs in a raw SQL object the migrations own (D83). | A raw SQL string, which would have to hold in Postgres and SQLite alike, would name columns by the names sqlgen gives them (`category_id`), and would fail only when a migration applied it, or at a write, inside the writer's transaction. |
+| `message` maps each field of the message the trigger sets to a field of the table. The loader checks that they line up: the same type (a list for a list), or from a to-one relation the type of its target's key, and the same SQL column type, so the value copies across as it is; and that every required field the trigger leaves out has its column's default (a list, a time, or an enum's schema default, which the trigger writes as the ORM's enqueue does). | Checking only the column types, which lets a `Finance.Money` message take any BIGINT. |
+| On Postgres it is a plpgsql function `<table>_enqueue_<queue>` and the trigger `trg_<table>_enqueue_<queue>`, `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, as a @versioned table's capture function and triggers are (D17), so create.sql and the planner's model take them from one renderer, and the planner creates, replaces in place (`CREATE OR REPLACE`), renames and drops them as it does those. A change of `fields`, `when` or `message` replaces the function; one of `on`, the trigger. | A trigger with a WHEN clause per write, which the planner's trigger model does not read. |
+| SQLite gets triggers too: one per write, `trg_<table>_enqueue_<queue>_<write>`, each holding its insert and, in its WHEN, the comparison and the conditions. The SQLite model holds triggers for the first time: the planner creates them, replaces them (DROP IF EXISTS and CREATE, SQLite having no functions), and drops them. A table SQLite rebuilds loses its triggers with its old copy, so the rebuild creates the triggers the phase leaves on each table it keeps, the new model's and, in expand, the previous model's that contract drops. A trigger that inserts into a rebuilt table needs nothing: SQLite resolves the name when the trigger runs. | Refusing @enqueueOnChange on SQLite, which the same app runs locally. |
+| The trigger's insert ends with the queue's Conflict, so under replace or skip repeated writes keep one ready message per key, and the trigger and an application's enqueue dedupe against each other. | |
+| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there. | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
+
+Status: built.
+- **Dedupe and serialization:** `internal/generator/sqlutil/queuesql_test.go`
+  holds the statements, `internal/registry/core_queues_test.go` and
+  `internal/loader/verify/enqueue_on_change_test.go` the options and the
+  key. The generated `TestQueueKeyParity` (`ormgen`'s
+  `queues_key_parity_test.go`, run by
+  `TestQueueParityOfGoTypeScriptAndRustOnPostgres` and `...OnSQLite`) has
+  Go, TypeScript and Rust share fixture-queue-db's keyed queues:
+  `ReplaceKeepsOneReadyMessage` (five enqueues of one key leave one ready
+  message, the last), `SkipKeepsTheFirst`, `FailedAndReleasedGiveWay`,
+  `SerializeHoldsOneClaimPerKey`, `SerializeTakesTheHeadOfEachKey` and
+  `ConcurrentClaimsNeverShareAKey` (eight workers, sixty messages, four
+  keys, no two claims of one key and no failed claim). On Postgres,
+  `LostClaimRaceTakesNothing` and `FailRacingAnEnqueueGivesWay` hold each
+  side's claim and fail in a lock wait on the other transaction, shown by
+  `pg_blocking_pids`, and check that the claim takes nothing and the fail
+  gives way, with no error.
+- **The trigger:** the same test's `TriggerEnqueuesOnChange`, on both
+  dialects, sets a line's product with raw SQL (one message), changes its
+  note (none), and changes it repeatedly and deletes it (one waiting
+  message). `TestEnqueueOnChangeIsATablesTrigger` reads the declaration.
+- **Migrations:** the plan cases `add-queue-key`, `change-queue-key`,
+  `add-enqueue-on-change`, `change-enqueue-on-change`,
+  `drop-enqueue-on-change` and `enqueue-on-change-rebuilt`, in each
+  dialect, with their goldens, and the convergence tests on Postgres and
+  SQLite, which apply them.
+- **Operator retry:** `TestQueueRetryOfAKeyedQueueOnPostgres` runs the
+  golden documents `retry-keyed` and `retry-all-keyed` of fixture-queue-db's
+  `StockChecked` (`internal/queueops`) with the migration runner: a retry
+  of two dead messages of one SKU changes none and names the one left
+  dead, and a retry of all retries the last death of each SKU and none of
+  a SKU a ready message holds.
+- **acme-shop:** `shop-db`'s `StockLow` keeps one waiting message per
+  product, the latest, and its worker handles one product at a time;
+  `OrderPlaced` waits once per order, and `Order`'s trigger enqueues it
+  when any writer puts an order back to placed.
+
+Left: a key over several fields; a delay on enqueue (`due_at` later than
+now), which replace would then take from the new message; operator
+statements on SQLite, which `stack queue` does not run yet (D68); and
+`when` rules beyond the literal ones.

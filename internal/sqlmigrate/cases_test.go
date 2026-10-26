@@ -49,8 +49,9 @@ type planCase struct {
 	// lists are rows of product a SQLite case seeds with lists in its
 	// items column, each with the JSON text it holds after the plan.
 	lists listRows
-	// rows are more rows a SQLite case seeds, such as rows that reference
-	// one another, with the checks they pass after the plan.
+	// rows are more rows a case seeds, such as rows that reference one
+	// another or messages that share a key, with the checks they pass
+	// after the plan, in each dialect.
 	rows extraRows
 }
 
@@ -463,6 +464,56 @@ var planCases = []planCase{
 		fieldNamed(s, "Order", "total").Default = &zero
 	}},
 
+	// A queue's key, and the triggers that enqueue its messages (D80).
+	{name: "add-queue-key",
+		before: func(s *ir.Schema) { shipQueue(s, &ir.QueueDef{}) },
+		after: func(s *ir.Schema) {
+			shipQueue(s, &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace, Serialize: true})
+		}, rows: waitingTwice},
+	{name: "change-queue-key",
+		before: func(s *ir.Schema) {
+			shipQueue(s, &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace, Serialize: true})
+		},
+		after: func(s *ir.Schema) { shipQueue(s, &ir.QueueDef{Key: "orderId", Serialize: true}) }},
+	{name: "add-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey) },
+		after:  func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") }},
+	{name: "change-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update", "delete"}, "note", "total")
+		}},
+	{name: "drop-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after:  func(s *ir.Schema) { shipQueue(s, shipKey) }},
+	// SQLite drops a table's triggers with it, so its rebuild creates them
+	// again.
+	{name: "enqueue-on-change-rebuilt",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			fieldNamed(s, "Order", "note").Required = true
+		}},
+	// SQLite rebuilds order for the check its note gains (D83), which
+	// drops the triggers its @enqueueOnChange made (D80) and the index raw
+	// SQL made on it: the copy creates the table with the check, the
+	// triggers after its indexes, and the phase ends by running the raw SQL
+	// again.
+	{name: "enqueue-on-change-rebuilt-with-check",
+		before: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+		},
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+			fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100)
+		}},
+
 	// Projections.
 	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		s.Types["CustomerDirectory"] = &ir.TypeDef{
@@ -495,6 +546,43 @@ var planCases = []planCase{
 		fieldNamed(s, "Note", "body").ConflictUnit = ir.ConflictUnitExcluded
 		typeNamed(s, "Recipe").VersionGraph.SchemaEpoch = 2
 	}},
+}
+
+// waitingTwice are two ready messages of one order, which the plan that
+// keys OrderShipped by order with replace leaves one: the latest waits,
+// and the other is done.
+var waitingTwice = extraRows{
+	seed: []string{
+		`INSERT INTO "order_shipped_queue" ("order_id", "note", "state", "created_at") VALUES ('a0000000-0000-4000-8000-00000000000a', 'first', 'ready', '2026-01-01T00:00:00.000Z')`,
+		`INSERT INTO "order_shipped_queue" ("order_id", "note", "state", "created_at") VALUES ('a0000000-0000-4000-8000-00000000000a', 'second', 'ready', '2026-01-02T00:00:00.000Z')`,
+	},
+	checks: []seedCheck{
+		{Name: "the latest message of the order waits",
+			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'ready' AND "note" = 'second'`},
+		{Name: "the earlier message of the order is done",
+			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'done' AND "note" = 'first' AND "last_error" LIKE 'another ready message of its key%'`},
+	},
+}
+
+// shipKey keys OrderShipped by order, one waiting message per order.
+var shipKey = &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace}
+
+// shipQueue adds the queue OrderShipped, a message of an order and a note,
+// declared with def.
+func shipQueue(s *ir.Schema, def *ir.QueueDef) {
+	s.Types["OrderShipped"] = &ir.TypeDef{Name: "OrderShipped", Role: ir.RoleEmbeddedStruct, Queue: def, Fields: []*ir.FieldDef{
+		{Name: "orderId", TypeRef: uuidRef, Required: true},
+		{Name: "note", TypeRef: stringRef},
+	}}
+}
+
+// enqueueShip has a change of Order's fields, on the writes on, enqueue
+// the order's OrderShipped.
+func enqueueShip(s *ir.Schema, on []string, fields ...string) {
+	typeNamed(s, "Order").EnqueueOnChange = []*ir.EnqueueOnChange{{
+		Queue: "OrderShipped", On: on, Fields: fields,
+		Message: map[string]string{"orderId": "id", "note": "note"},
+	}}
 }
 
 // addSupplierAndWarehouse adds two tables that reference each other: a

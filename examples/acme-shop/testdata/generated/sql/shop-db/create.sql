@@ -27,7 +27,10 @@ CREATE TABLE "order" (
   CONSTRAINT ck_order_cancel_reason CHECK (length(cancel_reason) <= 500)
 );
 
-COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first.';
+COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first. An
+order put back to placed, by staff or by a script in psql, is fulfilled
+again: the database''s trigger enqueues its OrderPlaced, whatever wrote
+the row.';
 
 CREATE TABLE order_line (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -179,9 +182,11 @@ CREATE TABLE order_placed_queue (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transaction that writes it: shop-orders''
-worker FulfilOrders handles each message, and a message whose handler
-fails is retried every half minute, five times at most.';
+COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transaction that writes it, and by the
+trigger on an order put back to placed: shop-orders'' worker FulfilOrders
+handles each message, and a message whose handler fails is retried every
+half minute, five times at most. One waits per order: an order placed
+again while its message waits adds none.';
 
 CREATE TABLE stock_low_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -202,9 +207,11 @@ COMMENT ON TABLE stock_low_queue IS 'Enqueued by shop-stock when a sale leaves a
 available units at or below its reorderAt (Stock.low, D70), and by its
 job OrderRestocks for one a count left low: shop-stock''s worker
 ReorderStock files a restock request for the product. The message holds
-the units available and the reorder level as the sale left them. A
-message whose handler fails is retried every half minute, five times at
-most.';
+the units available and the reorder level as the sale left them. One
+waits per product: a later sale that leaves the product low replaces it,
+so the worker reads the latest level, and the worker handles one
+product''s message at a time. A message whose handler fails is retried
+every half minute, five times at most.';
 
 -- Add foreign key constraints
 
@@ -290,8 +297,35 @@ CREATE INDEX idx_order_placed_queue_claim_expires_at ON order_placed_queue USING
 
 CREATE INDEX idx_order_placed_queue_updated_at ON order_placed_queue USING BTREE (updated_at) WHERE state = 'done';
 
+CREATE UNIQUE INDEX uq_order_placed_queue_ready_key ON order_placed_queue USING BTREE (order_id) WHERE state = 'ready';
+
 CREATE INDEX idx_stock_low_queue_due_at ON stock_low_queue USING BTREE (due_at) WHERE state = 'ready';
 
 CREATE INDEX idx_stock_low_queue_claim_expires_at ON stock_low_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
 
 CREATE INDEX idx_stock_low_queue_updated_at ON stock_low_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE UNIQUE INDEX uq_stock_low_queue_ready_key ON stock_low_queue USING BTREE (product_id) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_stock_low_queue_claimed_key ON stock_low_queue USING BTREE (product_id) WHERE state = 'claimed';
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+
+CREATE OR REPLACE FUNCTION order_enqueue_order_placed() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of OrderPlaced after a write to order (D80).
+  IF TG_OP = 'UPDATE' AND NOT (OLD.status IS DISTINCT FROM NEW.status) THEN
+    RETURN NULL;
+  END IF;
+  IF NEW.status = 'placed' THEN
+    INSERT INTO order_placed_queue (order_id) VALUES (NEW.id)
+      ON CONFLICT (order_id) WHERE state = 'ready' DO NOTHING;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_order_enqueue_order_placed
+  AFTER UPDATE ON "order"
+  FOR EACH ROW EXECUTE FUNCTION order_enqueue_order_placed();

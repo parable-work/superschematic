@@ -1,0 +1,66 @@
+{
+  "dialect": "postgres",
+  "from": "58b118bea58349ea2573b2a02013e31eccf0c58220ea350f0239fb9e1e87c273",
+  "hash": "fb9e5f11b7cffc6a87e4a62397c197d1774db3739527e796607fcc204cffcc90",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key",
+          "reason": "Building the index fails while two claims hold one order_id of OrderShipped: let them finish or expire, and run the plan again.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS uq_order_shipped_queue_claimed_key"
+      ],
+      "statements": [
+        "CREATE UNIQUE INDEX CONCURRENTLY uq_order_shipped_queue_claimed_key ON order_shipped_queue USING BTREE (order_id) WHERE state = 'claimed'"
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key",
+      "transactional": false
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "The step marks done every ready message of OrderShipped but one per order_id, the latest enqueued, which replace keeps: the others do not run.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "Servers built from the previous version enqueue OrderShipped without ON CONFLICT: once the index is built, such an enqueue of a message whose order_id a ready message holds fails, and the write that enqueued it with it.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+          "reason": "Building the index fails when such a server enqueues a duplicate order_id between the step's two statements; run the plan again.",
+          "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key"
+        }
+      ],
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS uq_order_shipped_queue_ready_key"
+      ],
+      "statements": [
+        "UPDATE order_shipped_queue SET state = 'done', updated_at = now(),\n  last_error = 'another ready message of its key was kept when the queue began to keep one per key'\nWHERE state = 'ready' AND id NOT IN (\n  SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY order_id ORDER BY created_at DESC, id DESC) AS n FROM order_shipped_queue WHERE state = 'ready') AS kept WHERE n = 1\n)",
+        "CREATE UNIQUE INDEX CONCURRENTLY uq_order_shipped_queue_ready_key ON order_shipped_queue USING BTREE (order_id) WHERE state = 'ready'"
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+      "transactional": false
+    }
+  ],
+  "to": "c2b1cc76b277f27b233d923d3ad91e0e00e493dd36f5164946ef90feb769f7b8",
+  "toModel": null,
+  "version": 1
+}

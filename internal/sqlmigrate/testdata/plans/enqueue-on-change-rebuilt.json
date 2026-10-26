@@ -1,0 +1,51 @@
+{
+  "dialect": "postgres",
+  "expanded": "419f407291d1e3608296f6784051777215e67c380a3eaeb33e813be5a702949b",
+  "from": "419f407291d1e3608296f6784051777215e67c380a3eaeb33e813be5a702949b",
+  "hash": "c193f850b98b082ff74d3494e6a11f7c77fd71cc50a65584e4b084cf04a5aecb",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addNotNullCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT order_note_not_null_check CHECK (note IS NOT NULL) NOT VALID"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/note",
+          "reason": "Order.note becomes required: the step fails when order has a row where note is null.",
+          "subject": "table/order/column/note"
+        }
+      ],
+      "index": 2,
+      "op": "validateNotNullCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT order_note_not_null_check"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "setNotNull",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN note SET NOT NULL",
+        "ALTER TABLE \"order\" DROP CONSTRAINT order_note_not_null_check"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    }
+  ],
+  "to": "82b4868bece70a037142381561fdc169ea81bb45cacce52446e7ad6a32f56aac",
+  "toModel": null,
+  "version": 1
+}

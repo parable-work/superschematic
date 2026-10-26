@@ -470,3 +470,70 @@ describe('a field on SQLite', () => {
     expect(() => sqliteColumnValue(9007199254740992n, { name: 'n', column: 'n' })).toThrow(/out of the range/);
   });
 });
+
+describe('JSON columns on SQLite', () => {
+  test("a JSON column's text is decoded once: a JSON string reads as the string, and JSON of another kind than its type's is refused", () => {
+    const any = { name: 'detail', column: 'detail', json: true };
+    expect(sqliteMemberValue('"1"', any)).toBe('1');
+    expect(sqliteMemberValue('"x"', any)).toBe('x');
+    expect(sqliteMemberValue('1', any)).toBe(1);
+    expect(sqliteMemberValue('[1,"x"]', any)).toEqual([1, 'x']);
+    const address = { name: 'shipTo', column: 'ship_to', json: true, shape: 'object' as const };
+    expect(sqliteMemberValue('{"line1":"1 Main St"}', address)).toEqual({ line1: '1 Main St' });
+    expect(sqliteMemberValue('null', address)).toBeNull();
+    expect(() => sqliteMemberValue('"no address"', address)).toThrow('holds a string, where its type is an object');
+    expect(() => sqliteMemberValue('{"a":1}', { ...address, shape: 'list' as const })).toThrow('holds an object, where its type is a list');
+    expect(() => sqliteMemberValue('{not json', address)).toThrow(/^holds no JSON: /);
+    expect(() => sqliteMemberValue(1, address)).toThrow('the column holds 1, no JSON text');
+  });
+
+  test('a JSON value reads back as it was enqueued, a JSON string among them', async () => {
+    const [db] = database();
+    await db.prepare(createTable('note_queue', 'seq INTEGER NOT NULL,\n  detail TEXT NOT NULL,')).run();
+    const note: QueueDefinition<{ seq: number; detail: unknown }> = {
+      ...ping,
+      name: 'Note',
+      table: 'note_queue',
+      retainSeconds: 3600,
+      fields: [
+        { name: 'seq', column: 'seq' },
+        { name: 'detail', column: 'detail', json: true },
+      ],
+      statements: statements('note_queue', ['seq', 'detail'], true),
+      sqliteStatements: statements('note_queue', ['seq', 'detail'], true),
+    };
+    const values: unknown[] = ['1', 'x', '', '{"a":1}', 1, 2.5, true, false, { a: '1', b: [1, 'x'] }, ['1', 2]];
+    for (const [seq, detail] of values.entries()) await enqueueSqlite(db, note, { seq, detail });
+    const claims = await sqliteQueue(db, note).claim(values.length + 1);
+    expect(claims.map(c => c.message).sort((a, b) => a.seq - b.seq)).toEqual(values.map((detail, seq) => ({ seq, detail })));
+  });
+});
+
+describe('a queue with a key on SQLite (D80)', () => {
+  test("enqueueStatement ends with the queue's conflict clause, so one message waits per key", async () => {
+    const [db] = database();
+    const setup = [
+      "CREATE TABLE stock_checked_queue (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), sku TEXT NOT NULL, quantity INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'ready')",
+      "CREATE UNIQUE INDEX uq_stock_checked_queue_ready_key ON stock_checked_queue (sku) WHERE state = 'ready'",
+    ];
+    for (const ddl of setup) await db.prepare(ddl).run();
+    const sqlite = statements('stock_checked_queue', ['sku', 'quantity'], false);
+    const definition: QueueDefinition<{ sku: string; quantity: number }> = {
+      name: 'StockChecked',
+      table: 'stock_checked_queue',
+      retries: 5,
+      backoffSeconds: 30,
+      maxBackoffSeconds: 3600,
+      leaseSeconds: 60,
+      retainSeconds: 0,
+      fields: [
+        { name: 'sku', column: 'sku' },
+        { name: 'quantity', column: 'quantity' },
+      ],
+      statements: sqlite,
+      sqliteStatements: { ...sqlite, conflict: "ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING" },
+    };
+    for (const quantity of [1, 2, 3]) await db.batch([enqueueStatement(db, definition, { sku: 'SKU-1', quantity })]);
+    expect(await db.prepare('SELECT sku, quantity FROM stock_checked_queue').raw()).toEqual([['SKU-1', 1]]);
+  });
+});
