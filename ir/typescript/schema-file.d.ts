@@ -157,6 +157,21 @@ export interface Document {
   workers?: Worker[];
 }
 
+export interface EnqueueCondition {
+  equals?: string | number | boolean;
+  field: string;
+  isNull?: boolean;
+  notNull?: boolean;
+}
+
+export interface EnqueueOnChange {
+  fields?: string[];
+  message: { [key: string]: string };
+  on: string[];
+  queue: string;
+  when?: EnqueueCondition[];
+}
+
 export interface EnumDef {
   comment?: string;
   description?: string;
@@ -515,10 +530,13 @@ export interface PruneReference {
 
 export interface QueueDef {
   backoff?: string;
+  key?: string;
   lease?: string;
   maxBackoff?: string;
+  onDuplicate?: string;
   retain?: string;
   retries?: number;
+  serialize?: boolean;
 }
 
 export interface RawHeritage {
@@ -644,6 +662,7 @@ export interface TypeDef {
   denyUnknownFields?: boolean;
   description?: string;
   display?: TypeDisplay;
+  enqueueOnChange?: EnqueueOnChange[];
   envVars?: boolean;
   environment?: EnvironmentDecl;
   extends?: string;

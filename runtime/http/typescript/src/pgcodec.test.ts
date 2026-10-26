@@ -4,6 +4,7 @@ import { connectPostgres } from './postgres';
 import { parseGenericDecimalStrict } from 'superscalar/scalars';
 import { PG_TYPES, canonicalDecimal, decodeRow, encodeParam, parseInt8, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec';
 import { uuidFromDb, uuidToDb } from './uuid';
+import { jsonMemberValue } from './queue-core';
 
 /** The variable that names a Postgres the pool tests run against; they are skipped without it. */
 const dsn = process.env.SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL ?? '';
@@ -164,6 +165,16 @@ describe('a JSON column', () => {
     // The JSON string "1" stays a string, and "x" is no JSON text to parse again.
     expect(decodeRow({ doc: '1' }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: '1' });
     expect(decodeRow({ doc: null }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: null });
+  });
+
+  test("reads each JSON value as a queue's claim reads it from the column's text, a JSON string staying a string", () => {
+    for (const [value] of [...jsonValues, [null, 'null'] as const]) {
+      const text = JSON.stringify(value);
+      const claimed = jsonMemberValue(text, { name: 'doc', column: 'doc', json: true });
+      expect(claimed).toEqual(value);
+      expect(decodeRow({ doc: value }, [{ name: 'doc', column: 'doc', json: true }])).toEqual({ doc: claimed });
+      expect(decodeRow({ doc: text }, [{ name: 'doc', column: 'doc', jsonText: true }])).toEqual({ doc: claimed });
+    }
   });
 
   test('binds every JSON value as its JSON text, and null as the JSON null only in a required column', () => {

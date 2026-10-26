@@ -39,6 +39,14 @@ func TableNameOf(schema *ir.Schema, typeName string) string {
 	return codegen.ToSnakeCase(typeName)
 }
 
+// QueueTableName is the table of the queue whose class is name (D53): the
+// class's table name, TableNameOf's, and ir.QueueTableSuffix,
+// order_placed_queue. sqlgen's DDL and every queue client name it here,
+// and its key indexes and @enqueueOnChange triggers are named from it.
+func QueueTableName(name string) string {
+	return TableNameOf(nil, name) + ir.QueueTableSuffix
+}
+
 // ColumnName is the column a field is stored in: its name in snake case.
 // Like TableName, it is the one place a column is named, through
 // ColumnNameOf, which names an @index key's column too.

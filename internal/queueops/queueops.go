@@ -54,6 +54,11 @@ type Request struct {
 	// (NormalizeID), and All takes every dead message in their place.
 	IDs []string
 	All bool
+
+	// Key is the quoted key column of a queue that keeps one ready message
+	// per key (D80), whose retry leaves each key one ready message; empty
+	// for every other queue.
+	Key string
 }
 
 // document is the runner's queue document (migrate.QueueDocument).
@@ -103,7 +108,7 @@ func Document(req Request) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("operation %q is not dead, retry or drop", req.Operation)
 	}
-	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(sqlgen.QueueTableName(req.Queue)))
+	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(sqlgen.QueueTableName(req.Queue)), req.Key)
 	doc := document{
 		Version:   Version,
 		Service:   req.Service,

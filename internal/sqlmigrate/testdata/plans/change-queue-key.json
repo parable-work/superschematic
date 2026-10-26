@@ -1,0 +1,35 @@
+{
+  "dialect": "postgres",
+  "expanded": "cbe56646b6fe67f661824cbec793448b8dc5d34a98d950fdc4ab788dbc6786e0",
+  "from": "c2b1cc76b277f27b233d923d3ad91e0e00e493dd36f5164946ef90feb769f7b8",
+  "hash": "1f9abbc416d18a76de1e40d21667898efc126b7c10f860c10c6e19d8acbdd1d9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_order_shipped_queue_ready_key"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_order_shipped_queue_ready_key ON order_shipped_queue USING BTREE (order_id) WHERE state = 'ready'"
+      ],
+      "subject": "table/order_shipped_queue/index/idx_order_shipped_queue_ready_key",
+      "transactional": false
+    },
+    {
+      "index": 2,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX uq_order_shipped_queue_ready_key"
+      ],
+      "subject": "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key",
+      "transactional": true
+    }
+  ],
+  "to": "c0fa0f3f193ab0cc275c1d61956942d067b3e6d8232b126229f47a71609e4333",
+  "toModel": null,
+  "version": 1
+}

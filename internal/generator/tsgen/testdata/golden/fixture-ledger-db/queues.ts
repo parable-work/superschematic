@@ -24,6 +24,8 @@ export interface QueueField {
   readonly column: string;
   /** The column holds the value as JSON, which an enqueue writes with JSON.stringify. */
   readonly json?: boolean;
+  /** The kind of JSON value the column holds for the member's type, which a claim holds the row to. */
+  readonly shape?: 'object' | 'list';
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
@@ -50,6 +52,8 @@ export interface QueueField {
  */
 export interface QueueStatements {
   readonly insert: string;
+  /** On a queue that keeps one ready message per key: what an enqueue ends with, which replaces or keeps that message. */
+  readonly conflict?: string;
   readonly expire: string;
   readonly claim: string;
   readonly complete: string;

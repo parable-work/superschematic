@@ -256,8 +256,11 @@ type DDLOutput struct {
 	HistoryTables []HistoryTable
 	// OptimisticTables are the @optimistic tables, in table order.
 	OptimisticTables []OptimisticTable
-	Projections      []ProjectionView
-	Timestamp        string
+	// EnqueueTriggers are the tables' @enqueueOnChange declarations, by
+	// table and queue (enqueue.go, D80).
+	EnqueueTriggers []EnqueueTrigger
+	Projections     []ProjectionView
+	Timestamp       string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -512,6 +515,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			usedScalars[col.Type] = true
 		}
 	}
+	enqueueTriggers, err := buildEnqueueTriggers(tableTypes, tables, schema)
+	if err != nil {
+		return nil, err
+	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
 
 	if err != nil {
@@ -554,6 +561,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		JoinTables:       joinTables,
 		HistoryTables:    historyTables,
 		OptimisticTables: optimisticTables,
+		EnqueueTriggers:  enqueueTriggers,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
 		RawSQL:           rawSQL,

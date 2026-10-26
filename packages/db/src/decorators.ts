@@ -307,7 +307,23 @@ export type QueueOptions = {
   readonly lease?: string;
   /** How long a done message stays before a worker removes it, a duration of whole seconds (`"168h"`); `"0s"` removes it when it is done; a week unless set. Dead messages stay. */
   readonly retain?: string;
+  /**
+   * The message's field that keys it, a required scalar or enum field. It takes effect with `onDuplicate`
+   * `"replace"` or `"skip"`, and with `serialize`.
+   */
+  readonly key?: string;
+  /**
+   * What an enqueue does when a ready message holds its key: `"append"` adds another, as a queue without a key
+   * does; `"replace"` overwrites the ready one with the new message, due at once with no attempts; `"skip"`
+   * keeps the ready one and adds none. `"append"` unless set.
+   */
+  readonly onDuplicate?: QueueOnDuplicate;
+  /** Hold the queue to one claim per key at a time: no worker claims a message whose key another claim holds. */
+  readonly serialize?: boolean;
 };
+
+/** What an enqueue does when a ready message holds its key. */
+export type QueueOnDuplicate = "append" | "replace" | "skip";
 
 /**
  * Declares a queue of the DB service whose class is its message
@@ -323,6 +339,56 @@ export type QueueOptions = {
  * ```
  */
 export function queue(_options?: QueueOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** A write to a table's rows that an `@enqueueOnChange` trigger enqueues on. */
+export type EnqueueWrite = "insert" | "update" | "delete";
+
+/**
+ * A condition the row must meet for the trigger to enqueue: a field that is null, one that is not, or one that
+ * equals a literal (an enum's member, a text, a number or a boolean). The row is the one written, or for a
+ * delete the one deleted.
+ */
+export type EnqueueCondition<TTable = any> =
+  | { readonly field: TableField<TTable>; readonly isNull: true }
+  | { readonly field: TableField<TTable>; readonly notNull: true }
+  | { readonly field: TableField<TTable>; readonly equals: string | number | boolean };
+
+/** A field of the table, by its name: any name unless the table's class is given as a type argument. */
+export type TableField<TTable> = keyof NoInfer<TTable> & string;
+
+/** The options of `@enqueueOnChange`. */
+export interface EnqueueOnChangeOptions<TMessage, TTable = any> {
+  /** The writes that enqueue. */
+  readonly on: readonly EnqueueWrite[];
+  /** The table's fields whose change makes an update enqueue; every update enqueues unless set. */
+  readonly fields?: readonly TableField<TTable>[];
+  /** The conditions the row must meet, all of them. */
+  readonly when?: readonly EnqueueCondition<TTable>[];
+  /** Each field of the message the trigger sets, and the table's field whose value it takes. */
+  readonly message: { readonly [K in keyof TMessage]?: TableField<TTable> };
+}
+
+/**
+ * Enqueues a message of a queue of the DB service after a write to the table's rows, whatever wrote it: a
+ * trigger of the database runs in the writer's transaction, so the message commits with the write. Under the
+ * queue's `onDuplicate`, repeated writes keep one ready message per key:
+ *
+ * ```ts
+ * @enqueueOnChange(EmbedLineItem, {
+ *   on: ["insert", "update"],
+ *   fields: ["category"],
+ *   when: [{ field: "category", notNull: true }],
+ *   message: { lineItemId: "id" },
+ * })
+ * export abstract class LineItem { ... }
+ * ```
+ */
+export function enqueueOnChange<TMessage, TTable = any>(
+  _queue: abstract new (...args: never[]) => TMessage,
+  _options: EnqueueOnChangeOptions<TMessage, TTable>,
+): ClassDecorator {
   return noopClassDecorator;
 }
 

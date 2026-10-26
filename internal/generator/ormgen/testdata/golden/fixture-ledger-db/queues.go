@@ -28,6 +28,7 @@ import (
 
 	types "example.com/schemas/types/go/fixture-ledger-db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,6 +55,23 @@ func (u *queueUnreadable) Error() string { return u.err.Error() }
 
 func (u *queueUnreadable) Unwrap() error { return u.err }
 
+// errKeyHeld is what claim returns when another worker's claim took a key
+// a message it would claim holds, as two workers claiming at once can on a
+// queue that holds one claim per key: the claim took nothing, and the next
+// one tries again.
+var errKeyHeld = errors.New("another claim holds the key")
+
+// keyHeld reports whether err is the unique violation of a queue's index
+// of claimed or of ready messages by key (D80). A claim on a queue that
+// holds one claim per key meets it when another worker's claim of the key
+// commits first; a fail or a release on a queue that keeps one ready
+// message per key, when a concurrent enqueue of the key commits first,
+// and then runs once more, when the ready message it sees takes its place.
+func keyHeld(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 // queueTable is a queue's table, its arguments and its statements on
 // Postgres, which the TypeScript types' queues.ts carries too, so the two
 // claim alike.
@@ -71,12 +89,13 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue; expire marks dead each message whose last attempt's claim
+// enqueue, and conflict ends one on a queue that keeps one ready message
+// per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, expire, claim, complete, fail, extend, release, prune string
+	insert, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -84,7 +103,8 @@ type queueStatements struct {
 
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
-// none.
+// none. On a queue that keeps one ready message per key, the conflict
+// clause replaces or keeps the ready message of the key.
 func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
@@ -93,6 +113,9 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
+	}
+	if t.statements.conflict != "" {
+		sql += " " + t.statements.conflict
 	}
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
@@ -127,6 +150,9 @@ func (t queueTable) claim(ctx context.Context, pool *pgxpool.Pool, n int, lease 
 		}
 	}
 	if err := rows.Err(); err != nil {
+		if keyHeld(err) {
+			return errKeyHeld
+		}
 		return fmt.Errorf("claim on %s: %w", t.name, err)
 	}
 	rows.Close()
@@ -150,6 +176,9 @@ func (t queueTable) complete(ctx context.Context, pool *pgxpool.Pool, id, token 
 func (t queueTable) fail(ctx context.Context, pool *pgxpool.Pool, id, token, cause string) (bool, error) {
 	var state string
 	err := pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause, t.maxBackoff.Seconds()).Scan(&state)
+	if keyHeld(err) {
+		err = pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause, t.maxBackoff.Seconds()).Scan(&state)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("fail message %s on %s: %w", id, t.name, ErrClaimLost)
 	}
@@ -187,6 +216,9 @@ func (t queueTable) prune(ctx context.Context, pool *pgxpool.Pool, limit int) (i
 // it.
 func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statement, id, token string, args ...any) error {
 	tag, err := pool.Exec(ctx, statement, append([]any{id, token}, args...)...)
+	if keyHeld(err) {
+		tag, err = pool.Exec(ctx, statement, append([]any{id, token}, args...)...)
+	}
 	if err != nil {
 		return fmt.Errorf("%s message %s on %s: %w", what, id, t.name, err)
 	}
@@ -296,6 +328,9 @@ func (q *EntryPostedQueue) Claim(ctx context.Context, n int, lease time.Duration
 		claims = append(claims, claim)
 		return nil
 	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

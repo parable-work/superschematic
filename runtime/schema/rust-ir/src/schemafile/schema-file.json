@@ -3596,6 +3596,80 @@
       },
       "type": "object"
     },
+    "EnqueueCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "default": null,
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "field": {
+          "type": "string"
+        },
+        "isNull": {
+          "default": false,
+          "type": "boolean"
+        },
+        "notNull": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "EnqueueOnChange": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "message": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "queue": {
+          "type": "string"
+        },
+        "when": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnqueueCondition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "queue",
+        "on",
+        "message"
+      ],
+      "type": "object"
+    },
     "EnumDef": {
       "additionalProperties": false,
       "properties": {
@@ -4936,11 +5010,19 @@
           "default": "",
           "type": "string"
         },
+        "key": {
+          "default": "",
+          "type": "string"
+        },
         "lease": {
           "default": "",
           "type": "string"
         },
         "maxBackoff": {
+          "default": "",
+          "type": "string"
+        },
+        "onDuplicate": {
           "default": "",
           "type": "string"
         },
@@ -4950,6 +5032,10 @@
         },
         "retries": {
           "type": "integer"
+        },
+        "serialize": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -5425,6 +5511,13 @@
         },
         "display": {
           "$ref": "#/$defs/TypeDisplay"
+        },
+        "enqueueOnChange": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnqueueOnChange"
+          },
+          "type": "array"
         },
         "envVars": {
           "default": false,

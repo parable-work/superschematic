@@ -19,8 +19,11 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	}
 	three := 3
 	for name, want := range map[string]*ir.QueueDef{
-		"OrderPlaced": {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
-		"Ping":        {Retain: "0s"},
+		"OrderPlaced":   {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
+		"Ping":          {Retain: "0s"},
+		"OrderChanged":  {Key: "orderId", OnDuplicate: "replace", Serialize: true},
+		"StockChecked":  {Key: "sku", OnDuplicate: "skip"},
+		"SyncRequested": {Key: "accountId", Serialize: true},
 	} {
 		td := schema.Types[name]
 		if td == nil {
@@ -43,8 +46,38 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	for _, td := range schema.Queues() {
 		names = append(names, td.Name)
 	}
-	if strings.Join(names, ",") != "OrderPlaced,Ping" {
+	if strings.Join(names, ",") != "OrderChanged,OrderPlaced,Ping,StockChecked,SyncRequested" {
 		t.Errorf("Queues() = %v", names)
+	}
+}
+
+// TestEnqueueOnChangeIsATablesTrigger: @enqueueOnChange on a table records
+// the queue, its writes in their one order, the fields, the conditions
+// with their literals and the message, from the TypeScript the author
+// writes (D80).
+func TestEnqueueOnChangeIsATablesTrigger(t *testing.T) {
+	schema, _, err := LoadService("testdata/services/fixture-queue-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := schema.Types["OrderLine"]
+	if line == nil || line.Role != ir.RoleDBTable {
+		t.Fatalf("OrderLine = %+v, want a table", line)
+	}
+	want := []*ir.EnqueueOnChange{{
+		Queue:   "OrderChanged",
+		On:      []string{"insert", "update", "delete"},
+		Fields:  []string{"product", "quantity"},
+		When:    []*ir.EnqueueCondition{{Field: "product", NotNull: true}},
+		Message: map[string]string{"orderId": "order", "lineId": "id"},
+	}}
+	if !reflect.DeepEqual(line.EnqueueOnChange, want) {
+		t.Errorf("OrderLine.EnqueueOnChange = %+v, want %+v", line.EnqueueOnChange, want)
+	}
+	for _, name := range []string{"Order", "Product", "OrderChanged"} {
+		if len(schema.Types[name].EnqueueOnChange) > 0 {
+			t.Errorf("%s has an @enqueueOnChange", name)
+		}
 	}
 }
 

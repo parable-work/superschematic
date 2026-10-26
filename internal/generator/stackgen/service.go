@@ -91,6 +91,12 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		svc.Vectors = hasVectorColumns(schema)
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
+			if td.Queue.Dedupes() {
+				if svc.QueueKeys == nil {
+					svc.QueueKeys = map[string]string{}
+				}
+				svc.QueueKeys[td.Name] = sqlutil.QueueKeyColumn(td)
+			}
 		}
 		engineTypes := codegen.EngineTypes(schema)
 		svc.Engine = len(engineTypes) > 0

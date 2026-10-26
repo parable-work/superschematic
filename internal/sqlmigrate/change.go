@@ -185,6 +185,12 @@ type change struct {
 	// partitioned is set when the change's table is partitioned.
 	partitioned bool
 
+	// dedupe is set on the index that keeps a queue's table to one ready
+	// message per key when the table exists (D80): the index's step first
+	// marks done the ready messages of a key but the one the queue's
+	// onDuplicate keeps, so the build finds none it refuses.
+	dedupe *QueueKey
+
 	hazards []*Hazard
 }
 

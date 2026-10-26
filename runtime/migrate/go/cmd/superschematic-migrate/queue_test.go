@@ -425,3 +425,55 @@ func TestQueueOnCloudSQL(t *testing.T) {
 		t.Error("a second run replaced the result")
 	}
 }
+
+// TestQueueRetryOfAKeyedQueueOnPostgres runs the retries of fixture-queue-db's
+// StockChecked, which keeps one ready message per SKU (D80), on its tables
+// as sqlgen writes them: of two dead messages of one SKU a retry makes the
+// one that died last ready, so a retry that names both changes none and
+// says why; a retry of every dead message retries one per SKU, and none of
+// a SKU a ready message holds.
+func TestQueueRetryOfAKeyedQueueOnPostgres(t *testing.T) {
+	dbURL := testdb.NewPostgres(t)
+	createSQL, err := os.ReadFile(filepath.Join(repoRoot, "internal", "generator", "sqlgen", "testdata", "golden", "fixture-queue-db", "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		heldID    = "00000000-0000-4000-8000-000000000004"
+		waitingID = "00000000-0000-4000-8000-000000000005"
+		aloneID   = "00000000-0000-4000-8000-000000000006"
+	)
+	testdb.Exec(t, dbURL, string(createSQL), `INSERT INTO stock_checked_queue (id, sku, quantity, state, attempts, updated_at) VALUES
+  ('`+deadID+`', 'sku-1', 1, 'dead', 4, now() - interval '2 hours'),
+  ('`+dead2ID+`', 'sku-1', 2, 'dead', 4, now() - interval '1 hour'),
+  ('`+heldID+`', 'sku-2', 3, 'dead', 4, now() - interval '1 hour'),
+  ('`+waitingID+`', 'sku-2', 4, 'ready', 0, now()),
+  ('`+aloneID+`', 'sku-3', 5, 'dead', 4, now() - interval '1 hour')`)
+	states := func() string {
+		t.Helper()
+		return strings.Join(testdb.Strings(t, dbURL, "SELECT sku || ':' || quantity || ':' || state FROM stock_checked_queue ORDER BY sku, quantity"), " ")
+	}
+	const before = "sku-1:1:dead sku-1:2:dead sku-2:3:dead sku-2:4:ready sku-3:5:dead"
+	if got := states(); got != before {
+		t.Fatalf("the queue holds %s", got)
+	}
+
+	invoke(t, nil, "queue", "--queue", queueDocument(t, "retry-keyed"), "--database-url", dbURL).expect(t, exitFailed,
+		"superschematic-migrate: queue StockChecked of fixture-queue-db: 1 of the 2 message(s) named are not dead, so none was retried: "+
+			deadID+" is dead, and a ready message holds its key")
+	if got := states(); got != before {
+		t.Fatalf("a refused retry changed the queue: %s", got)
+	}
+
+	i := invoke(t, nil, "queue", "--queue", queueDocument(t, "retry-all-keyed"), "--database-url", dbURL).expect(t, exitOK)
+	var r migrate.QueueResult
+	if err := json.Unmarshal([]byte(i.stdout), &r); err != nil {
+		t.Fatalf("the result: %v\n%s", err, i.stdout)
+	}
+	if !slices.Equal(r.IDs, []string{dead2ID, aloneID}) {
+		t.Errorf("retried %q, want the last death of sku-1 and sku-3's", r.IDs)
+	}
+	if got, want := states(), "sku-1:1:dead sku-1:2:ready sku-2:3:dead sku-2:4:ready sku-3:5:ready"; got != want {
+		t.Errorf("the queue holds %s, want %s", got, want)
+	}
+}
