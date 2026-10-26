@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import pg from 'pg';
 import { connectPostgres } from './postgres';
-import { PG_TYPES, decodeRow, encodeParam, parseInt8, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec';
+import { parseGenericDecimalStrict } from 'superscalar/scalars';
+import { PG_TYPES, canonicalDecimal, decodeRow, encodeParam, parseInt8, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec';
 import { uuidFromDb, uuidToDb } from './uuid';
 
 /** The variable that names a Postgres the pool tests run against; they are skipped without it. */
@@ -36,8 +37,14 @@ describe('the type parsers', () => {
     expect((postgresTypeParsers[PG_TYPES.int8Array] as (text: string) => unknown)('{1,NULL,3}')).toEqual([1, null, 3]);
   });
 
-  test('a NUMERIC and a DATE keep their text', () => {
-    expect((postgresTypeParsers[PG_TYPES.numeric] as (text: string) => unknown)('12.50')).toBe('12.50');
+  test('a NUMERIC is its canonical text, a DATE its text', () => {
+    const numeric = postgresTypeParsers[PG_TYPES.numeric] as (text: string) => unknown;
+    expect(numeric('12.50')).toBe('12.5');
+    expect(numeric('-0.000')).toBe('0');
+    expect(numeric('00120.0450')).toBe('120.045');
+    expect(numeric('NaN')).toBe('NaN');
+    expect(numeric('-Infinity')).toBe('-Infinity');
+    expect((postgresTypeParsers[PG_TYPES.numericArray] as (text: string) => unknown)('{1.50,NULL,2}')).toEqual(['1.5', null, '2']);
     expect((postgresTypeParsers[PG_TYPES.date] as (text: string) => unknown)('2026-10-25')).toBe('2026-10-25');
   });
 
@@ -64,6 +71,8 @@ const lineItem: readonly RowField[] = [
   { name: 'at', column: 'at', point: true },
   { name: 'took', column: 'took', interval: true },
   { name: 'order', column: '"order"', int64: true },
+  { name: 'embedding', column: 'embedding', vector: true },
+  { name: 'rates', column: 'rates', list: true, numeric: true },
 ];
 
 describe('decodeRow', () => {
@@ -82,6 +91,8 @@ describe('decodeRow', () => {
         at: { x: -0.1276, y: 51.5072 },
         took: '01:30:00',
         order: 3,
+        embedding: '[0.5,-1,1e-07]',
+        rates: ['1.50', '-0.0'],
       },
       lineItem
     );
@@ -98,6 +109,8 @@ describe('decodeRow', () => {
       at: { lat: 51.5072, lon: -0.1276 },
       took: '1h30m0s',
       order: 3,
+      embedding: [0.5, -1, 1e-7],
+      rates: ['1.5', '0'],
     });
     expect(decodeRow({ id: hyphenated }, lineItem)).toEqual({ id: base62 });
   });
@@ -113,6 +126,22 @@ describe('decodeRow', () => {
   test('names the field of a value it cannot read', () => {
     expect(() => decodeRow({ amount_cents: '9007199254740993' }, lineItem)).toThrow('column amount_cents, field amountCents');
     expect(() => decodeRow({ id: 'not-a-uuid' }, lineItem)).toThrow('column id, field id');
+    // A NUMERIC without a precision can hold NaN, which no Generic.Decimal is.
+    expect(() => decodeRow({ rate: 'NaN' }, lineItem)).toThrow('column rate, field rate: the NUMERIC NaN is no Generic.Decimal');
+    expect(() => decodeRow({ embedding: '0.5,1' }, lineItem)).toThrow('column embedding, field embedding');
+  });
+
+  test('a decimal reads back as superscalar canonicalizes it, and a vector as its numbers (D84)', () => {
+    for (const [text, canonical] of [['1.50', '1.5'], ['-0.00', '0'], ['007.5', '7.5'], ['12345678901234567890.0012300', '12345678901234567890.00123'], ['-3', '-3']] as const) {
+      expect(canonicalDecimal(text)).toBe(canonical);
+      expect(canonicalDecimal(text)).toBe(parseGenericDecimalStrict(text));
+    }
+    expect(decodeRow({ embedding: '[]' }, lineItem)).toEqual({ embedding: [] });
+    expect(decodeRow({ embedding: [1, 2] }, lineItem)).toEqual({ embedding: [1, 2] });
+    expect(encodeParam([0.5, -1, 1e-7], { vector: true })).toBe('[0.5,-1,1e-7]');
+    expect(encodeParam(null, { vector: true })).toBeNull();
+    expect(() => encodeParam([1, Number.NaN], { vector: true })).toThrow('finite numbers');
+    expect(() => encodeParam('[1,2]', { vector: true })).toThrow('no vector');
   });
 });
 
@@ -214,12 +243,12 @@ describe('a pool connectPostgres opens', () => {
     }
   });
 
-  test.skipIf(dsn === '')('reads a BIGINT as a number, a NUMERIC as its text and a DATE as its text, and refuses a BIGINT past 2^53 - 1', async () => {
+  test.skipIf(dsn === '')('reads a BIGINT as a number, a NUMERIC as its canonical text and a DATE as its text, and refuses a BIGINT past 2^53 - 1', async () => {
     const pool = await connectPostgres({ url: dsn });
     const plain = await connectPostgres({ url: dsn }, { typeParsers: false });
     try {
       const { rows } = await pool.query(`SELECT 42::bigint AS n, ARRAY[1, 2]::bigint[] AS ns, 12.50::numeric AS rate, DATE '2026-10-25' AS d`);
-      expect(rows).toEqual([{ n: 42, ns: [1, 2], rate: '12.50', d: '2026-10-25' }]);
+      expect(rows).toEqual([{ n: 42, ns: [1, 2], rate: '12.5', d: '2026-10-25' }]);
       await expect(pool.query('SELECT 9007199254740993::bigint AS n')).rejects.toThrow('past 2^53 - 1');
       // The pool still answers after a refused row.
       expect((await pool.query('SELECT 1::bigint AS n')).rows).toEqual([{ n: 1 }]);

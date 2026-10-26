@@ -191,6 +191,9 @@ type Index struct {
 	// InTransaction builds the index, on a table the plan does not create,
 	// inside its step's transaction rather than concurrently (D83).
 	InTransaction bool `json:"inTransaction,omitempty"`
+	// With are a vector index's storage parameters, "m = 16,
+	// ef_construction = 64" (D84); empty for the method's defaults.
+	With string `json:"with,omitempty"`
 }
 
 // Check is a CHECK constraint over one column (D83): the values an enum

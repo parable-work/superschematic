@@ -101,7 +101,49 @@ type TableStatements struct {
 	// Version reads the _version of the live row whose key is $1, which
 	// tells a fenced write's miss from a conflict.
 	Version string
+
+	// Nearest reads the rows nearest a vector (D84): the columns %s, the
+	// distance %s as _distance, the WHERE %s, the ORDER BY the distance %s
+	// again, which a vector index of its metric serves, and the limit %d.
+	// The distance is a vector column's NearestMetrics clause, whose
+	// parameter, the vector, follows the WHERE's. Empty for a table
+	// without a vector column.
+	Nearest string
 }
+
+// NearestDistance is the alias Nearest selects a row's distance as.
+const NearestDistance = "_distance"
+
+// The metrics nearest orders by (D84): pgvector's cosine distance,
+// Euclidean (L2) distance and negative inner product, each the operator
+// class a vector index serves it with.
+const (
+	MetricCosine = "cosine"
+	MetricL2     = "l2"
+	MetricIP     = "ip"
+)
+
+// NearestMetric is a metric nearest orders by: its name, the distance of
+// the vector column %s from the parameter $%d, and the operator class of
+// the vector index that serves it.
+type NearestMetric struct {
+	Name     string
+	Distance string
+	Opclass  string
+}
+
+// NearestMetrics are the metrics in the order both ORMs name them, cosine
+// first, the default.
+func NearestMetrics() []NearestMetric {
+	return []NearestMetric{
+		{Name: MetricCosine, Distance: "%s <=> $%d", Opclass: "vector_cosine_ops"},
+		{Name: MetricL2, Distance: "%s <-> $%d", Opclass: "vector_l2_ops"},
+		{Name: MetricIP, Distance: "%s <#> $%d", Opclass: "vector_ip_ops"},
+	}
+}
+
+// DefaultNearestK is the neighbours nearest reads unless told.
+const DefaultNearestK = 10
 
 // HistoryActorCTE prefixes a hard delete of a versioned table that has an
 // actor column (D17, D32): it sets the transaction-local history actor
@@ -247,6 +289,9 @@ func TableStatementsOf(table *TableModel) TableStatements {
 		}
 	}
 	s.Upsert = "INSERT INTO " + t + " (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s" + upsertGuard + " RETURNING " + list
+	if len(table.VectorColumns()) > 0 {
+		s.Nearest = "SELECT %s, %s AS " + NearestDistance + " FROM " + t + "%s ORDER BY %s LIMIT %d"
+	}
 	if table.HistoryActor != "" {
 		s.Delete = "DELETE FROM " + t + " USING history_actor WHERE " + key + " = $2"
 		s.DeleteIfVersion = "DELETE FROM " + t + " USING history_actor WHERE " + key + " = $2 AND _version = $3"
@@ -333,7 +378,7 @@ func (s TableStatements) AllStatements() []NamedStatement {
 		{"upsert", s.Upsert},
 		{"softDelete", s.SoftDelete}, {"softDeleteIfVersion", s.SoftDeleteIfVersion}, {"softDeleteMany", s.SoftDeleteMany},
 		{"delete", s.Delete}, {"deleteIfVersion", s.DeleteIfVersion}, {"deleteMany", s.DeleteMany},
-		{"version", s.Version},
+		{"version", s.Version}, {"nearest", s.Nearest},
 	}
 }
 

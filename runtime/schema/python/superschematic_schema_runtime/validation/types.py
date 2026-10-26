@@ -150,6 +150,11 @@ class FieldDef:
     validate_list_min: int | None = None
     validate_list_max: int | None = None
     validate_pattern: str = ""
+    # A Generic.Decimal's digits in all and after the point, and an
+    # Embedding.Vector's length (D84). None means unbounded.
+    validate_precision: int | None = None
+    validate_scale: int | None = None
+    validate_dimensions: int | None = None
     arguments: list[ArgumentDef] = field(default_factory=list)
     key: bool = False
     unique: bool = False

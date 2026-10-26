@@ -385,6 +385,19 @@ func indexDef(args []any) (ir.IndexDef, error) {
 						return ir.IndexDef{}, ArgErrorf(1, "@index concurrently must be a boolean literal")
 					}
 					idx.Concurrently = &b
+				case "m", "efConstruction", "lists":
+					n, ok := wholeNumber(value)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index %s must be a whole number literal", key)
+					}
+					switch key {
+					case "m":
+						idx.M = &n
+					case "efConstruction":
+						idx.EFConstruction = &n
+					default:
+						idx.Lists = &n
+					}
 				default:
 					return ir.IndexDef{}, ArgErrorf(1, "@index options has unknown key %q", key)
 				}
@@ -394,6 +407,22 @@ func indexDef(args []any) (ir.IndexDef, error) {
 		}
 	}
 	return idx, nil
+}
+
+// wholeNumber is a decorator argument's number literal as an int, when it
+// is a whole one.
+func wholeNumber(value any) (int, bool) {
+	switch n := value.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n == float64(int(n)) {
+			return int(n), true
+		}
+	}
+	return 0, false
 }
 
 // rawSQLDef reads @rawSql's options object: id and up, and down, after and

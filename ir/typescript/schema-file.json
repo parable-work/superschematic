@@ -3979,6 +3979,9 @@
           "default": false,
           "type": "boolean"
         },
+        "validateDimensions": {
+          "type": "integer"
+        },
         "validateListMax": {
           "type": "integer"
         },
@@ -4000,6 +4003,12 @@
         "validatePattern": {
           "default": "",
           "type": "string"
+        },
+        "validatePrecision": {
+          "type": "integer"
+        },
+        "validateScale": {
+          "type": "integer"
         },
         "validateUploadMaxBytes": {
           "type": "integer"

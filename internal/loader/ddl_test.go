@@ -16,7 +16,7 @@ func TestVerifyDDLTS(t *testing.T) {
 		t.Fatal("expected schema errors")
 	}
 	for _, want := range []string{
-		`Note: @index(["body"]) uses the hnsw method, which indexes a vector column, and Note.body is TEXT; vector columns follow`,
+		`Note: @index(["body"]) uses the hnsw method, which indexes a vector column, and Note.body is TEXT; a vector column is an Embedding.Vector with dimensions, Validate<Embedding.Vector, { dimensions: 1024 }>`,
 		`Note: @index(["body"]) where must be one SQL expression, with no semicolon`,
 		`Note: @rawSql "notes_view" up statement 2 cannot run again over what it made`,
 		`Note: @rawSql "orphan" runs after "missing", which no @rawSql of the service declares`,

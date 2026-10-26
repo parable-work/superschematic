@@ -158,6 +158,9 @@ function parseIRField(raw: unknown, path: string): FieldDef {
     validateListMin: asNumberOrNull(field.validateListMin),
     validateListMax: asNumberOrNull(field.validateListMax),
     validatePattern: asString(field.validatePattern),
+    validatePrecision: asNumberOrNull(field.validatePrecision),
+    validateScale: asNumberOrNull(field.validateScale),
+    validateDimensions: asNumberOrNull(field.validateDimensions),
     arguments: argumentsRaw.map((argument, index) =>
       parseIRArgument(argument, `${path}.arguments[${index}]`)
     ),

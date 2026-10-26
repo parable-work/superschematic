@@ -216,6 +216,11 @@ type FieldInfo struct {
 	// Validations contains validation rules derived from scalar and field constraints.
 	Validations []ValidationRule
 
+	// Digits are the field's rules on a decimal's digits and a vector's
+	// length (D84), nil without any. They are not in Validations: every
+	// validator checks them on each value apart from the other rules.
+	Digits *DigitRules
+
 	// Default is the raw @default value as written in the schema. Nil means
 	// the field has no default. Per-language generators parse this string
 	// into a typed literal using the field's primitive / scalar / enum

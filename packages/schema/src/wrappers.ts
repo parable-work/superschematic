@@ -2,7 +2,10 @@
  * The rules `Validate<T, C>` adds, which every generated decoder checks:
  * `min` and `max` bound a number, `minLength` and `maxLength` a text,
  * `listMin` and `listMax` a list's length, and `pattern` is a regular
- * expression a text must match.
+ * expression a text must match. `precision` and `scale` bound a
+ * `Generic.Decimal`'s digits, in all and after the point, and make a DB
+ * column `NUMERIC(p,s)`; `dimensions` is an `Embedding.Vector`'s length,
+ * and makes a DB column `vector(n)`.
  */
 export type ValidateConfig = {
   readonly min?: number;
@@ -15,6 +18,12 @@ export type ValidateConfig = {
   readonly listMax?: number;
   readonly pattern?: string;
   readonly format?: string;
+  /** The digits a `Generic.Decimal` holds in all; only on a `Generic.Decimal` field. */
+  readonly precision?: number;
+  /** The digits a `Generic.Decimal` holds after the point, 0 unless set; needs `precision`. */
+  readonly scale?: number;
+  /** The length of every `Embedding.Vector` value; only on an `Embedding.Vector` field. */
+  readonly dimensions?: number;
 };
 
 /**

@@ -125,6 +125,31 @@ type DateRange struct {
 	End   string
 }
 
+{{- if .HasDecimalFilters }}
+// DecimalFilter provides filtering operations for decimal fields stored as
+// NUMERIC (D84). Each value is a decimal's text, bound as it is, and
+// Postgres compares them as numbers: "1.50" equals "1.5".
+type DecimalFilter struct {
+	Eq      *string
+	Gt      *string
+	Gte     *string
+	Lt      *string
+	Lte     *string
+	Between *DecimalRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition.
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL.
+	IsNull *bool
+}
+
+// DecimalRange represents a range for decimal values, both included.
+type DecimalRange struct {
+	Min string
+	Max string
+}
+
+{{ end -}}
 // DurationFilter provides filtering operations for duration fields stored as
 // INTERVAL. Each value goes as its whole microseconds, as a duration is
 // written, and Postgres compares intervals with a day as 24 hours and a
@@ -440,6 +465,9 @@ type {{ .TypeName }}Filter struct {
 	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
 	{{- if .IsArray }}
 	{{ toGoName .Name }} *ArrayStringFilter
+	{{- else if .IsVector }}
+	{{- else if .IsDecimal }}
+	{{ toGoName .Name }} *DecimalFilter
 	{{- else if .IsGeoPoint }}
 	{{ toGoName .Name }} *GeoPointFilter
 	{{- else if .IsInterval }}

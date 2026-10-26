@@ -629,7 +629,7 @@ func (d *differ) diffForeignKeys(ft, tt *Table, mapColumns func([]string) []stri
 // it is created again.
 func (d *differ) diffIndexes(ft, tt *Table, mapColumns func([]string) []string) {
 	key := func(idx *Index, columns []string) string {
-		return fmt.Sprintf("%s|%s|%s|%t|%s|%s", strings.Join(columns, ","), idx.Method, idx.Opclass, idx.Unique, idx.Where, idx.Expression)
+		return fmt.Sprintf("%s|%s|%s|%t|%s|%s|%s", strings.Join(columns, ","), idx.Method, idx.Opclass, idx.Unique, idx.Where, idx.Expression, idx.With)
 	}
 	regenerated := func(columns []string) bool {
 		for _, col := range columns {

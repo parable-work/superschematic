@@ -82,6 +82,12 @@ export interface {{.Type}}PageKey {
   readonly {{.Key}}: {{.KeyType}};
 }
 
+{{- if .VectorFields}}
+
+/** The vector fields nearest orders rows of {{.Type}} by (D84). */
+export type {{.Type}}VectorField = {{tsUnion .VectorFields}};
+{{- end}}
+
 /** The repository of {{.Type}}. */
 export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}Repository{{end}}<
   {{.Type}}Row,
@@ -93,7 +99,8 @@ export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}
   {{.Type}}UniqueKey,
   {{.KeyType}},
   {{.Type}}PageKey
->;
+>{{if .VectorFields}} &
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField>{{end}};
 
 /** The {{.Table}} table, as the runtime reads and writes it. */
 export const {{.Const}}: TableDefinition = {
@@ -155,6 +162,16 @@ export const {{.Const}}: OrmDefinition = {
 {{- end}}
   },
   defaultLimit: {{.DefaultLimit}},
+{{- if .NearestMetrics}}
+  nearest: {
+    metrics: {
+{{- range .NearestMetrics}}
+      {{.Name}}: {{jsonString .Distance}},
+{{- end}}
+    },
+    defaultK: {{.DefaultNearestK}},
+  },
+{{- end}}
   historyActorCTE: {{jsonString .HistoryActorCTE}},
   clearHistoryActor: {{jsonString .ClearHistoryActor}},
   tables: {

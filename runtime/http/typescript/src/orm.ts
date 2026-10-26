@@ -60,6 +60,8 @@ export interface TableColumn extends RowField {
   readonly filter?: readonly string[];
   /** A column findPage orders by. */
   readonly sortable?: boolean;
+  /** A vector(n) column's n, the length of the vectors nearest takes (D84). */
+  readonly dimensions?: number;
 }
 
 /** A table's statements on Postgres, sqlutil.TableStatements: format strings of %s and %d alone. */
@@ -92,6 +94,8 @@ export interface TableStatements {
   readonly softDeleteMany: string;
   readonly delete: string;
   readonly deleteMany: string;
+  /** The rows nearest a vector, on a table with a vector column (D84). */
+  readonly nearest?: string;
 }
 
 /** The parts of statements written around a column, sqlutil.Clauses: format strings whose first %s is the column. */
@@ -159,9 +163,18 @@ export interface TableDefinition {
   readonly referencedBy?: readonly ReferenceDefinition[];
 }
 
+/** How nearest orders rows, on a database with a vector column (D84). */
+export interface NearestDefinition {
+  /** Each metric's distance of the vector column %s from the parameter $%d. */
+  readonly metrics: Readonly<Record<VectorMetric, string>>;
+  /** The rows nearest reads unless told. */
+  readonly defaultK: number;
+}
+
 /** What a database's ./orm entry gives ormOf beside its tables. */
 export interface OrmDefinition {
   readonly clauses: Clauses;
+  readonly nearest?: NearestDefinition;
   /** The rows findMany and findPage read unless told. */
   readonly defaultLimit: number;
   /** The CTE a versioned table's hard delete sets the history actor through, and the statement that clears it. */
@@ -370,6 +383,45 @@ export interface Repository<Row, Create, Update, Filter, OrderField extends stri
   deleteOne(id: Key): Promise<void>;
   /** Deletes the rows filter finds, stamping them on a soft-deletable table, and resolves to how many. */
   deleteMany(filter: Filter | null): Promise<number>;
+}
+
+/**
+ * A metric nearest orders rows by (D84): cosine distance, 1 less the
+ * cosine similarity; Euclidean (L2) distance; or the inner product,
+ * largest first, whose distance is its negative. An hnsw or ivfflat index
+ * with the metric's operator class, vector_cosine_ops, vector_l2_ops or
+ * vector_ip_ops, serves it.
+ */
+export type VectorMetric = 'cosine' | 'l2' | 'ip';
+
+/** The options of nearest. */
+export interface NearestOptions<Filter> {
+  /** The most rows nearest reads, 1 or more; 10 unless set. */
+  readonly k?: number;
+  /** The metric; cosine unless set. */
+  readonly metric?: VectorMetric;
+  /** The rows nearest reads from, as findMany's filter keeps them. */
+  readonly filter?: Filter | null;
+  /** Reads soft-deleted rows too. */
+  readonly includeDeleted?: boolean;
+}
+
+/** A row nearest read, and its distance from the vector by the metric. */
+export interface Neighbour<Row> {
+  readonly row: Row;
+  readonly distance: number;
+}
+
+/** What the repository of a table with a vector column adds (D84). */
+export interface VectorRepository<Row, Filter, VectorField extends string> {
+  /**
+   * The rows filter keeps whose field is nearest vector, by the metric,
+   * nearest first, at most k of them, each with its distance. A vector
+   * index serves the order and finds approximate neighbours; a filter that
+   * keeps few rows may leave fewer than k. A row whose field is null has no
+   * distance and is left out.
+   */
+  nearest(field: VectorField, vector: readonly number[], options?: NearestOptions<Filter>): Promise<Neighbour<Row>[]>;
 }
 
 /** The repository of a soft-deletable table, which can remove a row too. */
@@ -686,6 +738,32 @@ class TableRepository {
     if (decoded.length <= limit) return { rows: decoded, next: null };
     const kept = decoded.slice(0, limit);
     return { rows: kept, next: { [this.def.key]: kept[limit - 1]![this.def.key] } };
+  }
+
+  async nearest(field: string, vector: readonly number[], options: NearestOptions<Values> = {}): Promise<Neighbour<Values>[]> {
+    const column = this.def.columns.find(c => c.name === field && c.vector);
+    const s = this.def.statements;
+    const nearest = this.orm.nearest;
+    if (!column || !s.nearest || !nearest) throw new Error(`orm: ${this.def.name} has no vector field ${JSON.stringify(field)}`);
+    if (!Array.isArray(vector) || vector.length !== column.dimensions) {
+      throw new Error(`orm: ${this.def.name}.${field} holds vectors of ${column.dimensions} dimensions, not ${Array.isArray(vector) ? vector.length : 'none'}`);
+    }
+    const metric = options.metric ?? 'cosine';
+    const distance = nearest.metrics[metric];
+    if (distance === undefined) throw new Error(`orm: nearest orders by ${Object.keys(nearest.metrics).join(', ')}, not ${JSON.stringify(metric)}`);
+    if (options.k !== undefined && options.k < 0) throw new Error(`orm: nearest reads 1 or more ${this.def.name} rows, not ${options.k}`);
+    const k = options.k ? options.k : nearest.defaultK;
+    // The filter's conditions, then the soft-delete condition, then a
+    // vector that may be null's presence; the vector is the last parameter,
+    // as the Go ORM's Nearest writes it.
+    const args: unknown[] = [];
+    const conditions = this.conditions(options.filter, args, 0);
+    if (this.def.softDelete && !options.includeDeleted) conditions.push(s.liveCondition);
+    if (!column.required) conditions.push(fill(this.clauses.isNotNull, column.qualified));
+    args.push(this.encode(vector, column, 'nearest'));
+    const by = fill(distance, column.qualified, args.length);
+    const { rows } = await run(this.runner, fill(s.nearest, s.qualifiedColumns, by, this.whereOf(conditions), by, k), args);
+    return rows.map(row => ({ row: this.decode(row), distance: Number(row._distance) }));
   }
 
   /** The members a create writes, stamped with the acting user: createdBy needs one, as the Go ORM's CreateOne does. */

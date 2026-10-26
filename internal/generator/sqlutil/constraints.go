@@ -1,6 +1,7 @@
 package sqlutil
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -206,4 +207,21 @@ var opclassName = regexp.MustCompile(`^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$`)
 // ops: a lowercase identifier, optionally schema-qualified.
 func ValidOpclass(s string) bool {
 	return opclassName.MatchString(s)
+}
+
+// IndexWith is the WITH list of a vector index's storage parameters
+// (@index's m, efConstruction and lists, D84), "m = 16, ef_construction =
+// 64", in that order; empty when it sets none.
+func IndexWith(idx ir.IndexDef) string {
+	var params []string
+	if idx.M != nil {
+		params = append(params, fmt.Sprintf("m = %d", *idx.M))
+	}
+	if idx.EFConstruction != nil {
+		params = append(params, fmt.Sprintf("ef_construction = %d", *idx.EFConstruction))
+	}
+	if idx.Lists != nil {
+		params = append(params, fmt.Sprintf("lists = %d", *idx.Lists))
+	}
+	return strings.Join(params, ", ")
 }

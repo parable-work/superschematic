@@ -134,6 +134,12 @@ type ColumnClass struct {
 	// INTERVAL, or each element of an INTERVAL[].
 	Point    bool
 	Interval bool
+	// Vector is a vector(n) column, an Embedding.Vector with dimensions
+	// (D84), which both ORMs bind and read as pgvector's text, [1,2,3].
+	// Decimal is a NUMERIC column, or each element of a NUMERIC[], a
+	// Generic.Decimal whose text reads back canonical.
+	Vector  bool
+	Decimal bool
 	// AnyJSON is a scalar that holds any JSON value (Generic.JSON).
 	AnyJSON bool
 	// Enum and Union are an enum and a union type, local or imported.
@@ -174,6 +180,8 @@ func ClassifyColumn(f *ir.FieldDef, schema *ir.Schema, scalar ScalarClass, isSca
 		JSON:         f.JsonField || ref.IsMap || ref.IsArrayOfArrays || jsonPayload || explicitJSONNull,
 		Point:        stored && strings.EqualFold(scalar.SQLType, "POINT"),
 		Interval:     stored && strings.EqualFold(scalar.SQLType, "INTERVAL"),
+		Vector:       stored && !ref.IsArray && ref.Name == ir.VectorScalarName && f.ValidateDimensions != nil,
+		Decimal:      stored && strings.EqualFold(scalar.SQLType, "NUMERIC"),
 		AnyJSON:      isScalar && traits.IsAnyJSON,
 		Enum:         isEnum,
 		Union:        isUnion,
@@ -202,16 +210,19 @@ const (
 	// FilterJSON is a Generic.JSON column's: equality of JSON values, as
 	// JSONB compares them, and IS NULL (D79).
 	FilterJSON FilterKind = "json"
+	// FilterDecimal is a NUMERIC column's (D84): its values compare as
+	// numbers, each bound as its text.
+	FilterDecimal FilterKind = "decimal"
 )
 
 // FilterKind is the kind of the filter on a column of the class: the first
-// that holds of a list (none), a column of any JSON value (Generic.JSON's
-// JSONB equality), a POINT, an INTERVAL, a UUID, a time, a date, text, an
-// integer, a number and a boolean; any other value but JSON compares as
-// text, and other JSON, an object's or a map's, not at all.
+// that holds of a list or a vector (none), a column of any JSON value
+// (Generic.JSON's JSONB equality), a POINT, an INTERVAL, a UUID, a time, a
+// date, text, an integer, a number and a boolean; any other value but JSON
+// compares as text, and other JSON, an object's or a map's, not at all.
 func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 	switch {
-	case isArray:
+	case isArray, c.Vector:
 		return FilterNone
 	case c.AnyJSON:
 		return FilterJSON
@@ -219,6 +230,8 @@ func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 		return FilterPoint
 	case c.Interval:
 		return FilterDuration
+	case c.Decimal:
+		return FilterDecimal
 	case c.UUIDLike:
 		return FilterUUID
 	case c.DateTimeLike:
@@ -267,6 +280,7 @@ var filterOps = map[FilterKind][]string{
 	FilterBool:     {FilterEq, FilterIsNull},
 	FilterPoint:    {FilterIsNull},
 	FilterJSON:     {FilterEq, FilterIn, FilterIsNull},
+	FilterDecimal:  {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
 }
 
 // FilterOps are the operations of a filter of kind, in the order its
@@ -677,6 +691,18 @@ func sortableColumn(c ColumnModel, sortValue bool) bool {
 	}
 	return !cl.Enum && !cl.BoolLike && !cl.Point && !c.Secret && !c.Internal &&
 		(c.Audit == "" || c.Audit == AuditCreatedAt || c.Audit == AuditUpdatedAt)
+}
+
+// VectorColumns are the table's vector(n) columns (ColumnClass.Vector), in
+// column order: the fields nearest finds neighbours by (D84).
+func (t *TableModel) VectorColumns() []ColumnModel {
+	var out []ColumnModel
+	for _, c := range t.Columns {
+		if c.Class.Vector {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // Column returns the column named name, or nil.

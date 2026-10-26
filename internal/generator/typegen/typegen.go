@@ -103,6 +103,10 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// Digits are the field's digit rules (D84), which Validate checks on
+	// each value after the field's other checks; nil without any.
+	Digits *codegen.DigitRules
+
 	// ScalarRules are the rules copied from the field's scalar type (its
 	// lengths, pattern and range) when Validate hands the field's values to
 	// the scalar. validate<Symbol>Value checks them there and reports a
@@ -940,6 +944,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Doc:              cf.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      cf.Validations,
+			Digits:           cf.Digits,
 		}
 
 		if cf.Default != nil {

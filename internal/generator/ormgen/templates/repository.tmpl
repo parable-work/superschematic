@@ -180,10 +180,42 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		{{- else }}
 		result.{{ toGoName .Name }} = {{ .GoType }}(duration)
 		{{- end }}
+		{{- else if and .IsDecimal .NativeList }}
+		if err := unmarshalHistoryDecimals(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
 		{{- else if .NativeList }}
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
+		{{- else if .IsVector }}
+		// to_jsonb writes a vector as its text, "[0.5,-1]" (D84).
+		var text string
+		if err := json.Unmarshal(rawValue, &text); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		vector, err := parseVectorText(text)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		result.{{ toGoName .Name }} = &vector
+		{{- else }}
+		result.{{ toGoName .Name }} = vector
+		{{- end }}
+		{{- else if and .IsDecimal (not .IsArray) }}
+		// to_jsonb writes a NUMERIC as a JSON number, in the column's scale
+		// (D84); the decimal is its canonical text.
+		decimal, err := historyDecimal(rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		value := {{ .GoType }}(decimal)
+		result.{{ toGoName .Name }} = &value
+		{{- else }}
+		result.{{ toGoName .Name }} = {{ .GoType }}(decimal)
+		{{- end }}
 		{{- else if .IsGeoPoint }}
 		// to_jsonb writes a POINT as its text, "(x,y)": x is the longitude and
 		// y the latitude.
@@ -241,6 +273,7 @@ var temp{{ toGoName $member.Field.Name }} []byte
 var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.ListElementScanType }}
 {{- else if $member.Field.IsGeoPointList }}
 var temp{{ toGoName $member.Field.Name }} []pgtype.Point
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Point
 {{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
@@ -284,6 +317,7 @@ if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field
 if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&result.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -358,6 +392,7 @@ if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field
 if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -410,6 +445,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPointList }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsVector }}
+{{ if $member.Field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&result.{{ toGoName $member.Field.Name }}},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
@@ -433,6 +470,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPointList }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsVector }}
+{{ if $member.Field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&entity.{{ toGoName $member.Field.Name }}},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
@@ -454,6 +493,7 @@ var temp{{ toGoName $field.Name }} []byte
 var temp{{ toGoName $field.Name }} []*{{ $field.ListElementScanType }}
 {{- else if $field.IsGeoPointList }}
 var temp{{ toGoName $field.Name }} []pgtype.Point
+{{- else if $field.IsVector }}
 {{- else if $field.IsGeoPoint }}
 var temp{{ toGoName $field.Name }} pgtype.Point
 {{- else if and $field.IsInterval $field.IsNullableScalar }}
@@ -470,7 +510,7 @@ var temp{{ toGoName $field.Name }} *{{ $field.GoType }}
 
 {{- define "nullableSelectedFlagsFields" -}}
 {{- range $field := . }}
-{{- if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (not $field.IsJSONField) }}
+{{- if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (not $field.IsJSONField) (not $field.IsVector) }}
 {{- if or (not $field.IsRequired) (and $field.IsRequired (or $field.IsDateLike $field.IsGeoPoint)) }}
 var selected{{ toGoName $field.Name }} bool
 {{- end }}
@@ -487,6 +527,9 @@ case "{{ $field.DBName }}":
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if $field.IsGeoPointList }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
+	{{- else if $field.IsVector }}
+	// A vector reads as pgvector's text, [0.5,-1] (D84).
+	scanDest[i] = {{ if $field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&result.{{ toGoName $field.Name }}}
 	{{- else if $field.IsGeoPoint }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	selected{{ toGoName $field.Name }} = true
@@ -534,6 +577,7 @@ if err := {{ $field.ListCopyCall (printf "temp%s" (toGoName $field.Name)) (print
 if err := {{ $field.GeoPointListCopy (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
+{{- else if $field.IsVector }}
 {{- else if $field.IsGeoPoint }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -1713,7 +1757,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
-	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1756,7 +1800,11 @@ func {{ lowerFirst .TypeName }}FieldStrings(fields {{ .TypeName }}Fields) []stri
 // findRows runs query, a select of the columns fieldStrings names, in turn,
 // with args, scans its rows, and hydrates the relations fields selects, as
 // FindMany and FindPage read them. method names the caller in an error.
-func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
+{{- if .VectorFields }}
+// With distances, the select ends with the distance Nearest orders by,
+// which it appends, row by row (D84).
+{{- end }}
+func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields {{ .TypeName }}Fields{{ if .VectorFields }}, distances *[]float64{{ end }}) ([]*types.{{ .TypeName }}, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -1811,9 +1859,21 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			}
 		}
 
+		{{- if .VectorFields }}
+		var distance float64
+		if distances != nil {
+			scanDest = append(scanDest, &distance)
+		}
+		{{- end }}
+
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
+		{{- if .VectorFields }}
+		if distances != nil {
+			*distances = append(*distances, distance)
+		}
+		{{- end }}
 
 		// Copy nullable fields when present
 		var jsonFieldDecodeErr error
@@ -2180,7 +2240,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 	query := fmt.Sprintf({{ goRawString .SQL.Page }}, selectFields, whereClause, orderByClause, limit+1)
 
-	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
 	if err != nil {
 		return nil, err
 	}
@@ -2279,6 +2339,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, input.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsVector }}
+	values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 	{{- else if .IsGeoPoint }}
 	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .IsGeoPointList }}
@@ -2324,6 +2386,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			{{- else }}
 			values = append(values, time.Time(input.{{ toGoName .Name }}))
 			{{- end }}
+			{{- else if .IsVector }}
+			values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 			{{- else if .IsGeoPoint }}
 			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .IsGeoPointList }}
@@ -2521,6 +2585,8 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, input.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsVector }}
+	values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 	{{- else if .IsGeoPoint }}
 	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .IsGeoPointList }}
@@ -2566,6 +2632,8 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 			{{- else }}
 			values = append(values, time.Time(input.{{ toGoName .Name }}))
 			{{- end }}
+			{{- else if .IsVector }}
+			values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 			{{- else if .IsGeoPoint }}
 			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .IsGeoPointList }}
@@ -2643,6 +2711,8 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
@@ -2841,6 +2911,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 			cell.value = input.{{ toGoName .Name }}.ToUUID()
 			{{- else if .IsDateTimeScalar }}
 			cell.value = time.Time(input.{{ toGoName .Name }})
+			{{- else if .IsVector }}
+			cell.value = vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }})
 			{{- else if .IsGeoPoint }}
 			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 			{{- else if .IsGeoPointList }}
@@ -2885,6 +2957,8 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 				{{- else }}
 				cell.value = time.Time(input.{{ toGoName .Name }})
 				{{- end }}
+				{{- else if .IsVector }}
+				cell.value = vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }})
 				{{- else if .IsGeoPoint }}
 				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 				{{- else if .IsGeoPointList }}
@@ -3083,6 +3157,8 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
@@ -3269,6 +3345,8 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}

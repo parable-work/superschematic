@@ -28,7 +28,8 @@ type typeInfo struct {
 	platformDefault bool
 
 	// validate holds the Validate<T, C> config keys (min, max,
-	// uploadMaxBytes, minLength, maxLength, listMin, listMax, pattern).
+	// uploadMaxBytes, minLength, maxLength, listMin, listMax, pattern,
+	// precision, scale, dimensions).
 	validate map[string]any
 
 	// listBoundsDepth is the list depth of the type a Validate config with
@@ -690,10 +691,10 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
 			}
 			cfg[prop.Name] = uploadMaxBytes
-		case "minLength", "maxLength", "listMin", "listMax":
-			// A length or item count is a whole number: the JSON and YAML
-			// forms type these bounds as integers, so a fraction is refused
-			// here rather than truncated.
+		case "minLength", "maxLength", "listMin", "listMax", "precision", "scale", "dimensions":
+			// A length, an item count, a digit count or a vector's length is
+			// a whole number: the JSON and YAML forms type these bounds as
+			// integers, so a fraction is refused here rather than truncated.
 			bound, valid := safeIntegerLiteral(v)
 			if !valid {
 				return nil, errorAtNode(node, "Validate %s must be a finite JavaScript-safe integer literal, got %s", prop.Name, formatLiteral(v))

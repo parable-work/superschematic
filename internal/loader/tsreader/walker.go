@@ -1192,6 +1192,15 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 	if v, ok := cfg["pattern"].(string); ok {
 		fd.ValidatePattern = v
 	}
+	if v, ok := cfg["precision"].(int); ok {
+		fd.ValidatePrecision = &v
+	}
+	if v, ok := cfg["scale"].(int); ok {
+		fd.ValidateScale = &v
+	}
+	if v, ok := cfg["dimensions"].(int); ok {
+		fd.ValidateDimensions = &v
+	}
 }
 
 // applySource resolves @source(Target): the cross-layer projection linkage.
@@ -1605,6 +1614,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 		applyValidateConfig(info.validate, fd)
 		if fd.ValidateUploadMaxBytes != nil {
 			return nil, "", errorAtNode(p, "Validate uploadMaxBytes is only valid on object fields")
+		}
+		if fd.ValidatePrecision != nil || fd.ValidateScale != nil || fd.ValidateDimensions != nil {
+			return nil, "", errorAtNode(p, "Validate precision, scale and dimensions bound a field of a type, not an operation's argument; take the value in a type's field (support for arguments follows)")
 		}
 		arg.ValidateMin = fd.ValidateMin
 		arg.ValidateMax = fd.ValidateMax

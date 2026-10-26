@@ -131,6 +131,26 @@ func (pc planCase) plan(t *testing.T) *Plan {
 
 // Schema changes the cases make.
 
+// noPgvector is why a vector case is not applied to the convergence
+// Postgres, which has no pgvector (D84).
+const noPgvector = "the convergence Postgres has no pgvector; TestVectorPlansOnPostgres applies the case"
+
+// addProductEmbedding gives Product an optional vector of dimensions
+// numbers and an HNSW index over it by cosine distance (D84).
+func addProductEmbedding(s *ir.Schema, dimensions int) {
+	s.Scalars[ir.VectorScalarName] = &ir.ScalarDef{Name: ir.VectorScalarName, LanguagePrimitive: ir.LanguageString}
+	addField(s, "Product", &ir.FieldDef{Name: "embedding", TypeRef: ir.TypeRef{Name: ir.VectorScalarName}, ValidateDimensions: &dimensions})
+	m, ef := 16, 64
+	typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"embedding"}, Method: ir.IndexMethodHNSW, Ops: "vector_cosine_ops", M: &m, EFConstruction: &ef}}
+}
+
+// addProductRate gives Product an optional Generic.Decimal of the
+// precision and scale, NUMERIC(p,s), or NUMERIC without them (D84).
+func addProductRate(s *ir.Schema, precision, scale *int) {
+	s.Scalars[ir.DecimalScalarName] = &ir.ScalarDef{Name: ir.DecimalScalarName, LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "NUMERIC"}}
+	addField(s, "Product", &ir.FieldDef{Name: "rate", TypeRef: ir.TypeRef{Name: ir.DecimalScalarName}, ValidatePrecision: precision, ValidateScale: scale})
+}
+
 func typeNamed(s *ir.Schema, name string) *ir.TypeDef {
 	td := s.Types[name]
 	if td == nil {
@@ -439,6 +459,20 @@ var planCases = []planCase{
 	{name: "add-opclass-index", noSQLite: "sqlite has no operator classes", after: func(s *ir.Schema) {
 		typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"title"}, Name: "title_trgm", Method: ir.IndexMethodGIN, Ops: "gin_trgm_ops"}}
 	}},
+
+	// Vectors and decimals (D84). The convergence Postgres has no pgvector,
+	// so the vector cases are not applied to it; TestVectorPlansOnPostgres
+	// applies them to the one pgtest.VectorDatabaseURL names.
+	{name: "add-vector-column", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		after: func(s *ir.Schema) { addProductEmbedding(s, 3) }},
+	{name: "change-vector-dimensions", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		before: func(s *ir.Schema) { addProductEmbedding(s, 3) }, after: func(s *ir.Schema) { addProductEmbedding(s, 4) }},
+	{name: "narrow-decimal", noSQLite: "sqlite stores every decimal as NUMERIC",
+		before: func(s *ir.Schema) { addProductRate(s, nil, nil) },
+		after: func(s *ir.Schema) {
+			precision, scale := 6, 2
+			addProductRate(s, &precision, &scale)
+		}},
 
 	// Raw SQL (D83).
 	{name: "add-raw-sql", after: addOrderRawSQL},

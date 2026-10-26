@@ -141,6 +141,7 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 			errs = append(errs, fmt.Errorf("%s.%s platform default %q does not match field type %q", td.Name, f.Name, f.PlatformDefault, f.TypeRef.Name))
 		}
 		errs = append(errs, validateArrayOfArrays(td.Name+"."+f.Name, f.TypeRef)...)
+		errs = append(errs, validateDigitRules(td.Name, f)...)
 		if f.Relation != nil && f.Relation.OnDelete != "" {
 			switch f.Relation.OnDelete {
 			case "CASCADE", "RESTRICT", "NO ACTION":

@@ -113,6 +113,12 @@ func sqliteTable(t *Table) error {
 	var errs []error
 	for _, col := range t.Columns {
 		pg := col.Type
+		if sqlutil.IsVectorType(pg) {
+			// SQLite has no vector type or index, and no nearest (D84).
+			errs = append(errs, fmt.Errorf("sqlmigrate: column %s.%s%s is %s, an Embedding.Vector, which the sqlite dialect has no storage for: build the service for postgres alone (outputs.sql.dialects: [\"postgres\"]), or keep the vector as JSON (JsonField<Embedding.Vector>); vectors on SQLite follow",
+				t.Name, col.Name, originNote(col), pg))
+			continue
+		}
 		sqlite, err := sqliteType(pg)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("sqlmigrate: column %s.%s%s is %s, which the sqlite dialect has no storage for",

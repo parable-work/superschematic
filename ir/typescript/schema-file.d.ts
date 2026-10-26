@@ -250,6 +250,7 @@ export interface FieldDef {
   uiControl?: string;
   uiHidden?: boolean;
   unique?: boolean;
+  validateDimensions?: number;
   validateListMax?: number;
   validateListMin?: number;
   validateMax?: number;
@@ -257,6 +258,8 @@ export interface FieldDef {
   validateMin?: number;
   validateMinLength?: number;
   validatePattern?: string;
+  validatePrecision?: number;
+  validateScale?: number;
   validateUploadMaxBytes?: number;
   virtual?: boolean;
   webhook?: boolean;

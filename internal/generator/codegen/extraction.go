@@ -300,6 +300,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 	}
 
 	fieldInfo.Validations = buildValidations(fieldInfo.ScalarInfo, field, fieldInfo.Required)
+	fieldInfo.Digits = DigitRulesOf(field)
 
 	return fieldInfo
 }

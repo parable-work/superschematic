@@ -1,6 +1,7 @@
 import { formatDuration } from './queue-core.js';
 import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './queue.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
+import { parseGenericDecimalStrict } from 'superscalar/scalars';
 
 /*
 The Postgres value codec (D79): how a value crosses between the TypeScript
@@ -20,7 +21,10 @@ uuidToDb.
 
 A 64-bit integer is a number, as the types hold Generic.Int64 and every
 integer scalar, refused past 2^53 - 1 rather than rounded; a NUMERIC is its
-exact text; a DATE its YYYY-MM-DD text, Temporal.Date's; a TIMESTAMPTZ a
+exact text, and in a row a Generic.Decimal's canonical text, which
+superscalar writes (D84): Postgres writes a NUMERIC(5,2)'s 1.5 as 1.50,
+which the wire form is not; a vector(n) a list of numbers, which crosses as
+pgvector's text, [0.5,-1]; a DATE its YYYY-MM-DD text, Temporal.Date's; a TIMESTAMPTZ a
 Date; a JSON column the value it holds; a POINT the location {lat, lon}, x
 the longitude and y the latitude; an INTERVAL its duration's canonical text
 (1h30m0s), a day 24 hours and a month 30 days, as the queue client and
@@ -66,8 +70,10 @@ export interface RowField {
   readonly date?: boolean;
   /** The column, or each element, is a BIGINT, a number in the row, refused past 2^53 - 1. */
   readonly int64?: boolean;
-  /** The column, or each element, is a NUMERIC, its exact text in the row. */
+  /** The column, or each element, is a NUMERIC, a Generic.Decimal's canonical text in the row (D84): 1.50 reads as 1.5. */
   readonly numeric?: boolean;
+  /** The column is pgvector's vector(n), a list of numbers in the row, written as its text, [0.5,-1] (D84). */
+  readonly vector?: boolean;
   /** The column is a POINT, a location {lat, lon} in the row. */
   readonly point?: boolean;
   /** The column is an INTERVAL, its duration's canonical text in the row. */
@@ -107,16 +113,29 @@ function parseInt8Array(text: string): (number | null)[] {
 }
 
 /**
+ * A NUMERIC's text as a raw query reads it: a finite one as a
+ * Generic.Decimal's canonical text (D84), 1.50 as 1.5, the same value
+ * exactly; NaN and the infinities as Postgres writes them.
+ */
+export function numericText(text: string): string {
+  return /^[+-]?[0-9]/u.test(text) ? canonicalDecimal(text) : text;
+}
+
+function parseNumericArray(text: string): (string | null)[] {
+  return parseArray(text).map(element => (element === null ? null : numericText(element)));
+}
+
+/**
  * The type parsers connectPostgres gives each pool, by OID, beside pg's
- * own: BIGINT a number, refused past 2^53 - 1, NUMERIC its exact text, and
- * DATE its YYYY-MM-DD text, where pg would make a Date at local midnight;
- * and a list of each alike.
+ * own: BIGINT a number, refused past 2^53 - 1, NUMERIC its exact text in
+ * canonical form (numericText), and DATE its YYYY-MM-DD text, where pg
+ * would make a Date at local midnight; and a list of each alike.
  */
 export const postgresTypeParsers: Readonly<Record<number, (value: string) => unknown>> = {
   [PG_TYPES.int8]: parseInt8,
   [PG_TYPES.int8Array]: parseInt8Array,
-  [PG_TYPES.numeric]: value => value,
-  [PG_TYPES.numericArray]: parseArray,
+  [PG_TYPES.numeric]: numericText,
+  [PG_TYPES.numericArray]: parseNumericArray,
   [PG_TYPES.date]: value => value,
   [PG_TYPES.dateArray]: parseArray,
 };
@@ -174,6 +193,7 @@ export function decodeValue(value: unknown, codec: ValueCodec): unknown {
   if (codec.jsonText) return typeof value === 'string' ? JSON.parse(value) : value;
   if (codec.point) return decodePoint(value);
   if (codec.interval) return decodeInterval(value);
+  if (codec.vector) return decodeVector(value);
   if (codec.list) {
     // A list of a type pg does not know, such as citext[], arrives as its text.
     const elements = typeof value === 'string' ? parseArray(value) : value;
@@ -192,11 +212,50 @@ function decodeScalar(value: unknown, codec: ValueCodec): unknown {
     }
     return parseInt8(String(value));
   }
-  if (codec.numeric) return typeof value === 'string' ? value : String(value);
+  if (codec.numeric) return canonicalDecimal(typeof value === 'string' ? value : String(value));
   if (codec.date) return value instanceof Date ? localDate(value) : String(value).slice(0, 10);
   if (codec.timestamp) return value instanceof Date ? value : timestampOf(String(value));
   if (codec.boolean) return value === 1 || value === '1' || value === 't' ? true : value === 0 || value === '0' || value === 'f' ? false : value;
   return value;
+}
+
+/**
+ * A NUMERIC's text as a Generic.Decimal's canonical form, superscalar's
+ * (D84): no + or leading zero, no trailing zero after the point, and 0 for
+ * zero. NaN and the infinities, which a NUMERIC without a precision can
+ * hold, are no decimal and are refused.
+ */
+export function canonicalDecimal(text: string): string {
+  try {
+    return parseGenericDecimalStrict(text);
+  } catch {
+    throw new RangeError(`the NUMERIC ${text} is no Generic.Decimal, which holds a finite decimal alone`);
+  }
+}
+
+/** A vector(n)'s text, [0.5,-1], or the list pg made of it, as its numbers. */
+function decodeVector(value: unknown): number[] {
+  if (Array.isArray(value)) return value.map(Number);
+  const text = String(value).trim();
+  if (!text.startsWith('[') || !text.endsWith(']')) throw new Error(`${JSON.stringify(value)} is no vector`);
+  const inner = text.slice(1, -1).trim();
+  if (inner === '') return [];
+  return inner.split(',').map(part => {
+    const n = Number(part.trim());
+    if (!Number.isFinite(n)) throw new Error(`${JSON.stringify(value)} is no vector`);
+    return n;
+  });
+}
+
+/** A list of numbers in pgvector's text form, [0.5,-1], which pg sends for a vector(n) column. */
+export function vectorText(value: unknown): string {
+  if (!Array.isArray(value)) throw new Error(`${JSON.stringify(value)} is no vector, a list of numbers`);
+  return `[${value
+    .map(n => {
+      if (typeof n !== 'number' || !Number.isFinite(n)) throw new Error(`${JSON.stringify(value)} is no vector, a list of finite numbers`);
+      return String(n);
+    })
+    .join(',')}]`;
 }
 
 /** A Date pg made of a DATE, at local midnight, as its YYYY-MM-DD text. */
@@ -268,6 +327,7 @@ export function encodeParam(value: unknown, codec: ValueCodec): unknown {
   if (value === null) return null;
   if (codec.point) return pointText(value);
   if (codec.interval) return intervalText(value);
+  if (codec.vector) return vectorText(value);
   if (codec.list && Array.isArray(value)) return value.map(element => (element === null || element === undefined ? null : encodeScalar(element, codec)));
   return encodeScalar(value, codec);
 }
