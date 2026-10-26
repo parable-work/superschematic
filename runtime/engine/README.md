@@ -1566,7 +1566,18 @@ schema, asks `<schema>.define`. The Rust engine reads it as the policy
 engine's `PolicyConfig`) matches a namespace operation's question with a
 rule's `behavior`, `true` for any, `false` for none, or names, and fills
 `{behavior}` in a permission it requires, as it fills `{schema}`, which
-renders nothing in such a question.
+renders nothing in such a question. Only a rule that names `behavior`
+matches such a question: a rule that leaves `behavior` out, as every
+rule written before D77 does, matches schema, namespace and listing
+questions alone. So a subject- or service-wide allow, `{ "service":
+["shop-orders"], "action": ["read", "write"], "allow": true }`, lets its
+principal read and write schemas and call no behavior's namespace
+operation; with no rule naming `behavior`, the question falls past the
+last rule and is refused. A deployment that wants one allowed says so:
+`{ "behavior": ["Comments"], "action": "read", "allow": true }`, or
+`{ "behavior": true, "action": "write", "require":
+"{behavior}.{operation}" }` as `"permission"` does. `"allowAll"` still
+allows them.
 With the core user model ("Users" under "HTTP"), a user's permissions are
 those of their roles. `permissionPolicy({ permissionMatcher })` matches
 with the matcher it is given instead; called from a policy of the

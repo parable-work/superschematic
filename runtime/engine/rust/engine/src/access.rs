@@ -34,14 +34,17 @@
 //!   them), the principal's subject, its calling service (D37) and
 //!   whether that service stands in for an end user, and whether the
 //!   question is a listing one; a member a rule leaves out matches
-//!   anything. It decides with `allow` (`true` or `false`) or with
-//!   `require`, a permission or a list of them, any one of which the
-//!   principal must hold, matched with the engine's permission matcher
-//!   (the HTTP runtime's `hasAnyPermission` unless configured). A
-//!   permission is a template: `{schema}`, `{action}`, `{namespace}`,
-//!   `{operation}` and `{behavior}` stand for the question's; one whose
-//!   placeholder the question lacks (`{schema}` in a `manage` question) is
-//!   held by no one.
+//!   anything, but `behavior`: a rule that leaves it out matches no
+//!   question about a behavior's namespace operation, so only a rule that
+//!   names `behavior` decides one, and with none such the question falls
+//!   to the end of the rules and is refused. It decides with `allow`
+//!   (`true` or `false`) or with `require`, a permission or a list of
+//!   them, any one of which the principal must hold, matched with the
+//!   engine's permission matcher (the HTTP runtime's `hasAnyPermission`
+//!   unless configured). A permission is a template: `{schema}`,
+//!   `{action}`, `{namespace}`, `{operation}` and `{behavior}` stand for
+//!   the question's; one whose placeholder the question lacks (`{schema}`
+//!   in a `manage` question) is held by no one.
 //!
 //! ```json
 //! {"rules": [
@@ -476,7 +479,8 @@ pub enum Decision {
 }
 
 /// One rule of a policy: what it matches, each member left out matching
-/// anything, and how it decides.
+/// anything, but `behavior`, which left out matches only a question about
+/// no behavior, and how it decides.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolicyRule {
     pub action: Option<Vec<PolicyAction>>,
@@ -507,7 +511,11 @@ impl PolicyRule {
             && named(&self.schema, request.schema())
             && named(&self.namespace, Some(request.namespace()))
             && match &self.behavior {
-                None => true,
+                // A rule that names no behavior was written for schemas and
+                // namespaces: it matches no behavior question (D77), so a
+                // subject-wide allow does not reach every behavior's
+                // namespace operations.
+                None => request.behavior().is_none(),
                 Some(BehaviorMatch::Any(any)) => request.behavior().is_some() == *any,
                 Some(BehaviorMatch::Names(list)) => request
                     .behavior()
@@ -573,7 +581,13 @@ impl PolicyConfig {
     /// The rules a configuration answers with: a shorthand's, or its own.
     pub fn rules(&self) -> Vec<PolicyRule> {
         match self {
-            PolicyConfig::Shorthand(PolicyShorthand::AllowAll) => vec![rule(Decision::Allow(true))],
+            PolicyConfig::Shorthand(PolicyShorthand::AllowAll) => vec![
+                rule(Decision::Allow(true)),
+                PolicyRule {
+                    behavior: Some(BehaviorMatch::Any(true)),
+                    ..rule(Decision::Allow(true))
+                },
+            ],
             PolicyConfig::Shorthand(PolicyShorthand::Permission) => {
                 let template = |text: &str| {
                     PermissionTemplate::parse(text).unwrap_or_else(|_| {
@@ -1330,6 +1344,25 @@ mod tests {
                 ["listing"],
             json!(true)
         );
+        // A rule that names no behavior, as every rule written before D77
+        // does, matches no behavior question: a subject- or service-wide
+        // allow lets its principal read and write schemas, and call no
+        // behavior's namespace operation, which falls to the end of the
+        // rules and is refused.
+        let before_d77 = rules(json!({"rules": [
+            {"subject": ["root"], "action": ["read", "write"], "allow": true},
+            {"allow": true}
+        ]}));
+        let root = Principal::new("root", Vec::<String>::new());
+        assert!(before_d77.allows(&schema(&root, SchemaAction::Write, "Task", None)));
+        for (action, operation) in [
+            (SchemaAction::Write, "claimDeliveries"),
+            (SchemaAction::Read, "inbox"),
+        ] {
+            for listing in [false, true] {
+                assert!(!before_d77.allows(&behavior_question(&root, action, operation, listing)));
+            }
+        }
         // The rules match a behavior question by its behavior, and a rule
         // written for schemas, {schema}.{action}, refuses it.
         let rules = rules(json!({"rules": [

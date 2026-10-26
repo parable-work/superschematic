@@ -188,7 +188,15 @@ beside them (`PostgresOptions`); a `path` in its place opens a SQLite file
 the same way. Its calls run off the JavaScript thread, so its options are
 data alone: the policy is `allowAll`, `permissionPolicy()` (or its name,
 `'permission'`) or `{ rules }`, a list of rules the first match of which
-decides. It takes no policy of your own written as a function, no
+decides. A behavior's namespace operation (below) is decided only by a
+rule that names `behavior` (`true`, or the behaviors' names): a rule
+without it, such as `{ service: ["shop-orders"], action: ["read",
+"write"], allow: true }`, does not reach Comments' `inbox` or
+`claimDeliveries`, and with no rule that names `behavior` the call is
+refused. `{ behavior: ["Comments"], action: "read", allow: true }`
+allows its reads, and `{ behavior: true, action: "write", require:
+"{behavior}.{operation}" }` its writes to a caller holding
+`Comments.claimDeliveries`, as `'permission'` does. It takes no policy of your own written as a function, no
 permission matcher but the HTTP runtime's `hasAnyPermission`, no id
 function and no behavior written in TypeScript.
 Every instance of the server opens its own engine on the one schema; the
@@ -232,7 +240,8 @@ either engine.
   engine asks `read` of one schema at a time and skips when refused, so
   this policy lets every read one through, and a writing one only to a
   caller holding `<behavior>.<operation>` (`Comments.claimDeliveries`).
-  `permissionPolicy()` answers both the same way.
+  `permissionPolicy()` answers both the same way. In a `{ rules }`
+  policy, only a rule that names `behavior` answers them.
 - Where a behavior limits who may do something, its config names a
   permission and the behavior asks the engine's permission matcher. That
   is the HTTP runtime's `hasAnyPermission` unless you pass another, so
