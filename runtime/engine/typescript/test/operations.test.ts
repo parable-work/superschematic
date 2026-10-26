@@ -1,8 +1,9 @@
 // Behavior operations over HTTP and with an expected sequence: the
 // operation route (the body as its parameters, If-Match, the result with
 // the instance's new ETag, every refusal's status), invoke's and
-// operate's expectedSeq, the describe and tools routes, and the core's
-// behaviors through the route, Search's schema-level search among them.
+// operate's expectedSeq, the describe and tools routes, the core's
+// behaviors through the route, Search's schema-level search among them,
+// and a behavior's namespace operations through theirs (D77).
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -21,6 +22,7 @@ import {
   openTestEngine,
   orderDocument,
   projectsDocument,
+  schemaDocument,
   tasksDocument,
   thrown,
   type TestEngineOptions,
@@ -512,5 +514,83 @@ describe('the signal route', () => {
     assert.deepEqual([settled.status, body.code, body.title], [429, 'rate_limited', 'Too Many Requests']);
     // Another caller's budget is its own.
     assert.equal((await call(app, 'POST', route('typing'), { token: 'carol', body: {} })).status, 204);
+  });
+});
+
+describe('the namespace operation route', () => {
+  // test.Inbox (the test addon's) keeps notes on instances in a table of
+  // its own (D77): Note and Task compose it, each with a label, and Plain
+  // does not.
+  function serveInbox(): { engine: Engine; app: Hono } {
+    const engine = openTestEngine({ policy, metaSchema: openMetaSchema(), behaviors: ['test.Inbox'] });
+    for (const [name, label] of [
+      ['Note', 'notes'],
+      ['Task', 'tasks'],
+      ['Plain', undefined],
+    ] as const) {
+      const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+      if (label !== undefined) {
+        document.types[name]!.behaviors = [{ name: 'test.Inbox', config: { label } }];
+      }
+      engine.schemas.define(alice, document);
+      engine.schemas.publish(alice, name);
+    }
+    for (const [schema, id] of [
+      ['Note', 'n1'],
+      ['Task', 't1'],
+      ['Plain', 'p1'],
+    ] as const) {
+      engine.instances.create(alice, schema, { title: id }, { id });
+      if (schema !== 'Plain') {
+        engine.instances.invoke(alice, schema, id, 'add', { body: `on ${id}` });
+      }
+    }
+    return { engine, app: servedApp(engineApp, engine, { authenticate }) };
+  }
+
+  const route = (name: string, namespace = 'default', behavior = 'test.Inbox') => `/namespaces/${namespace}/behaviors/${behavior}/operations/${name}`;
+
+  test("runs one with the body as its parameters and answers its result with no ETag, across the schemas that compose its behavior", async () => {
+    const { engine, app } = serveInbox();
+    assert.deepEqual(await data(call(app, 'POST', route('notes'), { token: 'reader' })), {
+      data: {
+        items: [
+          ['Note', 'n1', 'on n1', 0],
+          ['Task', 't1', 'on t1', 0],
+        ],
+      },
+      etag: null,
+    });
+    assert.deepEqual((await data(call(app, 'POST', route('labels'), { body: {}, token: 'reader' }))).data, [
+      ['Note', 'notes'],
+      ['Task', 'tasks'],
+    ]);
+    // A reader may mark a note seen: mark asks read.
+    assert.equal((await call(app, 'POST', '/namespaces/default/schemas/Note/instances/n1/operations/mark', { token: 'reader' })).status, 200);
+    const head = engine.events.head();
+    assert.deepEqual((await data(call(app, 'POST', route('clear'), { body: {} }))).data, { changed: 1 });
+    assert.equal(engine.events.head(), head, 'no event');
+    assert.deepEqual((await data(call(app, 'POST', route('notes')))).data.items, [
+      ['Note', 'n1', 'on n1', 1],
+      ['Task', 't1', 'on t1', 1],
+    ]);
+  });
+
+  test('answers each refusal with its status; the instance route refuses a namespace operation', async () => {
+    const { app } = serveInbox();
+    assert.equal((await problem(call(app, 'POST', route('clear'), { token: 'reader' }), 403)).code, 'forbidden');
+    assert.equal((await problem(call(app, 'POST', route('notes'), { body: { all: true } }), 400)).code, 'invalid_argument');
+    await problem(call(app, 'POST', route('notes'), { body: '{}', type: 'text/plain' }), 415);
+    await problem(call(app, 'POST', route('notes'), { token: null }), 401);
+    assert.equal(
+      (await problem(call(app, 'POST', route('add'), { body: { body: 'x' } }), 404)).detail,
+      "test.Inbox's add is an instance operation: call it on an instance of a schema that composes test.Inbox"
+    );
+    assert.equal((await problem(call(app, 'POST', route('notes', 'default', 'test.Nothing')), 404)).detail, 'this engine runs no behavior test.Nothing');
+    assert.equal((await problem(call(app, 'POST', route('notes', 'nowhere')), 404)).code, 'unknown_namespace');
+    assert.equal(
+      (await problem(call(app, 'POST', '/namespaces/default/schemas/Note/instances/n1/operations/notes'), 404)).detail,
+      "Note's notes is a namespace operation of test.Inbox: call it on the namespace, with no schema"
+    );
   });
 });

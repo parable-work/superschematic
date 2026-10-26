@@ -694,18 +694,10 @@ fn start_operation(
     let engine = probe.engine;
     let spec = found.spec();
     let schema = found.record.name.as_str();
-    engine.access.require_operation(
-        principal,
-        if spec.writes {
-            SchemaAction::Write
-        } else {
-            SchemaAction::Read
-        },
-        namespace,
-        schema,
-        Some(&spec.name),
-    )?;
-    if spec.writes {
+    engine
+        .access
+        .require_operation(principal, spec.asks(), namespace, schema, Some(&spec.name))?;
+    if spec.refused_when_archived() {
         probe.view.require_writable(namespace)?;
     }
     check_expected_seq(options.expected_seq)?;

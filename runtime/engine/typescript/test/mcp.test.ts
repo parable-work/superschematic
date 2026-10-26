@@ -369,6 +369,41 @@ describe('schema-level operations', () => {
   });
 });
 
+describe('namespace operations', () => {
+  test("are tools named after their behavior (D77): tools/list shows a writing one only to a caller the policy's listing question allows, and tools/call runs them across the schemas", async () => {
+    const { url } = await served({ behaviors: ['test.Inbox'] }, {}, (engine) => {
+      for (const name of ['Note', 'Task']) {
+        const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+        document.types[name]!.behaviors = [{ name: 'test.Inbox', config: { label: name.toLowerCase() } }];
+        engine.schemas.define(everything, document);
+        engine.schemas.publish(everything, name);
+        engine.instances.create(everything, name, { title: name }, { id: `${name.toLowerCase()}1` });
+        engine.instances.invoke(everything, name, `${name.toLowerCase()}1`, 'add', { body: `on ${name}` });
+      }
+    });
+    const { client } = await connect(endpoint(url));
+    const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    const notes = byName.get('test_inbox_notes');
+    assert.ok(notes);
+    assert.deepEqual([notes.title, Object.keys(notes.inputSchema.properties ?? {}), notes.annotations], ['test.Inbox: notes', ['params'], { readOnlyHint: true }]);
+    assert.ok(byName.has('test_inbox_clear'));
+    const listed = (await client.callTool({ name: 'test_inbox_notes', arguments: {} })) as CallToolResult;
+    assert.deepEqual(listed.structuredContent, {
+      items: [
+        ['Note', 'note1', 'on Note', 0],
+        ['Task', 'task1', 'on Task', 0],
+      ],
+    });
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const names = (await reader.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('test_inbox_notes') && !names.includes('test_inbox_clear'), JSON.stringify(names));
+    const refused = (await reader.callTool({ name: 'test_inbox_clear', arguments: {} })) as CallToolResult;
+    assert.equal(problemOf(refused).status, 403);
+    const cleared = (await client.callTool({ name: 'test_inbox_clear', arguments: { params: {} } })) as CallToolResult;
+    assert.deepEqual(cleared.structuredContent, { changed: 2 });
+  });
+});
+
 describe('tools/call', () => {
   test('runs the operation and returns its result as text and, for an object, structured content', async () => {
     const { url, engine } = await served();

@@ -164,8 +164,12 @@ type BehaviorOperation struct {
 	// Writes is true for an operation that changes stored state.
 	Writes bool `json:"writes,omitempty"`
 	// Scope is what the operation runs on: "instance" (or empty, the
-	// default), one instance, which an engine's call names by id; or
-	// "schema", the schema as a whole, with no instance.
+	// default), one instance, which an engine's call names by id;
+	// "schema", the schema as a whole, with no instance; or "namespace"
+	// (D77), the behavior's own tables across every schema of a namespace
+	// that composes it, with no instance and no schema, which an engine
+	// calls by the behavior's name. A namespace operation is never beside
+	// an instance and appends no event, so it sets neither Beside nor Log.
 	Scope string `json:"scope,omitempty"`
 	// Beside is true for an instance operation that writes beside the
 	// instance (D77): only its behavior's own tables and columns, so an
@@ -176,6 +180,12 @@ type BehaviorOperation struct {
 	// Log, false, says a beside operation appends no event at all, for a
 	// write only its writer reads back. Absent, it appends one.
 	Log *bool `json:"log,omitempty"`
+	// Asks, "read", says the access policy is asked read for the operation
+	// though it writes (D77): a beside operation with "log": false that
+	// writes only its caller's own state, a read marker or a follow, which a
+	// caller who may only read the instance may call. Empty, a writing
+	// operation asks write.
+	Asks string `json:"asks,omitempty"`
 	// InvocationPolicy is the MCP invocation policy of the operation's
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
@@ -231,12 +241,16 @@ type Behavior struct {
 // take one of these names.
 var builtinOperations = []string{"create", "get", "list", "update", "delete", "lookup"}
 
-// The scopes an operation declares: an instance, the default, or its
-// schema as a whole.
+// The scopes an operation declares: an instance, the default, its schema
+// as a whole, or a namespace (D77).
 const (
-	OperationScopeInstance = "instance"
-	OperationScopeSchema   = "schema"
+	OperationScopeInstance  = "instance"
+	OperationScopeSchema    = "schema"
+	OperationScopeNamespace = "namespace"
 )
+
+// OperationAsksRead is the one value of an operation's Asks.
+const OperationAsksRead = "read"
 
 var (
 	behaviorBareName      = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
@@ -454,10 +468,17 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s declares operation %q twice", decl.Name, op.Name)
 		}
 		seen[op.Name] = true
-		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema {
-			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema)
+		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema && op.Scope != OperationScopeNamespace {
+			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q, %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema, OperationScopeNamespace)
 		}
-		if err := checkBesideOperation(decl, op); err != nil {
+		if op.Scope == OperationScopeNamespace {
+			if err := checkNamespaceOperation(decl, op); err != nil {
+				return err
+			}
+		} else if err := checkBesideOperation(decl, op); err != nil {
+			return err
+		}
+		if err := checkAsks(decl, op); err != nil {
 			return err
 		}
 		for _, s := range []struct {
@@ -514,6 +535,41 @@ func checkBehaviorSignals(decl BehaviorDeclaration) error {
 // every operation but a beside one that declares "log": false.
 func (op BehaviorOperation) Logged() bool {
 	return op.Log == nil || *op.Log
+}
+
+// checkNamespaceOperation holds a namespace operation to its rule (D77): it
+// runs on no instance, so it is never beside one, and it appends no event,
+// so it says nothing of one.
+func checkNamespaceOperation(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if op.Beside {
+		return fmt.Errorf("registry: behavior %s operation %s has scope %q and is beside the instance: a namespace operation runs on no instance", decl.Name, op.Name, OperationScopeNamespace)
+	}
+	if op.Log != nil {
+		return fmt.Errorf("registry: behavior %s operation %s has scope %q and sets \"log\": a namespace operation appends no event", decl.Name, op.Name, OperationScopeNamespace)
+	}
+	return nil
+}
+
+// AsksRead reports whether the access policy is asked read for the
+// operation though it writes (D77, "asks": "read").
+func (op BehaviorOperation) AsksRead() bool {
+	return op.Asks == OperationAsksRead
+}
+
+// checkAsks holds an operation's asks to its rule (D77): only "read", and
+// only on a beside operation that appends no event, which writes nothing
+// anyone but its caller reads.
+func checkAsks(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if op.Asks == "" {
+		return nil
+	}
+	if op.Asks != OperationAsksRead {
+		return fmt.Errorf("registry: behavior %s operation %s asks %q: the only value is %q", decl.Name, op.Name, op.Asks, OperationAsksRead)
+	}
+	if !op.Beside || op.Logged() {
+		return fmt.Errorf("registry: behavior %s operation %s asks %q and is not beside the instance with \"log\": false: only an operation that writes its caller's own state, and appends no event, asks read", decl.Name, op.Name, OperationAsksRead)
+	}
+	return nil
 }
 
 // checkBesideOperation holds a beside operation to its rule (D77): it

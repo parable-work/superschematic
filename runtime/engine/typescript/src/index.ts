@@ -27,6 +27,7 @@ export type {
   AccessPolicy,
   AccessRequest,
   Action,
+  BehaviorAccessRequest,
   ListingAccessRequest,
   NamespaceAccessRequest,
   NamespaceOperation,
@@ -97,7 +98,7 @@ export { DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS, MAX_RETENTION
 export type { RetentionOptions } from './types/events.js';
 // Signals (D77; runtime/engine/README.md, "The event stream").
 export { DEFAULT_SIGNALS_PER_SECOND, MAX_SIGNAL_DATA_BYTES } from './types/signals.js';
-export type { EngineSignal, SendSignalInput, SignalOptions } from './types/signals.js';
+export type { EngineSignal, NamespaceOperationInput, SendSignalInput, SignalOptions } from './types/signals.js';
 
 // The value store (runtime/engine/README.md, "The value store").
 export {

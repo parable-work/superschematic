@@ -526,6 +526,28 @@ pub(crate) fn serve(
                     .map_err(failed)?,
             ))
         }
+        "invokeNamespaceOperation" => {
+            let input = json_body(request)?;
+            if input.is_some() {
+                media_type(request, matched, JSON_MEDIA_TYPE)?;
+            }
+            let params = input.unwrap_or_else(|| Value::Object(Map::new()));
+            Ok(ok(
+                request,
+                engine
+                    .behaviors()
+                    .invoke(
+                        principal,
+                        &crate::behaviors::NamespaceCall {
+                            namespace: ns,
+                            behavior: matched.param("behavior"),
+                            operation: matched.param("operation"),
+                            params: Some(&params),
+                        },
+                    )
+                    .map_err(failed)?,
+            ))
+        }
         "sendSignal" => {
             let input = json_body(request)?;
             if input.is_some() {

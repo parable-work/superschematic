@@ -109,6 +109,33 @@ func TestSignalsAreListed(t *testing.T) {
 	}
 }
 
+// A behavior's namespace operations (D77) say where they run, and an
+// operation that asks read says so.
+func TestNamespaceOperationsAndAsksReadAreListed(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	closed := `"paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true`
+	chat := json.RawMessage(`{"name": "Chatter", "operations": [
+		{"name": "inbox", "description": "The caller's mentions.", "scope": "namespace", ` + closed + `},
+		{"name": "markRead", "writes": true, "beside": true, "log": false, "asks": "read", ` + closed + `}
+	]}`)
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: chat}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	catalog := render(t, Behaviors, reg)
+	want := "\nOperations:\n\n" +
+		"- `inbox` (reads, across the namespace's schemas, called by the behavior's name): The caller's mentions.\n" +
+		"- `markRead` (writes, on an instance, beside the instance, no event, asks read)\n"
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Chatter's entry lacks its operations:\n%s", catalog[strings.Index(catalog, "## `Chatter`"):])
+	}
+}
+
 func TestScalarsAndCapabilities(t *testing.T) {
 	reg := generator.CoreRegistry(naming.Naming{})
 	scalars := render(t, Scalars, reg)

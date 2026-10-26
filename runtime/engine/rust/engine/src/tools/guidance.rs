@@ -378,7 +378,12 @@ pub(crate) fn describe_target(
         })
         .collect();
     for bound in &composition.behaviors {
-        for operation in &bound.behavior.operations {
+        for operation in bound
+            .behavior
+            .operations
+            .iter()
+            .filter(|operation| operation.scope != OperationScope::Namespace)
+        {
             operations.push(DescribedTypeOperation {
                 name: operation.name.clone(),
                 behavior: Some(bound.behavior.name.clone()),

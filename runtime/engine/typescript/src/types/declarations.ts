@@ -72,8 +72,11 @@ export interface BehaviorOperationDeclaration {
   readonly writes?: boolean;
   /**
    * What it runs on: `instance` (or absent), one instance a call names by
-   * id; `schema`, the schema as a whole, with no instance. A string, as a
-   * JSON module types it; checkDeclaration refuses any other value.
+   * id; `schema`, the schema as a whole, with no instance; `namespace`
+   * (D77), the behavior's own tables across every schema of a namespace
+   * that composes it, with no instance and no schema, called by the
+   * behavior's name (engine.behaviors.invoke). A string, as a JSON module
+   * types it; registration refuses any other value.
    */
   readonly scope?: string;
   /**
@@ -83,8 +86,16 @@ export interface BehaviorOperationDeclaration {
    * declares one declares every field volatile.
    */
   readonly beside?: boolean;
-  /** False for a beside operation that appends no event; absent, it appends one. */
+  /** False for a beside operation that appends no event; absent, it appends one. A namespace operation sets neither beside nor log. */
   readonly log?: boolean;
+  /**
+   * `read` for a beside operation with `log: false` that writes only its
+   * caller's own state, a read marker say (D77): the policy is asked
+   * `read` for it, so a caller who may only read the instance may call
+   * it, and an archived namespace lets it run. Absent, a writing
+   * operation asks `write`.
+   */
+  readonly asks?: string;
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }
@@ -108,10 +119,10 @@ export interface BehaviorSignalDeclaration {
 export type SignalAccess = 'read' | 'write' | 'operation';
 
 /** What an operation runs on. */
-export type OperationScope = 'instance' | 'schema';
+export type OperationScope = 'instance' | 'schema' | 'namespace';
 
 /** The scopes an operation declares. */
-export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema'];
+export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema', 'namespace'];
 
 /** A JSON Schema: an object, or true or false. */
 export type JSONSchema = boolean | { readonly [key: string]: unknown };

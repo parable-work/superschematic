@@ -407,6 +407,20 @@ export class BehaviorCalls {
   describe(name: string, options: CallOptions = {}): Promise<BehaviorDocument> {
     return this.scope.data({ method: 'GET', path: `/behaviors/${segment(name)}`, options });
   }
+
+  /**
+   * invoke calls a behavior's namespace operation (D77), such as Comments'
+   * `inbox`: one that runs on the behavior's tables across every schema of
+   * the namespace that composes it, over the schemas the caller may read.
+   */
+  invoke<R = unknown>(behavior: string, operation: string, params: JSONObject = {}, options: CallOptions = {}): Promise<R> {
+    return this.scope.data({
+      method: 'POST',
+      path: `${this.scope.ns(options)}/behaviors/${segment(behavior)}/operations/${segment(operation)}`,
+      body: params,
+      options,
+    });
+  }
 }
 
 function writeHeaders(options: WriteOptions): Record<string, string> {

@@ -6,7 +6,7 @@
 //! authenticated) and sends back the [`Response`]: its status, headers and
 //! body bytes, or an [`EventStream`] the host copies to the client.
 //!
-//! The engine owns routing over the 27 routes and the MCP endpoint
+//! The engine owns routing over the 28 routes and the MCP endpoint
 //! ([`routes`]), the decoding of their parameters and bodies, the
 //! media-type refusals, ETags and `If-Match`, the `Preconditions` header,
 //! the success envelope and the RFC 9457 problems, `Location` (from the
@@ -193,7 +193,7 @@ pub struct Route {
 }
 
 impl Route {
-    /// Whether its spec declares a request body: the eight routes a host's
+    /// Whether its spec declares a request body: the nine routes a host's
     /// body limit applies to ([`DEFAULT_BODY_LIMIT_BYTES`] unless the mount
     /// sets one), as the HTTP runtimes apply theirs to a spec route. The
     /// event stream and the MCP endpoint, which the TypeScript app mounts
@@ -207,6 +207,7 @@ impl Route {
                 | "updateInstance"
                 | "invokeOperation"
                 | "invokeSchemaOperation"
+                | "invokeNamespaceOperation"
                 | "searchSchemas"
                 | "sendSignal"
         )
@@ -230,7 +231,7 @@ const fn route(name: &'static str, method: &'static str, path: &'static str) -> 
 
 /// Every route the engine serves, in the order the TypeScript app mounts
 /// them, then the MCP endpoint's.
-pub const ROUTES: [Route; 30] = [
+pub const ROUTES: [Route; 31] = [
     route("listNamespaces", "GET", "/namespaces"),
     route("createNamespace", "POST", "/namespaces"),
     route("getNamespace", "GET", "/namespaces/{namespace}"),
@@ -312,6 +313,11 @@ pub const ROUTES: [Route; 30] = [
         "POST",
         "/namespaces/{namespace}/schemas/{name}/instances/{id}/signals/{behavior}/{signal}",
     ),
+    route(
+        "invokeNamespaceOperation",
+        "POST",
+        "/namespaces/{namespace}/behaviors/{behavior}/operations/{operation}",
+    ),
     route("listTools", "GET", "/namespaces/{namespace}/tools"),
     route("listBehaviors", "GET", "/behaviors"),
     route("describeBehavior", "GET", "/behaviors/{name}"),
@@ -335,7 +341,7 @@ pub const ROUTES: [Route; 30] = [
     },
 ];
 
-/// Every route the engine serves (`routes()`): the 27 of the HTTP API,
+/// Every route the engine serves (`routes()`): the 28 of the HTTP API,
 /// then the MCP endpoint's POST, GET and DELETE.
 pub fn routes() -> Vec<Route> {
     ROUTES.to_vec()
@@ -536,14 +542,14 @@ mod tests {
             )),
             Some(("sendSignal", "test.Chat".to_owned(), "typing".to_owned()))
         );
-        assert_eq!(routes().len(), 30);
-        assert_eq!(routes().iter().filter(|route| !route.mcp).count(), 27);
+        assert_eq!(routes().len(), 31);
+        assert_eq!(routes().iter().filter(|route| !route.mcp).count(), 28);
         let bodies: Vec<&str> = routes()
             .iter()
             .filter(|route| route.takes_body())
             .map(|route| route.name)
             .collect();
-        assert_eq!(bodies.len(), 8, "{bodies:?}");
+        assert_eq!(bodies.len(), 9, "{bodies:?}");
         assert!(routes()
             .iter()
             .filter(|route| route.takes_body())

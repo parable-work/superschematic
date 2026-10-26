@@ -254,6 +254,8 @@ export interface DescribedBehavior {
   /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
   fields: Array<{ name: string; description?: string; volatile?: true }>;
   operations: string[];
+  /** Its namespace operations (D77), which `behaviors.invoke` calls; absent when it has none. */
+  namespaceOperations?: string[];
   vetoes: Array<{ code: string; description?: string }>;
 }
 
@@ -352,12 +354,14 @@ export interface BehaviorDocument {
 export interface BehaviorOperationDocument {
   name: string;
   description?: string;
-  scope: 'instance' | 'schema';
+  scope: 'instance' | 'schema' | 'namespace';
   writes: boolean;
   /** True for an operation beside the instance (D77). */
   beside?: true;
   /** False for a beside operation that appends no event. */
   log?: false;
+  /** `read` for a beside operation the policy is asked read for (D77). */
+  asks?: 'read';
   paramsSchema: JSONSchema;
   resultSchema: JSONSchema;
   [policyKey: string]: unknown;
