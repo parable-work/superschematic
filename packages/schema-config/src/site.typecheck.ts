@@ -18,6 +18,23 @@ export const site = defineConfig({
 // Every member of site is optional.
 export const defaults = defineConfig({ name: "shop-web", kind: SchemaKind.Site, site: {} });
 
+// A dev server, which stack dev runs in place of the build (D82): a script
+// or a binary, and a port for one that picks its own; both are optional.
+export const devServer = defineConfig({
+  name: "shop-web",
+  kind: SchemaKind.Site,
+  calls: [ShopApi],
+  site: { build: "build", dev: { command: "vite", port: 5173 } }
+});
+export const devDefaults = defineConfig({ name: "shop-web", kind: SchemaKind.Site, site: { dev: {} } });
+
+export const refusedDevKey = defineConfig({
+  name: "shop-web",
+  kind: SchemaKind.Site,
+  // @ts-expect-error site.dev takes command and port only
+  site: { dev: { script: "dev" } }
+});
+
 export const refusedCall = defineConfig({
   name: "shop-web",
   kind: SchemaKind.Site,
@@ -28,6 +45,6 @@ export const refusedCall = defineConfig({
 export const refusedKey = defineConfig({
   name: "shop-web",
   kind: SchemaKind.Site,
-  // @ts-expect-error site takes build, output and fallback only
+  // @ts-expect-error site takes build, output, fallback and dev only
   site: { outDir: "dist" }
 });

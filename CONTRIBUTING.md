@@ -171,6 +171,50 @@ fails when they disagree), then run `go run ./internal/tools/scalarcatalog`
 to rewrite the TypeScript and Python scalar catalogs and the docs' scalar
 page.
 
+### Without Rust
+
+A checkout without Rust builds the CLI and runs a TypeScript project
+(D82): Go, Bun, Node and Docker are enough. The Rust build products come
+prebuilt, in two families that `scripts/prebuilt_deps.py` describes:
+superscalar's Go binding with its static archive and its TypeScript
+binding with its builds, keyed by `superscalar.pin` and `tools.env`'s Rust
+and wasm-pack; and the version-graph core's archive and wasm32 module,
+keyed by its sources and Rust. With no `cargo` on `PATH`,
+`scripts/superscalar-dep.sh`, `scripts/versiongraph-archive.sh` and the
+version-graph package's wasm build stage them in place of a build (each
+script takes `--prebuilt` to do so with cargo present):
+
+```
+scripts/superscalar-dep.sh --prebuilt
+make cli          # bin/superschematic and bin/superschematic-migrate
+(cd runtime/http/typescript && bun install && bun run build)
+```
+
+The docs site's TypeScript install page has the minimal path for a
+TypeScript project. `make cli` builds only what the CLI links; the gates
+still need Rust, and `make setup` builds everything from source.
+
+The prebuilt-deps workflow (`.github/workflows/prebuilt-deps.yml`)
+publishes them: on a push to `main` that changes a family's inputs, or by
+hand, it builds each family that lacks a prerelease on the four release
+runners, writes its `manifest.json`, which lists each tarball's SHA-256,
+and attaches them to the prerelease `prebuilt-<family>-<key>`.
+`prebuilt.pin` pins each family's key and the digest of its manifest, and
+a fetch refuses a manifest or a tarball that differs. So after the
+workflow publishes a new key, a maintainer pins it and opens a pull
+request with the file:
+
+```
+scripts/prebuilt_deps.py pin superscalar versiongraph
+```
+
+Until it merges, a checkout without Rust is refused with that
+instruction. `SUPERSCHEMATIC_PREBUILT_URL` points the scripts at another
+copy of the releases, a URL or a directory of `<tag>/<file>`, and
+`SUPERSCHEMATIC_PREBUILT_<FAMILY>_MANIFEST_SHA256` trusts a manifest the
+pin does not name yet, as when you test one you packed yourself
+(`scripts/prebuilt_deps.py pack` and `manifest`).
+
 ## Running the gates
 
 The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
@@ -217,6 +261,7 @@ agent or a bot with write access counts.
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
+| `make cli`            | `bin/superschematic` and `bin/superschematic-migrate` alone, over superscalar's archive, built or, with no `cargo` on `PATH`, prebuilt ([Without Rust](#without-rust)) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |

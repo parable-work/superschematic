@@ -280,6 +280,63 @@ func TestWriteSDKGolden(t *testing.T) {
 	}
 }
 
+// TestWriteLazySDKGolden: with lazyValidation (D82) a namespace imports the
+// types package's types alone, and loads its validators and parsers, and
+// superscalar with them, with a dynamic import that each method awaits
+// first; the rest of the SDK is as without it.
+func TestWriteLazySDKGolden(t *testing.T) {
+	_, apiOutput, parseable := loadFixtureAPI(t)
+	clock := codegen.DefaultClock()
+	sdkOutput, err := Generate(apiOutput, parseable, clock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	sdkOutput.LazyValidation = true
+	outDir := t.TempDir()
+	if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, clock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
+	for _, name := range []string{"namespaces/session.ts", "namespaces/tenant.ts"} {
+		got, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatalf("read generated %s: %v", name, err)
+		}
+		goldenPath := filepath.Join("testdata", "golden", "fixture-api-lazy", name)
+		if *update {
+			if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+				t.Fatalf("mkdir golden: %v", err)
+			}
+			if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+				t.Fatalf("write golden %s: %v", name, err)
+			}
+			continue
+		}
+		want, err := os.ReadFile(goldenPath)
+		if err != nil {
+			t.Fatalf("read golden %s: %v (run with -update)", name, err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("%s differs from golden (run with -update to accept)", name)
+		}
+		if strings.Contains(string(got), "} from '@schemas/fixture-api-types';") && !strings.Contains(string(got), "import type {") {
+			t.Errorf("%s imports a value from the types package statically", name)
+		}
+	}
+	for _, name := range []string{"client.ts", "index.ts", "types.ts"} {
+		got, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join("testdata", "golden", "fixture-api", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("%s differs from the SDK's without lazyValidation", name)
+		}
+	}
+}
+
 func TestNamespaceScalarGetArgsStayPositional(t *testing.T) {
 	tmpl, err := template.New("namespace.tmpl").Funcs(
 		codegen.MergeTemplateFuncs(tsutil.BaseTemplateFuncs(), customTemplateFuncs()),

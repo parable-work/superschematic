@@ -214,7 +214,8 @@ const (
 
 	// TypeSite is a site the provisioner builds once and serves from a
 	// file server of its own, with the site's config and its single-page
-	// fallback (D55).
+	// fallback (D55), or whose dev server it runs behind a proxy that
+	// serves the site and the APIs it calls on one origin (D82).
 	TypeSite = "local:site/site:Site"
 
 	// TypeBucket is a bucket on the environment's storage emulator, which
@@ -553,6 +554,15 @@ var resourceTypes = map[string]string{
 	    "output": {"type": "string", "minLength": 1},
 	    "fallback": {"type": "string", "minLength": 1},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "dev": {
+	      "type": "object",
+	      "required": ["command", "port"],
+	      "properties": {
+	        "command": {"type": "string", "pattern": "^[^\\s]+$"},
+	        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+	      },
+	      "additionalProperties": false
+	    },
 	    "config": {
 	      "type": "object",
 	      "required": ["apis"],

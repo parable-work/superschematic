@@ -824,7 +824,10 @@
         "dir": "web/shop-web",
         "build": "build",
         "output": "dist",
-        "fallback": "index.html"
+        "fallback": "index.html",
+        "dev": {
+          "command": "dev"
+        }
       },
       "exposed": true,
       "resourceName": "shop-web",
@@ -1975,6 +1978,10 @@
                 "url": "http://127.0.0.1:21951"
               }
             }
+          },
+          "dev": {
+            "command": "dev",
+            "port": 20515
           },
           "dir": "web/shop-web",
           "fallback": "index.html",

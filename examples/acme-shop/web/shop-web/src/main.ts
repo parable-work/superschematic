@@ -1,9 +1,11 @@
 // The shop's static site (docs/stack-model.md, section 8.10): it lists
 // shop-api's products in stock from the browser. One build serves every
 // environment: loadApis() reads shop-api's public address from the config
-// the environment serves at /__superschematic/config.json, and shop-api
-// answers CORS for this site's origin, which its CORS field lists. The
-// browser carries the shopper's session token itself.
+// the environment serves at /__superschematic/config.json. Deployed,
+// shop-api answers CORS for this site's origin, which its CORS field lists;
+// under stack dev, Bun's dev server serves the page and stack dev's proxy
+// serves shop-api under /api/shop-api on the same origin (D82). The browser
+// carries the shopper's session token itself.
 //
 // It calls shop-api through the generated TypeScript SDK, which the config
 // hands out at shop-api's address. The SDK checks each product's fields
