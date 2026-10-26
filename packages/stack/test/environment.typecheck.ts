@@ -377,6 +377,22 @@ export abstract class SiteEnv {}
 })
 export abstract class DatabaseSettingOnSite {}
 
+// An origin (D91): a site and the APIs it serves on its own origin, or
+// every API it calls with apis left out.
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb, apis: [ShopApi] }] })
+export abstract class OriginShop {}
+
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb }] })
+export abstract class OriginOfEveryCall {}
+
+// @ts-expect-error an origin's site is a Site service's handle
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopApi }] })
+export abstract class OriginOfAnAPI {}
+
+// @ts-expect-error an origin serves APIs
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb, apis: [ShopWeb] }] })
+export abstract class OriginServingASite {}
+
 // A worker's element names its API's handle and the worker's class; it
 // sets how many instances run and how many messages each handles, takes
 // the target's worker settings, and an env of its API's config (D53).

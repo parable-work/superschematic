@@ -357,7 +357,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 			PublicAddressOf: func(ctx registry.PlatformContext) any {
 				return publicAddress(ctx, ctx.Deployable.Name+".site")
 			},
-			Lower: lowerSite,
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name:      BucketPlatform,
@@ -629,7 +630,9 @@ var resourceTypes = map[string]string{
 	  "additionalProperties": false}`,
 	TypeSite: `{"type": "object", "required": ["name", "prefix", "public"],
 	  "properties": {
-	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"}
+	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"},
+	    "routes": {"type": "array", "items": {"type": "object", "required": ["path", "upstream"],
+	      "properties": {"path": {"type": "string"}, "upstream": {}}, "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
 	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
@@ -871,8 +874,9 @@ func publicAddress(ctx registry.PlatformContext, id string) any {
 
 // lowerSite lowers a site (D55) to its storage, public, serving its files
 // under the prefix of their digest, which the deploy pins, with the
-// single-page fallback, and under the environment's domain a route and a
-// CNAME record, as an exposed server's.
+// single-page fallback, the routes of its origin (D91), each API's path
+// and the upstream its site edge derives, and under the environment's
+// domain a route and a CNAME record, as an exposed server's.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
@@ -882,6 +886,17 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	props := map[string]any{"name": d.ResourceName, "prefix": "/" + ir.SiteDigestToken + "/", "public": true}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
+	}
+	var routes []any
+	for _, api := range d.Site.Origin {
+		for _, b := range d.Bindings {
+			if value, _ := b.Value.(map[string]any); b.Field == api.Service && value["upstream"] != nil {
+				routes = append(routes, map[string]any{"path": api.Path, "upstream": value["upstream"]})
+			}
+		}
+	}
+	if len(routes) > 0 {
+		props["routes"] = routes
 	}
 	out := registry.Lowered{Resources: []*ir.Resource{{ID: id, Type: TypeSite, Properties: props}}}
 	if ctx.Environment.Domain != "" {
@@ -903,8 +918,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 
 // connectSite derives the public address of the server whose API a site
 // calls (D55). The browser carries its end user's token, so the edge
-// grants nothing.
+// grants nothing. For an API of the site's origin (D91) it derives the
+// same-origin URL, and the server's address as the upstream the site
+// forwards to, exposed or not.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name), Upstream: ctx.To.Address}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 

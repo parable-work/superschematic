@@ -196,6 +196,18 @@ type PlatformSpec struct {
 	// resolve. A site platform must have it.
 	PublicAddressOf func(PlatformContext) any
 
+	// ServesOrigin says a site platform serves a site's origin (D91): each
+	// API of it (ir.ResolvedSite.Origin) under ir.SiteDevAPIPath(service)
+	// on the site's own public address, forwarded to the API's server with
+	// that prefix taken off and the query kept, as `stack dev`'s proxy
+	// forwards it, and every other path from the site's files. Its
+	// connector to a server platform of its provider derives the
+	// same-origin URL (ir.SiteOriginURL) and reaches a server that is not
+	// exposed; the generic connector reaches one on another provider at
+	// its public address (ir.SiteEndpoint.Upstream). Resolution refuses an
+	// origin on a site platform without it. Only a site platform sets it.
+	ServesOrigin bool
+
 	// Lower returns the deployable's resources. It is pure: the same
 	// context gives the same result.
 	Lower func(PlatformContext) (Lowered, error)
@@ -728,6 +740,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
+	}
+	if spec.ServesOrigin && spec.Kind != ir.DeployableSite {
+		return fmt.Errorf("registry: %s platform %q says it serves a site's origin; only a site platform does (D91)", spec.Kind, spec.Name)
 	}
 	if spec.Artifact != "" {
 		if !spec.Kind.RunsCode() {

@@ -151,6 +151,13 @@ type ResolvedDeployable struct {
 	// environment, and for every site.
 	Exposed bool `json:"exposed,omitempty"`
 
+	// Origins names, for a server, the sites whose origin serves an API of
+	// it under SiteDevAPIPath(service) (D91), sorted: a browser reaches the
+	// server there, through the site's platform, whether it is exposed or
+	// not. A server that is not exposed has no public address of its own,
+	// and its platform admits only what the site's origin forwards.
+	Origins []string `json:"origins,omitempty"`
+
 	// Settings are the platform settings, the parent environment's merged
 	// under the environment's own.
 	Settings map[string]any `json:"settings,omitempty"`

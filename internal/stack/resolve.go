@@ -259,6 +259,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.resolveCalls()
 	r.resolveBuckets()
 	r.resolveMemoryStores()
+	r.resolveOrigins()
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
@@ -279,6 +280,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	}
 	out := r.output()
 	r.connectEdges()
+	r.checkOriginURLs()
 	if r.failed() {
 		return nil
 	}
@@ -1359,6 +1361,7 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	c.Calls = slices.Clone(d.Calls)
 	c.Buckets = slices.Clone(d.Buckets)
 	c.MemoryStores = slices.Clone(d.MemoryStores)
+	c.Origins = slices.Clone(d.Origins)
 	if d.Settings != nil {
 		c.Settings = deepCopy(d.Settings).(map[string]any)
 	}
@@ -1374,6 +1377,11 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 		if site.Dev != nil {
 			dev := *site.Dev
 			site.Dev = &dev
+		}
+		site.Origin = nil
+		for _, api := range d.Site.Origin {
+			copied := *api
+			site.Origin = append(site.Origin, &copied)
 		}
 		c.Site = &site
 	}

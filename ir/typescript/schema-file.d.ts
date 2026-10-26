@@ -474,6 +474,11 @@ export interface OperationSetFile {
   userSessions?: UserSessionsConfig;
 }
 
+export interface Origin {
+  apis?: ServiceRef[];
+  site: ServiceRef;
+}
+
 export interface ProjectionCollapse {
   by: string[];
   order?: ProjectionOrder[];
@@ -655,6 +660,7 @@ export interface SourceRef {
 export interface StackDecl {
   deploy?: ServiceRef[];
   expose?: DeployableRef[];
+  origins?: Origin[];
 }
 
 export interface TraitConfigSchema {

@@ -156,8 +156,21 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 // connectSite derives the public address of the server whose API a site
 // calls (D55), as every site connector does: the browser carries its end
 // user's token, and the server answers the site's origin through its CORS
-// field, so the edge needs no resource.
+// field, so the edge needs no resource. For an API the site serves on its
+// own origin (D91), the page's URL is the same-origin one
+// (ir.SiteOriginURL), and the site's platform forwards to the server's
+// public address, the endpoint's upstream: resolution has checked the
+// server is exposed.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		if !ctx.To.Exposed || ctx.To.PublicAddress == nil {
+			return registry.Connected{}, errors.New("the generic connector forwards a site's origin to a server of another provider only at its public address, and the server has none: expose it")
+		}
+		return registry.Connected{Value: ir.SiteEndpoint{
+			URL:      ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name),
+			Upstream: ctx.To.PublicAddress,
+		}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 

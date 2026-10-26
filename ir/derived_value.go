@@ -895,7 +895,7 @@ func DerivedMembers(kind EdgeKind) []string {
 	case EdgeHTTP:
 		return []string{"url", "binding.name", "binding.worker", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
 	case EdgeSite:
-		return []string{"url"}
+		return []string{"url", "upstream", "binding.name", "binding.worker"}
 	case EdgeBucket:
 		return []string{"name", "endpoint", "binding", "r2.account", "r2.accessKeyId", "r2.token", "r2.jurisdiction"}
 	case EdgeMemoryStore:
