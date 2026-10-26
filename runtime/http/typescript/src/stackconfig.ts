@@ -40,7 +40,8 @@ from node:, so it runs on Node.js, Bun and Workers.
 
 The members a Worker alone reads (D64) are read here, and refused by the Go
 and Rust readers: a database's D1 binding (field_D1_BINDING,
-field_D1_DATABASE), a service's binding (field_BINDING_NAME,
+field_D1_DATABASE) and Hyperdrive binding (field_HYPERDRIVE_BINDING,
+field_HYPERDRIVE_CONFIG, D92), a service's binding (field_BINDING_NAME,
 field_BINDING_WORKER), and a bucket's R2 binding and credential
 (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN).
 The Workers entry (./workers) takes each binding from its env by the name
@@ -71,11 +72,27 @@ export interface D1Connection {
   readonly database: string;
 }
 
+/**
+ * A Postgres database bound to a Worker through a Hyperdrive config (D92):
+ * the Workers entry takes the hyperdrive binding named binding from its env,
+ * whose connection string reaches the database through Hyperdrive's pool
+ * (./hyperdrive).
+ */
+export interface HyperdriveConnection {
+  /** The name of the Worker's hyperdrive binding. */
+  readonly binding: string;
+  /** The Hyperdrive config's id. */
+  readonly config: string;
+}
+
 /** A database connection a server opens a pool over: a connection string, or a Cloud SQL connector configuration. */
 export type Database = { readonly url: string } | { readonly cloudSql: CloudSqlConnection };
 
-/** Any database connection loadDatabase reads: a Database, or a D1 binding, which only a Worker reads (D64). */
-export type DatabaseConnection = Database | { readonly d1: D1Connection };
+/**
+ * Any database connection loadDatabase reads: a Database, or a D1 binding
+ * (D64) or a Hyperdrive binding (D92), which only a Worker reads.
+ */
+export type DatabaseConnection = Database | { readonly d1: D1Connection } | { readonly hyperdrive: HyperdriveConnection };
 
 /** The credential sources the HTTP runtimes ship (D37). */
 export const CREDENTIAL_SOURCES = ['google-id-token', 'token-file', 'signed-token'] as const;
@@ -245,26 +262,40 @@ function partition(env: StackEnv, names: readonly string[]): { values: string[];
 /**
  * Reads the database field named field: field_URL, the three
  * field_CLOUD_SQL_ variables, or on Workers the two field_D1_ variables
- * (D64). Throws StackConfigError when none is set, two are, or only some
- * of the Cloud SQL or D1 variables.
+ * (D64) or the two field_HYPERDRIVE_ variables (D92). Throws
+ * StackConfigError when none is set, two are, or only some of the Cloud
+ * SQL, D1 or Hyperdrive variables.
  */
 export function loadDatabase(field: string, env: StackEnv = processEnv()): DatabaseConnection {
   const url = getenv(env, `${field}_URL`);
   const cloud = [`${field}_CLOUD_SQL_INSTANCE`, `${field}_CLOUD_SQL_DATABASE`, `${field}_CLOUD_SQL_USER`];
   const { values, set, unset } = partition(env, cloud);
   const d1 = partition(env, [`${field}_D1_BINDING`, `${field}_D1_DATABASE`]);
-  if (d1.set.length > 0) {
-    const others = [...(url !== '' ? [`${field}_URL`] : []), ...set];
+  const hyperdrive = partition(env, [`${field}_HYPERDRIVE_BINDING`, `${field}_HYPERDRIVE_CONFIG`]);
+  // A binding a Worker reads is the database's one form: each is refused
+  // beside any other, then one with only some of its variables.
+  for (const [bound, what] of [
+    [d1, 'a D1 binding'],
+    [hyperdrive, 'a Hyperdrive binding'],
+  ] as const) {
+    if (bound.set.length === 0) continue;
+    const others = [...(url !== '' ? [`${field}_URL`] : []), ...set, ...(bound === hyperdrive ? d1.set : hyperdrive.set)];
     if (others.length > 0) {
       throw new StackConfigError([
-        `environment variables ${d1.set.join(', ')} are set beside ${others.join(', ')}; a database connection is one of a connection string, a Cloud SQL connector configuration and a D1 binding`,
+        `environment variables ${bound.set.join(', ')} are set beside ${others.join(', ')}; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding`,
       ]);
     }
-    if (d1.unset.length > 0) {
-      throw new StackConfigError([`environment variables ${d1.set.join(', ')} are set and ${d1.unset.join(', ')} is not; a D1 binding sets both`]);
+    if (bound.unset.length > 0) {
+      throw new StackConfigError([`environment variables ${bound.set.join(', ')} are set and ${bound.unset.join(', ')} is not; ${what} sets both`]);
     }
+  }
+  if (d1.set.length > 0) {
     const [binding, database] = d1.values as [string, string];
     return { d1: { binding, database } };
+  }
+  if (hyperdrive.set.length > 0) {
+    const [binding, config] = hyperdrive.values as [string, string];
+    return { hyperdrive: { binding, config } };
   }
   if (url !== '' && set.length > 0) {
     throw new StackConfigError([

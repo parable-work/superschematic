@@ -21,7 +21,8 @@
 //
 // The members a Worker alone reads (D64) are refused here, with a message
 // that says so: a database's D1 binding (field_D1_BINDING,
-// field_D1_DATABASE), a service's binding (field_BINDING_NAME,
+// field_D1_DATABASE) and Hyperdrive binding (field_HYPERDRIVE_BINDING,
+// field_HYPERDRIVE_CONFIG, D92), a service's binding (field_BINDING_NAME,
 // field_BINDING_WORKER), and a bucket's R2 binding and credential
 // (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN,
 // field_R2_JURISDICTION).
@@ -179,8 +180,8 @@ func (c *Credential) HeaderNames() []string {
 }
 
 // LoadDatabase reads the database field named field from the environment:
-// field_URL, or the three field_CLOUD_SQL_ variables. A D1 binding, which
-// only a Worker reads, is refused.
+// field_URL, or the three field_CLOUD_SQL_ variables. A D1 or a Hyperdrive
+// binding, which only a Worker reads, is refused.
 func LoadDatabase(field string) (Database, error) {
 	return loadDatabase(field, os.Getenv)
 }
@@ -324,6 +325,9 @@ func loadBucket(field string, getenv func(string) string) (Bucket, error) {
 
 func loadDatabase(field string, getenv func(string) string) (Database, error) {
 	if err := workerOnly(getenv, "a D1 binding", field+"_D1_BINDING", field+"_D1_DATABASE"); err != nil {
+		return Database{}, err
+	}
+	if err := workerOnly(getenv, "a Hyperdrive binding", field+"_HYPERDRIVE_BINDING", field+"_HYPERDRIVE_CONFIG"); err != nil {
 		return Database{}, err
 	}
 	url := getenv(field + "_URL")

@@ -197,6 +197,7 @@ export type {
   D1Connection,
   Database,
   DatabaseConnection,
+  HyperdriveConnection,
   R2Credential,
   Service,
   ServiceBinding,

@@ -36,14 +36,14 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; queue workers on Workers |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
 | [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1 |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -1874,10 +1874,14 @@ The target places TypeScript servers on Workers
 ([Servers on Workers](#servers-on-workers)), which call each other
 through service bindings ([Calls between Workers](#calls-between-workers)),
 buckets on R2 ([Buckets on R2](#buckets-on-r2)), databases on D1
-([Databases on D1](#databases-on-d1)), TypeScript jobs on Cron Triggers
-([Jobs on Cron Triggers](#jobs-on-cron-triggers)) and sites on Workers'
-static assets ([Sites on Workers](#sites-on-workers)). What every deploy
-goes through:
+([Databases on D1](#databases-on-d1)) or, for a DB service that lists
+postgres first, on a Postgres outside Cloudflare through Hyperdrive
+([Databases on Hyperdrive](#databases-on-hyperdrive)), TypeScript jobs on
+Cron Triggers ([Jobs on Cron Triggers](#jobs-on-cron-triggers)),
+TypeScript queue workers on Cron Triggers too
+([Queue workers on Cron Triggers](#queue-workers-on-cron-triggers)) and
+sites on Workers' static assets ([Sites on Workers](#sites-on-workers)).
+What every deploy goes through:
 
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
@@ -2005,8 +2009,9 @@ workerd with Bun, and fails on a `node:` import other than
 superscalar's; `bun bundle.ts --check`,
 which the generated CI's `check` runs, bundles into a temporary
 directory. Resolution refuses a Go or Rust server, a name over 63
-characters and an API over the user model on Workers, whose runtime has
-no argon2.
+characters, and an API over the user model whose `authDb` is not on
+Hyperdrive ([Databases on Hyperdrive](#databases-on-hyperdrive)): its
+identity store runs on Postgres alone.
 
 Each server's and job's version names the `nodejs_als` compatibility flag:
 the runtime carries a trace's context through `AsyncLocalStorage`, which
@@ -2105,7 +2110,9 @@ A database on the cloudflare target is on `cloudflare.d1`, in SQLite: a
 D1 database per DB service it hosts, named `<stack>-<env>-<db>`, with each
 parameter's name and value after it in a member of a parameterized
 environment, so each preview migrates databases of its own. A DB service
-that does not list `sqlite` is refused there. Its settings:
+that lists `postgres` first goes on Hyperdrive instead
+([Databases on Hyperdrive](#databases-on-hyperdrive)), and one a setting
+places on D1 that does not list `sqlite` is refused. Its settings:
 
 | Setting | |
 | --- | --- |
@@ -2178,6 +2185,89 @@ version, whose plan adds a column in expand and drops one in contract;
 the example's README walks through deploying both versions to an account
 of your own, and rolling back.
 
+### Databases on Hyperdrive
+
+A DB service that lists `postgres` first, as every Postgres-only one does,
+is on `cloudflare.hyperdrive` (D92): a database of a Postgres outside
+Cloudflare, such as Neon, Supabase, Cloud SQL or your own, which the
+environment's Workers reach through a Hyperdrive config, a pool
+Cloudflare keeps near the database. The config holds the origin's address
+and its user's password, which Cloudflare never gives back, so you make it
+once per environment and name it in the database's settings, as you set a
+secret's value once:
+
+```sh
+wrangler hyperdrive create acme-staging-finances-db \
+  --connection-string="$HYPERDRIVE_ORIGIN_FINANCES_DB" --caching-disabled
+```
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef", secretsStoreId: "..." },
+  settings: [{ of: FinancesDb, hyperdrive: "a76a99bc342644deb02c38d66082262a" }],
+})
+export abstract class Staging {}
+```
+
+The dashboard (Storage & databases, Hyperdrive) makes one too. Its
+settings:
+
+| Setting | Default | |
+| --- | --- | --- |
+| `hyperdrive` | none, which is refused, saying how to make one | the Hyperdrive config's id |
+| `caching` | `false` | whether the config may answer a read from its cache, which can return what the database held before the request's own write |
+
+Each server, job and worker of an API on the database gets a hyperdrive
+binding named after its field, `FINANCES_DB_DATABASE`, of the config's id,
+with `_HYPERDRIVE_BINDING` and `_HYPERDRIVE_CONFIG` as plain text, and
+connects as the config's user, who reads and writes the database. Its
+`Deps.db` is a pg Pool and its `Deps.orm` the generated repositories, as
+on Bun: `fetch.ts` runs each request in a scope of its own, which opens
+its connections through the binding when it first queries and ends them
+after the response, since a Worker may not use one request's socket in
+another; a transaction, `nearest` and `enqueue` work unchanged. The
+bundle runs node-postgres with Node's modules, which the extension's
+compatibility date gives with no flag, and a version whose
+`compatibilityDate` is earlier names `nodejs_compat`. `/readyz` pings the
+database through Hyperdrive.
+
+A deploy migrates the origin from your machine, or the CI job's, as it
+migrates D1: with the connection string your shell holds in
+`HYPERDRIVE_ORIGIN_<DB>`, `HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`, which a deploy that migrates refuses to go on without. It
+first reads the config through Cloudflare's API, with the deployer's
+`Hyperdrive Read`, and refuses an origin it does not reach, another host,
+port, database or user, so the deploy never migrates one database while
+the Workers read another, and a config that caches reads unless
+`caching: true` says it may. Then it runs `superschematic-migrate apply`
+on each plan, the connection string in `DATABASE_URL` alone: no file and
+no command line holds the password. A table with a vector column has its
+plan create pgvector's extension, which Neon, Supabase and Cloud SQL let
+the database's owner create. The generated CI's deploy job reads the
+connection string from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`
+in its GitHub environment, which `stack bootstrap --github` sets from your
+shell. `stack destroy` leaves the config and the origin alone.
+
+An API over the user model whose `authDb` is on Hyperdrive signs its
+users in on Workers as on Bun (D92): the identity store runs on the same
+per-request pool, and the session cookie is `__Host-session`, Secure,
+which a Worker's HTTPS takes. A Worker's `node:crypto` has no argon2, so
+the runtime hashes passwords there with its own argon2id in TypeScript,
+which writes the same PHC strings, so a user moves between a server on
+Bun and one on Workers with one password. At the default cost, 19 MiB and
+two passes, a sign-in or a registration takes about 120 ms of CPU and 19
+MiB of the isolate's 128 MB, measured under the pinned workerd, and an
+isolate's first request as much again, for the hash an unknown user's
+sign-in is compared against: within Workers Paid's CPU limit and over
+Workers Free's 10 ms.
+
+A parameterized environment's members would share the origin's
+database, so a database on Hyperdrive there is refused, as is one that
+hosts two DB services, which one config cannot reach. Under `stack dev`
+the database is the local Postgres container, pgvector's image when it
+has a vector column.
+
 ### Jobs on Cron Triggers
 
 A TypeScript job on the cloudflare target is a Worker of its own on
@@ -2238,6 +2328,35 @@ run job shop-storefront-sweep-carts of Staging (bundle sha256:5e0c…)
 A run whose last try fails exits non-zero with the job's error, and a
 deploy that runs the job stops at its jobs step, before the `contract`
 phase, as on gcp.
+
+### Queue workers on Cron Triggers
+
+A TypeScript worker on the cloudflare target is a Worker of its own on
+`cloudflare.drainer`, named as a server's is, never exposed, whose bundle
+the stack's build writes from `drain.ts` beside the `main.ts` that
+`stack dev` runs (D92). A Worker runs per firing, not until it is stopped,
+so a Cron Trigger fires it every minute, and each firing claims the
+queue's messages from Postgres, through the database's Hyperdrive config,
+for a window, `WORKER_DRAIN_SECONDS`, then stops as a worker stops at
+SIGTERM: it claims no more, lets its running handlers finish within the
+`@worker`'s grace, and gives back the rest. The queue stays its table, so
+a message enqueued in a transaction commits with it, `@enqueueOnChange`
+fills it whatever writes a row, and its keys, serialization, backoff,
+retention and dead messages are as on gcp
+([Queues and workers](/superschematic/guides/queues/#on-cloudflare)).
+
+| Setting | Default | |
+| --- | --- | --- |
+| `drainSeconds` | `50` | how long each firing claims; it and the grace must fit in a Cron Trigger's 15 minutes |
+| `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: handlers' work counts, waits do not |
+| `logs` | `true` | Workers Logs |
+| `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
+
+`concurrency` is how many messages a firing handles at a time, bound as
+`WORKER_CONCURRENCY`. A worker runs one claim loop per firing, so
+`instances` over one, and `maxInstances`, do not resolve;
+`enabled: false` leaves the Worker with no Cron Trigger. A Go or Rust
+worker does not resolve, and neither does one whose queue is on D1.
 
 ### Sites on Workers
 

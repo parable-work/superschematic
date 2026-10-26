@@ -119,7 +119,12 @@ constructor hands the runtime how the API's `register` admits users
 server wires nothing for it. A stack's Go and TypeScript
 entrypoints build it for you, reading each API's config as JSON from
 `<API>_IDENTITY` (`SHOP_API_IDENTITY`); a job, which serves no request,
-builds none. The config, which the three runtimes read alike:
+builds none. On Cloudflare Workers a TypeScript server serves the user
+model when its `authDb` is a Postgres database on Hyperdrive, and hashes
+passwords with the runtime's own argon2id, which writes the same hashes
+as `node:crypto`'s
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)).
+The config, which the three runtimes read alike:
 
 | Member | Default | Meaning |
 | --- | --- | --- |

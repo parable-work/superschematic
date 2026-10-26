@@ -36,7 +36,9 @@
 //!
 //! The members a Worker alone reads (D64) are refused, with a message that
 //! says so: a database's D1 binding (`<field>_D1_BINDING`,
-//! `<field>_D1_DATABASE`), a service's binding (`<field>_BINDING_NAME`,
+//! `<field>_D1_DATABASE`) and Hyperdrive binding
+//! (`<field>_HYPERDRIVE_BINDING`, `<field>_HYPERDRIVE_CONFIG`, D92), a
+//! service's binding (`<field>_BINDING_NAME`,
 //! `<field>_BINDING_WORKER`), and a bucket's R2 binding and credential
 //! (`<field>_BINDING`, `<field>_R2_ACCOUNT`, `<field>_R2_ACCESS_KEY_ID`,
 //! `<field>_R2_TOKEN`, `<field>_R2_JURISDICTION`). The TypeScript runtime reads them for its Workers
@@ -387,8 +389,8 @@ pub(crate) fn quote(value: &str) -> String {
 
 /// Reads the database field named `field` from the environment:
 /// `<field>_URL`, or the three `<field>_CLOUD_SQL_` variables. Refuses
-/// neither, both, and only some of the three, and a D1 binding, which only
-/// a Worker reads.
+/// neither, both, and only some of the three, and a D1 or a Hyperdrive
+/// binding, which only a Worker reads.
 pub fn load_database(field: &str) -> Result<Database, StackConfigError> {
     read_database(field, &process_vars(field)?)
 }
@@ -428,6 +430,14 @@ fn read_database(field: &str, vars: &impl Vars) -> Result<Database, StackConfigE
         &[
             format!("{field}_D1_BINDING"),
             format!("{field}_D1_DATABASE"),
+        ],
+    )?;
+    worker_only(
+        vars,
+        "a Hyperdrive binding",
+        &[
+            format!("{field}_HYPERDRIVE_BINDING"),
+            format!("{field}_HYPERDRIVE_CONFIG"),
         ],
     )?;
     let url = vars.get(&format!("{field}_URL"));

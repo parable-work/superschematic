@@ -254,6 +254,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.applySettings()
 	r.disableDeployables()
 	r.place()
+	r.checkIdentityDatabases()
 	r.expose()
 	r.dropUnplaced()
 	r.resolveCalls()
@@ -1014,7 +1015,9 @@ func (r *resolver) placeServer(d *deployable) {
 		}
 		r.fail(CodeUnrealizable, "%s", msg)
 	}
-	if reason := d.platform.NoIdentity; reason != "" && (d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp) {
+	// A platform that serves the user model over some database platforms
+	// alone is checked once every database is placed (checkIdentityDatabases).
+	if reason := d.platform.NoIdentity; reason != "" && len(d.platform.IdentityDatabases) == 0 && (d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp) {
 		for _, served := range d.res.Services {
 			if svc := r.services[served.Name]; svc != nil && svc.Identity {
 				r.fail(CodeUnrealizable, "%s %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Kind, d.res.Name, svc.Name, d.platform.Name, reason)

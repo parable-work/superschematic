@@ -152,6 +152,7 @@ func parityCorpus(t *testing.T) parityFile {
 	}}}
 	// The values a Worker's edges derive (D64).
 	d1 := map[string]any{"binding": "SHOP_DB_DATABASE", "database": "1c3e5a7b-9d2f-4b6a-8c0e-2f4a6b8c0d1e"}
+	hyperdrive := map[string]any{"binding": "SHOP_DB_DATABASE", "config": "a76a99bc342644deb02c38d66082262a"}
 	binding := map[string]any{"name": "SHOP_API_SERVICE", "worker": "shop-api"}
 	r2 := map[string]any{"account": "0123456789abcdef0123456789abcdef", "accessKeyId": "8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d", "token": "r2-token-value"}
 	// r2With is r2 with one more member: a jurisdiction (D64, amended).
@@ -200,8 +201,20 @@ func parityCorpus(t *testing.T) parityFile {
 			WorkerOnly: []string{"environment variable SHOP_DB_DATABASE_D1_BINDING is set: only a Worker reads a D1 binding (D64)"}},
 		{Name: "database: a D1 binding and a connection string", Reader: readerDatabase, Field: "SHOP_DB_DATABASE",
 			Value:      map[string]any{"url": "postgres://127.0.0.1/shop_db", "d1": d1},
-			Refusals:   []string{"environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration and a D1 binding"},
+			Refusals:   []string{"environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding"},
 			WorkerOnly: []string{"environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set: only a Worker reads a D1 binding (D64)"}},
+		{Name: "database: a Hyperdrive binding", Reader: readerDatabase, Field: "SHOP_DB_DATABASE",
+			Value:      map[string]any{"hyperdrive": hyperdrive},
+			Want:       map[string]any{"hyperdrive": hyperdrive},
+			WorkerOnly: []string{"environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set: only a Worker reads a Hyperdrive binding (D64)"}},
+		{Name: "database: a Hyperdrive binding without its config", Reader: readerDatabase, Field: "SHOP_DB_DATABASE",
+			Value:      map[string]any{"hyperdrive": map[string]any{"binding": "SHOP_DB_DATABASE"}},
+			Refusals:   []string{"environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING are set and SHOP_DB_DATABASE_HYPERDRIVE_CONFIG is not; a Hyperdrive binding sets both"},
+			WorkerOnly: []string{"environment variable SHOP_DB_DATABASE_HYPERDRIVE_BINDING is set: only a Worker reads a Hyperdrive binding (D64)"}},
+		{Name: "database: a Hyperdrive binding and a connection string", Reader: readerDatabase, Field: "SHOP_DB_DATABASE",
+			Value:      map[string]any{"url": "postgres://127.0.0.1/shop_db", "hyperdrive": hyperdrive},
+			Refusals:   []string{"environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding"},
+			WorkerOnly: []string{"environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set: only a Worker reads a Hyperdrive binding (D64)"}},
 
 		{Name: "service: a URL alone", Reader: readerService, Field: "SHOP_API_SERVICE",
 			Value: map[string]any{"url": "http://127.0.0.1:8081"},

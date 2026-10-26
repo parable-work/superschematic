@@ -196,12 +196,16 @@ async function cloudSqlPool(db: CloudSqlConnection, settings: PoolConfig, load: 
  * Opens a pool over db: pg over a connection string, or the Cloud SQL
  * connector with IAM database authentication over a Cloud SQL connector
  * configuration. Rejects for a Cloud SQL configuration when the connector
- * is not installed or cannot read the instance's settings, and for a D1
- * binding, which only a Worker reaches (D64).
+ * is not installed or cannot read the instance's settings, for a D1
+ * binding, which only a Worker reaches (D64), and for a Hyperdrive binding,
+ * which a Worker opens with ./hyperdrive's hyperdrivePool (D92).
  */
 export async function connectPostgres(db: DatabaseConnection, options: ConnectPostgresOptions = {}): Promise<Pool> {
   if ('d1' in db) {
     throw new Error(`D1 database ${db.d1.database} is no Postgres database: a Worker reaches it through its binding ${db.d1.binding} (D64)`);
+  }
+  if ('hyperdrive' in db) {
+    throw new Error(`Hyperdrive config ${db.hyperdrive.config} is reached through a Worker's binding ${db.hyperdrive.binding} alone (D92)`);
   }
   const settings: PoolConfig = { ...(options.pool ?? {}) };
   if (options.typeParsers !== false) settings.types = withTypeParsers(pg.types);

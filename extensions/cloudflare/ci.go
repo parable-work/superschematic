@@ -54,6 +54,10 @@ var _ registry.CIIdentities = ciIdentities{}
 
 // Identity names the secrets a CI job of env reads as role, which
 // bootstrap's --github sets. It is nil for an environment with no account.
+// A deploy job also reads the origin connection string of each database on
+// Hyperdrive, which the migration runner migrates it with (D92): the field
+// `env.<OriginEnv(db)>` names the secret the step's variable of that name
+// reads.
 func (ciIdentities) Identity(env *ir.ResolvedEnvironment, role registry.CIRole) *registry.CIIdentity {
 	if _, err := envValues(env); err != nil {
 		return nil
@@ -63,5 +67,37 @@ func (ciIdentities) Identity(env *ir.ResolvedEnvironment, role registry.CIRole) 
 	if s.environment != "" {
 		fields["environment"] = s.environment
 	}
+	if role == registry.CIDeployer {
+		for _, origin := range originSecretsOf(env) {
+			fields["env."+origin.variable] = origin.secret
+		}
+	}
 	return &registry.CIIdentity{Kind: CIIdentityKind, Fields: fields}
+}
+
+// originSecret is the GitHub secret a deploy job reads a database's origin
+// connection string from, and the variable it sets (D92).
+type originSecret struct {
+	db, variable, secret string
+}
+
+// originSecretsOf are the origin secrets env's deploy job reads: one per
+// database on Hyperdrive, OriginEnv(<db>)_<STACK>_<ENV>, in the deploy
+// job's GitHub environment, whose reviewers approve it, beside the
+// deployer's token. A parameterized environment has none: Hyperdrive
+// refuses its databases.
+func originSecretsOf(env *ir.ResolvedEnvironment) []originSecret {
+	if len(env.Parameters) > 0 {
+		return nil
+	}
+	suffix := "_" + screaming(env.Stack) + "_" + screaming(env.Environment)
+	var out []originSecret
+	for _, d := range env.Deployables {
+		if d.Platform != HyperdrivePlatform || len(d.Services) != 1 {
+			continue
+		}
+		db := d.Services[0].Name
+		out = append(out, originSecret{db: db, variable: OriginEnv(db), secret: OriginEnv(db) + suffix})
+	}
+	return out
 }

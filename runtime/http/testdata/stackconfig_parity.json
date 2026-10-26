@@ -179,10 +179,79 @@
       },
       "want": null,
       "refusals": [
-        "environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration and a D1 binding"
+        "environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding"
       ],
       "workerOnly": [
         "environment variables SHOP_DB_DATABASE_D1_BINDING, SHOP_DB_DATABASE_D1_DATABASE are set: only a Worker reads a D1 binding (D64)"
+      ]
+    },
+    {
+      "name": "database: a Hyperdrive binding",
+      "reader": "database",
+      "field": "SHOP_DB_DATABASE",
+      "value": {
+        "hyperdrive": {
+          "binding": "SHOP_DB_DATABASE",
+          "config": "a76a99bc342644deb02c38d66082262a"
+        }
+      },
+      "variables": {
+        "SHOP_DB_DATABASE_HYPERDRIVE_BINDING": "SHOP_DB_DATABASE",
+        "SHOP_DB_DATABASE_HYPERDRIVE_CONFIG": "a76a99bc342644deb02c38d66082262a"
+      },
+      "want": {
+        "hyperdrive": {
+          "binding": "SHOP_DB_DATABASE",
+          "config": "a76a99bc342644deb02c38d66082262a"
+        }
+      },
+      "refusals": null,
+      "workerOnly": [
+        "environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set: only a Worker reads a Hyperdrive binding (D64)"
+      ]
+    },
+    {
+      "name": "database: a Hyperdrive binding without its config",
+      "reader": "database",
+      "field": "SHOP_DB_DATABASE",
+      "value": {
+        "hyperdrive": {
+          "binding": "SHOP_DB_DATABASE"
+        }
+      },
+      "variables": {
+        "SHOP_DB_DATABASE_HYPERDRIVE_BINDING": "SHOP_DB_DATABASE"
+      },
+      "want": null,
+      "refusals": [
+        "environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING are set and SHOP_DB_DATABASE_HYPERDRIVE_CONFIG is not; a Hyperdrive binding sets both"
+      ],
+      "workerOnly": [
+        "environment variable SHOP_DB_DATABASE_HYPERDRIVE_BINDING is set: only a Worker reads a Hyperdrive binding (D64)"
+      ]
+    },
+    {
+      "name": "database: a Hyperdrive binding and a connection string",
+      "reader": "database",
+      "field": "SHOP_DB_DATABASE",
+      "value": {
+        "hyperdrive": {
+          "binding": "SHOP_DB_DATABASE",
+          "config": "a76a99bc342644deb02c38d66082262a"
+        },
+        "url": "postgres://127.0.0.1/shop_db"
+      },
+      "variables": {
+        "SHOP_DB_DATABASE_HYPERDRIVE_BINDING": "SHOP_DB_DATABASE",
+        "SHOP_DB_DATABASE_HYPERDRIVE_CONFIG": "a76a99bc342644deb02c38d66082262a",
+        "SHOP_DB_DATABASE_URL": "postgres://127.0.0.1/shop_db"
+      },
+      "want": null,
+      "refusals": [
+        "environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set beside SHOP_DB_DATABASE_URL; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding"
+      ],
+      "workerOnly": [
+        "environment variables SHOP_DB_DATABASE_HYPERDRIVE_BINDING, SHOP_DB_DATABASE_HYPERDRIVE_CONFIG are set: only a Worker reads a Hyperdrive binding (D64)"
       ]
     },
     {

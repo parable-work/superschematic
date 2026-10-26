@@ -162,11 +162,17 @@ type PlatformSpec struct {
 	// NoIdentity, when set, says why a server on this platform cannot
 	// serve an API over the user model, which authenticates with the
 	// identity runtime (D50): resolution refuses such a server as
-	// unrealizable, giving the reason. The cloudflare.workers platform sets
-	// it, since the TypeScript identity runtime hashes passwords with
-	// node:crypto's argon2, which Workers lacks (D64). Only a server or an
-	// app platform sets it, and not beside IdentityConfig.
+	// unrealizable, giving the reason. Only a server or an app platform
+	// sets it, and not beside IdentityConfig.
 	NoIdentity string
+
+	// IdentityDatabases, beside NoIdentity, names the database platforms
+	// over which a server here does serve an API over the user model: one
+	// whose authDb the environment places on one of them resolves, and
+	// NoIdentity refuses the rest (D92). The cloudflare.workers platform
+	// names cloudflare.hyperdrive, since its identity store runs on Postgres
+	// through Hyperdrive, and D1 holds none.
+	IdentityDatabases []string
 
 	// NoQueueClaims, when set, says why no worker claims the messages of a
 	// queue on a database this platform places (D53, amended): resolution
@@ -769,6 +775,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
 		}
 	}
+	if len(spec.IdentityDatabases) > 0 && spec.NoIdentity == "" {
+		return fmt.Errorf("registry: platform %q names the databases it serves the user model over, and no NoIdentity for the rest", spec.Name)
+	}
 	if spec.NoQueueClaims != "" && spec.Kind != ir.DeployableDatabase {
 		return fmt.Errorf("registry: %s platform %q says why no worker claims a queue on it; only a database platform places a queue", spec.Kind, spec.Name)
 	}
@@ -1090,6 +1099,18 @@ func (r *Registry) checkStackReferences() error {
 					want[i] = string(kind)
 				}
 				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), strings.Join(want, " or a "))
+			}
+		}
+	}
+	for _, name := range keysOf(r.stack.platforms) {
+		spec := r.stack.platforms[name]
+		for _, database := range spec.IdentityDatabases {
+			platform, ok := r.stack.platforms[database]
+			if !ok {
+				return fmt.Errorf("registry: platform %q serves the user model over database platform %q, which is not registered (registered platforms: %v)", name, database, keysOf(r.stack.platforms))
+			}
+			if platform.Kind != ir.DeployableDatabase {
+				return fmt.Errorf("registry: platform %q serves the user model over platform %q, a %s platform", name, database, platform.Kind)
 			}
 		}
 	}

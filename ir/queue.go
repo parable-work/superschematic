@@ -121,6 +121,12 @@ const (
 	// DefaultWorkerInstances is how many instances of a worker an
 	// environment runs unless its settings say otherwise.
 	DefaultWorkerInstances = 1
+
+	// DefaultWorkerDrainSeconds is how long each firing of the Cron
+	// Trigger of a worker on Cloudflare Workers claims unless its settings
+	// say otherwise (D92): within the minute between firings, with room
+	// for the default grace.
+	DefaultWorkerDrainSeconds = 50
 )
 
 // WorkerConcurrencyVariable is the environment variable a worker platform
@@ -128,6 +134,12 @@ const (
 // gives it (ResolvedWorker.Concurrency), which the worker's entrypoint
 // reads (runtime/http/go/worker.ConcurrencyVariable).
 const WorkerConcurrencyVariable = "WORKER_CONCURRENCY"
+
+// WorkerDrainSecondsVariable is the variable, a binding on Workers, the
+// cloudflare target sets on a worker's Worker to how long each firing of
+// its Cron Trigger claims, which its drain.ts reads (D92; the TypeScript
+// runtime's ./worker workerDrainSeconds).
+const WorkerDrainSecondsVariable = "WORKER_DRAIN_SECONDS"
 
 // The states of a queue's message, in its table's state column.
 const (
