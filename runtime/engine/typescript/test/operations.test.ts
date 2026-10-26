@@ -284,6 +284,7 @@ describe('the describe and tools routes', () => {
     assert.deepEqual(visible, ['item.get', 'item.list', 'item.history']);
     const listSchemas = tools.tools.find((tool: { name: string }) => tool.name === 'engine.listSchemas');
     assert.equal(listSchemas.mcp.hiddenReason, "this mount's tool filter leaves it out of reader's tools");
+    assert.deepEqual(listSchemas.mcp.hiddenBy, ['filter']);
   });
 });
 

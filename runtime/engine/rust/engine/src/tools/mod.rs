@@ -28,6 +28,8 @@
 //! namespace. A mount can narrow what a caller is offered further with a
 //! [`ToolFilter`]: a tool it leaves out is hidden from that caller, and a
 //! call of it is a tool the namespace does not have (`UnknownToolError`).
+//! A hidden tool's `mcp` names every cause in `hiddenBy` ([`HiddenBy`]),
+//! and gives the first one's reason in `hiddenReason`.
 //!
 //! The invocation policy and the vendor keys the documents are written
 //! with are engine config (`EngineOptions.tools`, [`ToolOptions`]).
@@ -183,6 +185,43 @@ impl ToolKind {
     }
 }
 
+/// Why the tools hide a tool from a caller, as a hidden tool's
+/// `mcp.hiddenBy` names it. The order here is the order `hiddenBy` lists
+/// the causes in, and the first one's reason is `hiddenReason`: the
+/// deployment's hide, which no caller is offered, before what refuses the
+/// caller, before MCP's limit on the handle, before the mount's narrowing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HiddenBy {
+    /// The deployment's tool options hide the operation (`tools.hidden`).
+    /// The policy is not asked: no caller is offered it.
+    Deployment,
+    /// The namespace is archived, and the tool writes there.
+    Archived,
+    /// The access policy refuses the caller what the tool's call asks.
+    Policy,
+    /// MCP would refuse its handle: not snake case, longer than
+    /// [`MCP_HANDLE_MAX_LENGTH`], an engine tool's, or another tool's too.
+    /// The operation is still offered through the API, so the policy is
+    /// asked all the same.
+    Handle,
+    /// The mount's [`ToolFilter`] leaves it out of the caller's tools. It
+    /// is asked only of a tool nothing else hides.
+    Filter,
+}
+
+impl HiddenBy {
+    /// The cause as `hiddenBy` writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HiddenBy::Deployment => "deployment",
+            HiddenBy::Archived => "archived",
+            HiddenBy::Policy => "policy",
+            HiddenBy::Handle => "handle",
+            HiddenBy::Filter => "filter",
+        }
+    }
+}
+
 // One tool before it is rendered: its names, what it does, and who may see
 // it.
 #[derive(Clone)]
@@ -206,7 +245,9 @@ struct ToolSpec {
     operation: Option<OperationDeclaration>,
     /// For create, the schema's behaviors that take create parameters.
     create_params: Vec<ComposedBehavior>,
-    hidden: Option<String>,
+    /// What hides it from every caller, with each cause's reason: the
+    /// deployment's tool options, and MCP's refusal of its handle.
+    hidden: Vec<(HiddenBy, String)>,
     preconditions: Option<Property>,
     filter: Option<Property>,
     key: Option<Property>,
@@ -401,6 +442,9 @@ impl<'e> Tools<'e> {
                         if let Some(icon) = text_of(field, "icon") {
                             entry.insert("icon".into(), Value::from(icon));
                         }
+                        if let Some(display) = described_field_display(field, fields) {
+                            entry.insert("display".into(), display);
+                        }
                         Value::Object(entry)
                     })
                     .collect()
@@ -476,9 +520,18 @@ impl<'e> Tools<'e> {
         check_principal(principal)?;
         let namespace = self.engine.namespaces().resolve(target.namespace)?;
         let tools = self.tool_set(principal, &namespace)?;
+        // Whether the namespace is archived is read once for the document,
+        // not once per tool that writes.
+        let archived = self.engine.namespaces().archived(&namespace)?;
         let mut definitions = Vec::new();
         for tool in &tools {
-            definitions.push(self.definition(principal, &namespace, tool, target.filter)?);
+            definitions.push(self.definition(
+                principal,
+                &namespace,
+                archived,
+                tool,
+                target.filter,
+            )?);
         }
         let mut out = Map::new();
         out.insert("$schema".into(), Value::from(TOOL_SCHEMA));
@@ -546,7 +599,7 @@ impl<'e> Tools<'e> {
         let tool = self
             .tool_set(principal, &namespace)?
             .into_iter()
-            .find(|candidate| candidate.handle == handle && candidate.hidden.is_none());
+            .find(|candidate| candidate.handle == handle && candidate.hidden.is_empty());
         let Some(tool) = tool.filter(|tool| {
             target
                 .filter
@@ -904,27 +957,34 @@ impl<'e> Tools<'e> {
                 .filter(|(other, (handle, _))| *other != index && *handle == tool.handle)
                 .map(|(_, (_, name))| name.as_str())
                 .collect();
-            if let Some((_, owner)) = reserved.iter().find(|(handle, _)| *handle == tool.handle) {
-                tool.hidden = Some(format!(
+            let refused = if let Some((_, owner)) =
+                reserved.iter().find(|(handle, _)| *handle == tool.handle)
+            {
+                Some(format!(
                     "its MCP handle {} is the handle of the engine's tool {owner}",
                     tool.handle
-                ));
+                ))
             } else if !is_snake_handle(&tool.handle) {
-                tool.hidden = Some(format!(
+                Some(format!(
                     "its MCP handle {} is not lowercase snake case starting with a letter",
                     tool.handle
-                ));
+                ))
             } else if tool.handle.len() > MCP_HANDLE_MAX_LENGTH {
-                tool.hidden = Some(format!(
+                Some(format!(
                     "its MCP handle {} is longer than {MCP_HANDLE_MAX_LENGTH} characters",
                     tool.handle
-                ));
+                ))
             } else if !sharing.is_empty() {
-                tool.hidden = Some(format!(
+                Some(format!(
                     "its MCP handle {} is also the handle of {}",
                     tool.handle,
                     sharing.join(", ")
-                ));
+                ))
+            } else {
+                None
+            };
+            if let Some(reason) = refused {
+                tool.hidden.push((HiddenBy::Handle, reason));
             }
         }
         let mut all = engine_tools;
@@ -999,7 +1059,7 @@ impl<'e> Tools<'e> {
             behavior: None,
             operation: None,
             create_params: Vec::new(),
-            hidden: None,
+            hidden: Vec::new(),
             preconditions: None,
             filter: None,
             key: None,
@@ -1055,7 +1115,7 @@ impl<'e> Tools<'e> {
             behavior: None,
             operation: None,
             create_params: Vec::new(),
-            hidden: None,
+            hidden: Vec::new(),
             preconditions: None,
             filter: None,
             key: None,
@@ -1179,10 +1239,10 @@ impl<'e> Tools<'e> {
                     encode_component(&operation.name)
                 );
                 if options.hides(&behavior.name, &operation.name) {
-                    tool.hidden = Some(format!(
+                    tool.hidden.push((HiddenBy::Deployment, format!(
                         "the deployment's tool options hide {}.{} (tools.hidden): a service calls it through the API, and no agent is offered it",
                         behavior.name, operation.name
-                    ));
+                    )));
                 }
                 tool.behavior = Some(behavior.clone());
                 if !schema_level {
@@ -1197,33 +1257,45 @@ impl<'e> Tools<'e> {
 
     // definition renders a tool as tools/schema.json writes it. A tool the
     // policy refuses the principal, or the mount's filter leaves out, is
-    // hidden with that reason.
+    // hidden with that reason. The policy is asked of every tool the
+    // deployment does not hide, one MCP refuses the handle of too, since
+    // its operation is still offered through the API; the filter only of a
+    // tool nothing else hides. A hidden tool's `hiddenBy` lists each cause
+    // in [`HiddenBy`]'s order, and `hiddenReason` is the first one's.
+    // `archived` is whether the namespace is archived.
     fn definition(
         &self,
         principal: &Principal,
         namespace: &str,
+        archived: bool,
         tool: &ToolSpec,
         filter: Option<&dyn ToolFilter>,
     ) -> Result<Value> {
         let options = self.options();
         let keys = &options.keys;
         let guidance = self.tool_guidance(tool)?;
-        let refusal = match &tool.hidden {
-            None => self.refusal(principal, namespace, tool)?,
-            Some(_) => None,
-        };
-        let filtered = (tool.hidden.is_none()
-            && refusal.is_none()
-            && filter.is_some_and(|filter| !filter.keeps(principal, &tool.summary(), namespace)))
-        .then(|| {
-            format!(
-                "this mount's tool filter leaves it out of {}'s tools",
-                principal.subject
-            )
-        });
-        let hidden = tool.hidden.clone().or(refusal).or(filtered);
-        let mcp = match hidden {
-            Some(reason) => json!({"hidden": true, "hiddenReason": reason}),
+        let mut hidden = tool.hidden.clone();
+        if !hidden.iter().any(|(by, _)| *by == HiddenBy::Deployment) {
+            hidden.extend(self.refusal(principal, namespace, archived, tool));
+        }
+        if hidden.is_empty()
+            && filter.is_some_and(|filter| !filter.keeps(principal, &tool.summary(), namespace))
+        {
+            hidden.push((
+                HiddenBy::Filter,
+                format!(
+                    "this mount's tool filter leaves it out of {}'s tools",
+                    principal.subject
+                ),
+            ));
+        }
+        hidden.sort_by_key(|(by, _)| *by);
+        let mcp = match hidden.first() {
+            Some((_, reason)) => json!({
+                "hidden": true,
+                "hiddenReason": reason,
+                "hiddenBy": hidden.iter().map(|(by, _)| by.as_str()).collect::<Vec<_>>(),
+            }),
             None => {
                 let mut record = Map::new();
                 record.insert("hidden".into(), Value::Bool(false));
@@ -1278,42 +1350,46 @@ impl<'e> Tools<'e> {
         Ok(Value::Object(out))
     }
 
-    // refusal is why the policy hides a tool from the principal.
+    // refusal is why the policy hides a tool from the principal: the
+    // namespace is archived (`archived`, read once per document), or the
+    // access policy refuses the call.
     fn refusal(
         &self,
         principal: &Principal,
         namespace: &str,
+        archived: bool,
         tool: &ToolSpec,
-    ) -> Result<Option<String>> {
+    ) -> Option<(HiddenBy, String)> {
         let engine = self.engine;
-        if tool.writes
-            && !tool.kind.acts_on_namespaces()
-            && engine.namespaces().archived(namespace)?
-        {
-            return Ok(Some(format!(
-                "namespace {namespace} is archived: it refuses every write until it is unarchived"
-            )));
+        if tool.writes && !tool.kind.acts_on_namespaces() && archived {
+            return Some((
+                HiddenBy::Archived,
+                format!(
+                    "namespace {namespace} is archived: it refuses every write until it is unarchived"
+                ),
+            ));
         }
         if let Some((action, operation)) = tool.kind.listing() {
             if engine
                 .access
                 .allows_listing(principal, action, namespace, operation)
             {
-                return Ok(None);
+                return None;
             }
-            return Ok(Some(format!(
-                "the access policy refuses {} {}",
-                principal.subject,
-                match operation {
-                    None => format!("{} in namespace {namespace}", action.as_str()),
-                    Some(operation) =>
-                        format!("{} ({}) of namespaces", action.as_str(), operation.as_str()),
-                }
-            )));
+            return Some((
+                HiddenBy::Policy,
+                format!(
+                    "the access policy refuses {} {}",
+                    principal.subject,
+                    match operation {
+                        None => format!("{} in namespace {namespace}", action.as_str()),
+                        Some(operation) =>
+                            format!("{} ({}) of namespaces", action.as_str(), operation.as_str()),
+                    }
+                ),
+            ));
         }
-        let Some(record) = tool.record() else {
-            return Ok(None);
-        };
+        let record = tool.record()?;
         let action = if tool.writes {
             SchemaAction::Write
         } else {
@@ -1325,15 +1401,18 @@ impl<'e> Tools<'e> {
             .access
             .allows_operation(principal, action, namespace, &record.name, operation)
         {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(format!(
-            "the access policy refuses {} {} on {}{}",
-            principal.subject,
-            action.as_str(),
-            record.name,
-            operation.map_or(String::new(), |operation| format!(" ({operation})"))
-        )))
+        Some((
+            HiddenBy::Policy,
+            format!(
+                "the access policy refuses {} {} on {}{}",
+                principal.subject,
+                action.as_str(),
+                record.name,
+                operation.map_or(String::new(), |operation| format!(" ({operation})"))
+            ),
+        ))
     }
 
     // arguments is a tool's argument schema, with the vendor keys at its
@@ -2296,7 +2375,7 @@ fn described_display(type_def: &Value) -> Option<Value> {
     let fields = type_def
         .get("fields")
         .and_then(Value::as_array)
-        .cloned()
+        .map(Vec::as_slice)
         .unwrap_or_default();
     let key_of = |name: &str| -> String {
         fields
@@ -2318,6 +2397,34 @@ fn described_display(type_def: &Value) -> Option<Value> {
                     .collect(),
             ),
         );
+    }
+    Some(Value::Object(out))
+}
+
+/// An own field's display (@display, D48) as the describe document carries
+/// it: the field's `display` as the document holds it (`multiline`, and
+/// `currency`, a literal ISO 4217 code or `{ field }`), with the field a
+/// currency names, by its name or its key, named by its key in an
+/// instance's data. None when the field declares no display.
+fn described_field_display(field: &Value, fields: &[Value]) -> Option<Value> {
+    let display = field.get("display")?.as_object()?;
+    if display.is_empty() {
+        return None;
+    }
+    let mut out = display.clone();
+    if let Some(Value::Object(currency)) = display.get("currency") {
+        if let Some(name) = currency.get("field").and_then(Value::as_str) {
+            let sibling = fields
+                .iter()
+                .find(|other| other.get("name").and_then(Value::as_str) == Some(name))
+                .or_else(|| fields.iter().find(|other| json_key(other) == name));
+            let mut currency = currency.clone();
+            currency.insert(
+                "field".into(),
+                Value::from(sibling.map_or(name, |sibling| json_key(sibling))),
+            );
+            out.insert("currency".into(), Value::Object(currency));
+        }
     }
     Some(Value::Object(out))
 }
