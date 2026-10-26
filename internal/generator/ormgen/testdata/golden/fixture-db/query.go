@@ -123,7 +123,9 @@ type DateFilter struct {
 type DateRange struct {
 	Start string
 	End   string
-} // DurationFilter provides filtering operations for duration fields stored as
+}
+
+// DurationFilter provides filtering operations for duration fields stored as
 // INTERVAL. Each value goes as its whole microseconds, as a duration is
 // written, and Postgres compares intervals with a day as 24 hours and a
 // month as 30 days, as a duration is read.
