@@ -1,8 +1,8 @@
-# Comments v2, batches 1 and 2: the contract
+# Comments v2, batches 1 to 3: the contract
 
 This note is the contract the Rust behavior (`comments.rs`), the Go
-generators and the corpora implement for batches 1 and 2 of D77
-("Comments, rebuilt", steps 1 and 2 of its build order). The declaration is
+generators and the corpora implement for batches 1 to 3 of D77
+("Comments, rebuilt", steps 1 to 3 of its build order). The declaration is
 `declarations/Comments.behavior.json`, the canonical copy of
 `internal/registry/behaviors/comments.behavior.json`; where this note and
 the declaration disagree, the declaration's schemas win and this note is
@@ -12,8 +12,10 @@ Batch 1 is posts, edits, deletes, purge, reactions, pins, threads and
 resolve, every writing operation beside the instance (D77 primitive 1,
 `"beside": true`, logged). Batch 2, streamed replies over signals (D77
 primitive 2), is "Batch 2" below: where it amends a rule of batch 1 it
-says so, and the amended rule holds. What both leave out is listed at the
-end.
+says so, and the amended rule holds. Batch 3, read state, follows, the
+inbox and deliveries over namespace operations (D77 primitive 3), is
+"Batch 3" after it, and amends both the same way. What they leave out is
+listed at the end.
 
 ## Terms
 
@@ -127,7 +129,9 @@ since gone.
 `mentions` is a list of subject strings (a person's, an agent's, a
 group's as `role:<name>`), each 1..256 code points with no whitespace, at
 most 50, unique; stored and returned in the order given. Batch 1 records
-them and nothing more: no delivery, no check that a subject exists.
+them and nothing more: no delivery, no check that a subject exists. Batch 3
+records a delivery for each ("Batch 3", "Deliveries"), and still checks no
+subject.
 
 ### Emoji
 
@@ -981,19 +985,750 @@ declaration's `signals`:
 - Go and Rust types render behavior fields only: they gain `composing`
   and nothing for signals.
 
+## Batch 3: read state, follows, inbox and deliveries
+
+Batch 3 is D77's step 3 on Comments' side: each caller's read markers
+(`markRead`, the `unread` field), follows (`follow`, and who follows
+without asking), deliveries (one row per message and subject that should
+hear of it), and three namespace operations (D77 primitive 3): `inbox`,
+`claimDeliveries` and `settleDeliveries`. The engine's side of namespace
+operations, `"scope": "namespace"`, its context, `readable()`, the
+policy's question, the route and the MCP tool, is the namespace-operations
+work's; this section says only what Comments declares and does with them.
+
+### Terms
+
+- A message's *stand* is its place in the order the conversation's
+  messages came to stand: the conversation's `last_stand + 1` (which
+  becomes `last_stand`) at the call that makes it stand, a `post`, a
+  `finish`, or an `interrupt` to `interrupted`. It never changes, and a
+  message deleted after it stood keeps it. A message deleted while
+  composing, or interrupted with no text, never has one. Markers count in
+  stands, not ids: a streamed reply takes its id at `begin` and its stand
+  at `finish`, so one that began before a message a reader has read, and
+  finished after, is still unread. Stands are numbered per instance, as
+  ids are.
+- A subject's *conversation marker* is its `comment_reads.up_to` on the
+  instance, a stand; a subject with no row has none. Its *thread marker*
+  on a thread is its `comment_follows.read_up_to` for that thread; with no
+  row, none.
+- Subject S *has read* a standing message X when X's marker for S exists
+  and is >= `X.stand`: the conversation marker for a top-level X, the
+  thread marker of X's thread for a reply. A message with no marker is
+  unread.
+- *Others'* messages are those whose `author` is not the caller's subject.
+- S *follows* thread T when S's `comment_follows` row for T has
+  `followed = 1`.
+- A *delivery* is a `comment_deliveries` row: one message, one subject,
+  its reasons (`mention`, `reply`), its state.
+- A delivery is *due* when `due_at IS NOT NULL AND due_at <= now`: a
+  pending one at once; a failed one once its next attempt comes; a claimed
+  one once its claim lapses. A sent or dropped one never is.
+- The *deliverable schemas* of a call are the schemas in `readable()`
+  whose Comments config names a `deliverPermission` that `cx.can()` grants
+  the caller ("claimDeliveries").
+- *Comes to stand*: the event at `post`, `finish`, and `interrupt` to
+  `interrupted`, after which "Deliveries" runs.
+- Lengths in code points, as batch 2's.
+
+### Config
+
+Batch 3 adds four members, every one optional:
+
+| Member | Type | When absent | Meaning |
+|--------|------|-------------|---------|
+| `deliverPermission` | string, `minLength` 1 | nobody claims the schema's deliveries | what `claimDeliveries` and `settleDeliveries` need of the caller, for the deliveries of this schema's messages, beside the policy's `Comments.claimDeliveries` and `Comments.settleDeliveries`. Deliveries are recorded either way: the inbox reads them |
+| `maxAttempts` | integer 1..20 | 5 | how many claims a delivery gets: a failure settled on, or a claim that lapses at, attempt `maxAttempts` drops it |
+| `retryBackoffMs` | integer 1000..3600000 | 30000 | a failed delivery is due again `min(retryBackoffMs * 2^(attempts - 1), 3600000)` ms after the settle |
+| `deliveryRetentionMs` | integer 86400000..31536000000 | 2592000000 (30 days) | how long a delivery is kept from its `created_at`, whatever its state but a live claim; the inbox's mention items reach back as far ("The schedule prune") |
+
+Each namespace operation reads the config of a delivery's own schema
+(`cx.schemas().config(schema, "Comments")`, parsed as `CommentsConfig`):
+a namespace has no single config. A config change applies to the next
+call; a delivery already failed keeps the `due_at` its settle gave it.
+
+### The record and listMessages
+
+Amends batch 2's record table:
+
+| Member | Batch 3 |
+|--------|---------|
+| `stand` | new, integer, right after `postedAt`: the message's stand ("Terms"). Present exactly when `postedAt` is; a message that stood before migration 4 has its id as its stand ("Migration 4") |
+
+`listMessages`' result gains `readUpTo`, after `after` and before `root`:
+the caller's conversation marker without `thread`, its thread marker on
+`thread` with it; absent when it has none. A client shows a message as
+unread when it is another's, stands, and its `stand` is above `readUpTo`,
+and draws no line by ids.
+
+### Who follows
+
+A follow row is the subject's state on one thread, whether it follows or
+not: `followed`, and its thread marker `read_up_to`. Rows are written by:
+
+| Write | When | Row |
+|-------|------|-----|
+| the author's | a message comes to stand | thread T = the message's `thread`, or the message itself when top-level: `followed = 1`, `read_up_to` = the greater of the row's and the message's stand. For a top-level message, also its conversation marker: `up_to` = the greater of the row's and the stand (the `comment_reads` row inserted when absent) |
+| a mention's | a message comes to stand with `mentions`, or an edit adds a mention ("Batch 1 and 2 operations, amended") | for each mentioned subject that is not the author and does not start with `role:`, thread T as above: absent, inserted with `followed = 1` and `read_up_to = W`; `followed = 0`, set to 1 and `read_up_to` = the greater of the row's and W; `followed = 1`, unchanged. W is the message's stand for a top-level message (the thread's replies all come later) and the stand - 1 for a reply (so the reply that mentions it counts in the thread item) |
+| `follow` | the call | below |
+| `markRead` with `thread` | the call | below; inserts `followed = 0` when absent |
+
+So a subject follows each thread it posts in and each it is mentioned in,
+again after `follow({ on: false })`; `begin` makes nobody follow, since a
+message deleted while composing never was in the thread; an `interrupt` to
+`interrupted` makes its author follow, the runner never. A `role:<name>`
+mention follows nothing: a group is not a reader, and following would send
+the whole group every later reply.
+
+### Deliveries
+
+When message X comes to stand, after its own writes and its stand, in the
+same call:
+
+1. *Followers*: the subjects that follow X's thread, read now, before
+   step 4's writes. A top-level X has none.
+2. *Mentioned*: X's `mentions` as written (`[]` for an `interrupt`).
+3. *Recipients*: (Mentioned union Followers) minus X's author. For each, a
+   `comment_deliveries` row: `mention` = 1 when it is in Mentioned,
+   `reply` = 1 when it is in Followers, `state = 'pending'`, `due_at =
+   now`, `attempts = 0`, `created_at = now`, every other column NULL. No
+   row exists yet for X, so each is an insert. A `role:<name>` subject gets
+   its row as given; the notifier expands it.
+4. The follow and marker writes of "Who follows".
+
+`reasons`, wherever a delivery is returned, is `["mention"]`,
+`["reply"]` or `["mention", "reply"]` from the two columns: one row per
+subject, with each reason that holds, never two rows.
+
+Nothing at `begin` or `appendDraft`. An `interrupt` to `deleted` makes no
+delivery. An interrupted reply's followers hear of it as of any reply: it
+stands, its text is what its author wrote, and a reader should know the
+agent stopped. A retry of a `post` (refusal 1) writes nothing, deliveries
+included.
+
+The states, and what each column holds:
+
+| `state` | `due_at` | `token`, `claimed_by` | `attempts` | `error` | `settled_at` |
+|---------|----------|-----------------------|------------|---------|--------------|
+| `pending` | `created_at`: due | NULL | 0 | NULL | NULL |
+| `claimed` | the claim's `expiresAt` | the claim's token and the claimer's subject | including this claim | the last failure's, or NULL | the last settle's, or NULL |
+| `failed` | the next attempt | NULL, the last claimer | as at the claim | the settle's | the settle's `now` |
+| `sent` | NULL | NULL, the last claimer | as at the claim | NULL | the settle's `now` |
+| `dropped` | NULL | NULL, the last claimer, or NULL | as it was | the settle's, or the claim's reason (`message_gone`, `read`, `claim_lapsed`) | the `now` it was dropped |
+
+The engine sends nothing (D77). The delivery row is also the inbox's
+record of a mention ("inbox"), so it is kept, sent or not, until
+`deliveryRetentionMs` passes.
+
+### Operations
+
+`markRead` and `follow` are `"writes": true, "beside": true, "log":
+false`, as `appendDraft` is: they append no event and move nothing a read
+of another caller returns. The policy is asked `write` with the operation
+`markRead` or `follow`, as for every writing operation, and D77's rule for
+`post` applies to them too: a deployment whose readers may read state lets
+both through for a caller who may read the type.
+
+#### `markRead({ upTo, thread? })`
+
+Result `{ readUpTo, unread }`: the marker after the call, and how many of
+others' standing messages of the listing stand above it. No event.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `no_message` | `thread` names no present message |
+| 2 | `not_a_thread` `{ message, thread }` | `thread` names a reply |
+
+`upTo` is a bound, as `before` and `after` are: an id that names no
+message is never refused. `thread` may name a composing or deleted
+top-level message.
+
+Writes: S is the greatest stand among the listing's messages (top-level
+without `thread`, the thread's replies with it) whose id is at most
+`upTo`:
+
+```sql
+SELECT MAX(stand) AS s FROM <comment_messages>
+ WHERE namespace = ? AND schema = ? AND id = ? AND thread IS NULL   -- or: AND thread = ?
+   AND message <= ? AND stand IS NOT NULL
+```
+
+`stand IS NOT NULL` alone, not the state: a message deleted after it stood
+keeps its stand, and counts in no unread. S is 0 when NULL. Without
+`thread`: the caller's `comment_reads` row gets `up_to` = the greater of
+its `up_to` and S, `read_at = now`; inserted with `up_to = S` when absent,
+which is how a caller starts to count a conversation's unread. With
+`thread`: the caller's `comment_follows` row for it gets `read_up_to` = the
+greater of its own and S, `updated_at = now`; inserted with `followed = 0`
+and `read_up_to = S` when absent. The marker never moves back. Neither
+dialect's `MAX(a, b)` is the other's (`GREATEST` in Postgres): compare in
+the handler, or with `CASE`.
+
+`unread` in the result is the `unread` field's statement ("Fields") for
+the conversation, and for a thread:
+
+```sql
+SELECT COUNT(*) AS unread FROM <comment_messages>
+ WHERE namespace = ? AND schema = ? AND id = ? AND thread = ?
+   AND stand IS NOT NULL AND stand > ? AND state IN ('posted', 'interrupted') AND author <> ?
+```
+
+A markRead that moves a marker past a mention reads that mention, and its
+inbox item is done. It cancels no delivery itself; the next claim drops a
+pending one its subject has read ("claimDeliveries").
+
+#### `follow({ thread, on })`
+
+Result `{ thread, following }`: `thread` as given, `following` whether the
+caller follows it after the call. No event.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `no_message` | `thread` names no present message |
+| 2 | `not_a_thread` `{ message, thread }` | `thread` names a reply |
+
+A composing or deleted top-level message may be followed. Writes, with L
+the conversation's `last_stand` (0 when it has no row):
+
+| `on` | The caller's row | Writes |
+|------|------------------|--------|
+| true | absent | insert `followed = 1`, `read_up_to = L`, `updated_at = now` |
+| true | `followed = 0` | `followed = 1`, `read_up_to` = the greater of its own and L, `updated_at = now` |
+| true | `followed = 1` | nothing |
+| false | `followed = 1` | `followed = 0`, `updated_at = now`; `read_up_to` stays |
+| false | absent or `followed = 0` | nothing |
+
+So a follow counts the thread's replies from the conversation's latest
+stand: what came before it is not new to the caller. Neither is refused
+for asking what already holds.
+
+### Namespace operations
+
+`inbox` is `"scope": "namespace"` and reads; `claimDeliveries` and
+`settleDeliveries` are `"scope": "namespace", "writes": true`. None is
+beside or logged: a namespace operation appends no event (D77 primitive
+3). The engine asks the policy `{ principal, action, namespace, behavior:
+"Comments", operation }` before the behavior's checks; `permissionPolicy`
+lets `inbox` through and asks `Comments.claimDeliveries` and
+`Comments.settleDeliveries` of the other two. Every statement joins
+`sql.readable()`, written `<readable>` below, the schemas that compose
+Comments and that the caller may read (column `schema`), or reads its
+schemas into a list it binds; a row of another schema never leaves a
+statement. `cx.now()` is one value for the call.
+
+#### `inbox({ kinds?, unread?, limit?, cursor? })`
+
+Read-only. Result `{ items, next }`, a page in the inbox's order, newest
+first. An item is `{ kind, schema, instanceId, message, thread?, author,
+postedAt, excerpt, unread }`, members in that order:
+
+| `kind` | One per | `message` | `thread` | `unread` |
+|--------|---------|-----------|----------|----------|
+| `mention` | delivery of the caller's subject with `mention = 1` whose message stands | the message that mentions the caller | when it is a reply, its thread | 1 while the caller has not read the message ("Terms"), 0 once it has |
+| `thread` | thread the caller follows that has a standing reply of another | the thread's standing reply of another with the greatest stand | the thread followed | how many standing replies of others in it stand above the caller's thread marker |
+| `conversation` | conversation the caller has a conversation marker on that has a standing top-level message of another | its standing top-level message of another with the greatest stand | absent | how many standing top-level messages of others stand above the marker |
+
+`author` and `postedAt` are the item's message's. An item whose `unread`
+is 0 is *done*. One message can be in two items: a reply that mentions
+the caller in a thread it follows is a mention and its thread's latest
+reply, as Slack lists it in both its activity and its threads.
+
+A mention item is done once the caller has read the message: once
+`markRead` moves the conversation marker (a top-level message) or the
+thread marker (a reply) past it, or the caller posts after it where that
+moves the marker ("Who follows"). The inbox clears nothing else, and
+nothing deletes a done item; `unread: true` hides it. A mention of a group
+the caller is in is not in its inbox: a principal carries no roles, so the
+engine cannot tell. Mention items reach back `deliveryRetentionMs`, the
+age of the delivery rows they read; thread and conversation items have no
+horizon.
+
+`excerpt`: the message's body with each maximal run of white space
+(Unicode `White_Space`, Rust's `char::is_whitespace`) replaced by one
+space U+0020, and leading and trailing space removed; when that is longer
+than 200 code points, its first 199 code points, a trailing space removed,
+then `…` (U+2026).
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/cursor` `is not a cursor this operation returned` | the cursor does not decode as below |
+
+Order and paging. Each item has the key `(postedAt, rank, schema,
+instanceId, message)`, `rank` 3 for `mention`, 2 for `thread`, 1 for
+`conversation`, and the inbox lists items in descending key order: the
+newest first, and at one `postedAt`, mentions before threads before
+conversations. Within one kind `(schema, instanceId, message)` is unique,
+since a thread item's latest reply names its thread and a conversation
+item's latest message its conversation.
+
+- `limit` 1..100, 50 when absent.
+- One statement per kind asked (`kinds`, all three when absent), each
+  ordered `posted_at DESC, schema DESC, id DESC, message DESC` with `LIMIT
+  limit + 1`, after the cursor as below. The handler merges the lists by
+  `(postedAt, rank)` descending, each list keeping its own order (so the
+  handler never compares text: the database's order of `schema` and `id`
+  holds), and takes the first `limit`.
+- `next`: when the lists held more than `limit` items in all, the cursor of
+  the last item taken; else null.
+- The cursor is the item's key as the compact JSON array `[postedAt, kind,
+  schema, instanceId, message]` (`kind` its name), in unpadded base64url
+  as the paging module writes it. It decodes to exactly that: an array of
+  five, an integer, one of the three kinds, two strings, an integer >= 1;
+  anything else is refusal 1.
+- After cursor `(p, kc, s, i, m)` with `rc` the rank of `kc`, the statement
+  of the kind of rank `r` adds: `posted_at <= p` when `r < rc`;
+  `posted_at < p` when `r > rc`; `(posted_at, schema, id, message) < (p,
+  s, i, m)` when `r = rc`.
+- `unread: true` adds `unread > 0`, `unread: false` adds `unread = 0`, in
+  the statement, so a page is never short for it.
+
+An item moves up when a newer message comes for it, so a client that pages
+on while the inbox changes may miss an item that moved above its cursor;
+it reads the first page again to catch up, as a feed does.
+
+The three statements (`?` bound in order; the outer `WHERE` takes the
+`unread` filter and the cursor's condition):
+
+```sql
+-- mention
+SELECT * FROM (
+  SELECT d.schema, d.id, d.message, m.thread, m.author, m.posted_at, m.body,
+         CASE WHEN m.stand > COALESCE(CASE WHEN m.thread IS NULL THEN r.up_to ELSE f.read_up_to END, 0)
+              THEN 1 ELSE 0 END AS unread
+    FROM <comment_deliveries> d
+    JOIN <readable> k ON k.schema = d.schema
+    JOIN <comment_messages> m
+      ON m.namespace = d.namespace AND m.schema = d.schema AND m.id = d.id AND m.message = d.message
+    LEFT JOIN <comment_reads> r
+      ON r.namespace = d.namespace AND r.schema = d.schema AND r.id = d.id AND r.subject = d.subject
+    LEFT JOIN <comment_follows> f
+      ON f.namespace = d.namespace AND f.schema = d.schema AND f.id = d.id
+     AND f.thread = m.thread AND f.subject = d.subject
+   WHERE d.namespace = ? AND d.subject = ? AND d.mention = 1
+     AND m.state IN ('posted', 'interrupted') AND m.stand IS NOT NULL
+) x
+ WHERE ...
+ ORDER BY x.posted_at DESC, x.schema DESC, x.id DESC, x.message DESC
+ LIMIT ?
+
+-- thread
+SELECT * FROM (
+  SELECT f.schema, f.id, f.thread, m.message, m.author, m.posted_at, m.body,
+         (SELECT COUNT(*) FROM <comment_messages> u
+           WHERE u.namespace = f.namespace AND u.schema = f.schema AND u.id = f.id
+             AND u.thread = f.thread AND u.stand IS NOT NULL AND u.stand > f.read_up_to
+             AND u.state IN ('posted', 'interrupted') AND u.author <> f.subject) AS unread
+    FROM <comment_follows> f
+    JOIN <readable> k ON k.schema = f.schema
+    JOIN <comment_messages> m
+      ON m.namespace = f.namespace AND m.schema = f.schema AND m.id = f.id
+     AND m.message = (SELECT l.message FROM <comment_messages> l
+                       WHERE l.namespace = f.namespace AND l.schema = f.schema AND l.id = f.id
+                         AND l.thread = f.thread AND l.stand IS NOT NULL
+                         AND l.state IN ('posted', 'interrupted') AND l.author <> f.subject
+                       ORDER BY l.stand DESC LIMIT 1)
+   WHERE f.namespace = ? AND f.subject = ? AND f.followed = 1
+) x
+ WHERE ...
+ ORDER BY x.posted_at DESC, x.schema DESC, x.id DESC, x.message DESC
+ LIMIT ?
+
+-- conversation: the thread statement over <comment_reads> r, with
+-- `thread IS NULL` for `thread = f.thread`, `r.up_to` for `f.read_up_to`,
+-- and no followed condition; it selects no thread.
+```
+
+`m.thread` is NULL for a top-level message, so the mention statement's
+follow join finds nothing for it, and its `CASE` reads the conversation
+marker. The thread and conversation statements cost one ordered probe of
+`comment_messages_stand` and one count per row of the caller's, so an
+inbox reads as many rows as the caller follows threads and has read
+conversations in the namespace; a caller with tens of thousands of them is
+past what batch 3 holds ("Left").
+
+#### `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })`
+
+Writes. Claims due deliveries under one new token. Result `{ token,
+expiresAt, items }`; `token` and `expiresAt` are null when `items` is
+empty. An item is `{ id, schema, instanceId, message, thread?, subject,
+reasons, author, via?, state, postedAt, body, truncated, attempt }`,
+members in that order: `state` the message's (`posted` or `interrupted`),
+`body` its body as it is now (an edit since the delivery was made shows),
+its first 4000 code points, `truncated` whether it was longer, `attempt`
+the delivery's `attempts` after this claim (1 for the first).
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/prefix` `must not be given with subjects` | both are given |
+| 2 | `not_configured` `{ permission: "deliverPermission" }` | no schema of `readable()` has a Comments config naming `deliverPermission` |
+| 3 | `forbidden` | some do, and `cx.can()` grants the caller none of the permissions they name; message `"<subject> may not claimDeliveries in namespace <namespace>: it needs permission <permissions>"`, the distinct permissions named, sorted, joined with `", "` |
+
+`limit` 1..100, 20 when absent; `ttlMs` 1000..600000, 60000 when absent.
+
+The deliverable schemas: for each schema of `readable()` (`SELECT schema
+FROM <readable>`), its config's `deliverPermission`, and `cx.can()` asked
+once per distinct permission. Refusals 2 and 3 read them; the claim reads
+only them. `subjects` keeps deliveries whose subject is one of them;
+`prefix` those whose subject starts with it, compared as code points
+(`substr(subject, 1, ?) = ?`, bound with the prefix's length in code
+points and the prefix: both dialects' `substr` counts characters, and
+neither needs `LIKE`'s escapes).
+
+Then, with `token` a new UUID from `cx.uuids()` and `expiresAt = now +
+ttlMs`, it reads due deliveries in the order `(due_at, schema, id,
+message, subject)`, a page at a time, through `comment_deliveries_due`:
+
+```sql
+SELECT d.schema, d.id, d.message, d.subject, d.mention, d.reply, d.state, d.attempts, d.due_at,
+       m.thread, m.author, m.via, m.state AS message_state, m.posted_at, m.stand, m.body,
+       CASE WHEN m.thread IS NULL THEN r.up_to ELSE f.read_up_to END AS marker
+  FROM <comment_deliveries> d
+  LEFT JOIN <comment_messages> m
+    ON m.namespace = d.namespace AND m.schema = d.schema AND m.id = d.id AND m.message = d.message
+  LEFT JOIN <comment_reads> r
+    ON r.namespace = d.namespace AND r.schema = d.schema AND r.id = d.id AND r.subject = d.subject
+  LEFT JOIN <comment_follows> f
+    ON f.namespace = d.namespace AND f.schema = d.schema AND f.id = d.id
+   AND f.thread = m.thread AND f.subject = d.subject
+ WHERE d.namespace = ? AND d.due_at IS NOT NULL AND d.due_at <= ?      -- now
+   AND d.schema IN (?, ...)                                            -- the deliverable schemas
+   [AND d.subject IN (?, ...)] [AND substr(d.subject, 1, ?) = ?]
+   [AND (d.due_at, d.schema, d.id, d.message, d.subject) > (?, ?, ?, ?, ?)]
+ ORDER BY d.due_at, d.schema, d.id, d.message, d.subject
+ LIMIT ?
+```
+
+Each row, in order, is one of:
+
+| Case | When | Writes | Returned |
+|------|------|--------|----------|
+| gone | `m.state` is NULL (purged) or not `posted` or `interrupted` | `dropped`, `error = 'message_gone'` | no |
+| read | the marker is not NULL and `marker >= m.stand` (the subject has read it) | `dropped`, `error = 'read'` | no |
+| spent | `state = 'claimed'` (its claim lapsed) and `attempts >= maxAttempts` of its schema | `dropped`, `error = 'claim_lapsed'` | no |
+| claimed | otherwise | `state = 'claimed'`, `token`, `claimed_by` = the caller's subject, `due_at = expiresAt`, `attempts + 1` | yes |
+
+A drop sets `due_at`, `token` NULL and `settled_at = now`. Every write is
+`UPDATE ... WHERE <key> AND due_at = ?`, bound with the `due_at` the row
+was read with; one that updates no row was taken by a concurrent claim and
+is skipped. The engine runs a writing namespace operation under the
+namespace's writer, as it runs an instance's writes; the guard keeps two
+claims apart even if it did not. The claim stops at `limit` claimed, at a
+page shorter than asked, or at 1000 rows read, whichever is first, and
+returns what it claimed in the order read. A due delivery whose subject
+has read its message is the notifier's to skip, so it never sends a person
+what they already saw.
+
+The delivery `id` is the compact JSON array `[schema, instanceId,
+message, subject]`, as `serde_json::to_string` writes it, in unpadded
+base64url: the same at every claim, and decoded, never looked up, by
+`settleDeliveries`.
+
+#### `settleDeliveries({ token, ids, outcome, error? })`
+
+Writes. Result `{ items }`: per id, in the order given, `{ id, state,
+attempts, nextAttemptAt? }`, `state` the delivery's after the call and
+`nextAttemptAt` its `due_at` when failed. All the ids settle, or none.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/error` `must not be given with outcome sent` | |
+| 2 | `not_configured` `{ permission: "deliverPermission" }` | as claimDeliveries' |
+| 3 | `forbidden` | as claimDeliveries', with `settleDeliveries` in the message |
+| 4 | `unknown_delivery` `{ ids }` | each id that does not decode to `[string, string, integer >= 1, string]`, or names no row of the namespace, or a row of a schema not deliverable for the caller; `ids` every such id, in the order given |
+| 5 | `token_stale` `{ token }` | no row of the namespace holds `token`: each it claimed was settled, or claimed again after the claim lapsed, or it was never one |
+| 6 | `not_claimed` `{ token, ids }` | each id whose row does not hold `token`: pending, settled, or claimed under another; `ids` every such id, in the order given |
+
+A row that still holds the token after its claim lapsed settles: nobody
+else took it, so nobody else sent it. Refusal 5 reads
+`comment_deliveries_token`:
+
+```sql
+SELECT 1 FROM <comment_deliveries> WHERE namespace = ? AND token = ? LIMIT 1
+```
+
+Writes, for each row, by `outcome`, with `attempts` as the row holds it
+(the claim counted this attempt) and M the `maxAttempts`, B the
+`retryBackoffMs` of the row's schema:
+
+| `outcome` | Writes |
+|-----------|--------|
+| `sent` | `state = 'sent'`, `due_at`, `token`, `error` NULL, `settled_at = now` |
+| `failed`, `attempts < M` | `state = 'failed'`, `due_at = now + min(B * 2^(attempts - 1), 3600000)`, `token` NULL, `error` = `error` or NULL, `settled_at = now` |
+| `failed`, `attempts >= M` | as `dropped` |
+| `dropped` | `state = 'dropped'`, `due_at`, `token` NULL, `error` = `error` or NULL, `settled_at = now` |
+
+`claimed_by` stays: the last claimer. The backoff is computed without
+overflow (`2^(attempts - 1)` with `attempts` at most 20 fits an `i64`).
+
+### Batch 1 and 2 operations, amended
+
+| Operation | Batch 3 |
+|-----------|---------|
+| `post` | after its writes: the message's stand (`stand`, `last_stand`), then "Deliveries" (followers, mentions) and "Who follows" (the author; mentioned subjects). The record carries `stand`. A retry writes nothing |
+| `begin`, `appendDraft` | unchanged: no stand, no delivery, no follow |
+| `finish` | as `post`: stand, deliveries for its `mentions` and the thread's followers, follows |
+| `interrupt` | to `interrupted`: stand, deliveries for the thread's followers (no mentions: an interrupted message has none), the author follows and its marker moves. To `deleted`: nothing new |
+| `edit` | when `mentions` is given, with O the message's mentions before and N after, A its author: for each subject in N not in O, not A: no row for the message, insert one as "Deliveries" does with `mention = 1`, `reply = 0`; a row, `mention = 1`, and when it is `sent` or `dropped` it returns to `pending` (`due_at = now`, `created_at = now`, `attempts = 0`, `token`, `claimed_by`, `error`, `settled_at` NULL), so a subject told of the reply hears of the mention; `pending`, `failed` or `claimed`, nothing else moves. Then the mention's follow ("Who follows", W from the message's stand). For each subject in O not in N: its row, when `pending` or `failed`, gets `mention = 0` and is deleted when `reply = 0`; a `claimed`, `sent` or `dropped` row is left (a claimer may settle it, or the subject was told). A moderator's edit is the same; recipients exclude the author, not the editor |
+| `deleteMessage` | deletes the message's deliveries but the claimed ones, which stay for their claimer's settle (and are dropped as `message_gone` if their claim lapses). Its `stand` stays; follows and markers stay |
+| `purge` | deletes every purged message's deliveries but the claimed ones; for a top-level message, every `comment_follows` row of its thread. Markers stay: they count stands, which are not reused |
+| `listMessages` | the result's `readUpTo` ("The record and listMessages") |
+| `getMessage`, `react`, `unreact`, `pin`, `unpin`, `resolve`, `reopen` | unchanged, but the record's `stand` |
+
+`edit` refusals are unchanged; its deliveries are written after the edit's
+own writes. Batch 1's rule that `mentions` are not checked holds: an
+unknown subject's delivery is the notifier's to drop.
+
+### Refusals
+
+New veto codes:
+
+| Veto code | details |
+|-----------|---------|
+| `unknown_delivery` | `{ ids }` |
+| `token_stale` | `{ token }` |
+| `not_claimed` | `{ token, ids }` |
+
+`not_configured` also covers `claimDeliveries` and `settleDeliveries`,
+details `{ permission: "deliverPermission" }`. `no_message` and
+`not_a_thread` also cover `markRead`'s and `follow`'s `thread`. `forbidden`
+(403) for a namespace operation names the namespace in place of the
+instance.
+
+### Fields
+
+| Field | Value | Moved by |
+|-------|-------|----------|
+| `unread` | integer, always present: the caller's count of standing top-level messages of others whose stand is above the caller's conversation marker; 0 while the caller has none | post, finish and interrupt of another's top-level message; deleteMessage and purge of one; markRead; the caller's own top-level stand |
+
+It is the caller's, the only field that differs by who reads: the view's
+principal (`view.principal().subject`). Replies are not counted: a
+conversation that counted every reply in every thread would read unread
+for whoever opened it once, and a thread is read in the inbox, by its
+follower, or by `listMessages` with `thread` and its `readUpTo`. A
+conversation the caller has never marked read, nor posted in top-level,
+counts 0: it is new to them, not unread, and the namespace's every
+instance is not unread for every reader. A mention reaches them anyway.
+
+```sql
+SELECT COUNT(*) AS unread
+  FROM <comment_messages> u
+  JOIN <comment_reads> r
+    ON r.namespace = u.namespace AND r.schema = u.schema AND r.id = u.id AND r.subject = ?
+ WHERE u.namespace = ? AND u.schema = ? AND u.id = ? AND u.thread IS NULL
+   AND u.stand IS NOT NULL AND u.stand > r.up_to
+   AND u.state IN ('posted', 'interrupted') AND u.author <> ?
+```
+
+A client watching the stream keeps it from its own `readUpTo` and each
+event's record: a `post`, `finish` or `interrupt` event of another's
+top-level message whose record stands adds one, a `deleteMessage` or
+`purge` of one whose stand is above the marker takes one away.
+
+### The schedule `prune`
+
+Comments declares a second schedule, `prune`, every 3600000 ms
+(`Every::Ms`). Each run, for its namespace and schema, reads up to 1000
+deliveries made more than `deliveryRetentionMs` ago that no live claim
+holds, oldest first, through `comment_deliveries_created`, and deletes them
+by key:
+
+```sql
+SELECT id, message, subject FROM <comment_deliveries>
+ WHERE namespace = ? AND schema = ? AND created_at < ?          -- now - deliveryRetentionMs
+   AND (state <> 'claimed' OR due_at <= ?)                      -- now
+ ORDER BY created_at LIMIT 1000
+```
+
+A delivery lives `deliveryRetentionMs` whatever its state: a deployment
+that runs no notifier still records them for the inbox, and they must not
+grow without end; a notification a month late is no use; and a mention
+older than the window falls out of the inbox. Settled deliveries are
+not pruned sooner, since the inbox's mention items are the same rows.
+Markers and follows have no retention: a row per reader per conversation
+or thread they touched, removed with its instance or its purged thread.
+
+### Migration 4, `inbox`
+
+`BehaviorMigration::new(4, "inbox")`, the same on both dialects. It adds
+two columns and an index to existing tables and creates three:
+
+| Table | Column | Spec | Holds |
+|-------|--------|------|-------|
+| `comment_messages` | `stand` | integer | the message's stand; NULL until it stands, kept after |
+| `comment_conversations` | `last_stand` | integer not null default 0 | the greatest stand given |
+
+Index `comment_messages_stand` on `comment_messages (namespace, schema, id,
+thread, stand)` where `stand IS NOT NULL`: the latest standing message of
+a listing, and the counts above a marker. Statements that should use it say
+`stand IS NOT NULL`, as batch 2's say `last_append_at IS NOT NULL`.
+
+`up`: `UPDATE <comment_messages> SET stand = message WHERE posted_at IS
+NOT NULL`, then `UPDATE <comment_conversations> SET last_stand =
+last_message`. No marker exists before migration 4, so any numbering that
+keeps every new stand above every old one serves; the id is one, and a
+message that stood keeps its id as its stand.
+
+`comment_reads`, primary key `(namespace, schema, id, subject)`: a
+subject's conversation marker.
+
+| Column | Spec | Holds |
+|--------|------|-------|
+| `namespace`, `schema`, `id` | text not null | the instance |
+| `subject` | text not null | |
+| `up_to` | integer not null | a stand |
+| `read_at` | integer not null | the `now` of the latest write |
+
+Index `comment_reads_subject` on `(namespace, subject)`: the inbox's
+conversations.
+
+`comment_follows`, primary key `(namespace, schema, id, thread, subject)`:
+a subject's state on a thread.
+
+| Column | Spec | Holds |
+|--------|------|-------|
+| `namespace`, `schema`, `id` | text not null | |
+| `thread` | integer not null | the thread's top-level message |
+| `subject` | text not null | |
+| `followed` | integer not null | 1 while it follows, 0 after `follow({ on: false })` or for a row `markRead` made |
+| `read_up_to` | integer not null | its thread marker, a stand |
+| `updated_at` | integer not null | |
+
+`followed`, not `following`, which is a keyword of both dialects' window
+frames. The primary key serves a thread's followers. Index
+`comment_follows_subject` on `(namespace, subject)` where `followed = 1`:
+the inbox's threads.
+
+`comment_deliveries`, primary key `(namespace, schema, id, message,
+subject)`:
+
+| Column | Spec | Holds |
+|--------|------|-------|
+| `namespace`, `schema`, `id` | text not null | |
+| `message` | integer not null | |
+| `subject` | text not null | as the mention or the follow gave it |
+| `mention` | integer not null default 0 | 1 when a reason is the mention |
+| `reply` | integer not null default 0 | 1 when a reason is the follow |
+| `state` | text not null | `pending`, `claimed`, `failed`, `sent`, `dropped`; no CHECK |
+| `due_at` | integer | "Deliveries"' table; NULL when sent or dropped |
+| `token` | text | the claim's, while claimed |
+| `claimed_by` | text | the last claimer's subject |
+| `attempts` | integer not null default 0 | claims so far |
+| `error` | text | |
+| `created_at` | integer not null | when made, or returned to pending by an edit |
+| `settled_at` | integer | |
+
+| Index on `comment_deliveries` | Columns | Where | Read by |
+|-------------------------------|---------|-------|---------|
+| `comment_deliveries_due` | `(namespace, due_at, schema, id, message, subject)` | `due_at IS NOT NULL` | `claimDeliveries` |
+| `comment_deliveries_mentions` | `(namespace, subject)` | `mention = 1` | `inbox`'s mentions |
+| `comment_deliveries_token` | `(namespace, token)` | `token IS NOT NULL` | `settleDeliveries`' refusal 5 |
+| `comment_deliveries_created` | `(namespace, schema, created_at)` | | the schedule `prune` |
+
+The primary key serves a message's deliveries (`edit`, `deleteMessage`,
+`purge`). `claimDeliveries` with `prefix` or `subjects` filters the due
+index's rows, so a dispatcher that claims `agent:` reads past people's due
+deliveries while no notifier claims them; past 1000 rows read it returns
+what it has.
+
+### Deleting the instance
+
+`afterChange` on `Delete` also removes the instance's `comment_reads`,
+`comment_follows` and `comment_deliveries` rows, claimed deliveries
+included: a settle of one then meets `unknown_delivery`. The
+`comment_conversations` row keeps `last_stand` with `last_message`, so a
+re-created instance numbers stands on.
+
+### What the generators expose
+
+For `behaviortypes` (typegen, rustgen) and `engineclientgen`:
+
+- **Fields.** `unread` is `number` (Go `int64`, Rust `i64`), always
+  present, like `messages`. Its doc says it is the reader's.
+- **The record.** `stand?: number` after `postedAt` on the message record
+  (`<Base>CommentMessage`), optional as `postedAt` is. `listMessages`'
+  result gains `readUpTo?: number`.
+- **`markRead` and `follow`.** Instance operations with their declared
+  results, on `<Schema>Client` as every instance operation; not in
+  `commentsMessageResults`.
+- **Namespace operations.** An operation of `"scope": "namespace"` is in
+  no schema's `<Base>Operations`, `<Base>InstanceOperation` or
+  `<Schema>Client`: it belongs to the behavior, not a type, and no type's
+  config narrows it. A module whose types compose a behavior with
+  namespace operations exports, once per behavior, named for the behavior
+  (`Comments`, not `<Base>`):
+  - `Comments<Op>Params` and `Comments<Op>Result` from each operation's
+    schemas (`CommentsInboxParams`, `CommentsInboxResult`,
+    `CommentsClaimDeliveriesParams`, ...), and named item types
+    `CommentsInboxItem`, `CommentsDelivery` (a claim's item) and
+    `CommentsSettledDelivery`, documented from the declaration.
+  - `CommentsNamespaceOperations`, `{ inbox: { scope: "namespace";
+    params: CommentsInboxParams; result: CommentsInboxResult }; ... }`,
+    as `<Base>Operations` maps a schema's.
+  - `CommentsNamespaceClient`, constructed from the engine client and a
+    namespace, with one method per namespace operation:
+    `inbox(params?, options?)`, `claimDeliveries(params?, options?)`,
+    `settleDeliveries(params, options?)` (optional params when the schema
+    requires none, as `<Schema>Client` decides), each calling the engine
+    client's namespace operation call (`POST
+    /namespaces/{namespace}/behaviors/Comments/operations/{operation}`,
+    whatever the namespace-operations work names the method) and resolving
+    to the typed result.
+  - `isCommentsNamespaceVeto(error, code?)`, a guard on the behavior and,
+    when given, a code of the behavior's vetoes, as `is<Base>Veto` checks a
+    schema's.
+- Go and Rust types render behavior fields only: they gain `unread` and
+  nothing for namespace operations. A typed Go or Rust client of them waits
+  for the notifier and the agent dispatcher as stack workers ("Left").
+- The MCP tool per namespace operation is the engine's; its description is
+  the operation's.
+
+### Batch 3's tests
+
+What `core_comments.rs` (or a `core_comments_inbox.rs` beside it) and the
+TypeScript suite should hold, on both databases:
+
+- Markers count stands: a reply begun before a message read and finished
+  after it is unread; `markRead` never moves back; `upTo` past every
+  message marks what stands; `readUpTo` and `unread` agree with the field.
+- `unread` is 0 with no marker, counts others' standing top-level
+  messages only, and differs by reader.
+- Follows: posting, finishing and being mentioned follow; `role:` does not;
+  `begin` does not; `follow({ on: false })` sticks until the next post or
+  mention.
+- Deliveries: one row per subject with both reasons; never the author; an
+  interrupted reply reaches followers; an edit adding a mention returns a
+  sent row to pending, one removing it deletes a pending row with no other
+  reason.
+- Claims: due order; `subjects` and `prefix`; drops `message_gone`, `read`,
+  `claim_lapsed`; a second claim takes nothing the first holds; a lapsed
+  claim is taken again with `attempt` one higher; schemas the claimer may
+  not read, or whose `deliverPermission` it lacks, are never claimed;
+  `not_configured` and `forbidden`.
+- Settles: each refusal; backoff and the drop at `maxAttempts`; a lapsed
+  claim still holding its token settles.
+- The inbox: each kind, the order across kinds at one `postedAt`, the
+  cursor, `unread` both ways, an unreadable schema's rows never listed,
+  and the excerpt.
+- `prune`, the instance's delete, `deleteMessage` and `purge` of messages
+  with deliveries in each state.
+
 ## Left for later batches
 
-Not declared and not built in batches 1 and 2, each in D77's order:
+Not declared and not built in batches 1 to 3, each in D77's order:
 
-- Batch 3 (namespace operations): `markRead`, `follow`, the `unread`
-  field, `inbox`, `claimDeliveries`, `settleDeliveries`,
-  `deliverPermission`, `maxAttempts`; `comment_reads`, `comment_follows`,
-  `comment_deliveries`; deliveries for mentions and followers.
 - Batch 4 (acting for a subject): the record's `for`, stored as
-  `for_subject`.
+  `for_subject`; whether a message an agent writes for a person makes the
+  person follow, and leaves the person out of its deliveries.
 - Batch 5: `searchMessages`; `code` and `attachment` blocks and the config
   kinds for them; `moveAnchor` and `anchorPermission`.
+- After D77's steps: following a whole conversation (an instance's
+  assignee hears of each top-level message); a mention of a group in its
+  members' inboxes, which needs roles the principal does not carry; an
+  inbox past tens of thousands of followed threads, which needs a
+  per-subject table the stands keep; a typed Go or Rust client of the
+  namespace operations, with the notifier and the agent dispatcher as
+  stack workers.
 
-Each batch adds its own migration (batch 2 adds 3, and later ones 4,
-5, ...) rather than the single migration 2 D77 describes, since batch 1
-shipped alone.
+Each batch adds its own migration (batch 2 adds 3, batch 3 adds 4, and
+later ones 5, ...) rather than the single migration 2 D77 describes, since
+batch 1 shipped alone.
