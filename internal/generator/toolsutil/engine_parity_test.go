@@ -80,7 +80,7 @@ var (
 		"order-create", "order.create", "", strings.Repeat("a", 48), strings.Repeat("a", 49),
 	}
 	enginePolicyKeyInputs = []string{
-		"invocationPolicy", "review", "confirm", "A_b1", "handle", "hidden", "hiddenReason", "reason", "_meta",
+		"invocationPolicy", "review", "confirm", "A_b1", "handle", "hidden", "hiddenReason", "hiddenBy", "reason", "_meta",
 		"name", "description", "icon", "9lives", "a-b", "",
 	}
 	enginePolicyValueInputs = []string{"auto", "ask", "on-write", "never_ever", "x9", "Never", "9x", "a b", "", "-a"}

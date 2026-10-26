@@ -1736,7 +1736,8 @@ the engine's cursor, with `back` and a size form of 10, 50 and 200 as
 the console's lists have ([A paged list](#a-paged-list)). An instance's
 own amount shows as money ([Money](#money)) in the currency its field's
 `@display` names, else its type's one `Finance.Currency` field's, which
-the page reads from the type's live schema document. The nav and
+the describe document's `fields` give with each field's scalar in its
+`instance` schema. The nav and
 the index gain Engine when the caller may read a type, and the trail
 names an instance by its title field, else its noun and id.
 
@@ -1746,10 +1747,15 @@ its bounds, an enum or a boolean a select, and anything else a JSON
 textarea, each control named by the bare parameter. A form that writes
 an instance sends a hidden `expectedSeq`, the instance's seq when its
 page was read. An operation is offered as the engine's tool manifest
-offers it to the caller: one the type lacks, or the deployment hides
-(`outputs.engine.tools.hidden`), is 404, one the policy refuses is 403
-with the engine's reason, and one the engine hides from MCP alone, for
-a handle MCP would refuse, is offered.
+offers it to the caller, by each tool's `mcp.hiddenBy`: one the type
+lacks, or the deployment hides (`deployment`, from
+`outputs.engine.tools.hidden`), is 404, one the policy refuses
+(`policy`) or that writes in an archived namespace (`archived`) is 403
+with the engine's reason, and one the engine hides from MCP alone, for a
+handle MCP would refuse (`handle`), is offered. The engine asks the
+policy of that one too, so a caller it refuses has no form. A hidden
+tool whose causes the console does not know, or that lists none, is
+refused: the console fails closed.
 
 | The engine refuses | The page answers |
 | --- | --- |

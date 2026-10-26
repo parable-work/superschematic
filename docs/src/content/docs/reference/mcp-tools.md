@@ -577,6 +577,32 @@ same tools with the same policies over one commerce database
 (`TestCommerceServersAnswerOneScriptAlike`), and
 [selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
 says why each of these operations asks.
+
+The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
+the generators' `tools/schema.json` does not write: each cause the
+engine found, in this order, and `hiddenReason` is the first one's.
+
+| `hiddenBy` | The engine hides the tool because |
+| --- | --- |
+| `deployment` | `tools.hidden` names its operation; the policy is not asked |
+| `archived` | it writes in an archived namespace |
+| `policy` | the access policy refuses the caller what its call asks |
+| `handle` | `@mcp` would refuse its handle: not snake case, longer than 48 characters, an engine tool's, or another tool's too; the policy is asked all the same, since the API still offers the operation |
+| `filter` | the mount's `tools` filter leaves it out; asked only of a tool nothing else hides |
+
+```json
+"mcp": {
+  "hidden": true,
+  "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)",
+  "hiddenBy": ["policy", "handle"]
+}
+```
+
+A tool hidden by `deployment` and `handle` keeps the deployment's reason.
+A client that shows the engine's operations outside MCP, as the Topcoat
+console does, offers one hidden by `handle` (or `filter`) alone, drops
+one hidden by `deployment`, and refuses any other.
+
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under
@@ -634,7 +660,7 @@ A distribution's own invocation policy is
 | Field | Core default | Rule |
 | --- | --- | --- |
 | `Extension` | | the registering extension; required |
-| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`) |
+| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`), nor `hiddenBy`, which the engine's hidden record uses |
 | `Values` | `auto`, `ask` | at least one; lowercase letters, digits, `_` and `-`, starting with a letter; each once; in the order `tools/index.ts` lists them |
 | `Default` | `auto` | one of `Values` |
 
