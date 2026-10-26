@@ -614,6 +614,7 @@ mod tests {
             name: "f".into(),
             column: "f".into(),
             json: marks.contains("json"),
+            shape: None,
             list: marks.contains("list"),
             default: None,
             point: marks.contains("point"),

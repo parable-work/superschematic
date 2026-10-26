@@ -271,6 +271,46 @@ describe('postgresQueue', () => {
     ]);
   });
 
+  test("a JSON column is decoded once, by the column's type: a JSON string reads as the string, and JSON of another kind than its type's fails the row alone", async () => {
+    const detailFields = [
+      { name: 'detail', column: 'detail', json: true },
+      { name: 'shipTo', column: 'ship_to', json: true, shape: 'object' as const },
+      { name: 'lines', column: 'lines', json: true, shape: 'list' as const },
+    ];
+    const def: QueueDefinition<{ detail?: unknown; shipTo?: Address; lines?: unknown[] }> = {
+      ...definition(),
+      fields: detailFields,
+      statements: statements('order_placed_queue', detailFields.map(f => f.column)),
+    } as QueueDefinition<{ detail?: unknown; shipTo?: Address; lines?: unknown[] }>;
+    const client = recorder(
+      { rows: [], rowCount: 0 },
+      {
+        rows: [
+          ['m-1', 't-1', 1, '"1"', '{"line1":"1 Main St","city":"Springfield"}', '[1]'],
+          ['m-2', 't-2', 1, '"x"', 'null', '[]'],
+          ['m-3', 't-3', 1, '1', '"no address"', '[]'],
+          ['m-4', 't-4', 1, '{}', '{"line1":"2 Side St","city":"York"}', '{"a":1}'],
+        ],
+        rowCount: 4,
+      },
+      { rows: [{ state: 'ready' }], rowCount: 1 },
+      { rows: [{ state: 'ready' }], rowCount: 1 }
+    );
+    const claims = await postgresQueue(client, def).claim(4);
+    expect(claims.map(c => [c.id, c.message])).toEqual([
+      ['m-1', { detail: '1', shipTo: { line1: '1 Main St', city: 'Springfield' }, lines: [1] }],
+      ['m-2', { detail: 'x', shipTo: null, lines: [] }],
+    ]);
+    // pg would decode json (114) and jsonb (3802) itself: the claim takes their text.
+    const types = client.queries[1]?.types;
+    expect((types?.getTypeParser(3802, 'text') as (text: string) => unknown)('"x"')).toBe('"x"');
+    expect((types?.getTypeParser(114, 'text') as (text: string) => unknown)('"1"')).toBe('"1"');
+    expect(client.queries.slice(2).map(q => [q.values[0], q.values[4]])).toEqual([
+      ['m-3', 'the message could not be read: message m-3 of order_placed_queue: field shipTo: holds a string, where its type is an object'],
+      ['m-4', 'the message could not be read: message m-4 of order_placed_queue: field lines: holds an object, where its type is a list'],
+    ]);
+  });
+
   test('a claim for no message asks nothing', async () => {
     const client = recorder();
     expect(await postgresQueue(client, definition()).claim(0)).toEqual([]);
@@ -356,6 +396,60 @@ interface DeliveryPlanned {
 }
 
 describe.skipIf(dsn === '')('on Postgres', () => {
+  test('a JSON value reads back as it was enqueued from a jsonb, a json and a text column, a JSON string among them', async () => {
+    const schema = `queue_runtime_json_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(`CREATE TABLE note_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  as_jsonb JSONB NOT NULL,
+  as_json JSON NOT NULL,
+  as_text TEXT NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+)`);
+      const noteFields = [
+        { name: 'seq', column: 'seq' },
+        { name: 'asJsonb', column: 'as_jsonb', json: true },
+        { name: 'asJson', column: 'as_json', json: true },
+        { name: 'asText', column: 'as_text', json: true },
+      ];
+      interface Note {
+        seq: number;
+        asJsonb: unknown;
+        asJson: unknown;
+        asText: unknown;
+      }
+      const def: QueueDefinition<Note> = {
+        ...definition('note_queue'),
+        name: 'Note',
+        fields: noteFields,
+        statements: statements('note_queue', noteFields.map(f => f.column)),
+      } as unknown as QueueDefinition<Note>;
+      const values: unknown[] = ['1', 'x', '', '{"a":1}', 1, 2.5, true, false, { a: '1', b: [1, 'x'] }, ['1', 2]];
+      for (const [seq, value] of values.entries()) {
+        await enqueue(pool, def, { seq, asJsonb: value, asJson: value, asText: value });
+      }
+      const claims = await postgresQueue(pool, def).claim(values.length + 1);
+      expect(claims.map(c => c.message).sort((a, b) => a.seq - b.seq)).toEqual(
+        values.map((value, seq) => ({ seq, asJsonb: value, asJson: value, asText: value }))
+      );
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   test('a location crosses as a POINT and a duration as an INTERVAL, and each reads back as the TypeScript types hold it', async () => {
     const schema = `queue_runtime_delivery_${Date.now()}`;
     const admin = new pg.Pool({ connectionString: dsn, max: 1 });

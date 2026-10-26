@@ -1225,10 +1225,11 @@ func TestQueueParity(t *testing.T) {
 // testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL
 // writes a row whose ship_to, a JSON column, holds no address: on
 // Postgres, whose JSONB column refuses text that is not JSON (D83), a JSON
-// string; on SQLite, text that is not JSON. The side's claim of both
-// returns the good message alone; the bad row, claimed and unread, is
-// failed with Unreadable and why, ready again after one attempt, and its
-// batch is not stranded.
+// string, which Go's and Rust's types refuse and TypeScript's claim by the
+// field's shape, an object; on SQLite, text that is not JSON. The side's
+// claim of both returns the good message alone; the bad row, claimed and
+// unread, is failed with Unreadable and why, ready again after one
+// attempt, and its batch is not stranded.
 func testUnreadableRowFailsAlone(t *testing.T) {
 	for _, name := range []string{"Go", "TypeScript", "Rust"} {
 		t.Run(name, func(t *testing.T) {

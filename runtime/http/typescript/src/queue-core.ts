@@ -16,6 +16,12 @@ export interface QueueField {
   readonly column: string;
   /** The column holds the value as JSON, which an enqueue writes with JSON.stringify. */
   readonly json?: boolean;
+  /**
+   * The kind of JSON value a JSON column holds for the member's type: an object for a @jsonField type or a map, a
+   * list for a list of them. A claim refuses a row whose JSON is of another kind, as Go's and Rust's types do.
+   * None for a JSON scalar, which holds any value.
+   */
+  readonly shape?: 'object' | 'list';
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
@@ -209,6 +215,37 @@ export function formatDuration(nanos: bigint): string {
   if (hours > 0n) return `${sign}${hours}h${minutes}m${seconds}`;
   if (minutes > 0n) return `${sign}${minutes}m${seconds}`;
   return `${sign}${seconds}`;
+}
+
+/**
+ * A JSON column's text as the message's member: the JSON it holds, decoded once, of the kind the field's shape
+ * names, or JSON null. A claim reads a JSON column as its text on every database: Postgres's json and jsonb
+ * columns arrive unparsed (queue.ts's type parsers), and SQLite's are TEXT. So a value that is itself a JSON
+ * string, "1" or "x", reads as that string, and is not parsed a second time.
+ */
+export function jsonMemberValue(text: unknown, field: QueueField): unknown {
+  if (typeof text !== 'string') throw new Error(`the column holds ${JSON.stringify(text)}, no JSON text`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`holds no JSON: ${errorMessage(error)}`, { cause: error });
+  }
+  if (field.shape !== undefined && value !== null && jsonKind(value) !== field.shape) {
+    throw new Error(`holds ${article(jsonKind(value))}, where its type is ${article(field.shape)}`);
+  }
+  return value;
+}
+
+/** The kind of a decoded JSON value: an object, a list, a string, a number or a boolean. */
+function jsonKind(value: unknown): string {
+  if (Array.isArray(value)) return 'list';
+  return typeof value === 'object' ? 'object' : typeof value;
+}
+
+/** A kind with its article: an object, a list. */
+function article(kind: string): string {
+  return /^[aeiou]/u.test(kind) ? `an ${kind}` : `a ${kind}`;
 }
 
 /** An error's message. */

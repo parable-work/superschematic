@@ -134,6 +134,12 @@ pub struct QueueField {
     /// The column holds the value as JSON.
     #[serde(default)]
     pub json: bool,
+    /// The kind of JSON value a JSON column holds for the member's type,
+    /// `object` or `list`, or none for a JSON scalar. The message's Rust
+    /// type holds a claimed row to it, so this only says what the
+    /// descriptor says.
+    #[serde(default)]
+    pub shape: Option<String>,
     /// The column holds a list as a Postgres array.
     #[serde(default)]
     pub list: bool,
@@ -729,7 +735,7 @@ mod tests {
         "fields": [
             { "name": "sentAt", "column": "sent_at" },
             { "name": "priority", "column": "priority", "default": "low" },
-            { "name": "shipTo", "column": "ship_to", "json": true },
+            { "name": "shipTo", "column": "ship_to", "json": true, "shape": "object" },
             { "name": "tags", "column": "tags", "list": true },
             { "name": "dropAt", "column": "drop_at", "point": true },
             { "name": "wait", "column": "wait", "interval": true }
@@ -766,6 +772,7 @@ mod tests {
                     name: "sentAt".into(),
                     column: "sent_at".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: false,
@@ -778,6 +785,7 @@ mod tests {
                     name: "priority".into(),
                     column: "priority".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: Some("low".into()),
                     point: false,
@@ -790,6 +798,7 @@ mod tests {
                     name: "shipTo".into(),
                     column: "ship_to".into(),
                     json: true,
+                    shape: Some("object".into()),
                     list: false,
                     default: None,
                     point: false,
@@ -802,6 +811,7 @@ mod tests {
                     name: "tags".into(),
                     column: "tags".into(),
                     json: false,
+                    shape: None,
                     list: true,
                     default: None,
                     point: false,
@@ -814,6 +824,7 @@ mod tests {
                     name: "dropAt".into(),
                     column: "drop_at".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: true,
@@ -826,6 +837,7 @@ mod tests {
                     name: "wait".into(),
                     column: "wait".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: false,

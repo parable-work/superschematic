@@ -470,6 +470,31 @@ type NamedStatement struct {
 // lines joins a statement's lines.
 func lines(l ...string) string { return strings.Join(l, "\n") }
 
+// The kinds of JSON value a queue's JSON column holds for its field's type,
+// which the TypeScript client holds a claimed row to, as Go's and Rust's
+// types do: an object for a @jsonField type, a struct or a map, a list for
+// a list of them or a list of lists.
+const (
+	QueueJSONObject = "object"
+	QueueJSONList   = "list"
+)
+
+// QueueJSONShape is the kind of JSON value the JSON column of a field of
+// type ref holds, one of the QueueJSON constants, or "" for a JSON scalar,
+// which holds any value. structType says whether ref names a type of the
+// schema, a struct, rather than a scalar or an enum.
+func QueueJSONShape(ref ir.TypeRef, structType bool) string {
+	switch {
+	case ref.IsMap:
+		return QueueJSONObject
+	case ref.IsArray:
+		return QueueJSONList
+	case structType:
+		return QueueJSONObject
+	}
+	return ""
+}
+
 // The kinds of value a queue's column, or each element of a list column,
 // holds that a client converts on SQLite (D53, amended), where the column
 // is TEXT or INTEGER: a UUID, written in its lowercase hyphenated text; a

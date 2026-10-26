@@ -6,6 +6,7 @@ import {
   errorMessage,
   UNREADABLE,
   formatDuration,
+  jsonMemberValue,
   parseDuration,
   unset,
   type PostgresQueue,
@@ -213,11 +214,13 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
   queue.fields.forEach((field, i) => {
     let value = row[3 + i];
     if (value === null || value === undefined) return;
-    if (field.json && typeof value === 'string') {
+    if (field.json) {
+      // By the column's type, not the value's: queueTypes leaves a json or jsonb column's text unparsed, so its
+      // JSON is decoded here once, a JSON string among it.
       try {
-        value = JSON.parse(value);
+        value = jsonMemberValue(value, field);
       } catch (error) {
-        throw new Error(`message ${String(id)} of ${queue.table}: field ${field.name} holds no JSON: ${errorMessage(error)}`, { cause: error });
+        throw new Error(`message ${String(id)} of ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
       }
     } else if (field.list && typeof value === 'string') {
       // A list of a type pg does not know, such as citext[], arrives as its text.
@@ -234,11 +237,15 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
  * TypeScript types hold Generic.Int64 and every integer scalar, a date
  * its YYYY-MM-DD text, Temporal.Date's, where pg would make a Date at local
  * midnight, a POINT the location {lat, lon}, Geo.Location's, where pg would
- * make {x, y}, and an INTERVAL the canonical text of its duration,
- * Temporal.Duration's, where pg would make an object of its parts.
+ * make {x, y}, an INTERVAL the canonical text of its duration,
+ * Temporal.Duration's, where pg would make an object of its parts, and a
+ * json or jsonb column its text, which claimOf decodes once by the field.
  */
 const overrides: Readonly<Record<number, (value: string) => unknown>> = {
   20: value => Number(value),
+  // pg would decode json and jsonb itself, and a JSON string, "1", would then be decoded twice.
+  114: value => value,
+  3802: value => value,
   600: value => parsePoint(value),
   1016: value => parseArray(value).map(element => (element === null ? null : Number(element))),
   1082: value => value,

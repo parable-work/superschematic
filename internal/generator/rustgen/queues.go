@@ -99,6 +99,12 @@ type QueueField struct {
 	// a list of lists, or a JSON scalar, as the Go ORM marshals each.
 	JSON bool `json:"json,omitempty"`
 
+	// Shape is the kind of JSON value a JSON column holds for the field's
+	// type (sqlutil.QueueJSONShape), as queues.ts marks it: "object" or
+	// "list", or empty for a JSON scalar. The Rust client's types hold a
+	// claimed row to it already.
+	Shape string `json:"shape,omitempty"`
+
 	// List is a list the column holds as a Postgres array.
 	List bool `json:"list,omitempty"`
 
@@ -257,6 +263,9 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	anyJSON := sqlType == "JSON" || sqlType == "JSONB"
 	field.JSON = f.JsonField || ref.IsMap || ref.IsArrayOfArrays || (target != nil && target.JsonField) || (anyJSON && !ref.IsArray)
 	field.List = ref.IsArray && !field.JSON
+	if field.JSON {
+		field.Shape = sqlutil.QueueJSONShape(ref, target != nil)
+	}
 	switch {
 	case field.List && anyJSON:
 		return field, "is a list of JSON values, which a queue's message does not hold yet; hold it in a @jsonField type"

@@ -116,7 +116,8 @@ pub const ORDER_PLACED_QUEUE: &str = r#"{
     {
       "name": "shipTo",
       "column": "ship_to",
-      "json": true
+      "json": true,
+      "shape": "object"
     },
     {
       "name": "tags",

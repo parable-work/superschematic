@@ -29,6 +29,8 @@ export interface QueueField {
   readonly column: string;
   /** The column holds the value as JSON, which an enqueue writes with JSON.stringify. */
   readonly json?: boolean;
+  /** The kind of JSON value the column holds for the member's type, which a claim holds the row to. */
+  readonly shape?: 'object' | 'list';
   /** The column holds a list as a Postgres array. */
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
@@ -219,7 +221,7 @@ export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {
     { name: "priority", column: "priority", default: "low" },
     { name: "quantity", column: "quantity" },
     { name: "note", column: "note" },
-    { name: "shipTo", column: "ship_to", json: true },
+    { name: "shipTo", column: "ship_to", json: true, shape: "object" },
     { name: "tags", column: "tags", list: true },
   ],
   statements: {
