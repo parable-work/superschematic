@@ -66,6 +66,18 @@ type ORMInfo struct {
 	DefaultNearestK   int
 	HistoryActorCTE   string
 	ClearHistoryActor string
+
+	// SystemActor is the DB service's system actor when it names one, which
+	// asSystem() acts as (D87), and nil for the runtime's default.
+	// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
+	SystemActor      *ORMSystemActor
+	RequireUpdatedBy bool
+}
+
+// ORMSystemActor is outputs.sql.systemActor as orm.ts writes it.
+type ORMSystemActor struct {
+	ID   string
+	Name string
 }
 
 // ORMTable is a table as orm.ts writes it.
@@ -187,7 +199,7 @@ var encryptedStatements = []string{"stale", "reseal"}
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "transaction", "query", "exec"}
+var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "transaction", "query", "exec"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
 // no table. output holds the types the rows' members take theirs from.
@@ -231,8 +243,12 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMI
 		DefaultLimit:      sqlutil.DefaultLimit,
 		HistoryActorCTE:   sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor: sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
+		RequireUpdatedBy:  opts.Actor.RequireUpdatedBy,
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
+	if opts.Actor.SystemSet {
+		out.SystemActor = &ORMSystemActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
+	}
 	for i := range tables {
 		t := &tables[i]
 		info := types[t.Type]

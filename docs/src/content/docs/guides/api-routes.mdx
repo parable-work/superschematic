@@ -139,7 +139,9 @@ page places an order with
 Before a method runs, the server decodes every argument, checks it
 against its type and constraints, and answers 400 with every failure at
 once, keyed by path, as an RFC 9457 problem body. A top-level key an
-input type does not declare is refused too, by every server. A list of order lines
+input type does not declare is refused too, by every server, unless the
+type is `@allowUnknownFields` or the operation a `@webhook`, whose input
+drops it ([Webhooks](#webhooks)). A list of order lines
 must hold one to 50 lines, and a country must match `^[A-Z]{2}$`:
 
 <Snippet file="go/orders_test.go" symbol="TestValidation" />
@@ -531,6 +533,39 @@ Every SDK leaves it out, methods and tools alike, since the provider
 sends its own request from its own servers and no SDK holds the signing
 secret `@hmacVerified` checks. A route your own clients or services call
 is an ordinary route, not a webhook.
+
+A provider adds keys to its payloads over time, so a webhook's input
+reads only the keys its type declares and drops the others, in every
+server, where any other input refuses them (D87). The declared keys are
+checked as on any route, and the method gets its typed input with no
+manual route:
+
+```ts
+export abstract class PlaidWebhookEvent {
+  webhook_type: string;
+  webhook_code: string;
+  item_id: string;
+}
+
+export class PlaidWebhooks {
+  @webhook
+  @publicRoute
+  @hmacVerified({ provider: "plaid" })
+  @rest(HttpMethod.POST, "plaid/webhook")
+  plaidWebhook(input: PlaidWebhookEvent): Accepted {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+A body with an `environment` key reaches `plaidWebhook` as the three
+declared keys; one without `item_id` is refused. A key is declared only as
+the type spells it, so `Item_Id` is dropped too, in Go as elsewhere. A
+nested object's keys follow its own type: mark it `@allowUnknownFields` to
+drop them in every decoder of it
+([Modeling types](/superschematic/guides/modeling-types/#lenient-decoding)).
+A provider whose payload is a closed contract keeps the refusal with
+`@strictJSON` on the input type.
 
 `@hmacVerified({ provider: "stripe" })` puts a signature check in front of
 the route, in every server. `Implementations` gains a verifier for each

@@ -556,16 +556,52 @@ soft-deletable:
 
 <Snippet file="testdata/generated/orm/shop-db/interfaces.go" symbol="ReviewRepositoryInterface" />
 
-`DeleteOne` records who deleted the row, so it needs the acting user on the
-context, set with `orm.WithUserID`; without one it returns
-`ErrNoUserInContext`, as `CreateOne` does on a table with `createdBy`. In
-TypeScript the acting user is the ORM's: `deps.orm.as(ctx.principal)` or
-`deps.orm.withUser(id)`, and a write that needs one throws `NoUserError`
-without it. The generated API server authenticates callers but
-does not tell the ORM who they are, so each method of the orders service
-that writes rows hands the caller over:
+`DeleteOne` records who deleted the row, so it needs an acting user
+([Who wrote a row](#who-wrote-a-row)): in an operation its caller, and in
+a job or a worker the user it names.
 
-<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
+## Who wrote a row
+
+A table's `createdBy`, `updatedBy` and `deletedBy` fields record the
+acting user: a create stamps `createdBy`, and `updatedBy` with it, an
+update `updatedBy`, and a soft delete `deletedBy`. Each holds a user's id,
+a scalar such as `Identity.UUID`, with no foreign key, so no user row need
+stand behind it. A create of a table with `createdBy`, a write of one with
+a required `updatedBy` and any soft delete need an acting user, and fail
+without one: `ErrNoUserInContext` in Go, `NoUserError` in TypeScript. An
+update with none leaves a nullable `updatedBy` as it was.
+
+In an operation, the acting user is its caller, the principal its route
+authenticated (D87), with nothing in the implementation:
+
+- Go: each route runs its operation with a context that acts as the caller
+  (`orm.WithCaller`), so the repositories of `Deps.DB` stamp the caller
+  wherever the implementation passes that context on.
+- TypeScript: the router runs each operation within its caller, and
+  `deps.orm`, which the entrypoint opens with no user of its own, acts as
+  it, in a transaction too.
+
+A job, a worker and a manual route's handler serve no caller, so their
+writes act as no one until they name a user. For a write no person makes,
+`orm.AsSystem(ctx)` in Go and `deps.orm.asSystem()` in TypeScript act as
+the database's system actor, a fixed id its DB service may name:
+
+```ts
+outputs: {
+  sql: { systemActor: { id: "3f2c1a9e-7b4d-4e8a-9c61-0d5e2f7a8b10", name: "sync" } },
+}
+```
+
+Unset, it is `00000000-0000-4000-8000-000000000000`, named `system`, the
+id a Go API exports as `SystemUserID`. `orm.WithUserID(ctx, id)` in Go,
+and `deps.orm.withUser(id)` or `deps.orm.as(principal)` in TypeScript,
+act as another user wherever they run, in an operation too;
+`deps.orm.withUser(null)` acts as no one. A caller whose subject is no
+UUID, as a custom authenticator may give, is no acting user.
+
+`requireUpdatedBy: true` in the DB service's `outputs.sql` makes an update
+of a table with `updatedBy` need an acting user too, so a nullable
+`updatedBy` is never left as it was by a write that forgot to name one.
 
 ## Transactions
 

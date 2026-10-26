@@ -128,6 +128,16 @@ path for when the store is unavailable.
   `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
+- **The caller wrote the row.** `createdBy`, `updatedBy` and `deletedBy`
+  are stamped with each operation's caller: write through `Deps.orm`
+  (TypeScript) or with the route's `ctx` (Go), never
+  `.as(ctx.principal)` or `WithUserID` by hand. A job or a worker has no
+  caller, so it writes as `deps.orm.asSystem()` or `orm.AsSystem(ctx)`,
+  the system actor `outputs.sql.systemActor` names; don't invent a user
+  row for it.
+- **Payloads you don't control gain keys.** A `@webhook`'s input drops the
+  keys its type does not declare; mark any other such type
+  `@allowUnknownFields`, rather than a manual route to read the body.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`

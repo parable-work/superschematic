@@ -11716,3 +11716,117 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D87. An operation's writes record its caller, a write no one asks for records the database's system actor, and a webhook's input drops the keys its type does not declare
+
+Two gaps of a real application's port, F2 and F3 of round 3:
+
+- The TypeScript entrypoint opened `Deps.orm` acting as no one, so every
+  write an operation made had to start with `deps.orm.as(ctx.principal)`.
+  One that forgot left a nullable `updatedBy` unstamped, silently, and
+  failed on a required `createdBy` with `NoUserError`. The Go routes did
+  not tell the ORM who called either, so each Go method that wrote rows
+  hand-copied the principal into the ORM's context (acme's `actingUser`).
+  A job or a worker had no caller at all, so a table with a required
+  `createdBy` made a project invent a user row to write as.
+- Every server refused a top-level key an input type does not declare
+  (D42), and nothing opted out: `@strictJSON` only made decoders
+  stricter. A provider such as Plaid or Stripe adds keys to its webhooks
+  over time, so a typed `@webhook` input broke in production on the
+  provider's next release, and the only way out was
+  `@manualRouteRegistration`, which gave up the typed, checked input.
+
+This entry adds:
+
+- **The caller.** A TypeScript operation's `deps.orm` acts as its caller,
+  and a Go route runs its operation with a context that does.
+- **The system actor.** `outputs.sql.systemActor` on a DB service,
+  `asSystem()` on the TypeScript ORM and `AsSystem(ctx)` in the Go ORM,
+  and `outputs.sql.requireUpdatedBy`.
+- **Unknown keys.** `@allowUnknownFields` on a type, and a `@webhook`'s
+  input that drops the keys its type does not declare.
+
+### The caller and the system actor
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| In TypeScript `deps.orm` is resolved per request: an ORM opened with no user of its own, as every entrypoint opens `Deps.orm`, acts as the caller of the operation being run. The runtime's `mountOperation` runs each implementation within its caller, `ctx.principal`, held in AsyncLocalStorage (`./caller`'s `withCaller` and `currentCaller`, which `./hono` exports), which Bun and Node.js have and a Worker has under `nodejs_als`, a flag every Worker version names already (D64, amended). The caller carries into what the operation awaits and starts, a transaction among them, and each statement reads it when it is written. | `ctx.orm`, a second handle each operation gets beside `deps.orm`: an implementation would still have to remember to use it, the slip F2 is about, and each API's interfaces would name a context type of their own. Building the implementation per request, which rebuilds its clients each time. |
+| In Go each route runs its operation with `callerContext(r.Context())`, from `caller.go`, which apigen writes for an API with a Deps database: `orm.WithCaller(ctx, session.GetPrincipalID(ctx))`. The Go ORM reads its user from the context, so binding the context is the Go form of the rule, and a method stamps the caller wherever it passes the context on. The identity runtime and both auth providers put the principal's ID there; `WithCaller` parses it with the ORM's `ParseUserID`, which reads a UUID's base62 or hyphenated form. | A middleware outside `RegisterRoutes`, which runs before the route's auth step has a principal. The ORM reading the principal itself, which would make every ORM module depend on the HTTP runtime. |
+| An explicit user wins: `as(principal)`, `withUser(id)`, `asSystem()` and `createOrm(pool, user)` act as whom they name wherever they run, an operation included, and `withUser(null)`, `as(null)` and `createOrm(pool, null)` as no one. In Go, `WithCaller` keeps a user the context has, and `WithUserID` and `AsSystem` replace it. | The caller over a user the code names, which would leave no way to write as another. |
+| A job, a worker, a manual route's handler and a route with no caller act as no one: the TypeScript `mountManualOperation` runs its handler within no caller, and the Go manual handler gets the request's own context. A write there that needs a user still refuses without one. | The system actor by default outside a request, which would stamp every write that forgot to name its actor with it, silently. Binding a manual route, whose handler owns the request. |
+| A caller whose subject is no UUID, as a custom authenticator may give, binds no one in TypeScript, and a principal ID `ParseUserID` refuses binds no one in Go. `as(principal)` still throws for one. | Throwing on every statement of such an operation, its reads included. |
+| The system actor is per DB service, `outputs.sql.systemActor: { id, name? }`: a hyphenated UUID, and a name an app may show. Unset it is `00000000-0000-4000-8000-000000000000`, named `system`, the ID a Go API already exports as `SystemUserID`. `asSystem()` on the TypeScript ORM and on a transaction, and `AsSystem(ctx)` in the Go ORM, act as it; `systemActorOf` and `DEFAULT_SYSTEM_ACTOR` (TypeScript) and `SystemActorID` and `SystemActorName` (Go) name it. The TypeScript definition carries it only when the service names one, and `ormOf` refuses one that is no UUID when it opens. | `outputs.orm`, an output key with no generator of its own, where `outputs.sql` already configures both ORMs (`encryption`). A reserved actor the identity tables seed. No default, which would make every project name one before its first job writes a row. |
+| The system actor needs no user row: an audit field is a scalar with no foreign key, and a field named `createdBy` whose type is a table is a relation, which `sqlutil` classifies before its audit name, so no audit column references the user table. Nothing is seeded, and D88's role seeds are untouched. | Seeding a user row in `create.sql` and the plans, whose required fields, the login and the name among them, no generator can fill for every user table. |
+| `outputs.sql.requireUpdatedBy: true` makes a write that would leave a nullable `updatedBy` as it was refuse without an acting user, as a required one does: a create, `updateOne`, `updateMany` and an upsert's update, with `NoUserError` in TypeScript and `ErrNoUserInContext` in Go. Unset, an update with no user leaves it as it was, as before. | On by default, which would fail every update a job makes until it names an actor. |
+| A Go ORM of a table with a nullable `updatedBy` compiles: a create stamped it with `GetUserID`, a value, where the field is a pointer, and `ApplyTo` dereferenced the update's pointer into it. A create now stamps it through its pointer, and only with a user, as TypeScript does. No fixture had one, so nothing caught it. | |
+| A Rust server's `Deps` holds a pool and no ORM (D57), so it has no caller to bind and no system actor. | |
+
+### Unknown keys
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@allowUnknownFields` (`TypeDef.AllowUnknownFields`), from `@superschematic/schema`, marks a type whose every decoder accepts a key it does not declare and drops it, so the code sees only the declared fields, which are checked as before. | `@lenientJSON`, when "lenient" already names the schema runtimes' coercing parse. Passing the keys through, which an implementation would come to read and a later declaration would change the meaning of. |
+| Each language drops them. Go: `UnmarshalJSON` keeps only the declared keys before it decodes (`keepDeclaredKeys`), so a key that differs in case alone, which `encoding/json` would read into the field, is dropped too. TypeScript: `parse<Type>Json`, its YAML and non-strict siblings drop the type's own keys, and `parse<Type>FromJSON` drops them wherever the type is nested, as a router reads an input after its validator. Python: pydantic's `extra='ignore'`, which every type that is not `@strictJSON` has already. Rust: `prepare_<type>` drops them whatever its caller's policy (`drop_unknown_fields`), and serde skips them. The Go, TypeScript and Python schema runtimes' strict parse and serialize accept and drop them, the TypeScript one reading `allowUnknownFields` from the IR and `x-allowUnknownFields` from a schema document. | Leaving Go's decoding to `encoding/json`'s matching, which reads `Item_Id` into `item_id` where every other language drops it. |
+| It applies to the type alone: a nested type's undeclared keys follow its own declaration, as `@strictJSON`'s do. | Leniency at every level the type reaches, which needs a lenient variant of every nested decoder in four languages. |
+| A server reads an input whose operation allows unknown keys (`EndpointInfo.InputAllowsUnknownFields`) with only the keys its type declares, spelled as declared: Go with `bodyargs.ReadInputDroppingUnknown`, TypeScript by handing the validator `declaredKeysOnly(value, keys)` from the runtime (a type that is `@allowUnknownFields` drops them in its own parser), Rust by parsing with `UnknownFields::Allow`, after which serde reads the declared fields alone. Every other input refuses them, as D42 says. | Skipping Go's check alone, which lets `encoding/json` read a key that differs in case. |
+| A `@webhook`'s input drops the keys its type does not declare unless the type is `@strictJSON` or `@denyUnknownFields`, which keep refusing them; a type that is `@allowUnknownFields` drops them on any route. The default belongs to the operation: the type's decoders elsewhere stay as declared. | The loader marking a webhook's input type `@allowUnknownFields`, which would loosen every other operation that takes the type, and cannot reach a type a dependency declares. Requiring the decorator on each webhook's input, which every provider's payload needs. |
+| A type that is `@allowUnknownFields` and `@strictJSON` or `@denyUnknownFields` fails the load, and so does a `@projection` class with it. | |
+| OpenAPI is unchanged: an object schema without `additionalProperties` already admits them. | `additionalProperties: true` on each such schema, a change of every document for no reader. |
+
+What changed while building:
+- The webhook default was to set the type's flag; it moved to the
+  operation for the reasons in the table.
+- Go's typed decoders, `<Type>FromJSON` among them, already ignored an
+  undeclared key: every generated struct has an `UnmarshalJSON`, which the
+  strict decoder's `DisallowUnknownFields` does not reach. Only the route
+  refused one, so only the route and `UnmarshalJSON` changed.
+
+Status: built.
+- **The caller and the system actor:**
+  `TestTypeScriptOperationsActAsTheirCallerAndWorkersAsTheSystem` and
+  `TestGoOperationsActAsTheirCallerAndWorkersAsTheSystem` (servergen,
+  `testdata/caller`) run a generated server and its worker over a
+  database with the user model and a `Note` with a required `createdBy`
+  and a nullable `updatedBy`, on Postgres. A signed-in user's operation
+  writes a note through `Deps` with no `.as()` or `WithUserID`, and
+  enqueues a follow-up in the same transaction: its `createdBy` and
+  `updatedBy` are the caller. Another user's update stamps `updatedBy`
+  with them, and an operation that asks for the system actor with it. The
+  worker is refused a write as no one, then writes the follow-up as the
+  system actor the database names. A router that binds no caller fails
+  the TypeScript test. `TestRepositoriesOnPostgres/fixture-actor-db`
+  (`actor.test.ts`) holds the TypeScript rules: the caller across awaits
+  and a transaction, the explicit users and null, a subject that is no
+  UUID, the default and a named system actor, a malformed one, and
+  `requireUpdatedBy` over `updateOne`, `updateMany` and `upsertOne`.
+  `TestGeneratedORMActsAsTheCallerAndTheSystem` (ormgen) holds the Go
+  ORM's, with and without `requireUpdatedBy`, and fixture-api-session's
+  golden `caller.go` and `routes.go` the Go routes. Acme's shop-orders
+  drops its `actingUser`.
+- **Unknown keys:** `TestAllowUnknownFieldsGeneratedDecoders` (parity)
+  runs the Go, TypeScript, Python and Rust decoders of one contract over
+  the same payloads: each accepts and drops an undeclared key, at the root
+  and in a nested `@allowUnknownFields` type, and one that differs in
+  case, and refuses a declared key of the wrong type.
+  `TestGeneratedWebhooksRouter` (TypeScript),
+  `TestWebhooksAPICrateBuildsAndRoutes` (Rust) and
+  `TestWebhookRoutesDropUndeclaredKeys` (Go) post fixture-webhooks-api's
+  `PlaidItemEvent` (`webhook_type`, `webhook_code`, `item_id`) with an
+  extra `environment` key, a key that differs in case and a nested
+  error's extra key: the method gets the declared keys, typed, and a
+  mistyped declared key is refused, and a missing one in TypeScript and
+  Rust; the `@strictJSON` `LedgerEvent` refuses `environment`.
+  `TestReadInputDroppingUnknownKeepsOnlyTheDeclaredKeys`, the runtime's
+  `declaredKeysOnly` test, the Rust runtime's
+  `unknown_fields_are_dropped_for_a_lenient_type`, the schema runtimes'
+  strict-parse tests in Go, TypeScript and Python,
+  `TestAllowUnknownFieldsContradictionsAreRefused`,
+  `TestWebhookInputsAllowUnknownFields` and the writers' round trip of
+  fixture-webhooks-api hold the rest.
+
+Left: a lenient decoding that reaches every nested type of a webhook's
+input; the caller in Rust, once a Rust server's `Deps` holds an ORM; a
+manual route's handler, which may run its writes within `withCaller`
+itself; a missing required string, which the Go route still reads as
+`""` (D14, amended), so a Go webhook accepts one the TypeScript and Rust
+servers refuse. The rules are reversible until the first release.

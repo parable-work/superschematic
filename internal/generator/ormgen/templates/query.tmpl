@@ -648,7 +648,11 @@ func (u *{{ .TypeName }}Update) ApplyTo(row *types.{{ .TypeName }}) {
 	{{- range .Fields }}
 	{{- if eq .Name "updatedBy" }}
 	if u.UpdatedBy != nil {
+		{{- if .IsRequired }}
 		row.UpdatedBy = *u.UpdatedBy
+		{{- else }}
+		row.UpdatedBy = u.UpdatedBy
+		{{- end }}
 	}
 	{{- end }}
 	{{- end }}

@@ -374,3 +374,7 @@ export type {
   VectorMetric,
   VectorRepository,
 } from './orm.js';
+// The system actor an ORM's asSystem() acts as, for a job's or a worker's
+// writes (D87).
+export { DEFAULT_SYSTEM_ACTOR, systemActorOf } from './orm.js';
+export type { SystemActor } from './orm.js';

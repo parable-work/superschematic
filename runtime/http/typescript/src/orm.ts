@@ -1,10 +1,11 @@
 import pg from 'pg';
+import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
-import { uuidToDb, uuidValue } from './uuid.js';
+import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
 The generated repositories' runtime (D79): a DB service's TypeScript types
@@ -20,11 +21,19 @@ A repository reads and writes a table's rows through the value codec
 foreign key as <field>Id, a UUID in its base62 wire form, a BIGINT a number,
 a TIMESTAMPTZ a Date, a DATE its YYYY-MM-DD text, a JSON column its value.
 
-The acting user stamps createdBy, updatedBy and deletedBy: orm.withUser(id)
-or orm.as(ctx.principal) returns the ORM acting as that user. A write the
-Go ORM refuses without one, a create of a table with createdBy and any
-delete of a soft-deletable table, throws NoUserError here too. updatedAt is
-the time of each update; createdAt the database's default.
+The acting user stamps createdBy, updatedBy and deletedBy. An ORM opened
+with no user of its own, as an API's Deps.orm is, acts as the caller of the
+operation being run (D87): a generated router runs each implementation
+within its caller (./caller), so an operation's writes record who called,
+and a job's, a worker's and a manual route's record no one.
+orm.withUser(id) or orm.as(principal) returns the ORM acting as that user,
+or as no one for null, wherever it runs, and orm.asSystem() as the
+database's system actor, which a job's or a worker's writes act as. A
+write the Go ORM refuses without one, a create of a table with createdBy
+and any delete of a soft-deletable table, throws NoUserError here too, and
+so does an update of a table with updatedBy when the DB service sets
+requireUpdatedBy. updatedAt is the time of each update; createdAt the
+database's default.
 
 A soft-deletable table, one with deletedAt, stamps deletedAt (and
 deletedBy) on deleteOne and deleteMany, and leaves its deleted rows out of
@@ -196,8 +205,31 @@ export interface OrmDefinition {
   /** The CTE a versioned table's hard delete sets the history actor through, and the statement that clears it. */
   readonly historyActorCTE: string;
   readonly clearHistoryActor: string;
+  /** Who asSystem() acts as: the DB service's outputs.sql.systemActor; DEFAULT_SYSTEM_ACTOR unless set (D87). */
+  readonly systemActor?: SystemActor;
+  /** An update of a table with updatedBy needs an acting user, as a create of a table with createdBy does (D87). */
+  readonly requireUpdatedBy?: boolean;
   /** The tables, by the member of the ORM that holds each one's repository. */
   readonly tables: Readonly<Record<string, TableDefinition>>;
+}
+
+/** A database's system actor, which asSystem() acts as (D87): a user's id and the name an app shows for it. */
+export interface SystemActor {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * The system actor of a database whose DB service names none: the fixed id
+ * the generated Go APIs export as SystemUserID. An audit field holds a
+ * user's id with no foreign key, so it needs no row of the user table.
+ */
+export const DEFAULT_SYSTEM_ACTOR: SystemActor = { id: '00000000-0000-4000-8000-000000000000', name: 'system' };
+
+/** The system actor asSystem() acts as, its id in the base62 wire form a row holds. */
+export function systemActorOf(orm: OrmDefinition): SystemActor {
+  const actor = orm.systemActor ?? DEFAULT_SYSTEM_ACTOR;
+  return { id: uuidFromDb(actor.id), name: actor.name };
 }
 
 /** What a repository runs a statement with: a pg Pool, PoolClient or Client. */
@@ -234,7 +266,9 @@ export class NotFoundError extends Error {
 
 /** The error of a write that stamps the acting user with none: orm.withUser(id) or orm.as(principal) gives one. */
 export class NoUserError extends Error {
-  constructor(message = 'no acting user: the write stamps who made it; act as one with orm.withUser(id) or orm.as(ctx.principal)') {
+  constructor(
+    message = 'no acting user: the write stamps who made it; act as one with orm.withUser(id), orm.as(principal) or orm.asSystem(), or write in an operation, whose caller acts'
+  ) {
     super(message);
     this.name = 'NoUserError';
   }
@@ -460,7 +494,10 @@ export interface SoftDeleteRepository<Row, Create, Update, Filter, OrderField ex
 
 /** What createOrm and ormOf take beside the pool. */
 export interface OrmOptions {
-  /** The acting user's id, as withUser takes one. */
+  /**
+   * The acting user's id, as withUser takes one, or null for no one.
+   * Unset, the ORM acts as the caller of the operation being run (D87).
+   */
   readonly user?: string | null;
   /**
    * The keys of the database's Encrypted<T> fields (D85): the DB service's
@@ -478,12 +515,17 @@ export interface Actor {
 
 /** The members an ORM and a transaction hold beside their repositories. */
 export interface OrmMembers<R> {
-  /** The acting user's id, or undefined. */
+  /**
+   * The acting user's id, or undefined: for an ORM opened with no user of
+   * its own, the caller of the operation being run (D87).
+   */
   readonly actingUser: string | undefined;
-  /** The ORM acting as the user id, which stamps createdBy, updatedBy and deletedBy. */
+  /** The ORM acting as the user id, which stamps createdBy, updatedBy and deletedBy, or as no one for null, wherever it runs. */
   withUser(id: string | null | undefined): this;
-  /** The ORM acting as the principal's subject, or as no one without a principal. */
+  /** The ORM acting as the principal's subject, or as no one without a principal, wherever it runs. */
   as(principal: Actor | null | undefined): this;
+  /** The ORM acting as the database's system actor (systemActorOf), for a job's or a worker's writes (D87). */
+  asSystem(): this;
   /** Runs fn in a transaction, with repositories bound to it, and commits; rolls back when fn throws. */
   transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>): Promise<T>;
 }
@@ -501,7 +543,7 @@ export type OrmTx<R> = R &
   };
 
 /** The members a repository's table may not take, which an ORM holds itself. */
-export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'transaction', 'query', 'exec'];
+export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'transaction', 'query', 'exec'];
 
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
@@ -547,7 +589,25 @@ async function run(runner: Runner, text: string, values: unknown[]): Promise<{ r
 
 type Values = Record<string, unknown>;
 
-/** The repository of one table over a runner, acting as user. */
+/**
+ * Who an ORM acts as: a user's id, no one, or CALLER, the caller of the
+ * operation being run, for an ORM opened with no user of its own (D87).
+ */
+const CALLER = Symbol('caller');
+type Acting = string | undefined | typeof CALLER;
+
+/**
+ * The user acting resolves to now. A caller whose subject is no UUID, a
+ * custom authenticator's, is no user an audit field can hold, so it binds
+ * no one; as(principal) still refuses one.
+ */
+function actingUser(acting: Acting): string | undefined {
+  if (acting !== CALLER) return acting;
+  const subject = currentCaller();
+  return subject !== undefined && uuidValue(subject) !== undefined ? subject : undefined;
+}
+
+/** The repository of one table over a runner, acting as whom acting resolves to. */
 class TableRepository {
   private readonly encrypted: readonly TableColumn[];
 
@@ -555,10 +615,15 @@ class TableRepository {
     private readonly orm: OrmDefinition,
     private readonly def: TableDefinition,
     private readonly runner: Runner,
-    private readonly user: string | undefined,
+    private readonly acting: Acting,
     private readonly keys: FieldKeyring | undefined
   ) {
     this.encrypted = def.columns.filter(c => c.encrypted);
+  }
+
+  /** The acting user, resolved when a statement is written. */
+  private get user(): string | undefined {
+    return actingUser(this.acting);
   }
 
   private get clauses(): Clauses {
@@ -884,7 +949,7 @@ class TableRepository {
     if (this.audit('createdBy')) out[this.audit('createdBy')!.name] = this.requireUser();
     const updatedBy = this.audit('updatedBy');
     if (updatedBy) {
-      if (updatedBy.required) out[updatedBy.name] = this.requireUser();
+      if (updatedBy.required || this.orm.requireUpdatedBy) out[updatedBy.name] = this.requireUser();
       else if (this.user !== undefined) out[updatedBy.name] = this.user;
     }
     return out;
@@ -1018,6 +1083,8 @@ class TableRepository {
       if (by !== undefined && by !== null) {
         args.push(this.encode(by, updatedBy, 'updatedBy'));
         sets.push(fill(s.updatedBy, args.length));
+      } else if (this.orm.requireUpdatedBy) {
+        throw new NoUserError();
       }
     }
   }
@@ -1152,11 +1219,11 @@ function jsonNull(column: TableColumn): boolean {
   return Boolean((column.json || column.jsonText) && column.required);
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, user: string | undefined, keys: FieldKeyring | undefined): Record<string, TableRepository> {
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, user, keys);
+    out[member] = new TableRepository(orm, def, runner, acting, keys);
   }
   return out;
 }
@@ -1167,8 +1234,8 @@ function userOf(id: string | null | undefined): string | undefined {
   return id;
 }
 
-/** A transaction over client, acting as user, with the field keys. */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefined, keys: FieldKeyring | undefined): OrmTx<R> {
+/** A transaction over client, acting as whom acting resolves to, with the field keys. */
+function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = async <Row>(text: string | OrmQueryConfig, values?: readonly unknown[]): Promise<OrmQueryResult<Row>> => {
     const config = typeof text === 'string' ? { text, values: [...(values ?? [])] } : { ...text, values: [...(text.values ?? values ?? [])] };
@@ -1176,10 +1243,13 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefi
     return { rows: result.rows as Row[], rowCount: result.rowCount };
   };
   return {
-    ...repositories(orm, runner, user, keys),
-    actingUser: user,
+    ...repositories(orm, runner, acting, keys),
+    get actingUser() {
+      return actingUser(acting);
+    },
     withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys),
     as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys),
+    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
   } as unknown as OrmTx<R>;
@@ -1188,23 +1258,29 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefi
 /**
  * The repositories of a database's tables over pool, as its types package's
  * ./orm entry describes them, acting as the user options names, or as the
- * user it is when a string: createOrm there calls it with the definitions
- * and types the result. The field keys are read once, and a malformed
- * secret throws FieldEncryptionError here.
+ * user it is when a string, or as no one for null; with no user, as the
+ * caller of the operation being run (D87). createOrm there calls it with
+ * the definitions and types the result. The field keys are read once, and
+ * a malformed secret throws FieldEncryptionError here.
  */
 export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | null | OrmOptions): Orm<R> {
   const opts: OrmOptions = typeof options === 'object' && options !== null ? options : { user: options };
   const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
-  return ormWith<R>(pool, orm, userOf(opts.user), keys);
+  // A system actor that is no UUID throws here, not at a job's first write.
+  systemActorOf(orm);
+  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys);
 }
 
-function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: string | undefined, keys: FieldKeyring | undefined): Orm<R> {
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false };
   return {
     ...repositories(orm, runner, acting, keys),
-    actingUser: acting,
+    get actingUser() {
+      return actingUser(acting);
+    },
     withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys),
     as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys),
+    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>): Promise<T> {
       const client = await pool.connect();
       // A connection whose transaction could not be ended is not returned

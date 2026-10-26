@@ -39,8 +39,10 @@ type repositoryCase struct {
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
 // the repositories; fixture-vault-db's Encrypted<T> fields (D85), sealed,
-// opened, refused and resealed; and fixture-vectors-db's decimals, vectors
-// and nearest (D84), on the Postgres with pgvector.
+// opened, refused and resealed; fixture-actor-db's acting user, the
+// caller of the operation being run and the system actor (D87); and
+// fixture-vectors-db's decimals, vectors and nearest (D84), on the
+// Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -90,6 +92,12 @@ var repositoryCases = []repositoryCase{
 		"deleting a category clears the references SET NULL names, and keeps their rows",
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
 		"an upsert by a unique @index over an expression, or with a where, infers the index",
+	}},
+	{fixture: "fixture-actor-db", files: []string{"actor.test.ts"}, tests: []string{
+		"an ORM opened with no user acts as the caller of the operation it runs in, and as no one outside one",
+		"withUser, as and asSystem act as whom they name wherever they run, and a transaction as its ORM",
+		"asSystem acts as the DB service's system actor, the default one unless it names another",
+		"requireUpdatedBy refuses an update with no user that would leave updatedBy as it was",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

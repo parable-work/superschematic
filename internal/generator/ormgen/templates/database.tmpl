@@ -4,8 +4,8 @@ package orm
 
 import (
 	"context"
-{{- if .VersionGraphs }}
 	"encoding/json"
+{{- if .VersionGraphs }}
 	"errors"
 {{- end }}
 	"fmt"
@@ -213,6 +213,66 @@ func GetUserID(ctx context.Context) {{ .UserIDGoType }} {
 func HasUserID(ctx context.Context) bool {
 	_, ok := ctx.Value(userContextKey).({{ .UserIDGoType }})
 	return ok
+}
+
+// WithCaller returns ctx acting as the caller of a request, the principal
+// whose ID is id, as a generated route binds the context of each operation
+// it runs (D87): a write the implementation makes with ctx stamps
+// createdBy, updatedBy and deletedBy with the caller. ctx keeps a user it
+// already has, and an id that is not a user ID binds no one.
+func WithCaller(ctx context.Context, id string) context.Context {
+	if id == "" || HasUserID(ctx) {
+		return ctx
+	}
+	userID, err := ParseUserID(id)
+	if err != nil {
+		return ctx
+	}
+	return WithUserID(ctx, userID)
+}
+
+// ParseUserID reads a user ID from its text, as a principal's ID holds it:
+// a UUID's base62 wire form, or hyphenated.
+func ParseUserID(text string) ({{ .UserIDGoType }}, error) {
+	var userID {{ .UserIDGoType }}
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return userID, err
+	}
+	if err := json.Unmarshal(quoted, &userID); err != nil {
+		return userID, fmt.Errorf("user ID %q: %w", text, err)
+	}
+	return userID, nil
+}
+
+{{- if .Actor.SystemSet }}
+// SystemActorID is the user AsSystem acts as (D87), the DB service's
+// outputs.sql.systemActor. An audit field holds a user's ID with no
+// foreign key, so it needs no row of the user table.
+{{- else }}
+// SystemActorID is the user AsSystem acts as (D87): the DB service's
+// outputs.sql.systemActor names none, so it is the ID the generated Go APIs
+// export as SystemUserID. An audit field holds a user's ID with no foreign
+// key, so it needs no row of the user table.
+{{- end }}
+var SystemActorID = mustParseUserID({{ printf "%q" .Actor.SystemID }})
+
+// SystemActorName is the name an app shows for SystemActorID.
+const SystemActorName = {{ printf "%q" .Actor.SystemName }}
+
+// AsSystem returns ctx acting as the system actor, SystemActorID, for a
+// write no request's caller makes, a job's or a worker's: it stamps
+// createdBy, updatedBy and deletedBy with SystemActorID (D87).
+func AsSystem(ctx context.Context) context.Context {
+	return WithUserID(ctx, SystemActorID)
+}
+
+func mustParseUserID(text string) {{ .UserIDGoType }} {
+	userID, err := ParseUserID(text)
+	if err != nil {
+		panic(err)
+	}
+	return userID
 }
 {{- if .HasHistoryActor }}
 

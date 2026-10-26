@@ -1,0 +1,17 @@
+# caller-go-api on its default Go server, and its worker, over
+# caller-db, on the local target.
+kind: Stack
+types:
+  Notes:
+    name: Notes
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: caller-go-api, kind: API }
+      expose:
+        - service: { name: caller-go-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

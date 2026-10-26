@@ -366,6 +366,20 @@ it to, so a message that comes again files none:
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
+A worker serves no request, so its writes act as no one: the ORM refuses
+a create of a table with `createdBy`, and a soft delete, until the method
+names whom they act as. `orm.AsSystem(ctx)` in Go and
+`deps.orm.asSystem()` in TypeScript act as the database's system actor
+([Who wrote a row](/superschematic/guides/database-tables/#who-wrote-a-row)):
+
+```ts
+async syncItem(message) {
+  await deps.orm.asSystem().transaction(async tx => {
+    await tx.lineItem.createOne({ ...row });
+  });
+},
+```
+
 A method that returns nil, or resolves, or returns `Ok`, completes its
 message. One that returns an error, or panics, or rejects, fails it: the
 message is due again after the queue's backoff, doubled for each attempt

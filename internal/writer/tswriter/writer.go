@@ -117,8 +117,7 @@ var symbolPackages = map[string]string{
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
 	"decrypted":         "@superschematic/schema",
-	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
-	"allowUnknownFields": "@superschematic/schema",
+	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema", "allowUnknownFields": "@superschematic/schema",
 	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
 	"uiControl": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the

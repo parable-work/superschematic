@@ -250,8 +250,9 @@ Here is `FeedItem` as the Rust types crate declares it:
 By default the decoders are lenient about keys a type does not declare, in
 the way each language usually is:
 
-- Go: `FeedItemFromJSON` refuses an unknown key and `FeedItemFromJSONNonStrict`
-  skips it.
+- Go: `FeedItemFromJSON` and `FeedItemFromJSONNonStrict` skip an unknown
+  key, as `encoding/json` does; a server refuses one at the top level of
+  an input body.
 - TypeScript: `parseFeedItemJson` refuses one and `parseFeedItemJsonNonStrict`
   skips it.
 - Python: the pydantic models skip unknown keys.
@@ -280,6 +281,41 @@ payload with an extra `colour` key, in each language:
 
 `@denyUnknownFields` is the Rust half alone: it adds
 `#[serde(deny_unknown_fields)]` and changes no other language.
+
+## Lenient decoding
+
+`@allowUnknownFields` on a type goes the other way: every decoder of it,
+in every language, accepts a key it does not declare and drops it, so the
+code sees only the declared fields, which are checked as before (D87). A
+server reading it as an operation's input drops the key too, where it
+refuses one for any other input type. It suits a payload a producer newer
+than its consumer sends: a provider's webhook, whose input reads this way
+by default ([Webhooks](/superschematic/guides/api-routes/#webhooks)).
+
+```ts
+import { allowUnknownFields } from "@superschematic/schema";
+
+@allowUnknownFields
+export abstract class PlaidError {
+  error_code: string;
+  error_message: Nullable<string>;
+}
+```
+
+- Go: `UnmarshalJSON` keeps only the declared keys before it decodes, so
+  `PlaidErrorFromJSON` drops `display_message`, and `Error_Code`, which
+  `encoding/json` would read into `error_code`.
+- TypeScript: `parsePlaidErrorJson` and its siblings drop the keys, and so
+  does `parsePlaidErrorFromJSON`, which reads the type where it is nested.
+- Python: the pydantic model skips them, as it does for any type.
+- Rust: `prepare_plaid_error` drops them whatever its caller asks, and
+  serde skips them.
+
+The schema runtimes' strict parse and serialize accept and drop them too.
+A key is declared only as the type spells it. It applies to that type
+only: a nested type's undeclared keys follow its own declaration. A type
+is never both `@allowUnknownFields` and `@strictJSON` or
+`@denyUnknownFields`.
 
 ## Environment variables
 

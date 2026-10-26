@@ -325,7 +325,7 @@ func createCheckoutsGetCheckoutHandler(impl CheckoutsImplementation) gohttp.Hand
 		}
 
 		// Call implementation
-		result, err := impl.GetCheckout(r.Context(), Id)
+		result, err := impl.GetCheckout(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -365,7 +365,7 @@ func createCheckoutsPayCheckoutHandler(impl CheckoutsImplementation) gohttp.Hand
 		}
 
 		// Call implementation
-		result, err := impl.PayCheckout(r.Context(), Id)
+		result, err := impl.PayCheckout(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -430,7 +430,7 @@ func createCheckoutsRequestRefundHandler(impl CheckoutsImplementation) gohttp.Ha
 		}
 
 		// Call implementation
-		result, err := impl.RequestRefund(r.Context(), Id, &input)
+		result, err := impl.RequestRefund(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -492,7 +492,7 @@ func createCheckoutsStartCheckoutHandler(impl CheckoutsImplementation) gohttp.Ha
 		}
 
 		// Call implementation
-		result, err := impl.StartCheckout(r.Context(), Id, &input)
+		result, err := impl.StartCheckout(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -549,7 +549,7 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.ListOrders(r.Context(), Statuses, page)
+		result, err := impl.ListOrders(callerContext(r.Context()), Statuses, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -605,7 +605,7 @@ func createOrderPlaceOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.PlaceOrder(r.Context(), &input)
+		result, err := impl.PlaceOrder(callerContext(r.Context()), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -649,7 +649,7 @@ func createOrderGetOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.GetOrder(r.Context(), Id)
+		result, err := impl.GetOrder(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -714,7 +714,7 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 		}
 
 		// Call implementation
-		result, err := impl.CancelOrder(r.Context(), Id, requestBody.Reason)
+		result, err := impl.CancelOrder(callerContext(r.Context()), Id, requestBody.Reason)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -730,11 +730,12 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 // createPaymentWebhooksPaymentEventsHandler creates a handler for POST /api/payments/acmepay/events
 func createPaymentWebhooksPaymentEventsHandler(impl PaymentWebhooksImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Parse and validate input: a body, JSON, an object with only the
-		// keys the input type declares, then the type's decoding and rules,
-		// each refused with the 400 every generated server sends.
+		// Parse and validate input: a body, JSON and an object, whose keys
+		// the input type does not declare are dropped (D87), then the type's
+		// decoding and rules, each refused with the 400 every generated
+		// server sends.
 		var input types.AcmepayEvent
-		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		rawInput, refusal := bodyargs.ReadInputDroppingUnknown(r.Body, input.JSONFieldNames())
 		if refusal != nil {
 			RespondInputRefusal(w, r, refusal)
 			return
@@ -761,7 +762,7 @@ func createPaymentWebhooksPaymentEventsHandler(impl PaymentWebhooksImplementatio
 		}
 
 		// Call implementation
-		result, err := impl.PaymentEvents(r.Context(), &input)
+		result, err := impl.PaymentEvents(callerContext(r.Context()), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -827,7 +828,7 @@ func createProductCatalogListProductsHandler(impl ProductCatalogImplementation) 
 		}
 
 		// Call implementation
-		result, err := impl.ListProducts(r.Context(), Ids, Q, page)
+		result, err := impl.ListProducts(callerContext(r.Context()), Ids, Q, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -879,7 +880,7 @@ func createProductCatalogGetProductHandler(impl ProductCatalogImplementation) go
 		}
 
 		// Call implementation
-		result, err := impl.GetProduct(r.Context(), ProductId)
+		result, err := impl.GetProduct(callerContext(r.Context()), ProductId)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -942,7 +943,7 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 		}
 
 		// Call implementation
-		result, err := impl.ListReviews(r.Context(), ProductId, MinRating, Q, page)
+		result, err := impl.ListReviews(callerContext(r.Context()), ProductId, MinRating, Q, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1013,7 +1014,7 @@ func createProductReviewsWriteReviewHandler(impl ProductReviewsImplementation) g
 		}
 
 		// Call implementation
-		result, err := impl.WriteReview(r.Context(), ProductId, &input)
+		result, err := impl.WriteReview(callerContext(r.Context()), ProductId, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

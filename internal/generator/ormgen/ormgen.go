@@ -116,6 +116,10 @@ type ORMOutput struct {
 	// fields' own scalar, falling back to UUIDGoType.
 	UserIDGoType string
 
+	// Actor is the system actor AsSystem acts as and whether an update
+	// needs an acting user (D87).
+	Actor sqlutil.Actor
+
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	Naming naming.Naming
 
@@ -791,6 +795,11 @@ type Options struct {
 	// database/sql (D53, amended).
 	SQLite bool
 
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87). A zero Actor acts as
+	// registry.DefaultSystemActorID.
+	Actor sqlutil.Actor
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -964,6 +973,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
+		Actor:                    actorOf(opts.Actor),
 		VersionGraphs:            graphs,
 		Queues:                   queues,
 		HasSearch:                hasSearch,
@@ -980,6 +990,18 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 
 	return output, nil
+}
+
+// actorOf is actor with the system actor defaulted: the ID the generated
+// Go APIs export as SystemUserID, named "system".
+func actorOf(actor sqlutil.Actor) sqlutil.Actor {
+	if actor.SystemID == "" {
+		actor.SystemID = "00000000-0000-4000-8000-000000000000"
+	}
+	if actor.SystemName == "" {
+		actor.SystemName = "system"
+	}
+	return actor
 }
 
 // dependencyTypeModuleReplaces returns a replace line per declared

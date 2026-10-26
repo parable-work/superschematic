@@ -401,7 +401,7 @@ func createProductListProductsHandler(impl ProductImplementation) gohttp.Handler
 		}
 
 		// Call implementation
-		result, err := impl.ListProducts(r.Context(), InStock)
+		result, err := impl.ListProducts(callerContext(r.Context()), InStock)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -448,7 +448,7 @@ func createProductCreateProductHandler(impl ProductImplementation) gohttp.Handle
 		}
 
 		// Call implementation
-		result, err := impl.CreateProduct(r.Context(), &input)
+		result, err := impl.CreateProduct(callerContext(r.Context()), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -491,7 +491,7 @@ func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFu
 		}
 
 		// Call implementation
-		result, err := impl.GetProduct(r.Context(), Id)
+		result, err := impl.GetProduct(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -539,7 +539,7 @@ func createProductWaitForProductImageHandler(impl ProductImplementation) gohttp.
 		}
 
 		// Call implementation
-		result, err := impl.WaitForProductImage(r.Context(), Id, WaitSeconds)
+		result, err := impl.WaitForProductImage(callerContext(r.Context()), Id, WaitSeconds)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -604,7 +604,7 @@ func createProductCreateProductImageUploadHandler(impl ProductImplementation) go
 		}
 
 		// Call implementation
-		result, err := impl.CreateProductImageUpload(r.Context(), Id, &input)
+		result, err := impl.CreateProductImageUpload(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

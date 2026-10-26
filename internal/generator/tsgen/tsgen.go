@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -442,6 +443,10 @@ type Options struct {
 	// package then writes no orm.ts, whose repositories run on Postgres
 	// alone (D79).
 	NoPostgres bool
+
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87), which orm.ts's definition carries.
+	Actor sqlutil.Actor
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
