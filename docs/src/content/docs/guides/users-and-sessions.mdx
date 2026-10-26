@@ -53,7 +53,7 @@ through the DDL, the ORM, the types and migrations like any other table:
 | Table | Columns |
 | --- | --- |
 | `Session` | `id`, `user`, `tokenHash` (the SHA-256 of the session's token, never the token), `createdAt`, `expiresAt`, `lastSeenAt`, `revokedAt`; indexed on `user` |
-| `UserCredential` | `id`, `user` (unique), `passwordHash` (an argon2id PHC string), `passwordChangedAt`, `disabledAt` |
+| `UserCredential` | `id`, `user` (unique), `passwordHash` (an argon2id PHC string), `passwordChangedAt`, `disabledAt`, `pendingAt` (set while a user waits for approval) |
 | `UserRoleGrant`, with a `UserRole` table | `id`, `user`, `role`, `grantedAt`; unique on `user` and `role` |
 
 It also writes the identity descriptor, `identity/<schema>.json` beside the
@@ -70,8 +70,8 @@ methods. `shop-api` serves both:
 
 <Snippet file="schemas/services/shop-api/src/account.schema.ts" />
 
-`@userSessions({ path?, login?, register? })` serves these, under `auth` by
-default:
+`@userSessions({ path?, login?, register?, registration?, defaultRoles?,
+firstUser? })` serves these, under `auth` by default:
 
 | Operation | Route | Rule |
 | --- | --- | --- |
@@ -80,15 +80,17 @@ default:
 | `me` | `GET auth/me`, answers the user, their roles and their permissions | a caller |
 | `capabilities` | `GET auth/capabilities`, answers which of the API's operations the caller may call | a caller |
 | `changePassword` | `POST auth/password`, `{ current, password }`, revokes the user's other sessions | a caller; 10 a minute |
-| `register`, with `register: true` | `POST auth/register`, answers as `login` | anyone; 5 a minute |
+| `register`, with `register: true` | `POST auth/register`, answers as `login`, or as [Approve new users](#approve-new-users) says under `registration: "approval"` | anyone; 5 a minute |
 
 `@userSessions({ login: false })` serves `me` and `capabilities` alone,
 for an API whose users sign in through another.
 `@userAdministration({ path? })` serves the routes that create, list,
-disable and enable users and set their passwords; create, list, update and
-delete roles; and grant and revoke them, under `auth/admin`. They need
-`identity.users.read` or `.write` and `identity.roles.read` or `.write`;
-the naming file's `identity_permission_prefix` renames `identity`.
+disable, enable and approve users and set their passwords; create, list,
+update and delete roles; and grant and revoke them, under `auth/admin`.
+They need `identity.users.read` or `.write` and `identity.roles.read` or
+`.write`; the naming file's `identity_permission_prefix` renames
+`identity`. `GET auth/admin/users?pending=true` lists the users who wait
+for approval alone, and `?pending=false` the others.
 
 These are ordinary operations in the OpenAPI document, every SDK and the
 tool manifest, but the runtime implements them: the implementation you
@@ -111,7 +113,10 @@ Each server takes the identity service, built over a store of the
 | Rust | `Implementations.authenticator`, an `Arc<IdentityAuthenticator>` | the crate's `identity::store(client)` and `identity::service(store, config)`, with its `identity-postgres` or `identity-sqlite` feature |
 
 [Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-go)
-shows the Go wiring in `shop-orders`. A stack's Go and TypeScript
+shows the Go wiring in `shop-orders`. The generated
+constructor hands the runtime how the API's `register` admits users
+(`IdentityRegistration`, `identityRegistration`, `registration()`), so a
+server wires nothing for it. A stack's Go and TypeScript
 entrypoints build it for you, reading each API's config as JSON from
 `<API>_IDENTITY` (`SHOP_API_IDENTITY`); a job, which serves no request,
 builds none. The config, which the three runtimes read alike:
@@ -160,7 +165,55 @@ refresh: after a 401, sign in again.
 
 Every failed login is 401 `invalid_credentials`, whether the login is
 unknown, the password wrong or the user disabled, and an unknown login
-takes as long to refuse as a wrong password.
+takes as long to refuse as a wrong password. The one exception is a user
+who waits for approval: once their password verifies, login refuses them
+with 403 `pending_approval`, so a sign-in page can say why.
+
+## Approve new users
+
+By default `register` signs the new user in at once. Three members of
+`@userSessions` change that
+([D81](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+each needing `register: true`:
+
+```ts
+@userSessions({
+  register: true,
+  registration: "approval",
+  defaultRoles: ["member"],
+  firstUser: { role: "admin", permissions: ["identity", "finances"] },
+})
+export class Account {}
+```
+
+- **`registration: "approval"`** creates the user pending: the credential's
+  `pendingAt` is set, apart from `disabledAt`, so an administrator tells a
+  pending user from a disabled one. `register` answers `RegisterResult` in
+  place of `LoginResult`: 202 with `{ pending: true, user }`, no session and
+  no cookie. Login refuses the user with 403 `pending_approval` until an
+  administrator calls `approveUser`, `POST auth/admin/users/{id}/approve`
+  (`identity.users.write`), which answers the user with `pending` false, and
+  409 `not_pending` for a user who is not waiting. The administration
+  routes' `IdentityUser` carries `pending` beside `disabled`.
+- **`defaultRoles`** names the roles each new user holds. Register creates
+  a role no role has the name of, with no permissions, for an
+  administrator to fill in. Under approval the roles are granted with the
+  pending user, who can neither sign in nor hold a session, so they take
+  effect at approval, and `approveUser` works from any API of the same
+  `authDb`. Since approving gives the user those roles, the approver's
+  permissions must cover theirs, as they must to enable a user.
+- **`firstUser`** makes the registration that finds no role grant, the
+  state in which `identity bootstrap` still runs, the database's first
+  administrator: active even under approval, signed in (200 with
+  `pending: false` and a session), and holding `role`, created with
+  `permissions` when no role has the name, beside the default roles. Two
+  registrations at once make one administrator: on Postgres the first
+  locks the grants table until it commits, and SQLite lets one transaction
+  write at a time. A self-hosted app then needs no bootstrap step.
+
+`defaultRoles` and `firstUser` need a `UserRole` table in the `authDb`.
+Open registration, the default, grants the default roles too, and its
+`register` keeps answering `LoginResult`.
 
 ## Roles and capabilities
 
@@ -189,7 +242,8 @@ need it. A role editor can read it.
 ## Create the first administrator
 
 An empty database has no roles, so the first administrator comes from a
-command. It reads the password from standard input, never a flag, and
+command, or from the first registration when `@userSessions` names a
+`firstUser` ([above](#approve-new-users)). It reads the password from standard input, never a flag, and
 refuses once any role has been granted:
 
 ```bash

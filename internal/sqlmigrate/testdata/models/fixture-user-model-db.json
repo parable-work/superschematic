@@ -202,6 +202,12 @@
           "nullable": true,
           "origin": "UserCredential.disabledAt",
           "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
+          "type": "TIMESTAMPTZ"
         }
       ],
       "comment": "A user's password hash, kept apart from the user row.",

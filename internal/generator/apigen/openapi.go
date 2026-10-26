@@ -376,6 +376,9 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 				if len(fileField.AllowedTypes) > 0 {
 					fieldDescription = fmt.Sprintf("%s (allowed types: %s)", fieldDescription, strings.Join(fileField.AllowedTypes, ", "))
 				}
+				if len(fileField.AllowedExtensions) > 0 {
+					fieldDescription = fmt.Sprintf("%s (allowed extensions: %s)", fieldDescription, strings.Join(fileField.AllowedExtensions, ", "))
+				}
 				if fileField.MaxSize > 0 {
 					fieldDescription = fmt.Sprintf("%s, max size: %d bytes", fieldDescription, fileField.MaxSize)
 				}
@@ -399,12 +402,17 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 				schemaObj["required"] = required
 			}
 
+			multipart := map[string]interface{}{
+				"schema": schemaObj,
+			}
+			// A part's allowed media types are its encoding (D81).
+			if encoding := multipartEncoding(endpoint.FileUploadFields); encoding != nil {
+				multipart["encoding"] = encoding
+			}
 			operation["requestBody"] = map[string]interface{}{
 				"required": true,
 				"content": map[string]interface{}{
-					"multipart/form-data": map[string]interface{}{
-						"schema": schemaObj,
-					},
+					"multipart/form-data": multipart,
 				},
 			}
 		} else if endpoint.HasInput {
@@ -483,15 +491,19 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			},
 		}
 
-		operation["responses"] = map[string]interface{}{
-			"200": map[string]interface{}{
-				"description": "Successful response",
-				"content": map[string]interface{}{
-					"application/json": map[string]interface{}{
-						"schema": envelopeSchema,
-					},
+		success := map[string]interface{}{
+			"description": "Successful response",
+			"content": map[string]interface{}{
+				"application/json": map[string]interface{}{
+					"schema": envelopeSchema,
 				},
 			},
+		}
+		if endpoint.FileDownload != nil {
+			success = fileDownloadResponse(endpoint.FileDownload)
+		}
+		operation["responses"] = map[string]interface{}{
+			"200": success,
 			"400": map[string]interface{}{
 				"description": "Bad request",
 				"content": map[string]interface{}{
@@ -518,6 +530,15 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		// answers it with (D50), beside the 400 and 500 of every route.
 		if endpoint.IdentityOperation != "" {
 			addIdentityErrorResponses(operation["responses"].(map[string]interface{}), endpoint.IdentityOperation)
+		}
+		// Under approval register answers 202 with the same envelope when
+		// the user waits for approval and starts no session (D81).
+		if endpoint.IdentityOperation == ir.IdentityOpRegister && endpoint.OutputType == ir.IdentityRegisterResultType {
+			success["description"] = "The user is active, signed in as login signs them in"
+			operation["responses"].(map[string]interface{})["202"] = map[string]interface{}{
+				"description": "The user waits for an administrator's approval: pending is true and no session started",
+				"content":     success["content"],
+			}
 		}
 
 		if security := operationSecurity(endpoint); security != nil {

@@ -7,7 +7,7 @@ import re
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
 from ..errors import SDKError, ValidationError
 from ..page import Page
 

@@ -139,7 +139,29 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
-export type { OperationAuth, OperationInput, OperationServiceCallers, OperationSpec, RequestContext } from './operation.js';
+export type {
+  OperationAuth,
+  OperationDownload,
+  OperationInput,
+  OperationServiceCallers,
+  OperationSpec,
+  OperationUpload,
+  RequestContext,
+} from './operation.js';
+export {
+  BODY_NOT_MULTIPART,
+  DATA_PART,
+  DEFAULT_PART_CONTENT_TYPE,
+  UploadInputError,
+  checkUpload,
+  decodeUploads,
+  mediaTypeOf,
+  parseUploadFields,
+  uploadBodyLimitBytes,
+} from './upload.js';
+export type { UploadInput, UploadedFiles } from './upload.js';
+export { contentDisposition, downloadFilename, downloadResponse } from './download.js';
+export type { FileDownload } from './download.js';
 export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,

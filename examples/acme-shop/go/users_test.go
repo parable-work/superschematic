@@ -206,9 +206,63 @@ func (s *memoryStore) CreateUser(_ context.Context, nu identity.NewUser) (identi
 	if name == "" {
 		name = login
 	}
-	user := identity.User{ID: scalars.NewUUID().String(), Login: login, Name: name}
+	roles := slices.Clone(nu.Roles)
+	user := identity.User{ID: scalars.NewUUID().String(), Login: login, Name: name, Pending: nu.Pending}
+	// The first user of a store with no grant is its administrator (D81).
+	if nu.First != nil && !s.anyGrant() {
+		user.Pending = false
+		roles = append(roles, nu.First.Role)
+	}
 	s.users[user.ID] = &memoryUser{user: user, hash: nu.PasswordHash}
-	return user, nil
+	for _, role := range roles {
+		id := s.roleNamed(role, nu)
+		if !slices.Contains(s.grants[user.ID], id) {
+			s.grants[user.ID] = append(s.grants[user.ID], id)
+		}
+	}
+	return s.withRoles(user), nil
+}
+
+// anyGrant reports whether any user holds a role.
+func (s *memoryStore) anyGrant() bool {
+	for _, roles := range s.grants {
+		if len(roles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// roleNamed is the id of the role named name, created when there is none:
+// with the first administrator's permissions for theirs, and none for
+// another.
+func (s *memoryStore) roleNamed(name string, nu identity.NewUser) string {
+	for id, role := range s.roles {
+		if role.Name == name {
+			return id
+		}
+	}
+	role := &identity.Role{ID: scalars.NewUUID().String(), Name: name, Permissions: []string{}}
+	if nu.First != nil && nu.First.Role == name {
+		role.Permissions = slices.Clone(nu.First.Permissions)
+	}
+	s.roles[role.ID] = role
+	return role.ID
+}
+
+// ApproveUser clears the user's pending state (D81).
+func (s *memoryStore) ApproveUser(_ context.Context, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[userID]
+	switch {
+	case !ok:
+		return identity.ErrNotFound
+	case !u.user.Pending:
+		return identity.ErrNotPending
+	}
+	u.user.Pending = false
+	return nil
 }
 
 func (s *memoryStore) SetPassword(_ context.Context, userID, passwordHash string, at time.Time, keepSession string) error {

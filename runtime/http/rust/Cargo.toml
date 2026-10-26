@@ -168,6 +168,10 @@ required-features = ["identity-sqlite"]
 name = "identity_http"
 required-features = ["identity-sqlite"]
 
+[[test]]
+name = "identity_registration"
+required-features = ["identity-sqlite"]
+
 # The pool over a connection string and over a Cloud SQL socket, on the
 # Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names.
 [[test]]

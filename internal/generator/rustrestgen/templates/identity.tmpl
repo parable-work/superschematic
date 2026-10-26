@@ -25,7 +25,12 @@
 use std::sync::Arc;
 
 use {{ .RuntimeCrateIdent }}::identity::{
+{{- if .Identity.Registration }}
+    Client, Config, ConfigError,{{ if .Identity.Registration.FirstUser }} FirstUser,{{ end }} Registration, Route, Scalars, Service, SqlStore, Store,
+    StoreError,
+{{- else }}
     Client, Config, ConfigError, Route, Scalars, Service, SqlStore, Store, StoreError,
+{{- end }}
 };
 
 use crate::operations;
@@ -63,11 +68,40 @@ pub fn store(client: impl Client) -> Result<SqlStore, StoreError> {
 /// route table `capabilities` answers for (`routes`). A service may set
 /// its clock or permission rule (`with_clock`, `with_permits`) before it
 /// shares it.
+{{- if .Identity.Registration }}
+/// `register` admits users as `registration` says (D81).
+{{- end }}
 pub fn service(store: Arc<dyn Store>, config: Config) -> Result<Service, ConfigError> {
+{{- if .Identity.Registration }}
+    Service::new(store, config)?
+        .with_permission_prefix(PERMISSION_PREFIX)?
+        .with_routes(routes())
+        .with_registration(registration())
+{{- else }}
     Ok(Service::new(store, config)?
         .with_permission_prefix(PERMISSION_PREFIX)?
         .with_routes(routes()))
+{{- end }}
 }
+{{- with .Identity.Registration }}
+
+/// How `register` admits users, as the API's `@userSessions` declares it
+/// (D81).
+pub fn registration() -> Registration {
+    Registration {
+        approval: {{ .Approval }},
+        default_roles: vec![{{ range $i, $role := .DefaultRoles }}{{ if $i }}, {{ end }}{{ rustString $role }}.to_owned(){{ end }}],
+{{- with .FirstUser }}
+        first_user: Some(FirstUser {
+            role: {{ rustString .Role }}.to_owned(),
+            permissions: vec![{{ range $i, $p := .Permissions }}{{ if $i }}, {{ end }}{{ rustString $p }}.to_owned(){{ end }}],
+        }),
+{{- else }}
+        first_user: None,
+{{- end }}
+    }
+}
+{{- end }}
 
 /// The route table `capabilities` answers for: each operation an end user
 /// may call, under its OpenAPI operation id, by its route's rules.

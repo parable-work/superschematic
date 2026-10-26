@@ -32,6 +32,7 @@ func IdentityRoutes() []identity.Route {
 		{OperationID: "AccountAdminListUsersHandler", RequiresAuth: true, Permissions: []string{"identity.users.read"}},
 		{OperationID: "AccountAdminCreateUserHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},
 		{OperationID: "AccountAdminGetUserHandler", RequiresAuth: true, Permissions: []string{"identity.users.read"}},
+		{OperationID: "AccountAdminApproveUserHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},
 		{OperationID: "AccountAdminDisableUserHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},
 		{OperationID: "AccountAdminEnableUserHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},
 		{OperationID: "AccountAdminSetUserPasswordHandler", RequiresAuth: true, Permissions: []string{"identity.users.write"}},
@@ -55,7 +56,16 @@ func NewIdentity(store identity.Store, cfg identity.Config, opts ...identity.Opt
 	return identity.New(store, cfg, append([]identity.Option{
 		identity.WithRoutes(IdentityRoutes()),
 		identity.WithPermissionPrefix(IdentityPermissionPrefix),
+		identity.WithRegistration(IdentityRegistration),
 	}, opts...)...)
+}
+
+// IdentityRegistration is how register admits users, as fixture-user-routes-api's
+// @userSessions declares it (D81).
+var IdentityRegistration = identity.Registration{
+	Approval:     true,
+	DefaultRoles: []string{"member"},
+	FirstUser:    &identity.FirstUser{Role: "admin", Permissions: []string{"identity"}},
 }
 
 // identityOperations are the user model's operations fixture-user-routes-api serves,
@@ -68,6 +78,7 @@ var identityOperations = []string{
 	"listUsers",
 	"createUser",
 	"getUser",
+	"approveUser",
 	"disableUser",
 	"enableUser",
 	"setUserPassword",

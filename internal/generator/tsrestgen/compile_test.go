@@ -79,6 +79,8 @@ type apiFixture struct {
 	authDB *ir.Schema
 	// endpoints is apigen's extraction for the schema.
 	endpoints *apigen.APIOutput
+	// mcp is outputs.api.mcp: the router serves its MCP endpoint (D81).
+	mcp bool
 }
 
 // fixtureAPI is fixture-api with its fixture-db dependency.
@@ -159,6 +161,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		Dependencies: fixture.deps,
 		Clock:        fixedClock,
 		AuthDB:       fixture.authDB,
+		MCP:          fixture.mcp,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)

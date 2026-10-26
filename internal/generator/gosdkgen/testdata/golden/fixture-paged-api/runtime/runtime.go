@@ -4,10 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"mime"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+// DownloadedFile is the file a FileDownload operation answers (D81): its
+// bytes, the filename Content-Disposition offered, "" for none, and the
+// Content-Type it was sent with.
+type DownloadedFile struct {
+	Body        []byte
+	Filename    string
+	ContentType string
+}
+
+// FilenameOf is the filename a Content-Disposition offers: filename*, the
+// name in UTF-8 (RFC 8187), before filename; "" for none.
+func FilenameOf(disposition string) string {
+	_, params, err := mime.ParseMediaType(disposition)
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
+}
 
 type PublicEncryptionKey struct {
 	PublicKey string

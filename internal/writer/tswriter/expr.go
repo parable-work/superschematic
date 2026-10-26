@@ -139,6 +139,13 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	}
 
 	expr := e.refersTo(e.renderTypeName(fd.TypeRef.Name, owner), fd.References, owner)
+	if fd.FileUpload != nil {
+		// FileUpload<C> (D81) is the string field it marks.
+		if fd.TypeRef != (ir.TypeRef{Name: "string"}) {
+			e.failf("%s: a FileUpload on a field that is not a single string has no TypeScript authoring form", owner)
+		}
+		expr = e.fileUploadExpr(fd.FileUpload)
+	}
 
 	if fd.Default != nil {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))

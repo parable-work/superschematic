@@ -151,6 +151,7 @@ func (m *model) addCredential() {
 			},
 			dateTime(ir.IdentityCredentialPasswordChangedAtField, true, ""),
 			dateTime(ir.IdentityCredentialDisabledAtField, false, "When the user was disabled; a disabled user cannot sign in."),
+			dateTime(ir.IdentityCredentialPendingAtField, false, "When the user registered to wait for an administrator's approval; a pending user cannot sign in (D81)."),
 		},
 	})
 }

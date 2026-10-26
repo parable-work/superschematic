@@ -41,6 +41,24 @@ type Service struct {
 	cop     *http.CrossOriginProtection
 	params  Argon2Params
 	dummy   string
+
+	registration Registration
+}
+
+// Registration is how Register admits a user (D81), as the API's
+// @userSessions({ registration, defaultRoles, firstUser }) declares it.
+type Registration struct {
+	// Approval creates the user pending: Register starts no session, and
+	// Login refuses them with 403 pending_approval until ApproveUser.
+	Approval bool
+	// DefaultRoles are the roles each new user is granted, by name, each
+	// created with no permissions when no role has the name. A pending
+	// user holds them from registration, and they take effect at approval.
+	DefaultRoles []string
+	// FirstUser, when set, makes the registration that finds no role grant
+	// the first administrator: active even under Approval, and holding the
+	// role beside DefaultRoles.
+	FirstUser *FirstUser
 }
 
 // Option configures a Service.
@@ -68,6 +86,16 @@ func WithMatcher(m session.Matcher) Option {
 // administration routes' permissions.
 func WithPermissionPrefix(prefix string) Option {
 	return func(s *Service) { s.prefix = prefix }
+}
+
+// WithRegistration sets how Register admits users (D81).
+func WithRegistration(r Registration) Option {
+	return func(s *Service) {
+		s.registration = Registration{Approval: r.Approval, DefaultRoles: append([]string(nil), r.DefaultRoles...)}
+		if r.FirstUser != nil {
+			s.registration.FirstUser = &FirstUser{Role: r.FirstUser.Role, Permissions: append([]string(nil), r.FirstUser.Permissions...)}
+		}
+	}
 }
 
 // WithRoutes sets the route requirements of every operation of the API,
@@ -98,6 +126,9 @@ func New(store Store, cfg Config, opts ...Option) (*Service, error) {
 	if !ValidPermission(s.prefix) {
 		return nil, fmt.Errorf("identity: the permission prefix %q is not dotted segments of letters, digits, '_' and '-'", s.prefix)
 	}
+	if err := s.registration.check(); err != nil {
+		return nil, err
+	}
 	cop, err := newCrossOriginProtection(s.cfg.TrustedOrigins)
 	if err != nil {
 		return nil, err
@@ -109,6 +140,31 @@ func New(store Store, cfg Config, opts ...Option) (*Service, error) {
 	}
 	return s, nil
 }
+
+// check refuses a registration whose roles a store could not write: an
+// empty role name, or a first administrator without a role or with no
+// permission or one of the wrong form.
+func (r Registration) check() error {
+	for _, role := range r.DefaultRoles {
+		if role == "" {
+			return errors.New("identity: a default role has no name")
+		}
+	}
+	if f := r.FirstUser; f != nil {
+		if f.Role == "" || len(f.Permissions) == 0 {
+			return errors.New("identity: the first administrator needs a role and at least one permission")
+		}
+		for _, p := range f.Permissions {
+			if !ValidPermission(p) {
+				return fmt.Errorf("identity: the first administrator's permission %q is not dotted segments of letters, digits, '_' and '-'", p)
+			}
+		}
+	}
+	return nil
+}
+
+// Registration is how the service's Register admits users.
+func (s *Service) Registration() Registration { return s.registration }
 
 // Config is the config the service runs with, its defaults filled in.
 func (s *Service) Config() Config { return s.cfg }
@@ -151,6 +207,14 @@ type (
 		// Token is absent for a cookie session, which no script reads.
 		Token *string `json:"token,omitempty"`
 	}
+	// RegisterResult is register's answer under approval (D81): pending
+	// and no session, or a session as LoginResult has one.
+	RegisterResult struct {
+		Pending   bool        `json:"pending"`
+		User      SessionUser `json:"user"`
+		ExpiresAt *time.Time  `json:"expiresAt,omitempty"`
+		Token     *string     `json:"token,omitempty"`
+	}
 	SessionUser struct {
 		ID    string `json:"id"`
 		Login string `json:"login"`
@@ -185,6 +249,7 @@ type (
 		Login    string    `json:"login"`
 		Name     string    `json:"name"`
 		Disabled bool      `json:"disabled"`
+		Pending  bool      `json:"pending"`
 		Roles    []RoleRef `json:"roles"`
 	}
 	RoleInput struct {
@@ -207,6 +272,24 @@ type IssuedSession struct {
 	Transport Transport
 	SessionID string
 	ExpiresAt time.Time
+}
+
+// Registered is what Register did: started a session (Issued), or, for a
+// user who waits for approval (Pending), none (D81).
+type Registered struct {
+	User    SessionUser
+	Pending bool
+	Issued  *IssuedSession
+}
+
+// RegisterResult is r as register answers it under approval.
+func (r Registered) RegisterResult() RegisterResult {
+	out := RegisterResult{Pending: r.Pending, User: r.User}
+	if r.Issued != nil {
+		expires := r.Issued.Result.ExpiresAt
+		out.ExpiresAt, out.Token = &expires, r.Issued.Result.Token
+	}
+	return out
 }
 
 // transportOf is a login's transport: bearer when absent.
@@ -236,8 +319,9 @@ func checkPasswordField(f *fieldErrors, field, password string) {
 // Every failure, an unknown login, a login the scalar refuses, a user
 // without a password and a disabled user included, is 401
 // invalid_credentials after a verify of the same cost, so neither the
-// answer nor its timing tells which. A hash at an older cost is written
-// again at the config's.
+// answer nor its timing tells which. A user whose password verifies and
+// who waits for approval is 403 pending_approval (D81). A hash at an older
+// cost is written again at the config's.
 func (s *Service) Login(ctx context.Context, in LoginInput) (IssuedSession, error) {
 	var f fieldErrors
 	transport := transportOf(in.Session, &f)
@@ -269,6 +353,9 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (IssuedSession, erro
 	if rec.User.Disabled {
 		return IssuedSession{}, invalidCredentials(errors.New("the user is disabled"))
 	}
+	if rec.User.Pending {
+		return IssuedSession{}, pendingApproval()
+	}
 	if rehash {
 		hash, err := HashPassword(in.Password, s.params)
 		if err != nil {
@@ -281,9 +368,11 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (IssuedSession, erro
 	return s.issue(ctx, rec.User, transport)
 }
 
-// Register creates a user with a password and signs them in, as Login
-// does. A taken login is 409 conflict.
-func (s *Service) Register(ctx context.Context, in RegisterInput) (IssuedSession, error) {
+// Register creates a user with a password, with the registration's
+// default roles, and signs them in, as Login does. Under approval the user
+// waits for an administrator and no session starts, unless they are the
+// first administrator (D81). A taken login is 409 conflict.
+func (s *Service) Register(ctx context.Context, in RegisterInput) (Registered, error) {
 	var f fieldErrors
 	transport := transportOf(in.Session, &f)
 	if in.Login == "" {
@@ -291,21 +380,33 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (IssuedSession
 	}
 	checkPasswordField(&f, "password", in.Password)
 	if err := f.err(); err != nil {
-		return IssuedSession{}, err
+		return Registered{}, err
 	}
-	user, err := s.createUser(ctx, in.Login, in.Name, in.Password)
+	reg := s.registration
+	user, err := s.createUser(ctx, NewUser{Login: in.Login, Name: in.Name, Pending: reg.Approval, Roles: reg.DefaultRoles, First: reg.FirstUser}, in.Password)
 	if err != nil {
-		return IssuedSession{}, err
+		return Registered{}, err
 	}
-	return s.issue(ctx, user, transport)
+	out := Registered{User: SessionUser{ID: user.ID, Login: user.Login, Name: user.Name}, Pending: user.Pending}
+	if user.Pending {
+		return out, nil
+	}
+	issued, err := s.issue(ctx, user, transport)
+	if err != nil {
+		return Registered{}, err
+	}
+	out.Issued = &issued
+	return out, nil
 }
 
-func (s *Service) createUser(ctx context.Context, login, name, password string) (User, error) {
+// createUser hashes password and creates nu with the hash.
+func (s *Service) createUser(ctx context.Context, nu NewUser, password string) (User, error) {
 	hash, err := HashPassword(password, s.params)
 	if err != nil {
 		return User{}, err
 	}
-	user, err := s.store.CreateUser(ctx, NewUser{Login: login, Name: name, PasswordHash: hash, At: s.now()})
+	nu.PasswordHash, nu.At = hash, s.now()
+	user, err := s.store.CreateUser(ctx, nu)
 	var invalidLogin *InvalidLoginError
 	var invalidName *InvalidNameError
 	switch {
@@ -319,6 +420,8 @@ func (s *Service) createUser(ctx context.Context, login, name, password string) 
 		return User{}, f.err()
 	case errors.Is(err, ErrLoginTaken):
 		return User{}, conflict("The login is taken")
+	case errors.Is(err, ErrNoRoles):
+		return User{}, storeError(err, "Role")
 	case err != nil:
 		return User{}, err
 	}
@@ -397,6 +500,8 @@ func (s *Service) AuthenticateToken(ctx context.Context, token string, transport
 		return Principal{}, unauthenticated(errors.New("the session is expired"))
 	case rec.User.Disabled:
 		return Principal{}, unauthenticated(errors.New("the user is disabled"))
+	case rec.User.Pending:
+		return Principal{}, unauthenticated(errors.New("the user waits for approval"))
 	}
 	lastSeen := sess.CreatedAt
 	if sess.LastSeenAt != nil {
@@ -519,7 +624,7 @@ func identityUser(u User) IdentityUser {
 	for i, r := range u.Roles {
 		roles[i] = RoleRef{ID: r.ID, Name: r.Name}
 	}
-	return IdentityUser{ID: u.ID, Login: u.Login, Name: u.Name, Disabled: u.Disabled, Roles: roles}
+	return IdentityUser{ID: u.ID, Login: u.Login, Name: u.Name, Disabled: u.Disabled, Pending: u.Pending, Roles: roles}
 }
 
 func identityRole(r Role) IdentityRole {
@@ -543,15 +648,17 @@ func (s *Service) CreateUser(ctx context.Context, p Principal, in CreateUserInpu
 	if err := f.err(); err != nil {
 		return IdentityUser{}, err
 	}
-	user, err := s.createUser(ctx, in.Login, in.Name, in.Password)
+	user, err := s.createUser(ctx, NewUser{Login: in.Login, Name: in.Name}, in.Password)
 	if err != nil {
 		return IdentityUser{}, err
 	}
 	return identityUser(user), nil
 }
 
-// ListUsers lists every user, by login (users.read).
-func (s *Service) ListUsers(ctx context.Context, p Principal) ([]IdentityUser, error) {
+// ListUsers lists the users, by login (users.read): every one when pending
+// is nil, else those who wait for approval when it is true and the others
+// when it is false (D81).
+func (s *Service) ListUsers(ctx context.Context, p Principal, pending *bool) ([]IdentityUser, error) {
 	if err := s.require(p, PermissionUsersRead); err != nil {
 		return nil, err
 	}
@@ -559,9 +666,11 @@ func (s *Service) ListUsers(ctx context.Context, p Principal) ([]IdentityUser, e
 	if err != nil {
 		return nil, err
 	}
-	out := make([]IdentityUser, len(users))
-	for i, u := range users {
-		out[i] = identityUser(u)
+	out := make([]IdentityUser, 0, len(users))
+	for _, u := range users {
+		if pending == nil || u.Pending == *pending {
+			out = append(out, identityUser(u))
+		}
 	}
 	return out, nil
 }
@@ -602,6 +711,26 @@ func (s *Service) setDisabled(ctx context.Context, p Principal, id string, disab
 		return IdentityUser{}, err
 	}
 	if err := s.store.SetDisabled(ctx, id, disabled, s.now()); err != nil {
+		return IdentityUser{}, storeError(err, "User")
+	}
+	return s.getUser(ctx, id)
+}
+
+// ApproveUser approves a user who waits for approval, who can then sign in
+// (users.write, D81). The caller's permissions must cover each of the
+// user's, the roles register granted them included; a user who is not
+// pending is 409 not_pending.
+func (s *Service) ApproveUser(ctx context.Context, p Principal, id string) (IdentityUser, error) {
+	if err := s.require(p, PermissionUsersWrite); err != nil {
+		return IdentityUser{}, err
+	}
+	if err := s.covers(ctx, p, id); err != nil {
+		return IdentityUser{}, err
+	}
+	if err := s.store.ApproveUser(ctx, id); err != nil {
+		if errors.Is(err, ErrNotPending) {
+			return IdentityUser{}, notPending()
+		}
 		return IdentityUser{}, storeError(err, "User")
 	}
 	return s.getUser(ctx, id)

@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, and how an extension adds its rules, vendor keys and policy.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript API serves them at, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -135,8 +135,12 @@ When the `api` generator builds an API it resolves each operation's record:
 a visible tool gets `name` from the `@docs` title, `description` from the
 `@docs` description and `icon: { name }` from `@icon`, and keeps its
 invocation policy, or gets the policy's default when IR that did not come
-through the loader has none; a hidden record keeps its reason. The schema's
-own record is not changed. A policy under another key, or with a value the
+through the loader has none; a hidden record keeps its reason. An
+operation whose result is a `FileDownload`
+([Downloads](/superschematic/guides/api-routes/#downloads)) and that
+declares no `@mcp` gets a hidden record, `It answers a file, which is no
+tool result.`, as the user model's password operations get one; the loader
+refuses a visible `@mcp` on it. The schema's own record is not changed. A policy under another key, or with a value the
 policy does not allow, fails the build, also when a tool hook left it. It
 then fails the build when two visible tools of the API:
 
@@ -207,7 +211,7 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   operation's comment, with ` (Requires authentication)` appended when the
   route requires it.
 - `bindingStatus` is `ready`, or `unsupported_multipart` for an operation
-  with a file upload.
+  with a file upload, a `FileUpload` field or a field of an upload scalar.
 - `parameters` is one closed JSON Schema object (`additionalProperties:
   false`) over the path parameters, the query parameters, the input type's
   fields or the scalar arguments, and `publicEncryptionKey` for an
@@ -367,6 +371,104 @@ expected revision a number. Otherwise the build fails:
 ```
 operation OrderOpenReturnHandler replay contract: idempotency pointer "/pickup/postalCode": segment "postalCode" is optional
 ```
+
+## An API's MCP endpoint
+
+A TypeScript API serves its visible tools over MCP when its config turns
+on `outputs.api.mcp` (D81):
+
+```ts
+outputs: {
+  types: { [TargetLanguage.TypeScript]: { enabled: true } },
+  api: { enabled: true, language: "TYPESCRIPT", mcp: true }
+}
+```
+
+The API package then has `mcp.ts`, the tool table, and `buildRouter`
+serves it at `POST /api/mcp`. The table is built from the tool documents
+above, whether or not the config enables an SDK: one tool per operation
+whose `@mcp` is visible, as the engine lists its tools.
+
+| `tools/list` member | From |
+| --- | --- |
+| `name` | the `@mcp` handle |
+| `title`, `description` | the `@docs` title and description |
+| `inputSchema` | the tool's `parameters` in `tools/schema.json` |
+| `annotations.readOnlyHint` | `true` when the `@docs` replay mode is `read_only` |
+| `_meta` | the declared `_meta`, the guidance under `superschematic/operation-guidance`, and the invocation policy under its key |
+
+A hidden or unclassified operation is no tool: it is not listed, and a
+call of it is the invalid-params error of a tool the API does not have.
+Nor is a `@requireService` operation, as in the documents. A tool whose
+operation uploads a file (`unsupported_multipart`), or whose payload is
+encrypted, is left out too, since a call's arguments cannot carry a file
+and only the SDK seals a payload; `mcp.ts` names each one it leaves out.
+A build that routes an operation at `/api/mcp` with `mcp` on is refused,
+naming the operation.
+
+The endpoint speaks the engine's transport, MCP's streamable HTTP,
+statelessly (`runtime/http/typescript/src/mcp.ts`, a copy of the engine's
+`api/mcp.rs`): on the 2025 revisions `initialize`, `ping`, `tools/list` and
+`tools/call`, alone or in a batch, each request answered as one `message`
+event of a `text/event-stream` body and a notification with 202; on
+2026-07-28, `server/discover`, `ping`, `tools/list` and `tools/call`, each
+answered as one JSON body; `GET` and `DELETE` answer 405. The runtime's
+tests replay the engine's MCP corpus (`runtime/engine/testdata/http/mcp.json`)
+through it.
+
+The endpoint authenticates as the API's other routes do: the identity
+service of the user model, or the router's `authenticate`, from a
+`Bearer` session or a cookie. It needs a caller when a route of the API
+does, so without a session it answers 401 with the problem document; an
+API whose routes are all public serves it to anyone. Each caller's list
+holds the tools whose routes it may call: a tool whose operation needs a
+permission the caller lacks is not listed, and a call of it is the
+invalid-params error.
+
+`tools/call` runs in process through the router, as a request to the
+route of the tool's operation that carries the endpoint request's
+headers (its `Authorization`, cookie, `Service-Authorization` and
+forwarded addresses) and its request id. Each argument goes where the
+route reads it: a path argument into the path, a query argument into the
+query string (a list as repeated keys), and an input type's fields or the
+body arguments into the JSON body, as `tools/mcp-binding.json` binds them.
+So the route's rate limit, body limit, permission check, validation and
+timeout apply to the call as to a request:
+
+- a result is the envelope's `data`, as text and, for an object, as
+  `structuredContent`; a body that is not JSON, which a
+  `@manualRouteRegistration` handler may answer, is its text, or an
+  embedded resource for one that is not text;
+- a refusal is a tool error (`isError`) whose `structuredContent` is the
+  problem document the route answered, its `requestId` the endpoint
+  request's;
+- an argument the tool does not take is a tool error with a 400 problem,
+  `get_order takes id, not "extra"`, and a tool the API does not offer
+  the caller is the JSON-RPC error `-32602`,
+  `fixture-mcp has no tool "delete_order"`.
+
+The invocation policy is the client's to apply, as on the engine's
+endpoint: a tool whose `@mcp` says `invocationPolicy: "ask"` reads
+`"invocationPolicy": "ask"` in its `_meta`, and the endpoint runs every
+call it is sent.
+
+`initialize` names the server after the API, at the version its OpenAPI
+document states (`openAPIVersion`, `1.0.0` unless set). The router's
+`mcp` option sets the rest:
+
+| `RouterOptions.mcp` | What it sets |
+| --- | --- |
+| `serverInfo` | the `{ name, version }` `initialize` reports |
+| `instructions` | the instructions `initialize` gives the client |
+| `rateLimitPerMinute`, `timeoutSeconds` | the endpoint's own rate limit and timeout; each call keeps its route's |
+
+The APIs of one server share its paths, so a server serves one API with
+`mcp` on, and the stack's build refuses a second:
+`stack shop-stack: server Web serves shop-api and shop-admin, which both turn on outputs.api.mcp, and one server answers POST /api/mcp for one API; serve them from two servers, or turn mcp off in one (D81)`.
+
+The Go and Rust servers serve no MCP endpoint yet. Their config fails to
+load with `mcp` on:
+`outputs.api.mcp is on and the API's language is GO: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
 
 ## The engine
 

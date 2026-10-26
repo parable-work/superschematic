@@ -14,6 +14,7 @@ import {
   type ManualRouteHandler,
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
+import { mountOpenAPI, type OpenAPIOptions } from '@superschematic/http-runtime/openapi';
 import type {
   IdentityUUID,
 } from 'superscalar/scalars';
@@ -26,6 +27,7 @@ import {
   parseCreateTenantInputJson,
 } from '@schemas/fixture-api-types/validators';
 import type { Implementations } from './interfaces';
+import { openAPIJSON } from './openapi';
 
 export type OperationName =
   | 'currentTenant'
@@ -111,7 +113,7 @@ export const operationSpecs = {
   },
 } as const satisfies Record<OperationName, OperationSpec>;
 
-export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions {
+export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions, OpenAPIOptions {
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
   bodyLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation requests per minute; overrides the schema's @rateLimit (0 disables). The store and key are `rateLimit`. */
@@ -132,6 +134,9 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The OpenAPI document at GET /api/openapi.json and its page at GET
+  // /api/docs, as the Go and Rust servers serve them (D81).
+  mountOpenAPI(router, openAPIJSON, 'fixture-api', options);
   mountOperation(
     router,
     operationSpecs.currentTenant,

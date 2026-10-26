@@ -108,11 +108,19 @@
   },
   {
     "name": "account-admin.listUsers",
-    "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+    "inputSchemaDigest": "sha256:cadd059fba88b02165defad0a5e28a300fe1cdf9b401d77ae842de4363a9cb6c",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
-      "properties": {}
+      "properties": {
+        "pending": {
+          "description": "A boolean value (true or false)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
     },
     "returns": {
       "type": "array",
@@ -168,6 +176,29 @@
   },
   {
     "name": "account-admin.getUser",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "IdentityUser object"
+    }
+  },
+  {
+    "name": "account-admin.approveUser",
     "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
     "parameters": {
       "additionalProperties": false,
@@ -494,7 +525,7 @@
     },
     "returns": {
       "type": "object",
-      "description": "LoginResult object"
+      "description": "RegisterResult object"
     }
   },
   {
