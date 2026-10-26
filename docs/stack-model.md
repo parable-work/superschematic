@@ -77,6 +77,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
+| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, until stopped | its API's needs; its API's engine database (D74, section 8.8) |
 | app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
@@ -100,9 +101,10 @@ deployable is declared only to change that:
 A declared deployable only groups. It declares no needs: a server's edges
 are the union of its APIs' edges, so grouping APIs never restates one.
 
-Each `@app` of an API service is one app too, named `<api>-<app>` as a
-job is (D78). An app is never declared in the stack: the API declares it,
-and the stack exposes it or turns it off.
+Each `@deriver` of an API service is one deriver, named `<api>-<deriver>`
+as a worker is (D74). Each `@app` of an API service is one app too, named
+`<api>-<app>` as a job is (D78). An app is never declared in the stack:
+the API declares it, and the stack exposes it or turns it off.
 
 ### 3.3 Edges
 
@@ -2062,7 +2064,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 
 | Stack concept | local |
 | --- | --- |
-| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
+| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another, or from `pgvector/pgvector:0.8.7-pg16` when a DB service of the stack has a vector column (D84); it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | memoryStore | one Valkey container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`, on `local.valkey`, from `valkey/valkey:8.0.2-alpine`, the engine version `gcp.memorystore` pins, unless the `memoryStoreImage` value names another. It runs `valkey-server --save "" --appendonly no`, so it keeps nothing, with no TLS and no password, publishes its port on 127.0.0.1 only, and is ready once `valkey-cli ping` answers inside it. Every memoryStore deployable of the environment lowers to the same node, since each store's names start with its own name (D75) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |

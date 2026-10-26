@@ -163,6 +163,11 @@ type Service struct {
 	// Derived (D73), sorted. A deriver's schemas are among those of its
 	// API's database (D74).
 	Derived []string
+
+	// Vectors reports that a DB service has a vector(n) column, an
+	// Embedding.Vector with dimensions, whose DDL enables pgvector's vector
+	// extension (D84).
+	Vectors bool
 }
 
 // Operation is what admits a caller to one operation of an API service.

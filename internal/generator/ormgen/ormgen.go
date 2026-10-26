@@ -84,6 +84,22 @@ type ORMOutput struct {
 	// of durations to and from []time.Duration.
 	HasIntervalLists bool
 
+	// HasVectors is true when a table has a vector(n) column (D84); it
+	// writes nearest.go, the vector's text form and each such
+	// repository's Nearest. HasVectorHistory and HasDecimalHistory are true
+	// when a versioned table has a vector or a NUMERIC column, whose
+	// to_jsonb text and number utils.go's history helpers read.
+	// HasDecimalFilters is true when a table has a single NUMERIC column,
+	// whose filter is a DecimalFilter. NearestMetrics are the metrics
+	// Nearest orders by, sqlutil's, and DefaultNearestK the rows it reads
+	// unless told.
+	HasVectors        bool
+	HasVectorHistory  bool
+	HasDecimalHistory bool
+	HasDecimalFilters bool
+	NearestMetrics    []sqlutil.NearestMetric
+	DefaultNearestK   int
+
 	// HasIntervalHistory is true when a versioned table has an INTERVAL or
 	// INTERVAL[] column; utils.go emits the helpers that read the interval
 	// text to_jsonb writes in a history row.
@@ -253,6 +269,11 @@ type Repository struct {
 	GeneratesKey        bool
 	PrimaryKeyIsPointer bool
 
+	// VectorFields are the table's vector(n) fields (D84), which Nearest
+	// orders its rows by; a table with one gets Nearest, and findRows
+	// collects the distance Nearest selects.
+	VectorFields []Field
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -310,6 +331,9 @@ type Field struct {
 	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
 	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): values convert through time.Duration, whole microseconds
 	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column: values convert through []time.Duration
+	IsVector           bool   // an Embedding.Vector stored as vector(n) (D84): values cross as pgvector's text, [1,2,3], which pgx sends and reads for a type it does not know
+	IsDecimal          bool   // a scalar stored as NUMERIC (Generic.Decimal, D84), or each element of a NUMERIC[]: superscalar's GenericDecimal binds and scans its canonical text
+	Dimensions         int    // a vector's dimensions, from its vector(n) column; 0 for any other field
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -843,6 +867,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasElementPointerLists := false
 	hasIntervalLists := false
 	hasIntervalHistory := false
+	hasVectors, hasVectorHistory, hasDecimalHistory, hasDecimalFilters := false, false, false, false
 	hasSearch := false
 	hasEncryptedFields := false
 	for _, repo := range repositories {
@@ -895,6 +920,18 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsGeoPointList {
 				geoPointListGoTypes[field.GeoPointListSymbol()] = field.GoType
 			}
+			if field.IsDecimal && !field.IsArray {
+				hasDecimalFilters = true
+			}
+			if field.IsVector && repo.Versioned {
+				hasVectorHistory = true
+			}
+			if field.IsDecimal && repo.Versioned {
+				hasDecimalHistory = true
+			}
+		}
+		if len(repo.VectorFields) > 0 {
+			hasVectors = true
 		}
 	}
 	geoPointListTypes := make([]GeoPointListType, 0, len(geoPointListGoTypes))
@@ -930,6 +967,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		VersionGraphs:            graphs,
 		Queues:                   queues,
 		HasSearch:                hasSearch,
+		HasVectors:               hasVectors,
+		HasVectorHistory:         hasVectorHistory,
+		HasDecimalHistory:        hasDecimalHistory,
+		HasDecimalFilters:        hasDecimalFilters,
+		NearestMetrics:           sqlutil.NearestMetrics(),
+		DefaultNearestK:          sqlutil.DefaultNearestK,
 		HistoryActorCTE:          sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
 		HasEncryptedFields:       hasEncryptedFields,
@@ -1390,6 +1433,9 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsGeoPointList:            class.Point && isArray,
 		IsInterval:                class.Interval && !isArray,
 		IsIntervalList:            class.Interval && isArray,
+		IsVector:                  class.Vector,
+		IsDecimal:                 class.Decimal,
+		Dimensions:                sqlutil.VectorDimensions(sqlutil.ColumnType(schema, fieldDef, sqlutil.ScalarSQLTypes(schema))),
 		IsUUIDLike:                class.UUIDLike,
 		IsStringLike:              class.StringLike,
 		IsIntLike:                 class.IntLike,
@@ -1541,6 +1587,9 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	for _, field := range repo.Fields {
 		if field.IsEncrypted {
 			repo.EncryptedFields = append(repo.EncryptedFields, field)
+		}
+		if field.IsVector {
+			repo.VectorFields = append(repo.VectorFields, field)
 		}
 	}
 	repo.GeneratesKey = table.GeneratesKey()

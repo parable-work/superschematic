@@ -104,6 +104,10 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// Digits are the field's digit rules (D84), which its validator checks
+	// on each value after the field's other checks; nil without any.
+	Digits *codegen.DigitRules
+
 	// IsArrayOfArrays marks T[][]: IsArray is also set, TSType is T[][] and
 	// Type is the innermost element type. Validators check every innermost
 	// element, list bounds apply to the outer list, and an inner list must
@@ -758,6 +762,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Doc:              f.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      f.Validations,
+			Digits:           f.Digits,
 			IsUnion:          !f.IsScalar && (f.IsUnion || unionNames[f.Type]),
 		}
 

@@ -1,0 +1,231 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto",
+    "vector"
+  ],
+  "service": "fixture-vectors-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Chunk.id",
+          "type": "UUID"
+        },
+        {
+          "name": "chunkText",
+          "origin": "Chunk.text",
+          "type": "TEXT"
+        },
+        {
+          "name": "chunkVector",
+          "origin": "Chunk.embedding",
+          "type": "vector(3)"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Chunk.note",
+          "type": "TEXT"
+        },
+        {
+          "name": "removedAt",
+          "nullable": true,
+          "origin": "Chunk.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A chunk of a note, in a table a database named before the schema did\n(D85): @table and @column name the table, its vector column and its\nsoft-delete column, in mixed case, which every statement quotes, and its\nindex is named after them. Its note is Encrypted\u003cT\u003e, sealed at rest, so a\nrow nearest reads opens it as any read does.",
+      "indexes": [
+        {
+          "columns": [
+            "chunkVector"
+          ],
+          "method": "HNSW",
+          "name": "idx_NoteChunk_by_vector",
+          "opclass": "vector_l2_ops"
+        }
+      ],
+      "kind": "entity",
+      "name": "NoteChunk",
+      "origin": "Chunk",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "NoteChunk_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "LedgerLine.id",
+          "type": "UUID"
+        },
+        {
+          "name": "amount",
+          "origin": "LedgerLine.amount",
+          "type": "BIGINT"
+        },
+        {
+          "name": "currency",
+          "origin": "LedgerLine.currency",
+          "type": "VARCHAR(3)"
+        },
+        {
+          "name": "rate",
+          "origin": "LedgerLine.rate",
+          "type": "NUMERIC(10,4)"
+        },
+        {
+          "name": "confidence",
+          "nullable": true,
+          "origin": "LedgerLine.confidence",
+          "type": "NUMERIC(5,2)"
+        },
+        {
+          "name": "quantity",
+          "nullable": true,
+          "origin": "LedgerLine.quantity",
+          "type": "NUMERIC"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "booked_at",
+          "origin": "LedgerLine.bookedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A line of a ledger: a signed amount in its currency's minor units, a\ndebit negative, and the exchange rate it was booked at, exact.",
+      "kind": "entity",
+      "name": "ledger_line",
+      "origin": "LedgerLine",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ledger_line_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Passage.id",
+          "type": "UUID"
+        },
+        {
+          "name": "title",
+          "origin": "Passage.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "topic",
+          "nullable": true,
+          "origin": "Passage.topic",
+          "type": "TEXT"
+        },
+        {
+          "name": "embedding",
+          "origin": "Passage.embedding",
+          "type": "vector(3)"
+        },
+        {
+          "name": "title_embedding",
+          "nullable": true,
+          "origin": "Passage.titleEmbedding",
+          "type": "vector(3)"
+        },
+        {
+          "name": "rates",
+          "nullable": true,
+          "origin": "Passage.rates",
+          "type": "NUMERIC(6,3)[]"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Passage.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A document a nearest-neighbour search finds, by a small embedding: by\ncosine distance through an HNSW index, and by Euclidean distance through\nan IVFFlat one, which a migration builds inside its step.",
+      "indexes": [
+        {
+          "columns": [
+            "embedding"
+          ],
+          "method": "HNSW",
+          "name": "idx_passage_embedding",
+          "opclass": "vector_cosine_ops"
+        },
+        {
+          "columns": [
+            "embedding"
+          ],
+          "inTransaction": true,
+          "method": "IVFFLAT",
+          "name": "idx_passage_embedding_l2",
+          "opclass": "vector_l2_ops",
+          "with": "lists = 4"
+        }
+      ],
+      "kind": "entity",
+      "name": "passage",
+      "origin": "Passage",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "passage_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "TextEmbedding.id",
+          "type": "UUID"
+        },
+        {
+          "name": "text",
+          "origin": "TextEmbedding.text",
+          "type": "TEXT"
+        },
+        {
+          "name": "embedding",
+          "origin": "TextEmbedding.embedding",
+          "type": "vector(1024)"
+        }
+      ],
+      "comment": "A text and its embedding, 1024 numbers, found by cosine distance.",
+      "indexes": [
+        {
+          "columns": [
+            "embedding"
+          ],
+          "method": "HNSW",
+          "name": "idx_text_embedding_embedding",
+          "opclass": "vector_cosine_ops",
+          "with": "m = 16, ef_construction = 64"
+        }
+      ],
+      "kind": "entity",
+      "name": "text_embedding",
+      "origin": "TextEmbedding",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "text_embedding_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

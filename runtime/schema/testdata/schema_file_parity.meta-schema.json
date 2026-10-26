@@ -4208,6 +4208,9 @@
           "default": false,
           "type": "boolean"
         },
+        "validateDimensions": {
+          "type": "integer"
+        },
         "validateListMax": {
           "type": "integer"
         },
@@ -4229,6 +4232,12 @@
         "validatePattern": {
           "default": "",
           "type": "string"
+        },
+        "validatePrecision": {
+          "type": "integer"
+        },
+        "validateScale": {
+          "type": "integer"
         },
         "validateUploadMaxBytes": {
           "type": "integer"
@@ -4446,6 +4455,9 @@
         "concurrently": {
           "type": "boolean"
         },
+        "efConstruction": {
+          "type": "integer"
+        },
         "expression": {
           "default": "",
           "type": "string"
@@ -4455,6 +4467,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "lists": {
+          "type": "integer"
+        },
+        "m": {
+          "type": "integer"
         },
         "method": {
           "default": "",

@@ -370,7 +370,8 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 			fv.ElementRequired = f.Required && (!f.IsMap || !anyJSON[f.Type])
 
 			rules := fieldRules(f)
-			if len(rules) > 0 {
+			digits := digitRuleExprs(f.Digits)
+			if len(rules) > 0 || len(digits) > 0 {
 				fv.RulesID = uniqueID(constName(t.Name)+"_"+constName(f.Name)+"_RULES", rulesIDs)
 				for _, rule := range rules {
 					expr, pattern := ruleExpr(rule, fv.RulesID)
@@ -379,6 +380,7 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 					}
 					fv.Rules = append(fv.Rules, expr)
 				}
+				fv.Rules = append(fv.Rules, digits...)
 			}
 			tv.Fields = append(tv.Fields, fv)
 
@@ -579,6 +581,24 @@ func ruleExpr(rule codegen.ValidationRule, rulesID string) (string, *PatternStat
 		return fmt.Sprintf("rt::Rule::Pattern(&%s, %s)", pattern.ID, message), pattern
 	}
 	return "", nil
+}
+
+// digitRuleExprs renders a field's digit rules (D84) as runtime Rules,
+// which check_value_rules checks on each value after the field's others.
+func digitRuleExprs(d *codegen.DigitRules) []string {
+	if d == nil {
+		return nil
+	}
+	var exprs []string
+	if d.Decimal {
+		exprs = append(exprs,
+			fmt.Sprintf("rt::Rule::Precision(%d, %s)", d.IntegerDigits, rustString(d.PrecisionMessage())),
+			fmt.Sprintf("rt::Rule::Scale(%d, %s)", d.Scale, rustString(d.ScaleMessage())))
+	}
+	if d.Dimensions > 0 {
+		exprs = append(exprs, fmt.Sprintf("rt::Rule::Dimensions(%d, %s)", d.Dimensions, rustString(d.DimensionsMessage())))
+	}
+	return exprs
 }
 
 // defaultJSON is the field's @default as JSON text, for a parse to fill in

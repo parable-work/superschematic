@@ -288,6 +288,31 @@ jobs:
             --command "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public" \
             --command "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
 
+      - name: Start Postgres with pgvector
+        # The tests of vector columns (D84) run on a second Postgres, the
+        # pgvector image of the same major version, which they read from
+        # SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL. The other database tests
+        # keep the alpine image above: the version-graph vectors hold
+        # date-times to its tzdata, which the pgvector image's Debian
+        # tzdata reads differently for 1890 Amsterdam.
+        run: |
+          docker run --detach --name superschematic-pgvector \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5433:5432 \
+            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}"
+          ready=""
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pgvector pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then
+            docker logs superschematic-pgvector
+            exit 1
+          fi
+          docker exec superschematic-pgvector psql --host 127.0.0.1 --username postgres --set ON_ERROR_STOP=1 \
+            --command "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public" \
+            --command "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"
+
       - name: Install the runtime's pinned workerd
         # The cloudflare extension runs the script of a site's Worker, and
         # servergen a job's bundled scheduled.ts, under the workerd the
@@ -330,6 +355,10 @@ jobs:
           # The identity runtime's store and handler tests run on it in a
           # schema of their own, as well as on SQLite.
           SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The tests of vector columns run on the pgvector container
+          # (D84); the database is there, so a skip is a broken gate.
+          SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5433/postgres?sslmode=disable
+          SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS: "1"
           # The rustgen, rustsdkgen, rustrestgen and parity tests run cargo on
           # the crates they generate. Each uses CARGO_TARGET_DIR when set, so
           # one target directory compiles axum, tokio, reqwest and superscalar

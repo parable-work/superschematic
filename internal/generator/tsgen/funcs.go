@@ -49,6 +49,7 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"fieldRules":         fieldRules,
 		"listValidations":    listValidations,
+		"digitRulesCheck":    digitRulesCheck,
 		"elementValidations": elementValidations,
 		"primitiveCheck":     primitiveCheck,
 		"ruleApplies":        ruleApplies,
@@ -120,11 +121,13 @@ func elementValidations(field FieldInfo) []codegen.ValidationRule {
 
 // Helpers of the generated validators/primitives.ts module.
 const (
-	expectStringHelper  = "expectString"
-	expectNumberHelper  = "expectNumber"
-	expectBooleanHelper = "expectBoolean"
-	expectListHelper    = "expectList"
-	finiteNumberHelper  = "isFiniteNumber"
+	expectStringHelper     = "expectString"
+	expectNumberHelper     = "expectNumber"
+	expectBooleanHelper    = "expectBoolean"
+	expectListHelper       = "expectList"
+	finiteNumberHelper     = "isFiniteNumber"
+	decimalDigitsHelper    = "checkDecimalDigits"
+	vectorDimensionsHelper = "checkVectorDimensions"
 )
 
 // primitiveCheck returns the validators/primitives.ts helper that reports
@@ -182,6 +185,12 @@ func typePrimitiveHelpers(t *TypeInfo) []string {
 				used[finiteNumberHelper] = true
 			}
 		}
+		if f.Digits != nil && f.Digits.Decimal {
+			used[decimalDigitsHelper] = true
+		}
+		if f.Digits != nil && f.Digits.Dimensions > 0 {
+			used[vectorDimensionsHelper] = true
+		}
 	}
 	helpers := make([]string, 0, len(used))
 	for helper := range used {
@@ -189,6 +198,34 @@ func typePrimitiveHelpers(t *TypeInfo) []string {
 	}
 	sort.Strings(helpers)
 	return helpers
+}
+
+// digitRulesCheck is the TypeScript that checks field's digit rules (D84)
+// in its validator, after the field's other checks, or "" for a field
+// without any: checkDecimalDigits on each decimal and checkVectorDimensions
+// on each vector, a single value or each element of a list.
+func digitRulesCheck(field FieldInfo) string {
+	d := field.Digits
+	if d == nil {
+		return ""
+	}
+	var calls []string
+	if d.Decimal {
+		calls = append(calls, fmt.Sprintf("checkDecimalDigits(errors, path, item, %d, %d);", d.IntegerDigits, d.Scale))
+	}
+	if d.Dimensions > 0 {
+		calls = append(calls, fmt.Sprintf("checkVectorDimensions(errors, path, item, %d);", d.Dimensions))
+	}
+	value := "value." + field.TSName
+	var b strings.Builder
+	fmt.Fprintf(&b, "  // The digit rules of %s (D84).\n", field.Name)
+	fmt.Fprintf(&b, "  const check%s = (item: unknown, path: string): void => {\n    %s\n  };\n", field.TSName, strings.Join(calls, "\n    "))
+	if field.IsArray {
+		fmt.Fprintf(&b, "  if (Array.isArray(%s)) {\n    %s.forEach((item, index) => check%s(item, `%s[${index}]`));\n  }", value, value, field.TSName, field.Name)
+	} else {
+		fmt.Fprintf(&b, "  check%s(%s, %q);", field.TSName, value, field.Name)
+	}
+	return b.String()
 }
 
 // tsDoc writes doc text into a JSDoc comment (codegen.JSDocText): "*/"
@@ -561,4 +598,25 @@ func typeParserScalarsUsed(t *TypeInfo) []ScalarInfo {
 		}
 	}
 	return scalars
+}
+
+// DecimalDigits and VectorDimensions report whether a type's validator
+// checks a field's digit rules (D84), so validators/primitives.ts holds
+// checkDecimalDigits and checkVectorDimensions.
+func (o *ModuleOutput) DecimalDigits() bool {
+	for i := range o.Types {
+		if slices.Contains(typePrimitiveHelpers(&o.Types[i]), decimalDigitsHelper) {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *ModuleOutput) VectorDimensions() bool {
+	for i := range o.Types {
+		if slices.Contains(typePrimitiveHelpers(&o.Types[i]), vectorDimensionsHelper) {
+			return true
+		}
+	}
+	return false
 }

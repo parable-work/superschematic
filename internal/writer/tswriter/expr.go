@@ -391,6 +391,15 @@ func validateConfigExpr(fd *ir.FieldDef) string {
 	if fd.ValidatePattern != "" {
 		add("pattern", quote(fd.ValidatePattern))
 	}
+	if fd.ValidatePrecision != nil {
+		add("precision", strconv.Itoa(*fd.ValidatePrecision))
+	}
+	if fd.ValidateScale != nil {
+		add("scale", strconv.Itoa(*fd.ValidateScale))
+	}
+	if fd.ValidateDimensions != nil {
+		add("dimensions", strconv.Itoa(*fd.ValidateDimensions))
+	}
 	if len(parts) == 0 {
 		return ""
 	}

@@ -53,3 +53,28 @@ func WriteCreateSQL(t testing.TB, src, dst string) {
 		t.Fatalf("pgtest: write create.sql: %v", err)
 	}
 }
+
+// VectorDatabaseEnv names the Postgres a test whose create.sql has a
+// vector(n) column runs on (D84): one with the pgvector extension
+// available, which the other test databases need not have. CI runs a
+// pgvector image beside the postgres:<version>-alpine one the rest share,
+// whose tzdata the version-graph vectors hold to.
+const VectorDatabaseEnv = "SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL"
+
+// RequireVectorEnv, set to 1, makes a vector test that finds no
+// VectorDatabaseEnv fail rather than skip, as CI sets it.
+const RequireVectorEnv = "SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS"
+
+// VectorDatabaseURL returns the URL VectorDatabaseEnv names. Without one it
+// skips the test, or fails it under RequireVectorEnv.
+func VectorDatabaseURL(t testing.TB) string {
+	t.Helper()
+	url := os.Getenv(VectorDatabaseEnv)
+	if url == "" {
+		if os.Getenv(RequireVectorEnv) == "1" {
+			t.Fatalf("%s is set, so %s must name a Postgres with the pgvector extension", RequireVectorEnv, VectorDatabaseEnv)
+		}
+		t.Skipf("set %s to a Postgres with the pgvector extension to run the vector columns against it", VectorDatabaseEnv)
+	}
+	return url
+}

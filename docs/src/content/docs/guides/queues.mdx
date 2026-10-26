@@ -73,10 +73,12 @@ A message's fields are values a column holds: a scalar, an enum, a list
 or map of them, or a JSON value such as a `@jsonField` type. A message
 names an order by its key, not by a relation to its table. The build
 refuses a `@key`, a generated field, a relation, an index, a field
-named like a column the queue keeps, and an
+named like a column the queue keeps, an
 [`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
-field, whose envelope no worker opens: carry the key of the row that holds
-one instead.
+field, whose envelope no worker opens, and a `Generic.Decimal` or an
+`Embedding.Vector`, which the queue clients do not read alike yet: carry
+the key of the row that holds one instead, or a decimal's text as a
+string.
 
 The DB service's build writes the queue's table, after its tables, named
 after the class with `_queue`, or as `@table` names it, whose columns

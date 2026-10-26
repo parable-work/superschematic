@@ -118,6 +118,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(searchFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove search.go: %w", err)
 	}
+	// nearest.go writes a vector's text form and the Nearest of each table
+	// with a vector column (D84); a schema without one has none.
+	nearestFile := filepath.Join(outputDir, "nearest.go")
+	if output.HasVectors {
+		if err := generateFile(generator, "nearest.tmpl", nearestFile, output); err != nil {
+			return fmt.Errorf("failed to write nearest.go: %w", err)
+		}
+	} else if err := os.Remove(nearestFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove nearest.go: %w", err)
+	}
 	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
 	}

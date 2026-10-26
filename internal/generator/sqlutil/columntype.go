@@ -1,6 +1,9 @@
 package sqlutil
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -68,6 +71,11 @@ func ElementType(typeName string, scalarTypes map[string]string) string {
 // ragged. A list is a native array of its element's type. A nil schema
 // knows no @jsonField class. An Encrypted<T> field's column is TEXT, its
 // ciphertext's envelope (D85).
+//
+// A field's Validate rules narrow its element's type (D84): a decimal with
+// a precision is NUMERIC(p,s), and an Embedding.Vector with dimensions is
+// pgvector's vector(n). An Embedding.Vector without dimensions keeps the
+// TEXT its scalar's missing SQL type falls back to.
 func ColumnType(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]string) string {
 	if field.EncryptedAtRest {
 		return "TEXT"
@@ -76,10 +84,40 @@ func ColumnType(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]st
 		return "JSONB"
 	}
 	element := ElementType(field.TypeRef.Name, scalarTypes)
+	switch {
+	case field.ValidatePrecision != nil && strings.EqualFold(element, "NUMERIC"):
+		element = fmt.Sprintf("NUMERIC(%d,%d)", *field.ValidatePrecision, field.DecimalScale())
+	case field.ValidateDimensions != nil && field.TypeRef.Name == ir.VectorScalarName:
+		element = VectorType(*field.ValidateDimensions)
+	}
 	if field.TypeRef.IsArray {
 		return element + "[]"
 	}
 	return element
+}
+
+// VectorType is the column type of a vector of dimensions numbers,
+// pgvector's vector(n) (D84).
+func VectorType(dimensions int) string {
+	return fmt.Sprintf("vector(%d)", dimensions)
+}
+
+// IsVectorType reports whether a column type is pgvector's vector(n), a
+// single vector: the type the vector index methods and nearest read.
+func IsVectorType(columnType string) bool {
+	return strings.HasPrefix(strings.ToLower(columnType), "vector(") && !strings.HasSuffix(columnType, "]")
+}
+
+// VectorDimensions is n of a vector(n) column type, or 0 for another type.
+func VectorDimensions(columnType string) int {
+	if !IsVectorType(columnType) {
+		return 0
+	}
+	var n int
+	if _, err := fmt.Sscanf(strings.ToLower(columnType), "vector(%d)", &n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // IsJSONFieldType reports whether name is a @jsonField class of schema: a

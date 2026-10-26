@@ -23,6 +23,9 @@ type repositoryCase struct {
 	fixture string
 	files   []string
 	tests   []string
+	// vector runs the test on the Postgres with pgvector
+	// pgtest.VectorDatabaseURL names (D84).
+	vector bool
 }
 
 // repositoryCases are the TypeScript repositories' Postgres tests (D79),
@@ -35,8 +38,9 @@ type repositoryCase struct {
 // column through the codec; fixture-user-model-db's user model tables,
 // user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
-// the repositories; and fixture-vault-db's Encrypted<T> fields (D85),
-// sealed, opened, refused and resealed.
+// the repositories; fixture-vault-db's Encrypted<T> fields (D85), sealed,
+// opened, refused and resealed; and fixture-vectors-db's decimals, vectors
+// and nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -72,6 +76,13 @@ var repositoryCases = []repositoryCase{
 		"a login that differs only in case is the same login, and the identity tables keep their keys unique",
 		"deleting a user deletes its sessions, credential and grants, and deleting a role its grants",
 		"a principal's base62 subject matches its user row through uuidToDb",
+	}},
+	{fixture: "fixture-vectors-db", files: []string{"vectors.test.ts"}, vector: true, tests: []string{
+		"a signed amount, a decimal in its column scale and an exact one read back as the wire holds them",
+		"a decimal filter compares numbers, each value bound as its text",
+		"a vector reads and writes as its numbers, and nearest finds the neighbours by each metric",
+		"a table @table and @column name, with a sealed note beside its vector: nearest orders by the renamed column and opens each note",
+		"nearest runs the statement sqlutil writes: the filter, the live rows, the vector last, and the order of its distance",
 	}},
 	{fixture: "fixture-ddl-db", files: []string{"ddl.test.ts"}, tests: []string{
 		"a create that leaves a defaulted field unset writes what the column's DEFAULT gives a raw insert",
@@ -148,6 +159,9 @@ func TestRepositoriesOnPostgres(t *testing.T) {
 			}
 			run := exec.Command(bunPath, append(args, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)...)
 			run.Dir = dir
+			if rc.vector {
+				run.Env = append(os.Environ(), "SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL="+pgtest.VectorDatabaseURL(t))
+			}
 			out, err := run.CombinedOutput()
 			if err != nil {
 				t.Fatalf("the repository test failed: %v\n%s", err, out)

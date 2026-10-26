@@ -546,3 +546,23 @@ func TestServiceCarriesMemoryStores(t *testing.T) {
 		t.Errorf("services = %v, want shop-api and shop-cache", names)
 	}
 }
+
+// TestServiceCarriesVectorsAndFieldKeys: a database with a vector column
+// and an Encrypted<T> field gives the resolver both facts, the vector,
+// which picks pgvector's image for stack dev (D84), and the key secret,
+// which every deployable on the database reads (D85).
+func TestServiceCarriesVectorsAndFieldKeys(t *testing.T) {
+	reg := assemble(t)
+	schema, cfg := load(t, reg, filepath.Join("..", "..", "loader", "tsreader", "testdata", "services", "fixture-vectors-db"))
+	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := stackgen.Service(schema, outputs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Vectors || svc.FieldKeys != "VectorKeys.VECTOR_DB_FIELD_KEYS" {
+		t.Errorf("vectors = %v, field keys = %q; want both", svc.Vectors, svc.FieldKeys)
+	}
+}

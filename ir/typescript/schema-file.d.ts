@@ -270,6 +270,7 @@ export interface FieldDef {
   uiControl?: string;
   uiHidden?: boolean;
   unique?: boolean;
+  validateDimensions?: number;
   validateListMax?: number;
   validateListMin?: number;
   validateMax?: number;
@@ -277,6 +278,8 @@ export interface FieldDef {
   validateMin?: number;
   validateMinLength?: number;
   validatePattern?: string;
+  validatePrecision?: number;
+  validateScale?: number;
   validateUploadMaxBytes?: number;
   virtual?: boolean;
   webhook?: boolean;
@@ -340,8 +343,11 @@ export interface Import {
 
 export interface IndexDef {
   concurrently?: boolean;
+  efConstruction?: number;
   expression?: string;
   keys: string[];
+  lists?: number;
+  m?: number;
   method?: string;
   name?: string;
   ops?: string;

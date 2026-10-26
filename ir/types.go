@@ -432,6 +432,19 @@ type FieldDef struct {
 	// (@validatePattern). Empty string means no pattern.
 	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
 
+	// ValidatePrecision and ValidateScale bound a Generic.Decimal field
+	// (Validate<Generic.Decimal, { precision, scale }>, D84): its value has at
+	// most ValidateScale digits after the point and at most precision minus
+	// scale before it, and a DB column of it is NUMERIC(p,s). The scale is 0
+	// unless set, and needs a precision. Nil means unbounded.
+	ValidatePrecision *int `json:"validatePrecision,omitempty" yaml:"validatePrecision,omitempty"`
+	ValidateScale     *int `json:"validateScale,omitempty" yaml:"validateScale,omitempty"`
+
+	// ValidateDimensions is the length of every value of an Embedding.Vector
+	// field (Validate<Embedding.Vector, { dimensions }>, D84), and a DB
+	// column of it is vector(n). Nil means any length.
+	ValidateDimensions *int `json:"validateDimensions,omitempty" yaml:"validateDimensions,omitempty"`
+
 	// Arguments lists field arguments (primarily used for operation fields).
 	Arguments []*ArgumentDef `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 
@@ -706,6 +719,15 @@ type IndexDef struct {
 	// the table while it builds. Nil or true builds it concurrently.
 	Concurrently *bool `json:"concurrently,omitempty" yaml:"concurrently,omitempty"`
 
+	// M and EFConstruction are an hnsw index's build parameters (D84),
+	// pgvector's m and ef_construction: the links each vector keeps to its
+	// neighbours, and the candidates a build weighs for them. Lists is an
+	// ivfflat index's, the lists it divides the vectors into. Nil keeps
+	// pgvector's default.
+	M              *int `json:"m,omitempty" yaml:"m,omitempty"`
+	EFConstruction *int `json:"efConstruction,omitempty" yaml:"efConstruction,omitempty"`
+	Lists          *int `json:"lists,omitempty" yaml:"lists,omitempty"`
+
 	// Origin is [OriginVersionGraph] for an index a version graph adds;
 	// empty for an authored index.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
@@ -725,11 +747,12 @@ const (
 var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, IndexMethodBRIN, IndexMethodHNSW, IndexMethodIVFFlat}
 
 // HasTableOptions reports whether the index sets an option only a table's
-// index has (D83): a method, an operator class, a predicate, an expression
-// or the concurrency of its build. The engine indexes an engine type's
-// listed fields and reads none of them.
+// index has (D83): a method, an operator class, a predicate, an expression,
+// the concurrency of its build or a vector method's parameter (D84). The
+// engine indexes an engine type's listed fields and reads none of them.
 func (idx IndexDef) HasTableOptions() bool {
-	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil
+	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil ||
+		idx.M != nil || idx.EFConstruction != nil || idx.Lists != nil
 }
 
 // RawSQLDef is a piece of raw SQL a DB service declares (@rawSql, D83):

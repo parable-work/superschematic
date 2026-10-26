@@ -441,16 +441,69 @@ def _has_field_level_constraints(field: FieldDef) -> bool:
         or field.validate_min_length is not None
         or field.validate_max_length is not None
         or field.validate_pattern != ""
+        or field.validate_precision is not None
+        or field.validate_dimensions is not None
     )
 
 
 def _apply_field_level_constraints(field: FieldDef, value: Any) -> list[ValidationError]:
+    digits = _validate_field_digits(field, value)
     if isinstance(value, str):
-        return _validate_field_level_string_constraints(field, value)
+        return _validate_field_level_string_constraints(field, value) + digits
     numeric = _to_number(value)
     if numeric is not None:
-        return _validate_field_level_numeric_constraints(field, numeric)
-    return []
+        return _validate_field_level_numeric_constraints(field, numeric) + digits
+    return digits
+
+
+_DECIMAL_TEXT = re.compile(r"[+-]?([0-9]+)(?:\.([0-9]+))?", re.ASCII)
+
+
+def _validate_field_digits(field: FieldDef, value: Any) -> list[ValidationError]:
+    """A field's digit rules (D84) on one value.
+
+    A Generic.Decimal's canonical form holds at most precision less scale
+    digits before the point, without leading zeros ("precision"), and at
+    most scale after it, without trailing zeros ("scale"); an
+    Embedding.Vector, the JSON array or the one its JSON text holds, has
+    exactly dimensions numbers ("dimensions"). A value of another shape is
+    the scalar's to report, and is not counted.
+    """
+    out: list[ValidationError] = []
+    if field.validate_precision is not None and isinstance(value, str):
+        m = _DECIMAL_TEXT.fullmatch(value.strip())
+        if m is not None:
+            scale = field.validate_scale or 0
+            integer_digits = field.validate_precision - scale
+            if len(m.group(1).lstrip("0")) > integer_digits:
+                out.append(
+                    ValidationError(
+                        validator="precision",
+                        message=f"{field.name} must have at most {integer_digits} digits before the decimal point.",
+                    )
+                )
+            if len((m.group(2) or "").rstrip("0")) > scale:
+                out.append(
+                    ValidationError(
+                        validator="scale",
+                        message=f"{field.name} must have at most {scale} digits after the decimal point.",
+                    )
+                )
+    if field.validate_dimensions is not None:
+        vector = value
+        if isinstance(vector, str) and vector != "":
+            try:
+                vector = json.loads(vector)
+            except ValueError:
+                vector = None
+        if isinstance(vector, list) and len(vector) != field.validate_dimensions:
+            out.append(
+                ValidationError(
+                    validator="dimensions",
+                    message=f"{field.name} must have exactly {field.validate_dimensions} dimensions.",
+                )
+            )
+    return out
 
 
 def _validate_single_field(
