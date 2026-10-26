@@ -6,7 +6,11 @@
  * site: its config names the APIs it calls and how it builds, and its code
  * sits at its implementation path (D55). A Bucket service is private object
  * storage that APIs list in their `buckets` (D54): its config is all it
- * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore
+ * service is a Redis or Valkey server the replicas of a stack share, which
+ * holds no fact (D75): its schema declares each channel and key it carries
+ * (`@superschematic/memory-store`), and APIs list it in their
+ * `memoryStores`.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -14,7 +18,8 @@ export enum SchemaKind {
   General = "General",
   Stack = "Stack",
   Site = "Site",
-  Bucket = "Bucket"
+  Bucket = "Bucket",
+  MemoryStore = "MemoryStore"
 }
 
 /**
@@ -41,23 +46,25 @@ export enum TargetLanguage {
  * A handle to a service: what service() returns and a generated sentinel
  * exports. K is the service's kind, as a string ("API"), C the type of its
  * @envVars class, J the names of its @job classes, W the names of its
- * @worker classes and D the names of its @deriver classes. All five are
- * phantom: the sentinel generator writes them
- * (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
+ * @worker classes, D the names of its @deriver classes and A the names of
+ * its @app classes. All six are phantom: the sentinel generator writes
+ * them (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
  * and superschematic reads only name and kind. A DB or General handle has
- * no config type, no jobs, no workers and no derivers, nor has an API
- * without an @envVars class, a @job class, a @worker class or a @deriver
- * class, or a handle written by hand, so C, J, W and D keep their
- * defaults: any config, and any job, worker or deriver name. An API with
- * workers and no jobs has the jobs `never`, and one with derivers has
- * `never` for the jobs and the workers it lacks.
+ * no config type, no jobs, no workers, no derivers and no apps, nor has an
+ * API without an @envVars class, a @job class, a @worker class, a @deriver
+ * class or an @app class, or a handle written by hand, so C, J, W, D and A
+ * keep their defaults: any config, and any job, worker, deriver or app
+ * name. An API with workers and no jobs has the jobs `never`, one with
+ * derivers has `never` for the jobs and the workers it lacks, and one with
+ * apps `never` for the jobs, the workers and the derivers it lacks.
  */
 export type ServiceHandle<
   K extends SchemaKindName = SchemaKindName,
   C = unknown,
   J extends string = string,
   W extends string = string,
-  D extends string = string
+  D extends string = string,
+  A extends string = string
 > = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
@@ -70,6 +77,8 @@ export type ServiceHandle<
   readonly __workers?: W;
   /** Phantom: carries D for the type checker and is never set. */
   readonly __derivers?: D;
+  /** Phantom: carries A for the type checker and is never set. */
+  readonly __apps?: A;
 };
 
 export type TargetOutputConfig = {
@@ -303,6 +312,14 @@ export type SchemaConfig = {
    */
   readonly buckets?: readonly ServiceHandle<"Bucket">[];
   /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry is a MemoryStore service's handle.
+   */
+  readonly memoryStores?: readonly ServiceHandle<"MemoryStore">[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceHandle<"MemoryStore">;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -314,7 +331,7 @@ export type SchemaConfig = {
 
 /**
  * A service reference in the JSON/YAML config forms, in dependencies,
- * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
+ * calls, buckets, memoryStores and rateLimitStore. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -348,6 +365,14 @@ export type SchemaConfigDocument = {
    */
   readonly buckets?: readonly ServiceDependencyRef[];
   /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.
+   */
+  readonly memoryStores?: readonly ServiceDependencyRef[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceDependencyRef;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -366,10 +391,14 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
  * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
  * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
  */
-export function service<K extends SchemaKindName, C = unknown, J extends string = string, W extends string = string, D extends string = string>(cfg: {
-  readonly name: string;
-  readonly kind: K;
-}): ServiceHandle<`${K}`, C, J, W, D> {
+export function service<
+  K extends SchemaKindName,
+  C = unknown,
+  J extends string = string,
+  W extends string = string,
+  D extends string = string,
+  A extends string = string
+>(cfg: { readonly name: string; readonly kind: K }): ServiceHandle<`${K}`, C, J, W, D, A> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,

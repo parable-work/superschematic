@@ -61,12 +61,12 @@ const (
 
 // tsOrder is the order a build-all builds the TypeScript fixture in,
 // tsCloudStack left out: ts-shop calls ts-pricing, so it builds after
-// ts-pricing's SDK. ts-media, the bucket ts-shop lists, builds nothing
-// (D54).
-var tsOrder = []string{"ts-db", "ts-media", "ts-pricing", "ts-shop", "ts-stack"}
+// ts-pricing's SDK. ts-media, the bucket ts-shop lists, builds nothing,
+// and ts-cache, the memory store both list, its inventory alone (D54, D75).
+var tsOrder = []string{"ts-db", "ts-media", "ts-cache", "ts-pricing", "ts-shop", "ts-stack"}
 
 // tsAPIs are the services of tsOrder the stacks serve.
-var tsAPIs = tsOrder[2 : len(tsOrder)-1]
+var tsAPIs = tsOrder[3 : len(tsOrder)-1]
 
 // loadTypeScriptFixture loads every TypeScript fixture service, as
 // loadFixture loads the Go one.

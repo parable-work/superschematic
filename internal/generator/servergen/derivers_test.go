@@ -25,8 +25,9 @@ import (
 // The deriver fixture (D74): triage-db, an engine database whose Ticket
 // composes Derived; triage-ts-api and triage-rs-api, a TypeScript and a
 // Rust API over it, each declaring TriageTickets, which fills Ticket, and
-// FillAll, which names no schema; and triage-stack, which deploys both on
-// the local target.
+// FillAll, which names no schema, and each listing the memory store
+// triage-cache (D75); and triage-stack, which deploys both on the local
+// target.
 const (
 	triageStack = "triage-stack"
 	triageTS    = "triage-ts-api-triage-tickets"
@@ -35,7 +36,7 @@ const (
 )
 
 // triageOrder is the order a build-all builds the deriver fixture in.
-var triageOrder = []string{"triage-db", "triage-ts-api", "triage-rs-api", triageStack}
+var triageOrder = []string{"triage-db", "triage-cache", "triage-ts-api", "triage-rs-api", triageStack}
 
 // loadDeriverFixture loads the deriver fixture with the core registry and
 // stacktest's fake target.

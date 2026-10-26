@@ -369,7 +369,7 @@ func TestABundleNeedsFiles(t *testing.T) {
 	}
 	t.Run("an image for the bundle's server", func(t *testing.T) {
 		imgs := images(1)
-		imgs[stacktest.StorefrontServer] = "shop-storefront@" + digest(1)
+		imgs[stacktest.StorefrontServer] = image(stacktest.StorefrontServer, 1)
 		_, err := stackdeploy.Deploy(context.Background(), stackdeploy.DeployOptions{
 			Options: f.options(t, env, nil), Images: imgs, Planner: (&planner{to: 1}).plan, Now: fixedNow,
 		})

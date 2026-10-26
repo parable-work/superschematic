@@ -740,3 +740,39 @@ func TestImplementationPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestRustAppPaths: an app's crate is at the [implementation_paths]
+// rust_app template, apps/{app} by default, with the app's name in kebab
+// case and its API's; a template without {app} is refused; and the app's
+// crates are named after the API and the app (D78).
+func TestRustAppPaths(t *testing.T) {
+	d := Default()
+	if got, want := d.RustAppDir("/repo", "shop-stock", "StockBackoffice"), filepath.Join("/repo", "apps", "stock-backoffice"); got != want {
+		t.Fatalf("RustAppDir = %q, want %q", got, want)
+	}
+	if got := (Naming{}).RustAppDir("/repo", "shop-stock", "Backoffice"); got != filepath.Join("/repo", "apps", "backoffice") {
+		t.Fatalf("an empty naming's RustAppDir = %q, want the default", got)
+	}
+	if got := d.RustAppImplementationCrate("shop-stock", "Backoffice"); got != "schemas-shop-stock-backoffice-app" {
+		t.Fatalf("RustAppImplementationCrate = %q", got)
+	}
+	if got := d.RustAppCrate("shop-stack", "shop-stock-backoffice"); got != "schemas-shop-stack-shop-stock-backoffice-app" {
+		t.Fatalf("RustAppCrate = %q", got)
+	}
+	n, err := Parse([]byte("[implementation_paths]\nrust_app = \"rust-impl/{service}-{app}\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.RustAppDir("/repo", "shop-stock", "Backoffice"), filepath.Join("/repo", "rust-impl", "shop-stock-backoffice"); got != want {
+		t.Fatalf("RustAppDir = %q, want %q", got, want)
+	}
+	for _, tc := range []struct{ value, want string }{
+		{"/abs/{app}", "implementation_paths.rust_app \"/abs/{app}\" is an absolute path"},
+		{"apps/{service}", "implementation_paths.rust_app \"apps/{service}\" does not contain {app}"},
+	} {
+		_, err := Parse([]byte("[implementation_paths]\nrust_app = \""+tc.value+"\"\n"), "test")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("implementation_paths.rust_app = %q: err = %v, want it to contain %q", tc.value, err, tc.want)
+		}
+	}
+}

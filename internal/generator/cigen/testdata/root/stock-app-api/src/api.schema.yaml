@@ -1,0 +1,21 @@
+name: stock-app-api
+kind: API
+types:
+  StockCount:
+    name: StockCount
+    role: APIView
+    fields:
+      - name: count
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: Stock
+    operations:
+      - name: stockCount
+        typeRef: { name: StockCount }
+        required: true
+        httpMethod: GET
+        restPath: stock/count
+apps:
+  - name: Backoffice
+    extensions: [topcoat]

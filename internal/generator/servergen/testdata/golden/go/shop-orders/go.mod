@@ -18,6 +18,7 @@ require (
 	example.com/schemas/orm/shop-db v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/sdk/go/shop-api v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-api v0.0.0-00010101000000-000000000000 // indirect
+	example.com/schemas/types/go/shop-cache v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-db v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-orders v0.0.0-00010101000000-000000000000 // indirect
 	github.com/parable-work/superscalar/go v1.0.0 // indirect
@@ -31,6 +32,7 @@ replace (
 	example.com/schemas/orm/shop-db => ../../schemas/dist/orm/shop-db
 	example.com/schemas/sdk/go/shop-api => ../../schemas/dist/sdk/go/shop-api
 	example.com/schemas/types/go/shop-api => ../../schemas/dist/types/go/shop-api
+	example.com/schemas/types/go/shop-cache => ../../schemas/dist/types/go/shop-cache
 	example.com/schemas/types/go/shop-db => ../../schemas/dist/types/go/shop-db
 	example.com/schemas/types/go/shop-orders => ../../schemas/dist/types/go/shop-orders
 	github.com/parable-work/superscalar/go => ../../third_party/superscalar/go

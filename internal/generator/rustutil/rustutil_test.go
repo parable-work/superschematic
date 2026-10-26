@@ -136,7 +136,7 @@ func TestCrateNameToModulePath(t *testing.T) {
 
 // TestUseLine: a use declaration sorts its items as rustfmt does, self,
 // then lower case, then upper case, names one item without braces, and
-// wraps past 100 columns.
+// wraps past 98 columns, as rustfmt does a line of 99 or 100.
 func TestUseLine(t *testing.T) {
 	for _, tc := range []struct {
 		path  string
@@ -149,6 +149,10 @@ func TestUseLine(t *testing.T) {
 		{"crate::runtime::stackconfig", []string{"Service", "self", "Cors"}, "use crate::runtime::stackconfig::{self, Cors, Service};"},
 		{"schemas_shop_api", []string{"Deps", "Handlers", "CartsImplementation", "ProductsImplementation", "StockImplementation", "CartsGetCartArgs"},
 			"use schemas_shop_api::{\n    CartsGetCartArgs, CartsImplementation, Deps, Handlers, ProductsImplementation,\n    StockImplementation,\n};"},
+		{"superschematic_http_runtime", []string{"cors", "IdentityAuthenticator", "JwtServiceAuthenticator", "Rate"},
+			"use superschematic_http_runtime::{cors, IdentityAuthenticator, JwtServiceAuthenticator, Rate};"},
+		{"superschematic_http_runtime", []string{"cors", "IdentityAuthenticator", "JwtServiceAuthenticator", "RateLimits"},
+			"use superschematic_http_runtime::{\n    cors, IdentityAuthenticator, JwtServiceAuthenticator, RateLimits,\n};"},
 	} {
 		if got := UseLine(tc.path, tc.items); got != tc.want {
 			t.Errorf("UseLine(%s, %v) =\n%s\nwant\n%s", tc.path, tc.items, got, tc.want)

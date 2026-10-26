@@ -54,6 +54,15 @@ type DepsInfo struct {
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 
+	// MemoryStores are the memory stores the API lists, its rateLimitStore
+	// among them, sorted by service (D75).
+	MemoryStores []DepsMemoryStore
+
+	// RateLimitStore is the memory store the API's @rateLimit routes count
+	// in, its config's rateLimitStore, which MemoryStores lists; empty
+	// keeps each replica's in-process limiter (D75).
+	RateLimitStore string
+
 	// Engine is the engine Deps holds when Database is an engine database
 	// (D58), nil otherwise.
 	Engine *DepsEngine
@@ -94,6 +103,17 @@ type DepsBucket struct {
 	Service string
 
 	// Field is the Deps member that holds the bucket.
+	Field string
+}
+
+// DepsMemoryStore is a memory store in Deps: the HTTP runtime's
+// MemoryStore, which the entrypoint opens on Redis, or disabled when its
+// field is unset (D75).
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps member that holds the store.
 	Field string
 }
 
@@ -138,7 +158,8 @@ func (o *APIOutput) DepsSQLite() bool {
 // its buckets.
 var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 
-// SetDeps sets what Deps holds, refusing a client or a bucket whose member
+// SetDeps sets what Deps holds, refusing a client, a bucket or a memory
+// store whose member
 // would take the name of another of its members.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
@@ -156,6 +177,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("tsrestgen: %s lists bucket %s, which would be Deps.%s, the member of %s", o.SchemaName, b.Service, b.Field, prev)
 		}
 		seen[b.Field] = b.Service
+	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("tsrestgen: %s lists memory store %s, which would be Deps.%s, the member of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
 	return nil
