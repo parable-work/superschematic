@@ -173,7 +173,8 @@ serves the engine (`docs/stack-model.md`, section 8.1).
 An event stream lifts the connection's write deadline, writes each frame
 and flushes it (`http.ResponseController`). It polls the engine without
 waiting whenever the engine's one waiter goroutine, blocked in `eng_wait`,
-sees a commit (`Engine.Changed`; on Postgres a commit in any process), or a
+sees a commit or a signal (`Engine.Changed`; on Postgres a commit or a
+signal in any process), or a
 quarter of the heartbeat passes, and ends when the engine ends it, the
 client goes away or the engine closes. `WriteProblem` writes a problem
 document as the engine writes one, for a host's own refusals.

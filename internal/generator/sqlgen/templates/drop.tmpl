@@ -1,6 +1,15 @@
 -- Drop statements for schema: {{ .SchemaName }}
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
+{{- if rawSQLDowns .RawSQL }}
+
+-- Undo the raw SQL the schema declares (@rawSql), last piece first
+{{- range $piece := rawSQLDowns .RawSQL }}
+{{- range $piece.Down }}
+{{ . }};
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Drop projection views first (they read the tables below)

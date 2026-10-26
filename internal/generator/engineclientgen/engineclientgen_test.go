@@ -328,3 +328,84 @@ func TestRefusesWhatTheEngineRefuses(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+// A behavior's signals (D77) are typed whatever behavior declares them:
+// one data type per signal, qualified by its behavior when another
+// behavior of the type declares its name; <T>Signals and <T>SignalMessage
+// over them; and a send helper per signal of access read or write,
+// qualified when an operation or another helper takes its name. A signal
+// of access operation gets a data type and no helper.
+func TestSignals(t *testing.T) {
+	reg := registry.New(naming.Default())
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	object := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}}
+	for _, spec := range []registry.BehaviorSpec{
+		{Extension: "acme", Declaration: json.RawMessage(`{"name": "acme.Chatter",
+			"operations": [{"name": "sendNudge", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": {"type": "object"}}],
+			"signals": [
+				{"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": {"type": "object", "additionalProperties": false, "properties": {"thread": {"type": "integer"}}}},
+				{"name": "nudge", "access": "write", "paramsSchema": {"type": "object", "additionalProperties": false, "required": ["to"], "properties": {"to": {"type": "string"}}}},
+				{"name": "echo", "access": "operation", "paramsSchema": true}
+			]}`)},
+		{Extension: "acme", Declaration: mustJSON(t, map[string]any{"name": "acme.Huddle", "signals": []any{
+			map[string]any{"name": "typing", "access": "write", "paramsSchema": object},
+		}})},
+	} {
+		if err := reg.RegisterBehavior(spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	room := `{"kind": "General", "name": "rooms", "types": {"Room": {"name": "Room", "role": "EmbeddedStruct",
+  "behaviors": [{"name": "acme.Chatter"}, {"name": "acme.Huddle"}],
+  "fields": [{"name": "title", "typeRef": {"name": "string"}}]}}}`
+	module, err := Generate([]*ir.Schema{loadDocument(t, reg, room)}, Options{Registry: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(module)
+	for _, want := range []string{
+		"export type RoomAcmeChatterTypingSignal = {",
+		"export type RoomNudgeSignal = { to: string };",
+		"/** The data of acme.Huddle's typing signal. */",
+		"export type RoomEchoSignal = unknown;",
+		"export type RoomAcmeHuddleTypingSignal = Record<string, never>;",
+		"export type RoomSignals = {\n  'acme.Chatter': { typing: RoomAcmeChatterTypingSignal; nudge: RoomNudgeSignal; echo: RoomEchoSignal };\n  'acme.Huddle': { typing: RoomAcmeHuddleTypingSignal };\n};",
+		"readonly behavior: 'acme.Huddle'; readonly name: 'typing'; readonly data: RoomAcmeHuddleTypingSignal } };",
+		"export function isRoomSignal<",
+		"  sendAcmeChatterTyping(id: string, data?: RoomAcmeChatterTypingSignal, options?: CallOptions): Promise<void>;",
+		"  sendAcmeChatterNudge(id: string, data: RoomNudgeSignal, options?: CallOptions): Promise<void>;",
+		"  sendAcmeHuddleTyping(id: string, data?: RoomAcmeHuddleTypingSignal, options?: CallOptions): Promise<void>;",
+		"      return client.signals.send({ schema: 'rooms', instanceId: id, behavior: 'acme.Chatter', name: 'nudge', data }, options);",
+		"      return client.signals.send({ schema: 'rooms', instanceId: id, behavior: 'acme.Huddle', name: 'typing', data: data ?? {} }, options);",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the module lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "sendEcho") || strings.Contains(text, "sendAcmeChatterEcho") {
+		t.Error("a signal of access operation has a send helper")
+	}
+
+	// A schema whose behaviors declare no signal gets none of it.
+	plain, err := Generate(loadSchemas(t, coreRegistry(t), jobsSchemas), Options{Registry: coreRegistry(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "Signal") {
+		t.Error("a module without signals names a signal type")
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}

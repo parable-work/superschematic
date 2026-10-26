@@ -9982,11 +9982,14 @@ Three rules hold throughout.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| A signal is a message about one instance that the engine delivers to the event streams open on it and does not keep. A behavior declares its signals, `signals: [{ name, paramsSchema, access }]`, `access` being `read` or `write`; the engine checks a signal's data against its schema, at most 4 KB of JSON, and asks the policy `access` with the operation `signal:<name>`. | Ephemeral events in the log with a short retention, which every cursor still has to scan past, and which replay sends to a client that reconnects an hour later. |
+| A signal is a message about one instance that the engine delivers to the event streams open on it and does not keep. A behavior declares its signals, `signals: [{ name, paramsSchema, access }]`, `access` being `read`, `write` or `operation` (below); the engine checks a signal's data against its schema, at most 4 KB of JSON, and asks the policy `access` with the operation `signal:<name>`. | Ephemeral events in the log with a short retention, which every cursor still has to scan past, and which replay sends to a client that reconnects an hour later. |
 | A caller sends one with `engine.signals.send(principal, { namespace, schema, instanceId, behavior, name, data })`, `POST .../instances/{id}/signals/{behavior}/{name}`. A behavior's operation sends one with `cx.signal(name, data)`, delivered after its call commits and dropped when it rolls back. The engine stamps `from`, the sender's subject, and `at`. | Signals only from operations, which a client's typing indicator would have to call a writing operation for. |
 | A stream opened with `signals=1` receives each signal on an instance its filters keep, which its principal may read, as an `event: signal` message with no `id:`, so `Last-Event-ID` and a reconnect's replay never see it. Without `signals=1` a stream is as it was. | A stream of its own for signals, which a client would open beside the event stream for every conversation it shows. |
 | Delivery is at most once and in no order with the events. On SQLite the in-process watcher carries it; on Postgres a `pg_notify` channel of its own, under that channel's 8000-byte payload limit, which is why a signal holds 4 KB. | A broker (Redis, NATS) beside the database, a dependency every stack would need for a typing indicator. |
 | The engine limits each principal's signals per instance (`signals.perSecond`, 20 when absent), and drops the rest with a 429 to a caller. | No limit, which lets one client fan out to every reader of a busy instance as fast as it can send. |
+| A third `access`, `operation`, is a signal only the behavior's own operations send, through `cx.signal`: Comments' `draft`, whose offsets only `appendDraft` knows. A signal an operation sends is not limited by `signals.perSecond`, since the operation that sends it already wrote and was asked of the policy; an agent appending faster than the limit loses no chunk. | Every signal a caller's, so a client could forge a draft chunk of someone else's reply. |
+| The call is `signals.send` (`sendSignal` is its alias, and the HTTP route's name). The 4 KB is the data's; the whole signal, envelope and all, is at most 7900 bytes, under `pg_notify`'s limit with room for the tag that keeps Postgres from folding two identical notifications of one transaction into one. Each engine schema has a channel of its own, `superschematic_engine_signals.<schema>`, beside its commit channel, and one listener hears both. | One channel for every engine on a database, which hands each listener every other engine's signals to drop. |
+| A signal wakes a waiting stream without a read of the log: the notifier counts signals' wakes apart from commits, the runner and `events.watch` wake for commits alone, and a stream reads the log again only when a commit moved since its last read. A stream holds at most 256 signals and drops the oldest. | Waking every stream as a commit does, a read of the log per signal per stream. |
 
 ### Primitive 3: namespace operations
 
@@ -10034,9 +10037,10 @@ Operations, each beside the instance (primitive 1):
 | Operation | What it does | Logged |
 |-----------|--------------|--------|
 | `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })` | posts a message, top-level or into `thread`; `clientId`, the caller's key, makes a retry return the message it posted | yes |
-| `begin({ thread?, quotes?, clientId? })` | starts a `composing` message, which holds its place in the thread and shows who is writing | yes |
-| `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }` | no |
+| `begin({ thread?, quotes?, clientId? })` | starts a `composing` message, which holds its place in the thread and shows who is writing; at most `maxDrafts` (5 when absent) per author on an instance | yes |
+| `appendDraft({ message, text })` | appends to a composing message's draft, its author only, and sends the `draft` signal `{ message, offset, text }`, `offset` in code points; an empty `text` appends nothing and keeps the draft from going idle, for an agent busy in a tool call | no |
 | `finish({ message, body?, blocks?, mentions? })` | posts a composing message, its body the draft when `body` is absent | yes |
+| `interrupt({ message })` | ends a composing message: its draft becomes its body as `interrupted`, or an empty draft a deleted message. Its author or `moderatePermission` at any time; anyone the policy lets write once the draft is idle, which is how the runner's schedule calls it | yes |
 | `edit({ message, body?, blocks?, mentions? })` | its author, or `moderatePermission`, within `editWindowMs` when the config sets one; the text before is kept (`listEdits`) | yes |
 | `deleteMessage({ message })` | its author or `moderatePermission`: the message becomes `deleted`, its body and blocks cleared, its replies kept. Not `delete`, which every schema has | yes |
 | `purge({ message })` | `moderatePermission`: removes the message, its edits and its reactions from the tables; a top-level message's whole thread with it | yes |
@@ -10052,6 +10056,20 @@ by a client every few seconds while it shows the conversation, and
 and who is looking from the signals of the last few seconds; the engine
 holds no presence for them (the work queue's `Presence` is for a worker,
 durable and swept).
+
+A message stands once it is `posted` or `interrupted`: the counts, the
+replies and `lastMessageAt` count standing messages, and move at `post`,
+`finish` and `interrupt`, never at `begin`. A streamed reply keeps
+`createdAt`, its begin time, for its place in the thread, and gains
+`postedAt` when it stands; `lastMessageAt`, `lastReplyAt` and
+`editWindowMs` read `postedAt`, so a long reply is not stale, or past its
+edit window, the moment it finishes. While a message is composing, edits,
+reactions, pins, resolves, replies into it and quotes of it are refused
+(`composing`). A reader subscribes with `signals=1` before it reads, so
+no chunk falls between the read and the stream; it appends a chunk whose
+offset is the length it holds, ignores one it holds already, reads the
+message again past a gap, and ignores the chunks of a message no longer
+composing, since signals keep no order with the events.
 
 Namespace operations (primitive 3):
 
@@ -10075,12 +10093,13 @@ nothing for `composeTimeoutMs` (60000 when absent) becomes `interrupted`
 on the runner's schedule, its draft kept as its body, so a crashed agent
 leaves what it wrote and no message stuck as writing.
 
-Fields, all volatile (primitive 1): `messages`, the posted messages;
+Fields, all volatile (primitive 1): `messages`, the standing messages;
 `lastMessageAt`; `threads`, `{ open, resolved }`; `unread`, the caller's;
 `composing`, the subjects writing now. `commentCount` goes; a type's
 list shows `Comments.messages`.
 
 Config, all optional: `maxBodyLength`; `editWindowMs`; `composeTimeoutMs`;
+`maxDrafts`;
 `blocks`, the kinds a message may hold (all four when absent);
 `moderatePermission`, `pinPermission`, `resolvePermission`,
 `anchorPermission`, `deliverPermission`; `maxAttempts` for deliveries (5
@@ -10113,7 +10132,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
+Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10129,7 +10148,20 @@ Status: step 1 is built; steps 2 to 5 are not. The order to build it in:
    the typed clients. Deleting an instance keeps its conversation's
    high-water marks, so a re-created instance never reuses a message id.
 2. Primitive 2, signals, on SQLite and Postgres and in the stream, with
-   `typing`, `viewing` and streamed replies.
+   `typing`, `viewing` and streamed replies. Built. Signals are
+   `runtime/engine/rust/engine/src/signals.rs` (the hub, the queues and
+   the limiter) and `storage/src/signals.rs` (the carriers), the route and
+   `signals=1` in `api/stream.rs`, and `cx.signal` in the operation
+   context; `testkit/tests/signals.rs` and `replicas_signals.rs` hold them
+   on both databases and across engines on one Postgres database. A
+   stream reads the log at least once a heartbeat however many signals
+   reach it, so an engine without a listener still sees other processes'
+   commits, and it asks the policy about a schema's signals again at each
+   read. Comments' streamed replies are `comments/drafts.rs` and
+   migration 3, held by `testkit/tests/core_comments_drafts.rs` and the
+   TypeScript suite, which reassembles a reply from its drafts over HTTP;
+   the typed clients carry each behavior's signals as types, a guard and a
+   send helper per signal a caller may send.
 3. Primitive 3, namespace operations, with the inbox, read state and
    deliveries.
 4. Primitive 4, acting for a subject, in the principal, the events,
@@ -10973,6 +11005,116 @@ Left: the engine's archive and Node-API addon prebuilt, for a TypeScript
 project whose types compose behaviors; the first publish and its pin,
 which a maintainer runs once this merges; a proxy for a site served by a
 deploy, which serves each API on its own origin.
+
+## D83. The generated DDL says what the schema says: defaults, checks, SET NULL, richer indexes and raw SQL (D27 amended)
+
+The DDL a DB service's build writes left out much of what its schema
+declares, so a row written outside the generated code was held to none of
+it:
+
+- `Default<T, V>` filled decoded payloads only; the column had no
+  `DEFAULT`. The identity runtimes' registration writes a user's login and
+  name alone, so a required extra column of the User table broke sign-up,
+  though verification accepted it because it had a default.
+- An enum's members and `Validate`'s bounds were the validators' alone.
+- `onDelete` had no `SET NULL`, which `OnDeleteAction` left out because a
+  relation was never null. `Nullable<Relation<T>>` has since made it one.
+- `@index` picked its method from the columns' types and took no operator
+  class, predicate or expression.
+- The only SQL a schema could carry was the projection views'. Everything
+  else, from an extension to a materialized view, was written by hand and
+  ordered around a plan (D27).
+- A field typed by a `@jsonField` class was a `TEXT` column, although the
+  ORM wrote it as JSON and the docs called it `JSONB`. `sqlutil.ColumnType`
+  read `JsonField` on the field, which `JsonField<T>` sets, and not on the
+  field's type, which `@jsonField` on a class sets.
+
+This entry closes those gaps.
+
+### Defaults and checks
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A required field's `Default<T, V>` is its column's `DEFAULT` when the column holds text, a boolean or a number, an enum being text: `V` as a SQL literal (`sqlutil.ColumnDefault`). | Every field's default, which for an optional field would change what the Go ORM writes: it leaves an optional zero out of an insert, so an explicit `0` would read back as `V`. A UUID's, a time's or a duration's default, which `V` writes in the wire form, not the stored one. |
+| An enum column has `CHECK (col IN (...))` over its members' serialized values; `Validate`'s `min` and `max` on a number column and `minLength` and `maxLength` on a text column are `CHECK (col >= min AND ...)` and `CHECK (length(col) <= n)`, ANDed into one check per column, named `ck_<table>_<column>` and cut to 63 bytes as a foreign key's name is. `length` counts characters in Postgres and SQLite, as every validator counts code points. | A pattern, which the dialects' regular expressions and the validators' do not read alike; the list rules, which SQLite's `CHECK` cannot read without a subquery; a scalar's own bounds (`Finance.Money`'s range), which can follow; checks on a list of an enum, for the same reason as the list rules. |
+| Both are on, for every DB service, with no option. The schema already says them, the project is unreleased, and an opt-in leaves out the projects that most need them: those with scripts, triggers and hand-written SQL. On an existing database, the next plan sets each default in `expand` with no hazard, and adds each check in `contract`, `NOT VALID` then validated (`data-dependent`), which takes no long lock and passes on rows the generated code wrote; a `stack deploy`, which gates on every class unless told otherwise, stops on each until `--allow` names it. SQLite rebuilds each changed table once per phase (`copy-table`). | Opt-in per service (`outputs.sql.checks`), whose cost is a key on every config and a second DDL to test; on with an opt-out, which can follow if a project needs one, for instance to load legacy values first. |
+| A check over a column the plan adds, or one that widens an enum (every previous member stays), goes in `expand`; one that narrows an enum goes in `contract`, `data-dependent`; any other change drops the old check in `expand` and adds the new one in `contract`. A dropped check is `expand`, a loosening; a check on a column `contract` drops goes with the column. | One rule for every change, contract, which would refuse a new enum member the new servers write until the contract ran. |
+| `verify`'s check that a User table takes a row from its key, login and name alone counts a `Default<T, V>` only when the column carries it. | Counting every default, which accepted a schema the store's insert broke. |
+
+### SET NULL
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `OnDeleteAction` gains `"SET NULL"`. `ir.Schema.Validate`, which every load format runs, refuses it on a required relation and names the fix, `Nullable<Relation<T, { onDelete: "SET NULL" }>>`. sqlgen and the SQLite model already rendered any action; a plan already replaces a key whose action changes, in `contract`, with no hazard, since its rows already meet it. | `SET DEFAULT`, which needs a default on a foreign key column, and no field declares one. |
+| No ORM emulates an action: the Go ORM's soft delete sets `deleted_at` and leaves the rows that reference the row as they are, whatever their keys' actions, as it does for `CASCADE`. | |
+
+### `@jsonField` types
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil.ColumnType` takes the schema and returns `JSONB` for a field whose type is a `@jsonField` class, alone or in a list, as it does for `JsonField<T>`: the Go ORM marshals either as one document. Every caller, sqlgen, projections, graphdesc and verify, passes the schema. | Setting `JsonField` on such fields in the loader, which changes the IR every generator and the TypeScript writer read, so `format` would write `JsonField<Address>` for an authored `Address`. |
+| A plan from a database a compiler before this entry built retypes the column with `USING col::JSONB`, `data-dependent`; on SQLite, whose column was text holding JSON already, the rebuild copies it through `json()`, which fails on text that is not JSON as the cast does. | Refusing the change on SQLite, which the D27 rule for text to a JSON value did, and which would leave every SQLite database of such a schema unable to plan. |
+
+### Richer indexes
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@index` takes `method` (`btree`, `gin`, `gist`, `brin`, `hnsw`, `ivfflat`), `ops` (one operator class for every key), `where` (a raw predicate, ANDed with a soft-delete table's `deleted_at IS NULL` on a unique index) and `expression` (one raw expression in place of the keys' columns, the keys naming the fields it reads and the index's default name). An operator class whose extension the DDL knows (`gin_trgm_ops`) enables it. | A typed predicate, which would need an expression language for one option; several expressions, which one expression and the keys cover for now. |
+| `concurrently: false` builds the index on a table a plan does not create inside the step's transaction (`blocking`); the default stays `CONCURRENTLY`, D27's online form. | `concurrently: true` as an opt-in, which would make the online form the exception. |
+| `hnsw` and `ivfflat` need a vector column, and verification refuses them on any other with a message that vector columns follow. A column is a vector when its type is `vector(n)`, so the later decision that adds the type lifts the refusal without changing it. | Leaving the vector methods out of the type until vector columns arrive, which would change the decorator's type twice. |
+| SQLite takes an expression and a predicate, and refuses a method other than BTREE and an operator class. An engine type's index is the engine's, over its fields alone, so it takes none of the options. `where` and `expression` hold one statement each. | |
+
+### Raw SQL
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@rawSql({ id, up, down?, after?, dialects? })` on any table of the DB service, any number of times. The SQL is in the schema, so it travels in the IR: the build cache, `check --watch`, `migrate plan --from-ref` and the JSON and YAML forms carry it with nothing new to read. The class is only where it is written; the piece belongs to the service, and its id names it. A template literal with no substitution is a string, so the SQL can span lines. | `schemas/services/<db>/sql/NNN_name.sql` files, a second input beside the schema files that the loader, the build cache's input hash and `check --watch` would each have to learn, and that the data forms could not hold. A service-level list in the config, which the IR does not carry. |
+| `up` holds statements separated by semicolons, which `sqlutil.SplitStatements` splits outside strings, quoted identifiers, dollar-quoted bodies and comments. A plan runs a piece again when its checksum changes, so each statement must run again over what it made: `CREATE OR REPLACE`, `CREATE ... IF NOT EXISTS`, `DROP ... IF EXISTS`, `REFRESH`, `COMMENT ON`, `GRANT`, `REVOKE`, `INSERT ... ON CONFLICT` (or SQLite's `OR IGNORE`, `OR REPLACE`), or a `DO` block, which its author vouches for. Any other statement, and `CONCURRENTLY`, which a step's transaction refuses, fails the load and names the fix. `down` follows the same rules. | No check, which would let a plain `CREATE INDEX` fail the second time a plan runs its piece. Parsing SQL to prove idempotence, which no parser shared by Postgres and SQLite does. |
+| `after` places a piece: `"tables"`, after the tables and before the indexes (in a plan, after the column alterations); `"indexes"`, the default, after every object the schema declares; another piece's id, right after it. Pieces of one place run in id order. An `after` that names no piece, a piece that reaches itself, and one that runs on a dialect its `after` piece does not, fail the load, naming the piece. | Declaration order, which depends on file and class order; an explicit `before`, which a second key would make two ways to say one thing. |
+| The model records each piece in run order with its statements, its `down` and the SHA-256 of its statements. A plan runs a new piece, and one whose checksum changes, in `expand`, at its place, and a removed piece's `down`, or a step with no SQL when it has none, in `contract`, before any drop. Each step is a new hazard class, `raw-sql`: the planner cannot judge what the SQL does, so a gate can stop on it. A plan from an empty database, `create.sql`, carries none. | Folding them into `destructive` or `data-dependent`, which would claim what the planner cannot know. Re-running every piece on every plan, which would rebuild a materialized view at every deploy. |
+| A SQLite rebuild drops the indexes and triggers raw SQL made on the tables it copies, so a phase that rebuilds tables ends by running every piece again (`rerunRawSQL`, `raw-sql`). | Leaving them lost until the piece next changes. |
+| `create.sql` runs each piece at its place, and `drop.sql` runs each `down` first, the last piece first. A piece runs on every dialect the service lists unless `dialects` narrows it, since SQL rarely means the same on both. | |
+
+D27's "Alternatives not taken" listed "an escape hatch of raw SQL in the
+schema". This entry takes it, bounded: a piece is recorded by id and
+checksum, runs at a declared place, and must run again safely.
+
+Status: built.
+
+- **Defaults and checks:** `sqlutil.ColumnDefault`, `ColumnCheck` and
+  their tests; sqlgen's golden `fixture-ddl-db`; the plan cases
+  `add-default`, `drop-default`, `add-enum-check`, `add-column-with-check`,
+  `widen-enum-check`, `narrow-enum-check`, `change-validate-check`,
+  `drop-validate-check` and `drop-checked-column`, on both dialects, with
+  `TestHazardClasses` and `TestSQLiteHazardClasses`; `TestDDLOnPostgres`
+  (sqlgen's pgcheck), where a raw `INSERT` that leaves out a defaulted
+  column succeeds and a bad enum value or bound fails; the identity
+  stores' `defaults.test.ts` and `TestStoreCreateUserWithADefaultedColumn`
+  over `runtime/http/testdata/identity/defaults`, which
+  `TestIdentityStoreFixtureIsCurrent` writes.
+- **SET NULL:** `TestValidate_RelationOnDeleteSetNullRequired`,
+  `TestRelationOnDeleteSetNullNeedsNullable`, the plan case
+  `change-on-delete-to-set-null`, and `TestDDLOnPostgres`, where deleting
+  a category clears the references to it.
+- **`@jsonField` types:** the plan case `retype-text-to-jsonb`, its
+  SQLite twin and `TestSQLiteKindChanges`; the goldens of
+  `fixture-queue-db` and acme-shop, whose `shipping_address` is `JSONB`.
+- **Indexes:** the plan cases `add-expression-index`,
+  `add-index-in-transaction`, `add-partial-brin-index` and
+  `add-opclass-index`; `TestVerifyDDLTS` and `TestVerifyDDLJSON`, which
+  hold the refusals, the vector one among them.
+- **Raw SQL:** `TestSplitStatements`, `TestStatementProblem`,
+  `TestOrderRawSQL` and `TestCheckRawSQL`; the plan cases `add-raw-sql`,
+  `change-raw-sql`, `drop-raw-sql` and `raw-sql-after-rebuild`;
+  `examples/migrations`, whose v2 adds an expression index, a defaulted
+  enum column and a materialized view that `superschematic-migrate`
+  applies to SQLite and Postgres.
+
+Left: checks for a pattern, the list rules and a scalar's own bounds; an
+opt-out of the checks; raw SQL that a plan knows to take down around a
+change to the columns it reads (a materialized view over a column a plan
+retypes fails the step, as Postgres refuses it); `SET DEFAULT`. The rule
+is reversible until the first release.
 
 ## D80. A queue keys its messages, keeps one ready per key or one claim per key, and a table's trigger enqueues on a change
 

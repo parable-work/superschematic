@@ -174,16 +174,80 @@ export function column(_source: string | ProjectionFunctionCall): PropertyDecora
   return noopPropertyDecorator;
 }
 
+/** An index's access method. `hnsw` and `ivfflat` index vector columns. */
+export type IndexMethod = "btree" | "gin" | "gist" | "brin" | "hnsw" | "ivfflat";
+
 export interface IndexOptions {
   readonly unique?: boolean;
+  /** A purpose name: the index is `idx_<table>_<name>`, or `uq_` when unique. */
   readonly name?: string;
+  /**
+   * The access method. Unset picks one from the columns' types: GIST for
+   * ltree and geometric types, GIN for JSONB, arrays and tsvector, else
+   * BTREE.
+   */
+  readonly method?: IndexMethod;
+  /** The operator class every key is indexed with, such as `gin_trgm_ops`. */
+  readonly ops?: string;
+  /** Makes the index partial: a raw SQL predicate over the table's columns, without WHERE. */
+  readonly where?: string;
+  /**
+   * Indexes a raw SQL expression over the table's columns, such as
+   * `lower(email)`, instead of the keys' columns. The keys name the fields it
+   * reads, and the index's default name.
+   */
+  readonly expression?: string;
+  /**
+   * How a migration plan builds the index on a table that holds data: true,
+   * the default, builds it concurrently, outside a transaction; false builds
+   * it inside the step's transaction, which blocks writes while it builds.
+   */
+  readonly concurrently?: boolean;
 }
 
-/** An index over the listed fields, unique when asked; the engine keeps it too. */
+/**
+ * An index over the listed fields, unique when asked. The engine keeps an
+ * engine type's index too, over its fields alone: method, ops, where,
+ * expression and concurrently are for tables.
+ */
 export function index<T>(
   _keys: readonly (keyof T)[],
   _uniqueOrOptions?: boolean | IndexOptions,
 ): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The options of a piece of raw SQL a DB service runs (@rawSql). */
+export interface RawSqlOptions {
+  /** Names the piece in the migration model: a lowercase identifier, unique in the service. */
+  readonly id: string;
+  /**
+   * The SQL: one or more statements separated by semicolons. A plan runs the
+   * piece again when it changes, so each statement must be able to run again
+   * over what it made: CREATE OR REPLACE, CREATE ... IF NOT EXISTS,
+   * DROP ... IF EXISTS, REFRESH, COMMENT ON, GRANT, REVOKE,
+   * INSERT ... ON CONFLICT, or a DO block.
+   */
+  readonly up: string;
+  /** The SQL a plan runs when the piece is no longer declared, under the same rules. */
+  readonly down?: string;
+  /**
+   * Where the piece runs: `"tables"`, after the tables and before the
+   * indexes; `"indexes"`, the default, after every object the schema
+   * declares; or another piece's id, right after that piece.
+   */
+  readonly after?: "tables" | "indexes" | (string & {});
+  /** The dialects it runs on; unset is every dialect the service is built for. */
+  readonly dialects?: readonly ("postgres" | "sqlite")[];
+}
+
+/**
+ * Raw SQL the DB service runs after the objects its schema declares: a
+ * function, a materialized view, an extension. create.sql includes it, and a
+ * migration plan runs it when it is new or changes, and its down when it is
+ * gone. The class it is written on is only where it lives.
+ */
+export function rawSql(_options: RawSqlOptions): ClassDecorator {
   return noopClassDecorator;
 }
 

@@ -16,13 +16,15 @@ CREATE TABLE "order" (
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   customer_id UUID NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT DEFAULT 'placed' NOT NULL,
   placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  shipping_address TEXT NOT NULL,
+  shipping_address JSONB NOT NULL,
   cancel_reason TEXT,
   checkout_id UUID,
   total_cents BIGINT NOT NULL,
-  UNIQUE (checkout_id)
+  UNIQUE (checkout_id),
+  CONSTRAINT ck_order_status CHECK (status IN ('placed', 'fulfilled', 'shipped', 'cancelled')),
+  CONSTRAINT ck_order_cancel_reason CHECK (length(cancel_reason) <= 500)
 );
 
 COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first. An
@@ -47,9 +49,10 @@ CREATE TABLE product (
   sku CITEXT NOT NULL,
   "name" VARCHAR(80) NOT NULL,
   price_cents BIGINT NOT NULL,
-  in_stock BOOLEAN NOT NULL,
+  in_stock BOOLEAN DEFAULT true NOT NULL,
   image_object TEXT,
-  UNIQUE (sku)
+  UNIQUE (sku),
+  CONSTRAINT ck_product_image_object CHECK (length(image_object) <= 1024)
 );
 
 -- Add search_text generated column for trigram search
@@ -64,10 +67,11 @@ CREATE TABLE restock_request (
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   product_id UUID NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT DEFAULT 'open' NOT NULL,
   quantity BIGINT NOT NULL,
   open_product_id UUID,
-  ordered_at TIMESTAMPTZ
+  ordered_at TIMESTAMPTZ,
+  CONSTRAINT ck_restock_request_status CHECK (status IN ('open', 'ordered'))
 );
 
 COMMENT ON TABLE restock_request IS 'A request to the supplier for more of a product: shop-stock''s worker
@@ -87,7 +91,9 @@ CREATE TABLE review (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   deleted_at TIMESTAMPTZ,
-  deleted_by UUID
+  deleted_by UUID,
+  CONSTRAINT ck_review_rating CHECK (rating >= 1 AND rating <= 5),
+  CONSTRAINT ck_review_title CHECK (length(title) <= 120)
 );
 
 -- Add search_text generated column for trigram search

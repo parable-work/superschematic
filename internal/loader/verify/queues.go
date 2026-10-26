@@ -105,7 +105,7 @@ func checkQueueKey(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 	}
 	_, union := schema.Unions[key.TypeRef.Name]
 	target := schema.Types[key.TypeRef.Name]
-	sqlType := strings.ToUpper(sqlutil.ColumnType(key, sqlutil.ScalarSQLTypes(schema)))
+	sqlType := strings.ToUpper(sqlutil.ColumnType(schema, key, sqlutil.ScalarSQLTypes(schema)))
 	switch {
 	case !key.Required:
 		r.errorf(td.Owner, "%s's key %s is optional; a key is a required field, so every message has one", where, key.Name)

@@ -30,32 +30,32 @@ func ColumnOf(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]stri
 	case relational:
 		return FieldColumn{
 			Name:     codegen.ToSnakeCase(field.Name) + "_id",
-			Type:     KeyColumnType(target, scalarTypes),
+			Type:     KeyColumnType(schema, target, scalarTypes),
 			Nullable: !field.Required,
 			Relation: true,
 		}, true
 	}
 	return FieldColumn{
 		Name:     codegen.ToSnakeCase(field.Name),
-		Type:     ColumnType(field, scalarTypes),
+		Type:     ColumnType(schema, field, scalarTypes),
 		Nullable: !field.Required,
 	}, true
 }
 
-// KeyColumnType is the SQL type of a table's key column: its @key field's,
-// else its id field's, else the UUID of the id sqlgen adds.
-func KeyColumnType(td *ir.TypeDef, scalarTypes map[string]string) string {
+// KeyColumnType is the SQL type of a table's key column, td of schema: its
+// @key field's, else its id field's, else the UUID of the id sqlgen adds.
+func KeyColumnType(schema *ir.Schema, td *ir.TypeDef, scalarTypes map[string]string) string {
 	if td == nil {
 		return "UUID"
 	}
 	for _, field := range td.Fields {
 		if field.Key {
-			return ColumnType(field, scalarTypes)
+			return ColumnType(schema, field, scalarTypes)
 		}
 	}
 	for _, field := range td.Fields {
 		if field.Name == "id" {
-			return ColumnType(field, scalarTypes)
+			return ColumnType(schema, field, scalarTypes)
 		}
 	}
 	return "UUID"

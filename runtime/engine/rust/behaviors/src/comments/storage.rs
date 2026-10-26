@@ -1,8 +1,10 @@
 //! Comments' storage: migration 1 as shipped (the instance column `count`
 //! and the table `comments`), and migration 2, `conversation`, which
 //! creates the conversation's four tables, moves v1's comments into the
-//! first and drops `comments`; the row a message is read from, and the
-//! counts a write keeps (`comments-contract.md`, "Storage").
+//! first and drops `comments`; migration 3, `drafts`, which adds a
+//! composing message's columns, their two indexes and the table of its
+//! draft's chunks (batch 2); the row a message is read from, and the
+//! counts a write keeps (`comments-contract.md`, "Storage", "Migration 3").
 //!
 //! Every statement is the same on SQLite and Postgres (D58): each
 //! parameter's type is the column's it is compared with or written to.
@@ -26,15 +28,22 @@ pub(super) const EDITS: &str = "comment_edits";
 pub(super) const REACTIONS: &str = "comment_reactions";
 /// One row per instance that has had a message: its counters and counts.
 pub(super) const CONVERSATIONS: &str = "comment_conversations";
+/// A composing message's draft, one row per non-empty append.
+pub(super) const DRAFTS: &str = "comment_drafts";
 
 /// A message row's columns, as [`Message::of`] reads them.
-pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at";
+pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at";
 
-/// The states a message is in, in batch 1.
+/// The states a message is in.
+pub(super) const COMPOSING: &str = "composing";
 pub(super) const POSTED: &str = "posted";
+pub(super) const INTERRUPTED: &str = "interrupted";
 pub(super) const DELETED: &str = "deleted";
 
-/// Comments' migrations: 1 as shipped, then 2.
+/// The condition on a message row that it stands: posted or interrupted.
+pub(super) const STANDS: &str = "state IN ('posted', 'interrupted')";
+
+/// Comments' migrations: 1 as shipped, then 2 and 3.
 pub(super) fn migrations() -> Vec<BehaviorMigration> {
     vec![
         BehaviorMigration::new(1, "comments")
@@ -121,7 +130,48 @@ pub(super) fn migrations() -> Vec<BehaviorMigration> {
                     .primary_key(&["namespace", "schema", "id"]),
             )
             .up(move_comments),
+        BehaviorMigration::new(3, "drafts")
+            .table(
+                instance_columns(TableSpec::new(DRAFTS))
+                    .column("message", ColumnSpec::integer().not_null())
+                    .column("chunk_offset", ColumnSpec::integer().not_null())
+                    .column("text", ColumnSpec::text().not_null())
+                    .primary_key(&["namespace", "schema", "id", "message", "chunk_offset"]),
+            )
+            .up(add_drafts),
     ]
+}
+
+// add_drafts adds a composing message's columns to comment_messages, and
+// the two indexes on them, and sets every existing message's posted_at to
+// its created_at: each was posted by a post, and stood from then.
+fn add_drafts(sql: &BehaviorSql<'_, '_>) -> superschematic_engine::storage::Result<()> {
+    let messages = sql.table(MESSAGES)?;
+    for column in ["draft_length", "last_append_at", "posted_at"] {
+        sql.run(
+            format!(
+                "ALTER TABLE {messages} ADD COLUMN {column} {}",
+                ColumnSpec::integer().definition(sql.dialect())?
+            ),
+            &[],
+        )?;
+    }
+    sql.run(
+        format!(
+            "CREATE INDEX {} ON {messages} (namespace, schema, id, message) WHERE last_append_at IS NOT NULL",
+            sql.table("comment_messages_composing")?
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!(
+            "CREATE INDEX {} ON {messages} (namespace, schema, last_append_at, id, message) WHERE last_append_at IS NOT NULL",
+            sql.table("comment_messages_idle")?
+        ),
+        &[],
+    )?;
+    sql.run(format!("UPDATE {messages} SET posted_at = created_at"), &[])?;
+    Ok(())
 }
 
 // instance_columns leads a table with the instance's key.
@@ -273,11 +323,18 @@ pub(super) struct Message {
     pub blocks: Value,
     pub mentions: Value,
     pub created_at: i64,
+    /// When it came to stand; `None` while composing and on a message that
+    /// never stood.
+    pub posted_at: Option<i64>,
     pub edited_at: Option<i64>,
     pub edits: i64,
     pub pinned: bool,
     pub resolved_by: Option<String>,
     pub resolved_at: Option<i64>,
+    /// The draft's length in code points, while composing.
+    pub draft_length: Option<i64>,
+    /// The `now` of its begin or latest appendDraft, while composing.
+    pub last_append_at: Option<i64>,
 }
 
 impl Message {
@@ -293,16 +350,24 @@ impl Message {
             blocks: json_array(row.text("blocks")?),
             mentions: json_array(row.text("mentions")?),
             created_at: row.i64("created_at")?,
+            posted_at: row.opt_i64("posted_at")?,
             edited_at: row.opt_i64("edited_at")?,
             edits: row.i64("edits")?,
             pinned: row.i64("pinned")? != 0,
             resolved_by: row.opt_text("resolved_by")?.map(str::to_owned),
             resolved_at: row.opt_i64("resolved_at")?,
+            draft_length: row.opt_i64("draft_length")?,
+            last_append_at: row.opt_i64("last_append_at")?,
         })
     }
 
-    pub fn posted(&self) -> bool {
-        self.state == POSTED
+    /// Whether it stands: posted or interrupted.
+    pub fn stands(&self) -> bool {
+        self.state == POSTED || self.state == INTERRUPTED
+    }
+
+    pub fn composing(&self) -> bool {
+        self.state == COMPOSING
     }
 
     pub fn deleted(&self) -> bool {
@@ -407,24 +472,36 @@ pub(super) fn save_conversation<C>(
     Ok(())
 }
 
-/// How a write moves the counts the fields read: posted messages, and
-/// posted top-level ones open and resolved.
+/// How a write moves the counts the fields read: standing messages, and
+/// standing top-level ones open and resolved.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Moves {
     pub messages: i64,
     pub open: i64,
     pub resolved: i64,
-    /// A posted message's `createdAt` a post adds.
+    /// The `postedAt` of a message that came to stand: a post's, a
+    /// finish's or an interrupt's `now`.
     pub posted_at: Option<i64>,
-    /// Whether a posted message left, so the greatest `createdAt` is read
+    /// Whether a standing message left, so the greatest `postedAt` is read
     /// again.
     pub left: bool,
 }
 
 impl Moves {
-    /// What a posted message leaving moves.
+    /// What a message coming to stand at `now` moves: a post, a finish, an
+    /// interrupt that keeps text.
+    pub fn standing(top_level: bool, now: i64) -> Self {
+        Moves {
+            messages: 1,
+            open: i64::from(top_level),
+            posted_at: Some(now),
+            ..Moves::default()
+        }
+    }
+
+    /// What a standing message leaving moves.
     pub fn leaving(&mut self, message: &Message) {
-        if !message.posted() {
+        if !message.stands() {
             return;
         }
         self.messages -= 1;
@@ -459,9 +536,9 @@ pub(super) fn move_counts<C>(
             .sql()
             .get(
                 format!(
-                    "SELECT MAX(created_at) AS latest FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND state = ?"
+                    "SELECT MAX(posted_at) AS latest FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND {STANDS}"
                 ),
-                &keyed(cx, [SqlValue::from(POSTED)]),
+                &key(cx),
             )?
             .map(|row| row.opt_i64("latest"))
             .transpose()?
@@ -472,4 +549,47 @@ pub(super) fn move_counts<C>(
             Some(conversation.last_message_at.map_or(at, |was| was.max(at)));
     }
     Ok(())
+}
+
+/// The subjects with a composing message on the instance, each once, by
+/// the least id of its composing messages: the `composing` field.
+pub(super) fn composing<C>(view: &InstanceView<'_, C>) -> Result<Vec<String>> {
+    let table = view.sql().table(MESSAGES)?;
+    view.sql()
+        .all(
+            format!(
+                "SELECT author, MIN(message) AS first FROM {table}
+                 WHERE namespace = ? AND schema = ? AND id = ? AND last_append_at IS NOT NULL
+                 GROUP BY author ORDER BY first"
+            ),
+            &key(view),
+        )?
+        .iter()
+        .map(|row| Ok(row.text("author")?.to_owned()))
+        .collect()
+}
+
+/// The drafts of the composing messages among `ids`, by message: each its
+/// chunks concatenated in `chunk_offset` order.
+pub(super) fn drafts<C>(view: &InstanceView<'_, C>, ids: &[i64]) -> Result<HashMap<i64, String>> {
+    let mut out: HashMap<i64, String> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let table = view.sql().table(DRAFTS)?;
+    let rows = view.sql().all(
+        format!(
+            "SELECT message, text FROM {table}
+             WHERE namespace = ? AND schema = ? AND id = ? AND message IN ({})
+             ORDER BY message, chunk_offset",
+            placeholders(ids.len())
+        ),
+        &keyed(view, ids.iter().map(|&id| SqlValue::Integer(id))),
+    )?;
+    for row in &rows {
+        out.entry(row.i64("message")?)
+            .or_default()
+            .push_str(row.text("text")?);
+    }
+    Ok(out)
 }

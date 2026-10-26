@@ -212,7 +212,7 @@ func equalsFits(schema *ir.Schema, c tableColumn, literal any) error {
 // type of the related table's key; and the same SQL column type, so the
 // value copies across as it is.
 func linesUp(schema *ir.Schema, mf *ir.FieldDef, c tableColumn, scalarTypes map[string]string) error {
-	msgType := sqlutil.ColumnType(mf, scalarTypes)
+	msgType := sqlutil.ColumnType(schema, mf, scalarTypes)
 	if !strings.EqualFold(msgType, c.column.Type) {
 		return fmt.Errorf("the message's column is %s and the table's %s", msgType, c.column.Type)
 	}
@@ -275,7 +275,7 @@ func hasColumnDefault(schema *ir.Schema, f *ir.FieldDef, scalarTypes map[string]
 	if f.TypeRef.IsArray {
 		return true
 	}
-	switch strings.ToUpper(sqlutil.ColumnType(f, scalarTypes)) {
+	switch strings.ToUpper(sqlutil.ColumnType(schema, f, scalarTypes)) {
 	case "TIMESTAMPTZ", "DATE", "TIME":
 		return true
 	}

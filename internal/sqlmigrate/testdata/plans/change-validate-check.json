@@ -1,0 +1,50 @@
+{
+  "dialect": "postgres",
+  "expanded": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "from": "3d7a5a3430d90285447bc5adfac799b59a003fdb3f487fda2f1889c799811a6c",
+  "hash": "5c46988082eb379d42a526c6cf77a3dd574e523efe2c0c08f94949968ac5ab9d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT ck_order_note"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_note CHECK (length(note) \u003c= 50) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/ck_order_note",
+          "reason": "Order.note gets a CHECK in the database: validating ck_order_note fails when a row of order holds a value longer than 50 characters.",
+          "subject": "table/order/constraint/ck_order_note"
+        }
+      ],
+      "index": 3,
+      "op": "validateCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_note"
+      ],
+      "subject": "table/order/constraint/ck_order_note",
+      "transactional": true
+    }
+  ],
+  "to": "4fc9ec394da119d611c2f9b1a33f471f2fed677f8b9d97713b1281bafe1728fe",
+  "toModel": null,
+  "version": 1
+}

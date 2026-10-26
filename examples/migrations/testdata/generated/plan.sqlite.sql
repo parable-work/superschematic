@@ -1,10 +1,10 @@
 -- Migration plan for tasks-db (sqlite)
 -- from:    288da563a4c63dd5f6805bd32a1509d3501ad56808f1feefc1b419c76c5190d8
--- to:      1c45865ddcb6c5199a6527a5ff24f2d1606f6bce578f88208022df1ca4337b8d
--- between: 64c7eaa310f2bb3d987cfd26f6fea030955996ab52957462ef47996a86c871cd (expanded: the model between the phases)
--- plan:    01966f0f87eb965d67fd5b1b065cb7be784406f4eda0758e7b36119195f2caaf
+-- to:      90b86dd1598f2aa16a543dabf48c1b96a8e578ad9575b62d6387781bfeec0297
+-- between: d709077e86ae51c5261ddbd645ac68d3022b605a4af5ddf50a9a326955e3d355 (expanded: the model between the phases)
+-- plan:    6500e9f6f4eb3fbb6b1cdc16309e474e425f93608beb7e266a7293316bc57b8c
 -- renames: task.title=task.summary
--- 3 steps (2 expand, 1 contract), 7 hazards (2 destructive, 2 blocking, 2 compat, 1 copy-table)
+-- 4 steps (3 expand, 1 contract), 7 hazards (2 destructive, 2 blocking, 2 compat, 1 copy-table)
 
 -- Expand. Runs before the new servers roll out.
 
@@ -12,7 +12,10 @@
 -- hazard compat:table/task/column/summary
 ALTER TABLE "task" RENAME COLUMN "title" TO "summary";
 
--- Step 2, expand, copyTable table/comment
+-- Step 2, expand, addColumn table/project/column/status
+ALTER TABLE "project" ADD COLUMN "status" TEXT DEFAULT 'active' NOT NULL CHECK ("status" IN ('active', 'archived'));
+
+-- Step 3, expand, copyTable table/comment
 -- hazard destructive:table/task/column/remind_before
 -- hazard blocking:table/comment
 -- hazard compat:table/task/column/remind_before
@@ -50,10 +53,11 @@ DROP TABLE "task";
 ALTER TABLE "_new_task" RENAME TO "task";
 ALTER TABLE "_new_comment" RENAME TO "comment";
 CREATE INDEX "idx_task_project_due_at" ON "task" ("project_id", "due_at");
+CREATE INDEX "idx_task_summary_lower" ON "task" ((lower(summary)));
 
 -- Contract. Runs after the new servers roll out.
 
--- Step 3, contract, dropColumn table/comment/column/legacy_id
+-- Step 4, contract, dropColumn table/comment/column/legacy_id
 -- hazard destructive:table/comment/column/legacy_id
 -- hazard blocking:table/comment/column/legacy_id
 ALTER TABLE "comment" DROP COLUMN "legacy_id";

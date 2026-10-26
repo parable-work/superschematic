@@ -39,6 +39,16 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "priority",
+          "in": [
+            "low",
+            "high"
+          ],
+          "name": "ck_order_changed_queue_priority"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -57,6 +67,7 @@
           "type": "UUID"
         },
         {
+          "default": "'low'",
           "name": "priority",
           "origin": "OrderChanged.priority",
           "type": "TEXT"
@@ -229,6 +240,21 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "note",
+          "maxLength": 200,
+          "name": "ck_order_placed_queue_note"
+        },
+        {
+          "column": "priority",
+          "in": [
+            "low",
+            "high"
+          ],
+          "name": "ck_order_placed_queue_priority"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -247,6 +273,7 @@
           "type": "TIMESTAMPTZ"
         },
         {
+          "default": "'low'",
           "name": "priority",
           "origin": "OrderPlaced.priority",
           "type": "TEXT"
@@ -265,7 +292,7 @@
         {
           "name": "ship_to",
           "origin": "OrderPlaced.shipTo",
-          "type": "TEXT"
+          "type": "JSONB"
         },
         {
           "default": "'{}'",

@@ -398,11 +398,13 @@ describe('refusals', () => {
     ];
     // busy needs another writer to hold the database's lock past the busy
     // timeout, which the Rust engine's tests make (testkit's
-    // replicas_failures.rs); the test after this one maps it.
+    // replicas_failures.rs); the test after this one maps it. rate_limited
+    // needs a behavior that declares a signal (D77), which signals.test.ts
+    // sends past its rate.
     assert.deepEqual(
       cases.map(([code]) => code).sort(),
       Object.keys(ENGINE_ERROR_STATUS)
-        .filter((code) => code !== 'busy')
+        .filter((code) => code !== 'busy' && code !== 'rate_limited')
         .sort(),
       'a case per engine error code'
     );

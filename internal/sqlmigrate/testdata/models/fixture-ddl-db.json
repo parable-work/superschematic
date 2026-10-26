@@ -1,0 +1,218 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "rawSql": [
+    {
+      "checksum": "13e1e79cb70a04f6724e2b7e0a103af7c5b17c86d19f38478ac3733c81ddc345",
+      "down": [
+        "DROP MATERIALIZED VIEW IF EXISTS category_totals"
+      ],
+      "id": "category_totals",
+      "origin": "LineItem",
+      "position": "indexes",
+      "statements": [
+        "DROP MATERIALIZED VIEW IF EXISTS category_totals",
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS category_totals AS\n      SELECT category_id, sum(amount_cents) AS total_cents, count(*) AS line_count\n      FROM line_item\n      GROUP BY category_id",
+        "COMMENT ON MATERIALIZED VIEW category_totals IS 'Each category''s total, for the dashboard.'"
+      ]
+    },
+    {
+      "after": "category_totals",
+      "checksum": "d53f509d609241bce79d20881c6b3997200d90751a9ca4cbf737de4c93841ad8",
+      "id": "category_totals_key",
+      "origin": "LineItem",
+      "position": "indexes",
+      "statements": [
+        "CREATE UNIQUE INDEX IF NOT EXISTS category_totals_category ON category_totals (category_id)"
+      ]
+    }
+  ],
+  "service": "fixture-ddl-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "kind",
+          "in": [
+            "personal",
+            "business",
+            "accounting"
+          ],
+          "name": "ck_category_kind"
+        },
+        {
+          "column": "label",
+          "maxLength": 60,
+          "minLength": 1,
+          "name": "ck_category_label"
+        },
+        {
+          "column": "sort_order",
+          "max": 1000,
+          "min": 0,
+          "name": "ck_category_sort_order"
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Category.id",
+          "type": "UUID"
+        },
+        {
+          "name": "label",
+          "origin": "Category.label",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "Category.kind",
+          "type": "TEXT"
+        },
+        {
+          "default": "false",
+          "name": "active",
+          "origin": "Category.active",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "0",
+          "name": "sort_order",
+          "origin": "Category.sortOrder",
+          "type": "DOUBLE PRECISION"
+        },
+        {
+          "name": "parent_id",
+          "nullable": true,
+          "origin": "Category.parent",
+          "type": "UUID"
+        }
+      ],
+      "comment": "A category of spending. A category may sit under another, and deleting\nthe parent leaves its children at the top level. Labels are looked up\nwhatever their case, and the active categories by kind.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "parent_id"
+          ],
+          "name": "fk_category_parent_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "method": "BTREE",
+          "name": "idx_category_active_kind",
+          "where": "active"
+        },
+        {
+          "columns": [
+            "label"
+          ],
+          "expression": "lower(label)",
+          "method": "BTREE",
+          "name": "idx_category_label_lower"
+        }
+      ],
+      "kind": "entity",
+      "name": "category",
+      "origin": "Category",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "category_pkey"
+      }
+    },
+    {
+      "checks": [
+        {
+          "column": "confidence",
+          "max": 1,
+          "min": 0,
+          "name": "ck_line_item_confidence"
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "LineItem.id",
+          "type": "UUID"
+        },
+        {
+          "name": "category_id",
+          "nullable": true,
+          "origin": "LineItem.category",
+          "type": "UUID"
+        },
+        {
+          "name": "amount_cents",
+          "origin": "LineItem.amountCents",
+          "type": "BIGINT"
+        },
+        {
+          "default": "'it''s unexplained'",
+          "name": "memo",
+          "origin": "LineItem.memo",
+          "type": "TEXT"
+        },
+        {
+          "name": "confidence",
+          "nullable": true,
+          "origin": "LineItem.confidence",
+          "type": "DOUBLE PRECISION"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "posted_at",
+          "origin": "LineItem.postedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A line of spending. Deleting its category leaves the line uncategorized.\nThe dashboard reads each category's total from a materialized view the\nraw SQL keeps, keyed by its category so it refreshes concurrently. Lines\nare read by when they were posted; a migration builds that index inside\nits step, as the table is small.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "category_id"
+          ],
+          "name": "fk_line_item_category_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "posted_at"
+          ],
+          "inTransaction": true,
+          "method": "BTREE",
+          "name": "idx_line_item_posted_at"
+        }
+      ],
+      "kind": "entity",
+      "name": "line_item",
+      "origin": "LineItem",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "line_item_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

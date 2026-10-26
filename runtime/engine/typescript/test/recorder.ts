@@ -1298,7 +1298,7 @@ function writeFiles(): void {
 }
 
 /** The most JSON text, in characters, of a case the corpus writes (before its shared values are taken out). */
-const MAX_CASE_CHARS = 100_000;
+const MAX_CASE_CHARS = 125_000;
 
 // The members of a step whose own members, not they, are shared.
 const OPENED = new Set(['args', 'request', 'response']);

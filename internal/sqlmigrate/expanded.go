@@ -19,7 +19,9 @@ import (
 //     ever dropped;
 //   - the new model's functions, triggers and views, and those of the
 //     previous model contract drops or replaces;
-//   - the version graphs of both models (expandedGraphs).
+//   - the version graphs of both models (expandedGraphs);
+//   - the new model's raw SQL, then the previous model's pieces contract
+//     undoes, in the order they ran (D83).
 //
 // Diff sets it on a plan with contract steps only.
 func (d *differ) expandedModel() (*Model, error) {
@@ -97,6 +99,17 @@ func (d *differ) expandedModel() (*Model, error) {
 	for _, c := range d.changes {
 		if c.phase == Contract && c.op == opDropView {
 			m.Views = append(m.Views, d.renamedView(c.oldView))
+		}
+	}
+
+	m.RawSQL = append(m.RawSQL, d.to.RawSQL...)
+	declared := map[string]bool{}
+	for _, p := range d.to.RawSQL {
+		declared[p.ID] = true
+	}
+	for _, p := range d.from.RawSQL {
+		if !declared[p.ID] {
+			m.RawSQL = append(m.RawSQL, p)
 		}
 	}
 

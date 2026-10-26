@@ -694,6 +694,16 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
    * operation, which appends nothing anyway, it does nothing.
    */
   unchanged(): void;
+  /**
+   * Sends one of this behavior's signals on the instance (D77), of any
+   * access its declaration gives it: the data is at most 4096 bytes of
+   * JSON its paramsSchema accepts, and a refusal is a BehaviorError. It is
+   * delivered to the event streams open on the instance once the call
+   * commits, in the order sent, and dropped when the call, or the call()
+   * that sent it, rolls back. Its from is the call's principal; no rate
+   * limit applies.
+   */
+  signal(name: string, data: FrozenJSON): void;
 }
 
 /** What an operation's update() takes beside its patch. */

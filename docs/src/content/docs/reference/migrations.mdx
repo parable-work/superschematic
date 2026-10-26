@@ -35,9 +35,10 @@ previous version is one of:
 | neither | An empty database. The plan creates everything `create.sql` creates. |
 
 A model is the relational schema `sqlgen` resolves before it renders
-`create.sql`: tables with their columns, keys, constraints and indexes,
-plus the history tables, functions, triggers and projection views the
-decorators add. Each column records the schema field it stores
+`create.sql`: tables with their columns, defaults, keys, checks and
+indexes, plus the history tables, functions, triggers and projection views
+the decorators add, and the raw SQL the schema declares, each piece by id
+and checksum. Each column records the schema field it stores
 (`Order.total`). Both versions resolve to models in memory, the same way,
 with the options a build passes `sqlgen`, and the plan is the difference
 between them.
@@ -157,6 +158,15 @@ names `title`. The drop of `legacy_id` is meant, and stops the plan until
 `--allow 'destructive:table/comment/column/legacy_id'` acknowledges it. The
 [Renames](#renames) section says what a rename carries with it.
 
+The rest of v2 needs no acknowledgment but the raw SQL's.
+`Project.status` is required and has a default, so the column is added
+with it, and the previous version's servers keep inserting projects
+without it; its enum's check follows in `expand`, since the column is new
+([Defaults and checks](#defaults-and-checks)). The index over
+`lower(summary)` is built concurrently. The materialized view is raw SQL
+the schema declares, which runs last, and is `raw-sql`
+([Raw SQL](#raw-sql)).
+
 ### Adopt a database built from create.sql
 
 A database built from `create.sql`, or changed by hand, has no recorded
@@ -180,8 +190,8 @@ Every step is in one of two phases.
 
 | Phase | Runs | Holds |
 | --- | --- | --- |
-| `expand` | before the new servers roll out | everything that keeps the previous version's servers working: renames, creates and adds, alterations, indexes, constraints, functions, triggers, views and comments |
-| `contract` | after the rollout | what removes something the previous version's servers use or tightens what they write: drops, `SET NOT NULL`, dropped defaults, foreign keys over columns the previous version already has |
+| `expand` | before the new servers roll out | everything that keeps the previous version's servers working: renames, creates and adds, defaults, alterations, indexes, constraints, functions, triggers, views and comments, and new or changed raw SQL |
+| `contract` | after the rollout | what removes something the previous version's servers use or tightens what they write: drops, `SET NOT NULL`, dropped defaults, foreign keys over columns the previous version already has, checks that tighten a column it has, and the `down` of raw SQL the schema no longer declares |
 
 A column dropped in `contract` that is `NOT NULL` first loses the
 constraint in `expand`, so the new servers can insert without it. A step
@@ -192,10 +202,12 @@ rollout runs both phases back to back.
 
 Steps run in this order: renames; creates and adds in dependency order,
 a generated column such as `search_text` after the columns it reads;
-alterations, each wrapped by the drop and re-creation of the views that
-read the altered columns; indexes, constraints, functions, triggers, views
-and comments; then the contract steps, tightenings before drops, drops in
-reverse dependency order, a generated column before the columns it reads.
+dropped checks and alterations, each wrapped by the drop and re-creation of
+the views that read the altered columns; the raw SQL that runs after the
+tables; indexes, constraints, checks, functions, triggers, views and
+comments; the raw SQL that runs after them; then the contract steps,
+tightenings before the `down` of removed raw SQL, then drops in reverse
+dependency order, a generated column before the columns it reads.
 Extensions are created and never dropped, as `drop.sql` leaves them.
 
 A step on a table the previous version already has uses the online form
@@ -206,6 +218,7 @@ SQLite has no online forms; [SQLite](#sqlite) says what its steps do.
 | --- | --- |
 | an index | `CREATE INDEX CONCURRENTLY`, outside a transaction |
 | a foreign key | added `NOT VALID`, then validated |
+| a check | added `NOT VALID`, then validated |
 | `SET NOT NULL` | a `CHECK (col IS NOT NULL) NOT VALID`, validated first, so Postgres skips the scan |
 | a unique constraint | added `USING INDEX` over an index built concurrently |
 
@@ -245,12 +258,13 @@ Each step lists the hazard classes it falls in.
 | `copy-table` | rebuilds the table by copying it, with the tables that reference it | SQLite only: a change its `ALTER TABLE` cannot make |
 | `api-breaking` | drops, renames or retypes a column a deployed reader reads, or changes the columns a projection view publishes | [Readers](#readers) |
 | `history` | changes the shape of rows a history table keeps | retyping a column of a versioned table; changing a version graph member's content columns |
+| `raw-sql` | runs raw SQL the schema declares, or would undo it, which the planner cannot judge | a new or changed `@rawSql` piece, or a removed one's `down` ([Raw SQL](#raw-sql)) |
 
 A hazard's id is `<class>:<subject>`, where the subject is the object the
 step changes as a path: `table/order`, `table/order/column/total`,
 `table/order/index/order_total_idx`, `table/order/constraint/<name>`,
 `function/<name>`, `trigger/<table>/<name>`, `view/<pool>.<name>`,
-`schema/<pool>` or `extension/<name>`. An `api-breaking` id also names the
+`schema/<pool>`, `extension/<name>` or `rawSql/<id>`. An `api-breaking` id also names the
 reader: `api-breaking:table/order/column/total@shop-api/OrderView.total`.
 
 `compat` is judged against the server generated from the previous version.
@@ -309,7 +323,61 @@ was given.
 Intent the plan does not model, such as a cast with a custom expression, a
 backfill or a column split, goes in a migration written by hand that the
 deploy orders around the plan, or the operator applies it and adopts the
-result.
+result. SQL that can run again over what it made, such as a function or a
+materialized view, is raw SQL the schema declares instead
+([Raw SQL](#raw-sql)).
+
+## Defaults and checks
+
+A required field's `Default<T, V>` is its column's `DEFAULT`, and an
+enum's members and `Validate`'s bounds are its column's `CHECK`
+([Columns](/superschematic/guides/database-tables/#columns)).
+
+| Change | Plan |
+| --- | --- |
+| a default set or changed | `SET DEFAULT` in `expand`, with no hazard |
+| a default dropped | `DROP DEFAULT` in `contract` |
+| a check on a column the plan adds | added `NOT VALID` and validated, in `expand` |
+| a check on a column the previous version has | added `NOT VALID`, then validated, in `contract` (`data-dependent`): the previous version's servers may write values outside it until the rollout |
+| an enum gains a member | the check replaced in `expand`, which every value the previous one took passes |
+| an enum loses a member | the check replaced in `contract` (`data-dependent`) |
+| any other change of a check | the old check dropped in `expand`, the new one added in `contract` (`data-dependent`) |
+| a check dropped | in `expand`; one on a column `contract` drops goes with the column |
+
+A database built before D83 has neither, so its next plan sets each
+default and adds each check, every check a `contract` step that passes on
+the rows the generated code wrote and fails, naming the constraint, on any
+other. A field typed by a `@jsonField` class was `TEXT` then and is `JSONB`
+now: the plan casts it with `USING col::JSONB` (`data-dependent`).
+
+## Raw SQL
+
+`@rawSql` declares SQL the DB service runs after the objects its schema
+declares ([Raw SQL](/superschematic/guides/database-tables/#raw-sql)). The
+model records each piece by id, with its place, its statements, its `down`
+and the SHA-256 of its statements, in the order the pieces run.
+
+| Change | Plan |
+| --- | --- |
+| a new piece | its statements in `expand`, at its place: after the column alterations for one that runs after the tables, after the views and comments for one that runs after every object (`raw-sql`) |
+| a piece whose statements change | its new statements, in `expand`, at its place (`raw-sql`) |
+| a piece whose place or `down` changes alone | nothing: the checksum covers its statements |
+| a piece the schema no longer declares | its `down` in `contract`, before anything is dropped, or a step with no SQL when it has none (`raw-sql`) |
+
+A plan from an empty database runs every piece, with no hazard, as
+`create.sql` does. Each statement can run again over what it made, which
+the load holds every piece to, so a changed piece runs whole: write one
+that changes what it made to take that down first, as `DROP MATERIALIZED
+VIEW IF EXISTS` before `CREATE MATERIALIZED VIEW IF NOT EXISTS`.
+
+The planner does not read the SQL, so it does not know what a piece
+depends on. A change Postgres refuses while raw SQL depends on a column,
+such as retyping a column a materialized view reads, fails its step; take
+the piece down by hand, or change it so it runs again, and plan again.
+
+On SQLite, a rebuild drops the old tables with the indexes and triggers
+raw SQL made on them, so a phase that rebuilds tables ends with a step that
+runs every piece again, in order (`rerunRawSQL`, `raw-sql`).
 
 ## Versioned tables and version graphs
 
@@ -421,9 +489,12 @@ A default writes the form the schema runtime reads:
 | `CURRENT_TIME` | `strftime('%H:%M:%f', 'now')` |
 | `'{}'` on a list | `'[]'` |
 | a JSON platform default (`'{...}'::jsonb`) | its text, `'{...}'` |
+| `true`, `false` | `1`, `0` |
 | a number or a string | the same |
 
 The primary key is part of `CREATE TABLE`, and so is each foreign key. A
+check is its column's own, unnamed, so `DROP COLUMN` drops it with the
+column, with the same predicate as on Postgres. A
 unique field is a unique index under the name Postgres gives its
 constraint (`customer_email_key`), so adding or dropping one is a
 statement of its own, not a rebuild. SQLite names neither a primary key
@@ -453,8 +524,9 @@ its `ALTER TABLE` can:
 | a table dropped | `DROP TABLE`, after every table that references it. Tables that reference each other are dropped in one step, since SQLite cannot drop the foreign key that closes the cycle without rebuilding a table the plan drops. That step, and one that drops a table that references itself, starts with `PRAGMA defer_foreign_keys = ON` |
 
 Every other change to a table rebuilds it: a type, a list's element, a
-nullability, a default, a foreign key added over a column the table has,
-changed or dropped, and a column `ADD COLUMN` cannot add. The rebuild is
+nullability, a default, a check added over a column the table has, changed
+or dropped, a foreign key added over a column the table has, changed or
+dropped, and a column `ADD COLUMN` cannot add. The rebuild is
 SQLite's copy-table procedure, run for the table and every table that
 references it, directly or through another table, in one step:
 
@@ -487,8 +559,8 @@ hazards of every change it makes.
 SQLite's `CAST` never fails: text that is not a number becomes `0`, and a
 fraction is cut toward zero as an `INTEGER`. So a type change that cannot
 keep every value is `destructive`, not `data-dependent`. A `NOT NULL` a
-rebuild adds, a required column without a default, and a unique index
-fail on the rows that break them, as on Postgres (`data-dependent`).
+rebuild adds, a required column without a default, a check and a unique
+index fail on the rows that break them, as on Postgres (`data-dependent`).
 
 ### Foreign keys stay on
 
@@ -568,8 +640,9 @@ the feature and the dialect:
 - `@versioned` and `@optimistic`, whose triggers SQLite's adapter does not
   read yet;
 - projections;
-- `GIN` and `GIST` indexes: an `@index` over a list, a JSON or an `LTREE`
-  column;
+- an index method other than BTREE, such as the GIN or GIST an `@index`
+  over a list, a JSON or an `LTREE` column picks, and an operator class
+  (`ops`);
 - the types SQLite has no storage for: `LTREE` and the PostGIS types
   (`POINT`, `GEOGRAPHY`, `GEOMETRY`).
 
@@ -582,12 +655,13 @@ the feature and the dialect:
   column holds as JSON (`"holds": "list"` or `"json"`), so a field that
   changes between them is not lost. A JSON value that becomes text keeps
   its JSON text, as Postgres's cast keeps it, through a rebuild that casts
-  nothing; one that becomes another scalar casts as text does. Every other
+  nothing; one that becomes another scalar casts as text does. Text that
+  becomes a JSON value is copied through `json()`, which fails on text
+  that is not JSON as Postgres's cast does (`data-dependent`). Every other
   change between a scalar, a list and a JSON value fails the plan, naming
-  the column and both kinds: text is not a JSON array, Postgres parses
-  text as JSON where wrapping it in a JSON string would keep another
-  value, and Postgres converts no list to or from anything else. Change
-  the column by hand and adopt the new model.
+  the column and both kinds: text is not a JSON array, and Postgres
+  converts no list to or from anything else. Change the column by hand
+  and adopt the new model.
 - A `@searchField`'s trigram index: `search_text` is there, with no
   index over it.
 - A list's element type is kept only as far as JSON tells types apart:
@@ -773,11 +847,14 @@ adopt.
   previous version's servers working, a server rollback needs no schema
   rollback.
 - A custom cast, a backfill or a column split is written by hand, ordered
-  around the plan or applied and then adopted.
+  around the plan or applied and then adopted. SQL that can run again
+  over what it made is declared with `@rawSql` instead ([Raw SQL](#raw-sql)).
+- The planner does not read raw SQL: a change Postgres refuses while a
+  piece depends on a column fails its step.
 - A change the plan cannot express fails the plan and names it.
-- SQLite refuses `@versioned`, `@optimistic`, projections,
-  `GIN` and `GIST` indexes, and `LTREE` and the PostGIS types
-  ([Refusals](#refusals)).
+- SQLite refuses `@versioned`, `@optimistic`, projections, an index
+  method other than BTREE and an operator class, and `LTREE` and the
+  PostGIS types ([Refusals](#refusals)).
 - A SQLite rebuild copies every table that references the rebuilt one,
   directly or through another table, so rebuilding a table many others
   reference holds the database's write lock while it copies them all

@@ -114,7 +114,7 @@ const EXPECTED: &str = r#"{
     }
   },
   "comments": {
-    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 40000 characters, ref and action blocks and mentions. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted messages, lastMessageAt says when the latest was posted, and threads counts the open and resolved threads; none of them moves in an event, so read the instance for them.",
+    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 40000 characters, ref and action blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 1 minute is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, and composing names who is writing a message; none of them moves in an event, so read the instance for them.",
     "operations": {
       "post": {
         "useWhen": "Use to post a message as the caller, top-level or with thread a reply in a top-level message's thread; quotes names a message of that thread. Give clientId to make a retry safe: a post with a clientId the caller has used returns that message and posts nothing. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
@@ -138,8 +138,106 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "Quote a message that is not deleted."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Reply in, or quote, a message once it is finished: a composing message is still being written."
+          },
+          {
             "code": "ref_not_found",
             "commonCorrection": "Refer to an instance that exists in the namespace and that the caller may read."
+          }
+        ]
+      },
+      "begin": {
+        "useWhen": "Use to stream a message as it is written, as the caller: begin holds its place, top-level or with thread a reply, as composing; appendDraft adds text to it and finish posts it. Give clientId to make a retry safe, as for post. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
+        "doNotUseWhen": "Do not use for a message written all at once; call post.",
+        "success": "Returns the message's record, state composing, with its id, which appendDraft, finish and interrupt name.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          },
+          {
+            "code": "not_in_thread",
+            "commonCorrection": "Quote the thread's top-level message or one of its replies."
+          },
+          {
+            "code": "deleted",
+            "commonCorrection": "Quote a message that is not deleted."
+          },
+          {
+            "code": "composing",
+            "commonCorrection": "Reply in, or quote, a message once it is finished: a composing message is still being written."
+          },
+          {
+            "code": "too_many_drafts",
+            "commonCorrection": "Finish, interrupt or delete one of the caller's composing messages first; a caller composes at most 5 at once."
+          }
+        ]
+      },
+      "appendDraft": {
+        "useWhen": "Use to add text to the draft of a message the caller began, in order; readers with the event stream open with signals receive it as a draft signal once the call commits. An empty text adds nothing and keeps the message from being interrupted: send one at least every 1 minute while working with nothing to show. It appends no event.",
+        "success": "Returns message, offset and length: the draft's length before the text and after it, in code points.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_author",
+            "commonCorrection": "Only the author who began the message appends to it."
+          },
+          {
+            "code": "draft_too_long",
+            "commonCorrection": "Finish the message, or post the rest as another; a draft holds at most 40000 characters."
+          }
+        ]
+      },
+      "finish": {
+        "useWhen": "Use to post a composing message: its draft becomes its body, or body when given replaces it, with blocks and mentions as post takes them.",
+        "success": "Returns the record, state posted.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_author",
+            "commonCorrection": "Only the author who began the message finishes it."
+          },
+          {
+            "code": "ref_not_found",
+            "commonCorrection": "Refer to an instance that exists in the namespace and that the caller may read."
+          }
+        ]
+      },
+      "interrupt": {
+        "useWhen": "Use to stop a composing message, keeping the draft as its body, state interrupted, or deleting it when the draft has no text. Its author may at any time; anyone else once its author has appended nothing for 1 minute, as the engine's runner does.",
+        "doNotUseWhen": "Do not use to drop a draft; its author calls deleteMessage.",
+        "success": "Returns the record, state interrupted, or deleted when the draft had no text.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_idle",
+            "commonCorrection": "Wait until its author has appended nothing for composeTimeoutMs, or leave it to the runner."
           }
         ]
       },
@@ -156,6 +254,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_author",
             "commonCorrection": "Only the author edits a message."
           },
@@ -170,7 +272,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "deleteMessage": {
-        "useWhen": "Use to delete a message: its body, blocks, mentions, reactions and edits go, and its id and its place in the thread stay, as do its replies.",
+        "useWhen": "Use to delete a message: its body, blocks, mentions, reactions and edits go, and its id and its place in the thread stay, as do its replies. Its author deletes a composing message to drop its draft.",
         "doNotUseWhen": "Do not use to delete the instance; call delete.",
         "success": "Returns the record, state deleted.",
         "errors": [
@@ -210,6 +312,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "already_reacted",
             "commonCorrection": "None: the caller has reacted with it already."
           },
@@ -232,6 +338,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_reacted",
             "commonCorrection": "None: the caller holds no reaction with that emoji."
           }
@@ -248,6 +358,10 @@ const EXPECTED: &str = r#"{
           {
             "code": "deleted",
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
+          },
+          {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
           },
           {
             "code": "already_pinned",
@@ -286,6 +400,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_author",
             "commonCorrection": "Only its author resolves the thread."
           },
@@ -312,6 +430,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_author",
             "commonCorrection": "Only its author reopens the thread."
           },
@@ -322,7 +444,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "listMessages": {
-        "useWhen": "Use to read the conversation a page at a time, in ascending id order: the top-level messages, or with thread a thread's replies and its top-level message as root. With no anchor it reads the latest page; before reads older, after newer, around a page about one message.",
+        "useWhen": "Use to read the conversation a page at a time, in ascending id order: the top-level messages, or with thread a thread's replies and its top-level message as root. With no anchor it reads the latest page; before reads older, after newer, around a page about one message. A composing message is in its place, its body the draft so far.",
         "doNotUseWhen": "Do not page through it for one message; call getMessage.",
         "success": "Returns items, before and after; pass before as before for the older page and after as after for the newer, each null at its end.",
         "errors": [
@@ -337,7 +459,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "getMessage": {
-        "useWhen": "Use to read one message's record by its id, a deleted one's included.",
+        "useWhen": "Use to read one message's record by its id, a deleted one's included; a composing message's body is its draft so far, which draft signals extend.",
         "errors": [
           {
             "code": "no_message",
@@ -356,7 +478,7 @@ const EXPECTED: &str = r#"{
     }
   },
   "commentsConfigured": {
-    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 2000 characters, ref blocks and mentions. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted messages, lastMessageAt says when the latest was posted, and threads counts the open and resolved threads; none of them moves in an event, so read the instance for them.",
+    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 2000 characters, ref blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 30 seconds is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, and composing names who is writing a message; none of them moves in an event, so read the instance for them.",
     "operations": {
       "post": {
         "useWhen": "Use to post a message as the caller, top-level or with thread a reply in a top-level message's thread; quotes names a message of that thread. Give clientId to make a retry safe: a post with a clientId the caller has used returns that message and posts nothing. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
@@ -380,12 +502,114 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "Quote a message that is not deleted."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Reply in, or quote, a message once it is finished: a composing message is still being written."
+          },
+          {
             "code": "block_not_allowed",
             "commonCorrection": "Give only ref blocks; the config allows no other."
           },
           {
             "code": "ref_not_found",
             "commonCorrection": "Refer to an instance that exists in the namespace and that the caller may read."
+          }
+        ]
+      },
+      "begin": {
+        "useWhen": "Use to stream a message as it is written, as the caller: begin holds its place, top-level or with thread a reply, as composing; appendDraft adds text to it and finish posts it. Give clientId to make a retry safe, as for post. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
+        "doNotUseWhen": "Do not use for a message written all at once; call post.",
+        "success": "Returns the message's record, state composing, with its id, which appendDraft, finish and interrupt name.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          },
+          {
+            "code": "not_in_thread",
+            "commonCorrection": "Quote the thread's top-level message or one of its replies."
+          },
+          {
+            "code": "deleted",
+            "commonCorrection": "Quote a message that is not deleted."
+          },
+          {
+            "code": "composing",
+            "commonCorrection": "Reply in, or quote, a message once it is finished: a composing message is still being written."
+          },
+          {
+            "code": "too_many_drafts",
+            "commonCorrection": "Finish, interrupt or delete one of the caller's composing messages first; a caller composes at most 3 at once."
+          }
+        ]
+      },
+      "appendDraft": {
+        "useWhen": "Use to add text to the draft of a message the caller began, in order; readers with the event stream open with signals receive it as a draft signal once the call commits. An empty text adds nothing and keeps the message from being interrupted: send one at least every 30 seconds while working with nothing to show. It appends no event.",
+        "success": "Returns message, offset and length: the draft's length before the text and after it, in code points.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_author",
+            "commonCorrection": "Only the author who began the message appends to it."
+          },
+          {
+            "code": "draft_too_long",
+            "commonCorrection": "Finish the message, or post the rest as another; a draft holds at most 2000 characters."
+          }
+        ]
+      },
+      "finish": {
+        "useWhen": "Use to post a composing message: its draft becomes its body, or body when given replaces it, with blocks and mentions as post takes them.",
+        "success": "Returns the record, state posted.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_author",
+            "commonCorrection": "Only the author who began the message finishes it."
+          },
+          {
+            "code": "block_not_allowed",
+            "commonCorrection": "Give only ref blocks; the config allows no other."
+          },
+          {
+            "code": "ref_not_found",
+            "commonCorrection": "Refer to an instance that exists in the namespace and that the caller may read."
+          }
+        ]
+      },
+      "interrupt": {
+        "useWhen": "Use to stop a composing message, keeping the draft as its body, state interrupted, or deleting it when the draft has no text. Its author may at any time, and a caller with permission orders.moderate; anyone else once its author has appended nothing for 30 seconds, as the engine's runner does.",
+        "doNotUseWhen": "Do not use to drop a draft; its author calls deleteMessage.",
+        "success": "Returns the record, state interrupted, or deleted when the draft had no text.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_composing",
+            "commonCorrection": "None: the message is posted, interrupted or deleted; read it with getMessage."
+          },
+          {
+            "code": "not_idle",
+            "commonCorrection": "Wait until its author has appended nothing for composeTimeoutMs, or leave it to the runner."
           }
         ]
       },
@@ -400,6 +624,10 @@ const EXPECTED: &str = r#"{
           {
             "code": "deleted",
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
+          },
+          {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
           },
           {
             "code": "not_author",
@@ -424,7 +652,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "deleteMessage": {
-        "useWhen": "Use to delete a message: its body, blocks, mentions, reactions and edits go, and its id and its place in the thread stay, as do its replies.",
+        "useWhen": "Use to delete a message: its body, blocks, mentions, reactions and edits go, and its id and its place in the thread stay, as do its replies. Its author deletes a composing message to drop its draft.",
         "doNotUseWhen": "Do not use to delete the instance; call delete.",
         "success": "Returns the record, state deleted.",
         "errors": [
@@ -466,6 +694,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "already_reacted",
             "commonCorrection": "None: the caller has reacted with it already."
           },
@@ -488,6 +720,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_reacted",
             "commonCorrection": "None: the caller holds no reaction with that emoji."
           }
@@ -504,6 +740,10 @@ const EXPECTED: &str = r#"{
           {
             "code": "deleted",
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
+          },
+          {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
           },
           {
             "code": "already_pinned",
@@ -542,6 +782,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_author",
             "commonCorrection": "Only its author or a caller with permission orders.resolve resolves the thread."
           },
@@ -568,6 +812,10 @@ const EXPECTED: &str = r#"{
             "commonCorrection": "None: a deleted message takes no edit, reaction or pin."
           },
           {
+            "code": "composing",
+            "commonCorrection": "Wait for the message's finish or interrupt event: a composing message is still being written."
+          },
+          {
             "code": "not_author",
             "commonCorrection": "Only its author or a caller with permission orders.resolve reopens the thread."
           },
@@ -578,7 +826,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "listMessages": {
-        "useWhen": "Use to read the conversation a page at a time, in ascending id order: the top-level messages, or with thread a thread's replies and its top-level message as root. With no anchor it reads the latest page; before reads older, after newer, around a page about one message.",
+        "useWhen": "Use to read the conversation a page at a time, in ascending id order: the top-level messages, or with thread a thread's replies and its top-level message as root. With no anchor it reads the latest page; before reads older, after newer, around a page about one message. A composing message is in its place, its body the draft so far.",
         "doNotUseWhen": "Do not page through it for one message; call getMessage.",
         "success": "Returns items, before and after; pass before as before for the older page and after as after for the newer, each null at its end.",
         "errors": [
@@ -593,7 +841,7 @@ const EXPECTED: &str = r#"{
         ]
       },
       "getMessage": {
-        "useWhen": "Use to read one message's record by its id, a deleted one's included.",
+        "useWhen": "Use to read one message's record by its id, a deleted one's included; a composing message's body is its draft so far, which draft signals extend.",
         "errors": [
           {
             "code": "no_message",
@@ -750,6 +998,8 @@ fn the_guidance_is_the_typescript_engines_text() {
                 moderate_permission: Some("orders.moderate".to_owned()),
                 pin_permission: Some("orders.pin".to_owned()),
                 resolve_permission: Some("orders.resolve".to_owned()),
+                compose_timeout_ms: 30_000,
+                max_drafts: 3,
             },
             "commentsConfigured",
         ),

@@ -1,0 +1,187 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-ddl-db",
+  "tables": [
+    {
+      "checks": [
+        {
+          "column": "kind",
+          "in": [
+            "personal",
+            "business",
+            "accounting"
+          ],
+          "name": "ck_category_kind"
+        },
+        {
+          "column": "label",
+          "maxLength": 60,
+          "minLength": 1,
+          "name": "ck_category_label"
+        },
+        {
+          "column": "sort_order",
+          "max": 1000,
+          "min": 0,
+          "name": "ck_category_sort_order"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Category.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "label",
+          "origin": "Category.label",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "Category.kind",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "active",
+          "origin": "Category.active",
+          "type": "INTEGER"
+        },
+        {
+          "default": "0",
+          "name": "sort_order",
+          "origin": "Category.sortOrder",
+          "type": "REAL"
+        },
+        {
+          "name": "parent_id",
+          "nullable": true,
+          "origin": "Category.parent",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "parent_id"
+          ],
+          "name": "fk_category_parent_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "method": "BTREE",
+          "name": "idx_category_active_kind",
+          "where": "active"
+        },
+        {
+          "columns": [
+            "label"
+          ],
+          "expression": "lower(label)",
+          "method": "BTREE",
+          "name": "idx_category_label_lower"
+        }
+      ],
+      "kind": "entity",
+      "name": "category",
+      "origin": "Category",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "category_pkey"
+      }
+    },
+    {
+      "checks": [
+        {
+          "column": "confidence",
+          "max": 1,
+          "min": 0,
+          "name": "ck_line_item_confidence"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "LineItem.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "category_id",
+          "nullable": true,
+          "origin": "LineItem.category",
+          "type": "TEXT"
+        },
+        {
+          "name": "amount_cents",
+          "origin": "LineItem.amountCents",
+          "type": "INTEGER"
+        },
+        {
+          "default": "'it''s unexplained'",
+          "name": "memo",
+          "origin": "LineItem.memo",
+          "type": "TEXT"
+        },
+        {
+          "name": "confidence",
+          "nullable": true,
+          "origin": "LineItem.confidence",
+          "type": "REAL"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "posted_at",
+          "origin": "LineItem.postedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "category_id"
+          ],
+          "name": "fk_line_item_category_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "category"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "posted_at"
+          ],
+          "inTransaction": true,
+          "method": "BTREE",
+          "name": "idx_line_item_posted_at"
+        }
+      ],
+      "kind": "entity",
+      "name": "line_item",
+      "origin": "LineItem",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "line_item_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

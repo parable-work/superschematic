@@ -618,7 +618,7 @@ func TestValueClassReadsTheInferredSQLType(t *testing.T) {
 		"Test.Json":         {"JSONB", graphdesc.ClassJSON},
 	} {
 		fd := &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: name, IsArray: true}}
-		if got := sqlutil.ColumnType(fd, sqlTypes); got != want.sql+"[]" {
+		if got := sqlutil.ColumnType(schema, fd, sqlTypes); got != want.sql+"[]" {
 			t.Errorf("ColumnType(%s[]) = %q, want %q", name, got, want.sql+"[]")
 		}
 		got, err := graphdesc.ValueClass(schema, fd)

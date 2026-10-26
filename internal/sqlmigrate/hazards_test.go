@@ -13,6 +13,7 @@ const (
 	dataDependent = HazardDataDependent
 	apiBreaking   = HazardAPIBreaking
 	history       = HazardHistory
+	rawSQL        = HazardRawSQL
 )
 
 // TestHazardClasses checks the hazard classes of each operation: every
@@ -40,6 +41,8 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "retype-column", op: "alterColumnType", phase: Expand, want: []HazardClass{compat, apiBreaking}},
 		{plan: "retype-column-cast", op: "alterColumnType", phase: Expand, want: []HazardClass{blockingClass, compat, dataDependent}},
 		{plan: "retype-column-narrow", op: "alterColumnType", phase: Expand, want: []HazardClass{destructive, blockingClass, compat}},
+		{plan: "retype-text-to-jsonb", op: "alterColumnType", phase: Expand, want: []HazardClass{blockingClass, compat, dataDependent},
+			reason: "Order.shipTo changes from TEXT to JSONB: the cast fails on a value JSONB cannot hold."},
 		{plan: "make-column-required", op: "addNotNullCheck", phase: Contract},
 		{plan: "make-column-required", op: "validateNotNullCheck", phase: Contract, want: []HazardClass{dataDependent}},
 		{plan: "make-column-required", op: "setNotNull", phase: Contract},
@@ -71,6 +74,7 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "relation-on-existing-column", op: "addForeignKey", phase: Contract},
 		{plan: "relation-on-existing-column", op: "validateForeignKey", phase: Contract, want: []HazardClass{dataDependent}},
 		{plan: "change-on-delete", op: "replaceForeignKey", phase: Contract},
+		{plan: "change-on-delete-to-set-null", op: "replaceForeignKey", phase: Contract},
 		{plan: "drop-relation", op: "dropForeignKey", phase: Contract},
 		{plan: "add-join-table", op: "createTable", phase: Expand},
 		{plan: "drop-join-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
@@ -96,6 +100,35 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "optimistic-off", op: "dropTrigger", phase: Contract},
 		{plan: "optimistic-to-versioned", op: "seedHistory", phase: Expand, want: []HazardClass{blockingClass}},
 		{plan: "versioned-to-optimistic", op: "replaceTrigger", phase: Contract},
+
+		{plan: "add-default", op: "setDefault", phase: Expand},
+		{plan: "drop-default", op: "dropDefault", phase: Contract},
+		{plan: "add-enum-check", op: "addCheck", phase: Contract},
+		{plan: "add-enum-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent},
+			reason: "Order.status gets a CHECK in the database: validating ck_order_status fails when a row of order holds a value other than 'placed', 'shipped'."},
+		{plan: "add-column-with-check", op: "addColumn", phase: Expand},
+		{plan: "add-column-with-check", op: "addCheck", phase: Expand},
+		{plan: "add-column-with-check", op: "validateCheck", phase: Expand},
+		{plan: "widen-enum-check", op: "replaceCheck", phase: Expand},
+		{plan: "widen-enum-check", op: "validateCheck", phase: Expand},
+		{plan: "narrow-enum-check", op: "replaceCheck", phase: Contract},
+		{plan: "narrow-enum-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent}, reason: "holds 'cancelled'"},
+		{plan: "change-validate-check", op: "dropCheck", phase: Expand},
+		{plan: "change-validate-check", op: "addCheck", phase: Contract},
+		{plan: "change-validate-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent}, reason: "longer than 50 characters"},
+		{plan: "drop-validate-check", op: "dropCheck", phase: Expand},
+		{plan: "drop-checked-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive}},
+
+		{plan: "add-expression-index", op: "createIndex", phase: Expand},
+		{plan: "add-index-in-transaction", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass}, reason: "concurrently: false"},
+		{plan: "add-partial-brin-index", op: "createIndex", phase: Expand},
+		{plan: "add-opclass-index", op: "createIndex", phase: Expand},
+
+		{plan: "add-raw-sql", op: "runRawSQL", phase: Expand, want: []HazardClass{rawSQL}, reason: "runs for the first time"},
+		{plan: "change-raw-sql", op: "runRawSQL", phase: Expand, want: []HazardClass{rawSQL}, reason: "changed: the step runs its statements again"},
+		{plan: "drop-raw-sql", op: "undoRawSQL", phase: Contract, want: []HazardClass{rawSQL}, reason: "the step runs its down"},
+		{plan: "drop-raw-sql-without-down", op: "undoRawSQL", subject: "rawSql/order_code_lower", phase: Contract, want: []HazardClass{rawSQL},
+			reason: "has no down: nothing undoes what it made"},
 
 		{plan: "add-queue-key", op: "createIndex", subject: "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key", phase: Expand,
 			want: []HazardClass{destructive, compat, dataDependent}, reason: "but one per order_id, the latest enqueued, which replace keeps"},

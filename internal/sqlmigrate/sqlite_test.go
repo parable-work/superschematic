@@ -167,6 +167,15 @@ func TestSQLiteHazardClasses(t *testing.T) {
 		{plan: "from-empty", op: "createTable", phase: Expand},
 		{plan: "from-empty", op: "createIndex", phase: Expand},
 
+		// SQLite cannot change a default or a check in place (D83).
+		{plan: "add-default", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}, reason: "change the default of total"},
+		{plan: "add-enum-check", op: "copyTable", phase: Contract, want: []HazardClass{blockingClass, dataDependent, copyTable}, reason: "add a check on status"},
+		{plan: "add-column-with-check", op: "addColumn", phase: Expand},
+		{plan: "widen-enum-check", op: "copyTable", phase: Expand, want: []HazardClass{blockingClass, copyTable}, reason: "change the check on status"},
+		{plan: "drop-checked-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive, blockingClass}},
+		{plan: "raw-sql-after-rebuild", op: "rerunRawSQL", phase: Expand, want: []HazardClass{rawSQL},
+			reason: "The phase rebuilds order, order_label and order_line, which drops what raw SQL made on them, so the step runs the raw SQL again: order_code_lower"},
+
 		{plan: "add-column", op: "addColumn", phase: Expand},
 		{plan: "add-required-column", op: "copyTable", phase: Expand,
 			want: []HazardClass{blockingClass, compat, dataDependent, copyTable}, reason: "add channel NOT NULL without a default"},
@@ -427,7 +436,8 @@ func TestSQLiteDefault(t *testing.T) {
 		{"1", "BIGINT", "1"},
 		{"-2.5", "DOUBLE PRECISION", "-2.5"},
 		{"'draft'", "TEXT", "'draft'"},
-		{"true", "BOOLEAN", "true"},
+		{"true", "BOOLEAN", "1"},
+		{"false", "BOOLEAN", "0"},
 	}
 	for _, tc := range tests {
 		got, err := sqliteDefault(tc.def, tc.pg)
@@ -481,8 +491,10 @@ func TestSQLiteConvert(t *testing.T) {
 
 // TestSQLiteKindChanges: a list, a JSON value and text are all TEXT in
 // SQLite, and the model tells them apart by what a column holds. A JSON
-// value becomes a scalar as its text does, through a rebuild; every other
-// change between them is refused, naming the column and both kinds.
+// value becomes a scalar as its text does, and text becomes a JSON value
+// through json(), which fails on text that is not JSON, each through a
+// rebuild; every other change between them is refused, naming the column
+// and both kinds.
 func TestSQLiteKindChanges(t *testing.T) {
 	model := func(typ, holds string) *Model {
 		return &Model{Version: ModelVersion, Dialect: SQLite, Service: "s", Tables: []*Table{{
@@ -508,7 +520,8 @@ func TestSQLiteKindChanges(t *testing.T) {
 		{"TEXT", scalar, "TEXT", list, "changes from a scalar (TEXT) to a list (TEXT holding a JSON array)"},
 		{"INTEGER", scalar, "TEXT", list, "changes from a scalar (INTEGER) to a list (TEXT holding a JSON array)"},
 		{"TEXT", list, "TEXT", scalar, "changes from a list (TEXT holding a JSON array) to a scalar (TEXT)"},
-		{"TEXT", scalar, "TEXT", json, "changes from a scalar (TEXT) to a JSON value (TEXT)"},
+		{"TEXT", scalar, "TEXT", json, `json("v") [blocking compat data-dependent copy-table]`},
+		{"TEXT COLLATE NOCASE", scalar, "TEXT", json, `json("v") [blocking compat data-dependent copy-table]`},
 		{"INTEGER", scalar, "TEXT", json, "changes from a scalar (INTEGER) to a JSON value (TEXT)"},
 		{"TEXT", list, "TEXT", json, "changes from a list (TEXT holding a JSON array) to a JSON value (TEXT)"},
 		{"TEXT", json, "TEXT", list, "changes from a JSON value (TEXT) to a list (TEXT holding a JSON array)"},

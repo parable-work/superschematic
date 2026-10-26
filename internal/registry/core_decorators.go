@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
+	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -86,6 +89,19 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 				return err
 			}
 			n.Type.Indexes = append(n.Type.Indexes, idx)
+			return nil
+		},
+	})
+	// Raw SQL the DB service runs after its own objects (D83).
+	specs = append(specs, DecoratorSpec{
+		Name: "rawSql", Packages: []string{pkgDB}, Target: TargetType,
+		Kinds: []string{string(ir.SchemaKindDB)},
+		Apply: func(n Node, args []any, _ Site) error {
+			raw, err := rawSQLDef(args)
+			if err != nil {
+				return err
+			}
+			n.Type.RawSQL = append(n.Type.RawSQL, raw)
 			return nil
 		},
 	})
@@ -343,6 +359,34 @@ func indexDef(args []any) (ir.IndexDef, error) {
 						return ir.IndexDef{}, ArgErrorf(1, "@index name %q must be a lowercase identifier (e.g. digest)", s)
 					}
 					idx.Name = s
+				case "method":
+					s, ok := value.(string)
+					if !ok || !slices.Contains(ir.IndexMethods, s) {
+						return ir.IndexDef{}, ArgErrorf(1, "@index method must be one of %s", strings.Join(ir.IndexMethods, ", "))
+					}
+					idx.Method = s
+				case "ops":
+					s, ok := value.(string)
+					if !ok || !sqlutil.ValidOpclass(s) {
+						return ir.IndexDef{}, ArgErrorf(1, "@index ops must name an operator class, a lowercase identifier such as gin_trgm_ops, optionally schema-qualified")
+					}
+					idx.Ops = s
+				case "where", "expression":
+					s, ok := value.(string)
+					if !ok || strings.TrimSpace(s) == "" {
+						return ir.IndexDef{}, ArgErrorf(1, "@index %s must be a non-empty string of SQL", key)
+					}
+					if key == "where" {
+						idx.Where = strings.TrimSpace(s)
+					} else {
+						idx.Expression = strings.TrimSpace(s)
+					}
+				case "concurrently":
+					b, ok := value.(bool)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index concurrently must be a boolean literal")
+					}
+					idx.Concurrently = &b
 				default:
 					return ir.IndexDef{}, ArgErrorf(1, "@index options has unknown key %q", key)
 				}
@@ -352,6 +396,57 @@ func indexDef(args []any) (ir.IndexDef, error) {
 		}
 	}
 	return idx, nil
+}
+
+// rawSQLDef reads @rawSql's options object: id and up, and down, after and
+// dialects when given. Verification checks the SQL and the order
+// (sqlutil.CheckRawSQL).
+func rawSQLDef(args []any) (ir.RawSQLDef, error) {
+	if len(args) != 1 {
+		return ir.RawSQLDef{}, fmt.Errorf("@rawSql takes one options object: { id, up, down?, after?, dialects? }")
+	}
+	opts, ok := args[0].(map[string]any)
+	if !ok {
+		return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql takes one options object: { id, up, down?, after?, dialects? }")
+	}
+	var raw ir.RawSQLDef
+	for key, value := range opts {
+		switch key {
+		case "id", "up", "down", "after":
+			s, ok := value.(string)
+			if !ok {
+				return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql %s must be a string literal", key)
+			}
+			switch key {
+			case "id":
+				raw.ID = s
+			case "up":
+				raw.Up = s
+			case "down":
+				raw.Down = s
+			case "after":
+				raw.After = s
+			}
+		case "dialects":
+			list, ok := value.([]any)
+			if !ok {
+				return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql dialects must be a list of dialect names")
+			}
+			for _, e := range list {
+				d, ok := e.(string)
+				if !ok {
+					return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql dialects must be a list of dialect names")
+				}
+				raw.Dialects = append(raw.Dialects, d)
+			}
+		default:
+			return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql options has unknown key %q", key)
+		}
+	}
+	if raw.ID == "" || raw.Up == "" {
+		return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql needs an id and its up SQL")
+	}
+	return raw, nil
 }
 
 // applyMiddleware folds one of @rateLimit/@bodyLimit/@timeout into a

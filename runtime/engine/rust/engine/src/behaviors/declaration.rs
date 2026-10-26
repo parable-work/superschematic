@@ -16,6 +16,12 @@
 //! (D77): it writes only its behavior's own storage, so it leaves the
 //! instance's seq alone, and with `"log": false` appends no event. A
 //! behavior that declares one declares every field volatile.
+//! A behavior may declare signals (D77): messages about an instance the
+//! engine delivers to the event streams open on it and keeps nowhere, each
+//! with a camelCase name unique among its signals, a JSON Schema of its
+//! data, and who may send it: a caller who may read the schema (`read`),
+//! one who may write it (`write`), or the behavior's own operations alone
+//! (`operation`).
 //! The compiler's registry refuses the same declarations, with the same
 //! wording.
 //!
@@ -39,7 +45,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 10] = [
+const DECLARATION_KEYS: [&str; 11] = [
     "name",
     "description",
     "configSchema",
@@ -48,9 +54,11 @@ const DECLARATION_KEYS: [&str; 10] = [
     "conflicts",
     "fields",
     "operations",
+    "signals",
     "preconditionSchema",
     "vetoes",
 ];
+const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
 const FIELD_KEYS: [&str; 3] = ["name", "description", "volatile"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
 const OPERATION_KEYS: [&str; 9] = [
@@ -136,6 +144,36 @@ impl OperationScope {
     }
 }
 
+/// Who may send a signal (D77).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SignalAccess {
+    /// A caller the policy lets read the schema.
+    Read,
+    /// A caller the policy lets write the schema.
+    Write,
+    /// The behavior's own operations alone, through their context.
+    Operation,
+}
+
+impl SignalAccess {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SignalAccess::Read => "read",
+            SignalAccess::Write => "write",
+            SignalAccess::Operation => "operation",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "read" => Some(SignalAccess::Read),
+            "write" => Some(SignalAccess::Write),
+            "operation" => Some(SignalAccess::Operation),
+            _ => None,
+        }
+    }
+}
+
 /// A behavior's declaration, checked: its JSON as given and what the
 /// engine reads of it.
 #[derive(Clone, Debug, PartialEq)]
@@ -158,6 +196,8 @@ pub struct BehaviorDeclaration {
     pub fields: Vec<FieldDeclaration>,
     /// The operations it adds beside the built-in ones, in order.
     pub operations: Vec<OperationDeclaration>,
+    /// The signals it declares (D77), in order.
+    pub signals: Vec<SignalDeclaration>,
     /// The JSON Schema of the entry a caller sends for it in a write's
     /// preconditions.
     pub precondition_schema: Option<Value>,
@@ -195,6 +235,16 @@ pub struct OperationDeclaration {
     /// The MCP invocation policy of its tool (D11); absent for the policy's
     /// default.
     pub invocation_policy: Option<String>,
+}
+
+/// One signal a behavior declares (D77).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignalDeclaration {
+    pub name: String,
+    pub description: Option<String>,
+    /// The JSON Schema of its data.
+    pub params_schema: Value,
+    pub access: SignalAccess,
 }
 
 /// One code a behavior's vetoes carry.
@@ -281,6 +331,19 @@ impl BehaviorDeclaration {
                     invocation_policy: text(operation, "invocationPolicy"),
                 })
                 .collect(),
+            signals: list("signals")
+                .iter()
+                .map(|signal| SignalDeclaration {
+                    name: text(signal, "name").unwrap_or_default(),
+                    description: text(signal, "description"),
+                    params_schema: signal.get("paramsSchema").cloned().unwrap_or(Value::Null),
+                    access: signal
+                        .get("access")
+                        .and_then(Value::as_str)
+                        .and_then(SignalAccess::parse)
+                        .unwrap_or(SignalAccess::Operation),
+                })
+                .collect(),
             precondition_schema: value.get("preconditionSchema").cloned(),
             vetoes: list("vetoes")
                 .iter()
@@ -298,6 +361,11 @@ impl BehaviorDeclaration {
         self.operations
             .iter()
             .find(|operation| operation.name == name)
+    }
+
+    /// The signal of a name.
+    pub fn signal(&self, name: &str) -> Option<&SignalDeclaration> {
+        self.signals.iter().find(|signal| signal.name == name)
     }
 }
 
@@ -355,6 +423,7 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
     check_fields(members.get("fields"), &mut problems);
     check_operations(members.get("operations"), &mut problems);
     check_beside_fields(members, &mut problems);
+    check_signals(members.get("signals"), &mut problems);
     if let Some(precondition) = members.get("preconditionSchema") {
         match precondition {
             Value::Object(schema) if schema.get("type") == Some(&Value::from("object")) => {
@@ -543,6 +612,63 @@ fn check_operations(operations: Option<&Value>, problems: &mut Vec<String>) {
             _ => problems.push(format!(
                 "{at} paramsSchema must be an object schema (\"type\": \"object\")"
             )),
+        }
+    }
+}
+
+// check_signals holds each signal to its rule (D77): a camelCase name,
+// declared once, a JSON Schema of its data, and an access of read, write or
+// operation.
+fn check_signals(signals: Option<&Value>, problems: &mut Vec<String>) {
+    let Some(signals) = signals else {
+        return;
+    };
+    let Value::Array(signals) = signals else {
+        problems.push("signals is a list".to_owned());
+        return;
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    for (index, signal) in signals.iter().enumerate() {
+        let mut at = format!("signals[{index}]");
+        let Value::Object(members) = signal else {
+            problems.push(format!("{at} is an object"));
+            continue;
+        };
+        let name = members.get("name");
+        match name
+            .and_then(Value::as_str)
+            .filter(|name| is_operation_name(name))
+        {
+            None => problems.push(format!("{at}.name {} is not camelCase", shown(name))),
+            Some(text) => {
+                at = format!("signal {text}");
+                if seen.contains(&text) {
+                    problems.push(format!("{at} is declared twice"));
+                }
+                seen.push(text);
+            }
+        }
+        unknown_keys(members, &SIGNAL_KEYS, &at, problems);
+        optional_string(
+            members.get("description"),
+            &format!("{at} description"),
+            problems,
+        );
+        if !members.get("paramsSchema").is_some_and(is_schema) {
+            problems.push(format!(
+                "{at} has no paramsSchema: a JSON Schema of its data, an object, or true or false"
+            ));
+        }
+        let access = members.get("access");
+        if access
+            .and_then(Value::as_str)
+            .and_then(SignalAccess::parse)
+            .is_none()
+        {
+            problems.push(format!(
+                "{at} access {} is not \"read\", \"write\" or \"operation\"",
+                shown(access)
+            ));
         }
     }
 }
@@ -761,6 +887,52 @@ mod tests {
         assert_eq!(flags("post"), (true, true));
         assert_eq!(flags("markRead"), (true, false));
         assert_eq!(flags("rename"), (false, true));
+    }
+
+    #[test]
+    fn signals_are_named_once_with_a_schema_and_an_access() {
+        let problems = check_declaration(&json!({
+            "name": "test.Chat",
+            "signals": [
+                {"name": "typing", "paramsSchema": {"type": "object"}, "access": "read"},
+                {"name": "typing", "paramsSchema": true, "access": "write"},
+                {"name": "Draft", "paramsSchema": {}, "access": "operation"},
+                {"name": "seen", "paramsSchema": 3, "access": "everyone", "colour": 1},
+                "loud"
+            ]
+        }));
+        assert_eq!(
+            problems,
+            [
+                "signal typing is declared twice",
+                "signals[2].name \"Draft\" is not camelCase",
+                "signal seen has the unknown key \"colour\"",
+                "signal seen has no paramsSchema: a JSON Schema of its data, an object, or true or false",
+                "signal seen access \"everyone\" is not \"read\", \"write\" or \"operation\"",
+                "signals[4] is an object",
+            ]
+        );
+        assert_eq!(
+            check_declaration(&json!({"name": "test.Chat", "signals": {}})),
+            ["signals is a list"]
+        );
+        let declaration = BehaviorDeclaration::parse(
+            r#"{"name": "test.Chat", "signals": [
+                {"name": "typing", "description": "Who is typing.", "paramsSchema": {"type": "object"}, "access": "read"},
+                {"name": "draft", "paramsSchema": true, "access": "operation"}
+            ]}"#,
+        )
+        .unwrap();
+        let typing = declaration.signal("typing").unwrap();
+        assert_eq!(
+            (typing.access, typing.description.as_deref()),
+            (SignalAccess::Read, Some("Who is typing."))
+        );
+        assert_eq!(
+            declaration.signal("draft").map(|signal| signal.access),
+            Some(SignalAccess::Operation)
+        );
+        assert!(declaration.signal("viewing").is_none());
     }
 
     #[test]

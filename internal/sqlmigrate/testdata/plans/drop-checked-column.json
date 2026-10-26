@@ -1,0 +1,30 @@
+{
+  "dialect": "postgres",
+  "expanded": "42de3d392730d96c220a84de2ddcaf89aca2389ea6f3751c25774f83dfd944fc",
+  "from": "3d7a5a3430d90285447bc5adfac799b59a003fdb3f487fda2f1889c799811a6c",
+  "hash": "5bc31dec60392fcee6ab9127f83c433593136479fc93202d7800dd109ab163e6",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/note",
+          "reason": "Dropping order.note deletes the values of Order.note.",
+          "subject": "table/order/column/note"
+        }
+      ],
+      "index": 1,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN note"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    }
+  ],
+  "to": "6a6a0cbf648b37681b96f66569bd5ac768b5373f00177b74769bb4027daed98e",
+  "toModel": null,
+  "version": 1
+}

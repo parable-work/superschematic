@@ -1589,6 +1589,37 @@ impl Core for Ctx<'_, '_, '_> {
         }
     }
 
+    fn signal(&self, name: &str, data: &Value) -> Result<()> {
+        if !matches!(self.mode, Mode::Operation { .. }) {
+            return Err(Error::internal("signal() is not part of this context"));
+        }
+        let behavior = &self.bound().behavior;
+        let Some(spec) = behavior.signal(name) else {
+            return Err(Error::behavior(
+                self.name(),
+                format!("signal() names {name}, which its declaration does not declare"),
+            ));
+        };
+        if let Some(problem) = crate::signals::data_problem(spec, &behavior.name, data) {
+            return Err(Error::behavior(self.name(), problem));
+        }
+        let exec = self.exec;
+        let signal = crate::signals::EngineSignal {
+            namespace: exec.reach.chain.namespace.clone(),
+            schema: exec.schema.clone(),
+            instance_id: exec.id.clone(),
+            behavior: behavior.name.clone(),
+            name: name.to_owned(),
+            data: data.clone(),
+            from: exec.reach.chain.principal.subject.clone(),
+            at: exec.reach.chain.now,
+        };
+        let payload = crate::signals::payload_of(&signal)
+            .map_err(|problem| Error::behavior(self.name(), problem))?;
+        exec.reach.tx.signal(&payload)?;
+        Ok(())
+    }
+
     fn writing(&self) -> bool {
         self.exec
             .reach

@@ -719,6 +719,15 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   and the engine both refuse one that does not.
   `invocationPolicy` is a value of the registry's tool invocation policy;
   left out, the policy's default applies.
+- `signals` are the messages about an instance the engine hands to the
+  event streams open on it and keeps nowhere (D77): a typing indicator,
+  a draft's next chunk. Each is `{ name, description, paramsSchema,
+  access }`, its name camelCase and unique among the behavior's signals,
+  its `paramsSchema` the JSON Schema of its data, and its `access` who
+  may send it: `read` or `write`, a caller the policy lets read or write
+  the schema, or `operation`, the behavior's own operations alone,
+  through their context's `signal(name, data)`. `engine-client` types
+  each one's data and writes a send method for each a caller may send.
 - `vetoes` lists the codes the behavior's refusals carry, each
   `{ code, description }` in lowercase snake case, so a client can
   branch on `details.code` of a 409 `vetoed`. The engine refuses a veto

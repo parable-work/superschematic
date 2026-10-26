@@ -143,7 +143,15 @@ function servingOf(engine: ServedEngine): Serving {
     pull: async (id) => engine.streamPull(id),
     waitsHere: true,
     close: (id) => engine.streamClose(id),
-    watch: (wake) => engine.events.watch({ committed: wake, closed: wake }),
+    watch: (wake) => {
+      // A commit, a close, and a signal one of its streams keeps (D77).
+      const unwatch = engine.events.watch({ committed: wake, closed: wake });
+      const unwake = engine.onWake(wake);
+      return () => {
+        unwatch();
+        unwake();
+      };
+    },
     available: () => true,
   };
 }
@@ -181,7 +189,7 @@ function backgroundServing(background: EngineBackground): Serving {
 
 // The routes whose body the runtime's body limit caps, as the TypeScript
 // app's routes that take an input.
-const BODY_ROUTES = new Set(['createNamespace', 'defineSchema', 'createInstance', 'updateInstance', 'invokeOperation', 'invokeSchemaOperation', 'searchSchemas']);
+const BODY_ROUTES = new Set(['createNamespace', 'defineSchema', 'createInstance', 'updateInstance', 'invokeOperation', 'invokeSchemaOperation', 'searchSchemas', 'sendSignal']);
 
 const INTEGER_PARAMS = new Set(['version']);
 
