@@ -189,16 +189,22 @@ const (
 	FilterDate     FilterKind = "date"
 	FilterDuration FilterKind = "duration"
 	FilterPoint    FilterKind = "point"
+	// FilterJSON is a Generic.JSON column's: equality of JSON values, as
+	// JSONB compares them, and IS NULL (D79).
+	FilterJSON FilterKind = "json"
 )
 
 // FilterKind is the kind of the filter on a column of the class: the first
-// that holds of a list (none), a POINT, an INTERVAL, a UUID, a time, a date,
-// text, an integer, a number and a boolean; any other value but JSON
-// compares as text, and JSON not at all.
+// that holds of a list (none), a column of any JSON value (Generic.JSON's
+// JSONB equality), a POINT, an INTERVAL, a UUID, a time, a date, text, an
+// integer, a number and a boolean; any other value but JSON compares as
+// text, and other JSON, an object's or a map's, not at all.
 func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 	switch {
 	case isArray:
 		return FilterNone
+	case c.AnyJSON:
+		return FilterJSON
 	case c.Point:
 		return FilterPoint
 	case c.Interval:
@@ -250,6 +256,7 @@ var filterOps = map[FilterKind][]string{
 	FilterDuration: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
 	FilterBool:     {FilterEq, FilterIsNull},
 	FilterPoint:    {FilterIsNull},
+	FilterJSON:     {FilterEq, FilterIn, FilterIsNull},
 }
 
 // FilterOps are the operations of a filter of kind, in the order its

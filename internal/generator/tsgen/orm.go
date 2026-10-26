@@ -341,6 +341,8 @@ func filterType(kind sqlutil.FilterKind, t string) string {
 		return "UuidFilter<" + t + ">"
 	case sqlutil.FilterString:
 		return "StringFilter<" + t + ">"
+	case sqlutil.FilterJSON:
+		return "JsonFilter<" + t + ">"
 	case sqlutil.FilterInt, sqlutil.FilterFloat:
 		return "NumberFilter<" + t + ">"
 	case sqlutil.FilterDateTime:

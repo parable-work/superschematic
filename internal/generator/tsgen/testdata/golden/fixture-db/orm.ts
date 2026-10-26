@@ -16,7 +16,7 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -70,7 +70,7 @@ export interface TenantFilter {
   status?: StringFilter<T.TenantStatus>;
   isActive?: BoolFilter;
   seatCount?: NumberFilter<number>;
-  metadata?: StringFilter<T.GenericJSON>;
+  metadata?: JsonFilter<T.GenericJSON>;
   _version?: NumberFilter<number>;
   /** The rows a TenantUser row's tenant points at, or none does. */
   referencedByTenantUserTenant?: ReferencedByFilter;
@@ -120,7 +120,7 @@ export const tenantTable: TableDefinition = {
     { name: "status", column: "status", field: "status", qualified: "tenant.status", required: true, default: "active", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "isActive", column: "is_active", field: "isActive", qualified: "tenant.is_active", boolean: true, required: true, default: true, filter: ["eq", "isNull"] },
     { name: "seatCount", column: "seat_count", field: "seatCount", qualified: "tenant.seat_count", required: true, default: 5, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "metadata", column: "metadata", field: "metadata", qualified: "tenant.metadata", json: true, required: true, filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "metadata", column: "metadata", field: "metadata", qualified: "tenant.metadata", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "tenant._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {

@@ -320,6 +320,7 @@ export type {
   DateTimeFilter,
   DurationFilter,
   FindOptions,
+  JsonFilter,
   NullFilter,
   NumberFilter,
   OrderBy,

@@ -247,6 +247,9 @@ try {
   await call('findEntries', () =>
     orm.entry.findMany({ reviewedAt: { isNull: true }, transferId: { isNull: true }, amountCents: { in: [cents(500), cents(-1250)] } }, { orderBy: [{ field: 'amountCents' }] })
   );
+  // A Generic.JSON column's eq compares JSON values (D79): the same
+  // statement, the value TypeScript's JSON text and Go's.
+  await call('findEntriesByMetadata', () => orm.entry.findMany({ metadata: { eq: { source: 'bank' } } }, { orderBy: [{ field: 'amountCents' }] }));
   await call('pageEntries', () => orm.entry.findPage({ accountId: { in: [cash.id, bank!.id] } }, { sort: { field: 'amountCents', desc: true }, limit: 1 }));
   await call('updateEntry', () => orm.entry.updateOne(e1.id, { memo: null, amountCents: cents(-1300), transferId: bank!.id }));
   await call('updateEntries', () => orm.entry.updateMany({ accountId: { in: [bank!.id, card!.id] } }, { kind: 'credit' as never }));
@@ -446,6 +449,10 @@ func TestTableParity(t *testing.T) {
 	must(err)
 	rec.call("findEntries")
 	_, _, err = db.Entry.FindMany(ctx, &EntryFilter{ReviewedAt: &DateTimeFilter{IsNull: &yes}, TransferID: &UUIDFilter{IsNull: &yes}, AmountCents: &Int64Filter{In: []int64{500, -1250}}},
+		&EntryFindOptions{Fields: EntryFields{}.All(), OrderBy: []EntryOrderBy{{Field: EntryOrderByAmountCents}}})
+	must(err)
+	rec.call("findEntriesByMetadata")
+	_, _, err = db.Entry.FindMany(ctx, &EntryFilter{Metadata: &StringFilter{Eq: str("{\"source\": \"bank\"}")}},
 		&EntryFindOptions{Fields: EntryFields{}.All(), OrderBy: []EntryOrderBy{{Field: EntryOrderByAmountCents}}})
 	must(err)
 	rec.call("pageEntries")

@@ -350,10 +350,14 @@ text and a DATE as its text, through parsers of the pool's own;
 A filter member per column holds its conditions, by the column's kind, as
 the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
 condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
-a time, `ilike` on text, `isNull` on a column that may be null, and a
-relation's key by `<field>Id`. The Go filters take the same:
-`Int64Filter`, `FloatFilter` and `DateFilter` have `In`, and the filter of
-each kind of column has `IsNull`.
+a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
+compare JSON values as JSONB does, an object whatever the order of its
+keys and the string `"1"` apart from the number 1, `isNull` on a column
+that may be null, and a relation's key by `<field>Id`. The Go filters take
+the same: `Int64Filter`, `FloatFilter` and `DateFilter` have `In`, and the
+filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
+alike, and whose `ILike` Postgres refuses on JSONB.
 
 The repositories do not select fields, load one-to-many relations or read
 a `@versioned` table's history yet; the Go ORM does. SQLite repositories

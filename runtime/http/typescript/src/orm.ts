@@ -235,6 +235,16 @@ export interface StringFilter<T = string> {
   /** Contains the text, in any case: ILIKE %text%. */
   readonly ilike?: string;
 }
+/**
+ * A Generic.JSON column's filter: eq and in compare JSON values as JSONB
+ * does, an object equal to another whatever the order of its keys and the
+ * string "1" apart from the number 1. isNull, on a column that may be null,
+ * tests SQL NULL, never the JSON null.
+ */
+export interface JsonFilter<T = unknown> {
+  readonly eq?: T;
+  readonly in?: readonly T[];
+}
 export interface NumberFilter<T = number> {
   readonly eq?: T;
   readonly gt?: T;

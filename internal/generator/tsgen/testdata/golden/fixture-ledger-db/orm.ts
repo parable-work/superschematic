@@ -16,7 +16,7 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -217,7 +217,7 @@ export interface EntryFilter {
   kind?: StringFilter<T.EntryKind>;
   memo?: StringFilter<string> & NullFilter;
   externalId?: StringFilter<string> & NullFilter;
-  metadata?: StringFilter<T.GenericJSON> & NullFilter;
+  metadata?: JsonFilter<T.GenericJSON> & NullFilter;
   reviewedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
@@ -267,7 +267,7 @@ export const entryTable: TableDefinition = {
     { name: "memo", column: "memo", field: "memo", qualified: "entry.memo", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "externalId", column: "external_id", field: "externalId", qualified: "entry.external_id", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "tags", column: "tags", field: "tags", qualified: "entry.tags", list: true, required: true },
-    { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "in", "isNull"] },
     { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy" },

@@ -375,6 +375,18 @@ func (r Relationship) FilterConditions() []FilterCondition {
 	return filterConditions("f."+codegen.ToPascalCase(r.FieldName)+"ID", sqlutil.FilterUUID, r.SQL.Filter)
 }
 
+// goFilterKind is the Go ORM's filter of a column of kind: kind, but for a
+// Generic.JSON column (sqlutil.FilterJSON), whose StringFilter predates D79
+// and stays the Go API: its Eq and In bind JSON text, which pgx sends as
+// such, so they compare JSONB values as the TypeScript filter's eq and in
+// do, and its ILike, which Postgres has no operator for on JSONB, fails.
+func goFilterKind(kind sqlutil.FilterKind) sqlutil.FilterKind {
+	if kind == sqlutil.FilterJSON {
+		return sqlutil.FilterString
+	}
+	return kind
+}
+
 // filterConditions are the conditions of a filter of kind on the member
 // field, over its column's conditions sql.
 func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterConditions) []FilterCondition {
@@ -1350,7 +1362,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}
 	if !field.IsAuditField || field.IsAuditTimestamp {
-		field.FilterKind = class.FilterKind(isArray)
+		field.FilterKind = goFilterKind(class.FilterKind(isArray))
 	}
 
 	nilCheckedJSONScalar := field.IsScalarType && field.IsJSONLike && !field.IsArray
@@ -1470,7 +1482,7 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	for i := range repo.Fields {
 		field := &repo.Fields[i]
 		column := table.Column(field.DBName)
-		if field.FilterKind != column.Filter {
+		if field.FilterKind != goFilterKind(column.Filter) {
 			return fmt.Errorf("ormgen: %s.%s filters as %q, and sqlutil's column as %q", repo.TypeName, field.Name, field.FilterKind, column.Filter)
 		}
 		field.SQL = sqlutil.ColumnStatementsOf(column)

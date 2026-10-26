@@ -16,7 +16,7 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -183,7 +183,7 @@ export interface IngredientFilter {
   recipeId?: UuidFilter<T.IdentityUUID>;
   stepKey?: UuidFilter<T.IdentityUUID>;
   quantity?: StringFilter<string>;
-  substitutes?: StringFilter<T.GenericJSON>;
+  substitutes?: JsonFilter<T.GenericJSON>;
   entityKey?: UuidFilter<T.IdentityUUID>;
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
@@ -227,7 +227,7 @@ export const ingredientTable: TableDefinition = {
     { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "ingredient.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "stepKey", column: "step_key", field: "stepKey", qualified: "ingredient.step_key", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "quantity", column: "quantity", field: "quantity", qualified: "ingredient.quantity", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "substitutes", column: "substitutes", field: "substitutes", qualified: "ingredient.substitutes", json: true, required: true, filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "substitutes", column: "substitutes", field: "substitutes", qualified: "ingredient.substitutes", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "ingredient.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "ingredient.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
     { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "ingredient.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
@@ -1255,7 +1255,7 @@ export interface StepFilter {
   recipeId?: UuidFilter<T.IdentityUUID>;
   position?: NumberFilter<T.GenericInt64>;
   instruction?: StringFilter<string>;
-  timings?: StringFilter<T.GenericJSON>;
+  timings?: JsonFilter<T.GenericJSON>;
   scratch?: StringFilter<string> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
@@ -1302,7 +1302,7 @@ export const stepTable: TableDefinition = {
     { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "step.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "position", column: "position", field: "position", qualified: "step.position", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "instruction", column: "instruction", field: "instruction", qualified: "step.instruction", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "timings", column: "timings", field: "timings", qualified: "step.timings", json: true, required: true, filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "timings", column: "timings", field: "timings", qualified: "step.timings", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "scratch", column: "scratch", field: "scratch", qualified: "step.scratch", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "step.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "step.created_by", uuid: true, required: true, audit: "createdBy" },
@@ -1432,7 +1432,7 @@ export interface TastingFilter {
   servedAt?: StringFilter<T.TemporalTime>;
   rested?: DurationFilter<T.TemporalDuration>;
   verdict?: StringFilter<T.Verdict>;
-  remarks?: StringFilter<T.GenericJSON>;
+  remarks?: JsonFilter<T.GenericJSON>;
   entityKey?: UuidFilter<T.IdentityUUID>;
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
@@ -1483,7 +1483,7 @@ export const tastingTable: TableDefinition = {
     { name: "servedAt", column: "served_at", field: "servedAt", qualified: "tasting.served_at", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "rested", column: "rested", field: "rested", qualified: "tasting.rested", interval: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "verdict", column: "verdict", field: "verdict", qualified: "tasting.verdict", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "remarks", column: "remarks", field: "remarks", qualified: "tasting.remarks", json: true, required: true, filter: ["eq", "in", "ilike", "isNull"] },
+    { name: "remarks", column: "remarks", field: "remarks", qualified: "tasting.remarks", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "tags", column: "tags", field: "tags", qualified: "tasting.tags", list: true, required: true },
     { name: "helpers", column: "helpers", field: "helpers", qualified: "tasting.helpers", list: true, uuid: true, required: true },
     { name: "bites", column: "bites", field: "bites", qualified: "tasting.bites", json: true, required: true },

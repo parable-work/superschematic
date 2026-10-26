@@ -58,6 +58,7 @@ var repositoryCases = []repositoryCase{
 	}},
 	{fixture: "fixture-db", test: "json.test.ts", tests: []string{
 		"a JSON column holds a string, a number, a list, an object and the JSON null as they are, with the pool's parsers on and off",
+		"eq and in on a JSON column compare JSON values as JSONB does",
 	}},
 	{fixture: "fixture-queue-db", test: "order_by.test.ts", tests: []string{
 		"findMany and findOne order a keyword-named table by a column, each way",

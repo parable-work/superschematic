@@ -17,7 +17,8 @@ import (
 // partial unique index, so a new row is inserted, and an upsert by the
 // primary key of a deleted row is ErrNotFound; a key the table has none of
 // is refused. It also filters by the operations D79 adds: In on an integer
-// and IsNull on text.
+// and IsNull on text, and by a Generic.JSON column's Eq, which compares
+// JSONB values.
 func TestGeneratedUpsertOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -98,6 +99,22 @@ func TestUpsertOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "PRE
 	}
 	if _, err := db.Entry.UpsertOne(ctx, input(1), EntryUniqueKey("memo"), nil); err == nil {
 		t.Fatal("an upsert by a key the table has none of was not refused")
+	}
+
+	// A Generic.JSON column's Eq binds JSON text, which pgx sends as such,
+	// so it compares JSONB values: an object's keys in any order (D79).
+	tagged := input(42)
+	tagged.ExternalId = "plaid-json"
+	metadata := types.GenericJSON("{\"source\": \"bank\", \"pending\": false}")
+	tagged.Metadata = &metadata
+	jsonEntry, err := db.Entry.CreateOne(ctx, tagged)
+	if err != nil {
+		t.Fatalf("create an entry with metadata: %v", err)
+	}
+	reordered := "{\"pending\":false,\"source\":\"bank\"}"
+	byMetadata, total, err := db.Entry.FindMany(ctx, &EntryFilter{Metadata: &StringFilter{Eq: &reordered}}, &EntryFindOptions{Fields: EntryFields{Id: true}})
+	if err != nil || total != 1 || *byMetadata[0].Id != *jsonEntry.Id {
+		t.Fatalf("entries by their metadata = %+v, %d, %v; want the one tagged", byMetadata, total, err)
 	}
 
 	// In on an integer, IsNull on text (D79).

@@ -56,7 +56,7 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	}
 	for column, want := range map[string]FilterKind{
 		"id": FilterUUID, "account_id": FilterUUID, "amount_cents": FilterInt, "booked_on": FilterDate, "kind": FilterString,
-		"memo": FilterString, "tags": FilterNone, "reviewed_at": FilterDateTime, "created_at": FilterDateTime,
+		"memo": FilterString, "tags": FilterNone, "metadata": FilterJSON, "reviewed_at": FilterDateTime, "created_at": FilterDateTime,
 		"created_by": FilterNone, "deleted_at": FilterNone,
 	} {
 		if kinds[column] != want {
@@ -144,6 +144,10 @@ func TestTableStatementsOfALedger(t *testing.T) {
 func TestFilterOpsAndClauses(t *testing.T) {
 	if got := FilterOps(FilterInt); !slices.Equal(got, []string{"eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"}) {
 		t.Errorf("an integer's ops = %v", got)
+	}
+	// A Generic.JSON column's: JSONB equality and IS NULL, no ILIKE (D79).
+	if got := FilterOps(FilterJSON); !slices.Equal(got, []string{"eq", "in", "isNull"}) {
+		t.Errorf("a JSON column's ops = %v", got)
 	}
 	if got := FilterOps(FilterNone); got != nil {
 		t.Errorf("no filter's ops = %v", got)

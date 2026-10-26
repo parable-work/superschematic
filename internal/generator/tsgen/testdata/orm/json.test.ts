@@ -3,7 +3,8 @@
 // pg reads already parsed and the codec takes as it is; null is the JSON
 // null, since the column may not be SQL NULL. A raw query through
 // decodeRow reads it alike, on a pool with connectPostgres's parsers and on
-// one with pg's own.
+// one with pg's own. Its filter's eq and in compare JSON values as JSONB
+// does.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { connectPostgres, decodeRow, uuidToDb } from '@superschematic/http-runtime/postgres';
 import { createOrm, tenantTable, type TenantRow } from './orm';
@@ -65,5 +66,22 @@ describe.skipIf(dsn === '')('a JSON column', () => {
         await pool.end();
       }
     }
+  });
+
+  test('eq and in on a JSON column compare JSON values as JSONB does', async () => {
+    const orm = createOrm(db.pool, alice);
+    const tenant = async (slug: string, metadata: GenericJSON) =>
+      (await orm.tenant.createOne({ name: `Filter ${slug}` as IdentityName, slug: slug as IdentitySlug, email: `${slug}@example.com`, metadata })).id;
+    const object = await tenant('f-object', { plan: 'team', seats: [1, 2] });
+    const text = await tenant('f-text', '1');
+    const number = await tenant('f-number', 1);
+    const ids = async (filter: Parameters<typeof orm.tenant.findMany>[0]) =>
+      (await orm.tenant.findMany({ ...filter, slug: { in: ['f-object' as IdentitySlug, 'f-text' as IdentitySlug, 'f-number' as IdentitySlug] } }, { orderBy: [{ field: 'slug' }] })).rows.map(r => r.id);
+    // An object equals one whose keys are in another order; the string "1" is not the number 1.
+    expect(await ids({ metadata: { eq: { seats: [1, 2], plan: 'team' } } })).toEqual([object]);
+    expect(await ids({ metadata: { eq: '1' } })).toEqual([text]);
+    expect(await ids({ metadata: { eq: 1 } })).toEqual([number]);
+    expect(await ids({ metadata: { in: [1, '1'] } })).toEqual([number, text]);
+    expect(await ids({ metadata: { in: [{ plan: 'solo' }] } })).toEqual([]);
   });
 });
