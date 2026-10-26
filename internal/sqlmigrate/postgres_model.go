@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -141,7 +140,7 @@ func queueKeyOf(schema *ir.Schema, t *sqlgen.Table) *QueueKey {
 	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td.Name) {
 		return nil
 	}
-	return &QueueKey{Key: codegen.ToSnakeCase(td.Queue.Key), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
+	return &QueueKey{Key: sqlutil.QueueKeyColumnName(td), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
 }
 
 // dedupes reports whether a queue keeps one ready message per key.

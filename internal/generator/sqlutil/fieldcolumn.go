@@ -1,14 +1,14 @@
 package sqlutil
 
 import (
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
 // FieldColumn is the column a field of a DB table stores, as sqlgen writes
 // it: its name, its SQL type and whether it is nullable. A to-one relation
 // is the column of its target's key, `<field>_id`; a list of a table's
-// rows has no column.
+// rows has no column. Names come from ColumnName and ForeignKeyColumn
+// (D79), as sqlgen's do.
 type FieldColumn struct {
 	Name     string
 	Type     string
@@ -29,14 +29,14 @@ func ColumnOf(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]stri
 		return FieldColumn{}, false
 	case relational:
 		return FieldColumn{
-			Name:     codegen.ToSnakeCase(field.Name) + "_id",
+			Name:     ForeignKeyColumn(field),
 			Type:     KeyColumnType(schema, target, scalarTypes),
 			Nullable: !field.Required,
 			Relation: true,
 		}, true
 	}
 	return FieldColumn{
-		Name:     codegen.ToSnakeCase(field.Name),
+		Name:     ColumnName(field),
 		Type:     ColumnType(schema, field, scalarTypes),
 		Nullable: !field.Required,
 	}, true

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -80,7 +79,7 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 	var out []EnqueueTrigger
 	for _, td := range tableTypes {
 		for _, def := range td.EnqueueOnChange {
-			source := byName[td.Name+"/"+codegen.ToSnakeCase(td.Name)]
+			source := byName[td.Name+"/"+sqlutil.TableName(td)]
 			queueDef := schema.Types[def.Queue]
 			if source == nil || queueDef == nil || queueDef.Queue == nil {
 				return nil, fmt.Errorf("@enqueueOnChange(%s) on %s: no table of %s or no queue %s", def.Queue, td.Name, td.Name, def.Queue)
@@ -103,7 +102,9 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 }
 
 func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queueDef *ir.TypeDef, queue *Table, schema *ir.Schema) (EnqueueTrigger, error) {
-	base := codegen.ToSnakeCase(queueDef.Name)
+	// The names follow the tables' (sqlutil.TableName, QueueTableName):
+	// the queue's is its table's without the suffix.
+	base := strings.TrimSuffix(queue.Name, ir.QueueTableSuffix)
 	t := EnqueueTrigger{
 		Origin:           td.Name,
 		Queue:            queueDef.Name,

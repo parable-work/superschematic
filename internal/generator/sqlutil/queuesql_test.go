@@ -20,7 +20,8 @@ func TestQueueSpecOfReadsTheKey(t *testing.T) {
 	if plain.Key != "" || plain.Dedupes() || plain.Serializes() {
 		t.Errorf("QueueSpecOf of a queue with no key = %+v", plain)
 	}
-	if got := QueueKeyColumn(&ir.QueueDef{Key: "order"}); got != `"order"` {
+	keyword := &ir.TypeDef{Name: "Shipped", Queue: &ir.QueueDef{Key: "order"}, Fields: []*ir.FieldDef{{Name: "order", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
+	if got := QueueKeyColumn(keyword); got != `"order"` {
 		t.Errorf("QueueKeyColumn quotes a keyword as %s", got)
 	}
 }

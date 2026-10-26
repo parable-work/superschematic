@@ -198,7 +198,7 @@ func RustQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 			DocLines: queueDocLines(codegen.DocText(td.Description, td.Comment)),
 			Descriptor: QueueDescriptor{
 				Name:              td.Name,
-				Table:             sqlutil.QuoteIdentifier(codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix),
+				Table:             sqlutil.QuoteIdentifier(sqlutil.QueueTableName(td.Name)),
 				Retries:           settings.Retries,
 				BackoffSeconds:    settings.BackoffSeconds,
 				MaxBackoffSeconds: settings.MaxBackoffSeconds,
@@ -253,7 +253,7 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	ref := f.TypeRef
 	field := QueueField{
 		Name:   f.Name,
-		Column: sqlutil.QuoteIdentifier(codegen.ToSnakeCase(f.Name)),
+		Column: sqlutil.QuoteIdentifier(sqlutil.ColumnName(f)),
 	}
 	if _, union := schema.Unions[ref.Name]; union {
 		return field, "is a union, which a queue's message does not hold yet"

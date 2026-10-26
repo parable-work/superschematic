@@ -89,7 +89,7 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 			return nil, fmt.Errorf("queue %s: %w", td.Name, err)
 		}
 		settings := registry.QueueSettingsOf(td.Queue)
-		table := codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix
+		table := sqlutil.QueueTableName(td.Name)
 		q := Queue{
 			Name:              td.Name,
 			DocLines:          docLines(codegen.DocText(td.Description, td.Comment)),
