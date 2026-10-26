@@ -819,9 +819,6 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasManualRoutes() && !background {
 			api.ManualRoutes = taken.take(stem + "ManualRoutes")
 		}
-		if o.Identity != nil && s.Workers {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run: it hashes passwords with node:crypto's argon2 (D64)", in.Stack, in.Server, o.SchemaName)
-		}
 		if o.Identity != nil && !background {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
@@ -1194,7 +1191,8 @@ func (s *TypeScriptServer) DrainSeconds() int { return ir.DefaultWorkerDrainSeco
 // WorkersRuntimeImports are the names a Workers entrypoint imports from the
 // HTTP runtime's main entry: main.ts's, with a Postgres database's
 // connection read as any DatabaseConnection, which a Hyperdrive binding is
-// (D92), in place of the Database a pool opens over.
+// (D92), in place of the Database a pool opens over, and the string
+// bindings' type for an identity config.
 func (s *TypeScriptServer) WorkersRuntimeImports() []string {
 	var out []string
 	for _, name := range s.RuntimeImports() {
@@ -1204,6 +1202,11 @@ func (s *TypeScriptServer) WorkersRuntimeImports() []string {
 		if !slices.Contains(out, name) {
 			out = append(out, name)
 		}
+	}
+	if s.Identity() {
+		// identityConfig reads the identity config field from the string
+		// bindings (D92).
+		out = append(out, "type StackEnv")
 	}
 	return out
 }
@@ -1221,9 +1224,11 @@ func (s *TypeScriptServer) APIsWithConfig() bool {
 }
 
 // ReadsBindings reports whether fetch.ts reads the Worker's string and
-// secret bindings when it builds the server: for an API's config, or the
-// origins its CORS field lists.
-func (s *TypeScriptServer) ReadsBindings() bool { return s.APIsWithConfig() || s.AnyCORS() }
+// secret bindings when it builds the server: for an API's config, the
+// origins its CORS field lists, or its identity config (D92).
+func (s *TypeScriptServer) ReadsBindings() bool {
+	return s.APIsWithConfig() || s.AnyCORS() || s.Identity()
+}
 
 // SecretBindings are the Secret<T> fields of every API's config, sorted:
 // the Secrets Store secret bindings fetch.ts awaits once per isolate

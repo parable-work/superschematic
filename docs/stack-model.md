@@ -815,8 +815,10 @@ registers a `PlatformSpec`:
   `local` platform's turns the session cookie's `Secure` off;
 - `NoIdentity`, for a server platform that runs no identity runtime, why
   not: resolution refuses a server of an API over the user model on it as
-  unrealizable, giving the reason. `cloudflare.workers` sets it (section
-  18.15, D64);
+  unrealizable, giving the reason. With `IdentityDatabases` beside it, the
+  database platforms it does run one over, it refuses only a server whose
+  API's `authDb` the environment places elsewhere. `cloudflare.workers`
+  sets both, naming `cloudflare.hyperdrive` (section 18.6, D64, D92);
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
   (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
@@ -5831,7 +5833,7 @@ app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
+| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and an API over the user model only when its authDb is on Hyperdrive, where its identity store runs (D92); a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, a Hyperdrive config, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `hyperdrive: {binding, config}` a `hyperdrive` binding of the config's id (D92), `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
 | database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. A database whose DB services list postgres first is on `cloudflare.hyperdrive` instead: a database of a Postgres outside Cloudflare, no node, reached through the Hyperdrive config whose id its settings name (section 18.6, D92). |
 | sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. To a database on Hyperdrive, `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive `hyperdrive: { binding: "<FIELD>", config: <the settings' id> }`, and the Worker connects as the config's user. |
@@ -6446,6 +6448,16 @@ from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack
 bootstrap --github` sets that secret from the shell. The deployer's token
 holds `Hyperdrive Read`. `stack destroy` leaves the config and the origin.
 
+An API over the user model whose authDb is on Hyperdrive is served on
+Workers (`PlatformSpec.IdentityDatabases`, beside `NoIdentity`, which
+still refuses one whose authDb is elsewhere): `fetch.ts` builds its
+identity store over the database's pool, so it runs per request as the
+ORM does, and reads its identity config from the string bindings. A
+Worker's `node:crypto` has no argon2, so the runtime's `password.ts`
+takes its own argon2id (`identity/argon2.ts`), in TypeScript, which writes
+`node:crypto`'s keys for the same inputs; at the default cost it takes
+about 120 ms of CPU and 19 MiB, which it keeps for the next hash.
+
 ### 18.7 Buckets on R2
 
 The runtime's `./r2` entry implements D54's `Bucket`:
@@ -6779,8 +6791,8 @@ runtime tests run fixture bundles under the `workerd` binary.
   the pins, a fake account and a stand-in `superschematic-migrate`, and
   the bundles under workerd over a hyperdrive binding to a local
   Postgres.
-- An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
-  an identity store over SQLite for a TypeScript API.
+- An identity store over SQLite or D1 for a TypeScript API (D50). An
+  identity API on Workers is built over Hyperdrive (section 18.6, D92).
 - A D1 deploy that has reached Cloudflare: the platform, the runner and
   the D1 driver are proven against the pins, a fake account and the fake
   D1, and `TestRealD1` has not run yet. acme-shop's `wishlist-stack` is

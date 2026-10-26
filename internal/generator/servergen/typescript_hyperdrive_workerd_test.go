@@ -39,7 +39,11 @@ function embedding(slug: string): number[] {
   return [0, 0, 1];
 }
 
-export const create: Constructor = deps => ({ ledger: ledger(deps) });
+export const create: Constructor = deps => ({
+  ledger: ledger(deps),
+  // The identity runtime has let the caller in only when they hold ledger.close.
+  books: { closeBooks: async () => ({ closed: true }) },
+});
 
 function ledger(deps: Deps): LedgerImplementation {
   const categoryOf = async (slug: string | undefined) => (slug ? ((await deps.orm.category.findOne({ slug: { eq: slug } }))?.id ?? null) : null);
@@ -120,6 +124,34 @@ export const createWorkers: WorkersConstructor = deps => ({
 });
 `
 
+// ledgerIdentityScript registers or signs in a member of ts-ledger on Bun,
+// over the database the Workers use, with the identity runtime's store and
+// node:crypto's argon2, and says which argon2 that is: a member moves
+// between a server on Bun and one on Workers with one password hash (D92).
+// It registers with open registration and no roles, so the first member
+// who registers through the Worker is still its administrator.
+const ledgerIdentityScript = `import * as nodeCrypto from 'node:crypto';
+import pg from 'pg';
+import { IdentityService, postgresIdentityStore } from '@superschematic/http-runtime/identity';
+import { identityDescriptor } from '@schemas/ts-ledger-db-types/identity';
+
+const [url, op, login, password] = process.argv.slice(2);
+const pool = new pg.Pool({ connectionString: url, max: 2 });
+try {
+  const argon2 = typeof (nodeCrypto as unknown as { argon2?: unknown }).argon2 === 'function' ? "node:crypto's argon2" : 'no argon2 in node:crypto';
+  const service = new IdentityService({ store: postgresIdentityStore(pool, identityDescriptor) });
+  if (op === 'register') {
+    const registered = await service.register({ login, password });
+    console.log('registered ' + registered.user.login + ' with ' + argon2);
+  } else {
+    const session = await service.login({ login, password });
+    console.log('signed in ' + session.result.user.login + ' with ' + argon2);
+  }
+} finally {
+  await pool.end();
+}
+`
+
 // TestTypeScriptHyperdriveUnderWorkerd: ts-ledger-stack's packages install
 // in the output root's workspace with ts-ledger's implementation and
 // type-check, fetch.ts and both drain.ts among them; each bundles for
@@ -137,7 +169,14 @@ export const createWorkers: WorkersConstructor = deps => ({
 //     line item by its category's vector;
 //   - at a firing, SyncItems handles two items at once and one claim per
 //     item, retries a sync that fails once after the backoff, and marks one
-//     that always fails dead.
+//     that always fails dead;
+//   - the identity runtime serves ts-ledger's members through Hyperdrive,
+//     hashing with its portable argon2id: a member a server on Bun
+//     registered with node:crypto's argon2 signs in with a cookie; the
+//     first member who registers is the administrator, who approves the
+//     second and grants him the role a permission-gated route needs; and
+//     after the run, the server on Bun signs in a member whose hash the
+//     Worker wrote.
 func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -238,6 +277,25 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 	}
 	query(ledger.String(), string(pgtest.CreateSQL(createSQL)))
 
+	// carol, registered on Bun, whose hash node:crypto's argon2 writes.
+	identity := filepath.Join(pkg, "ledger-identity.ts")
+	if err := os.WriteFile(identity, []byte(ledgerIdentityScript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	member := func(op, login, password string) string {
+		t.Helper()
+		cmd := exec.Command(bun, identity, ledger.String(), op, login, password)
+		cmd.Dir = pkg
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %s on Bun: %v\n%s", op, login, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	if got, want := member("register", "carol@example.com", "carol registered on bun"), "registered carol@example.com with node:crypto's argon2"; got != want {
+		t.Fatalf("carol's registration on Bun said %q, want %q", got, want)
+	}
+
 	// The Workers, their bundles, superscalar's module and the tester, with
 	// the database filled in.
 	password, _ := server.User.Password()
@@ -285,10 +343,17 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 		`"msg":"message failed and will be retried"`,
 		`"msg":"message failed and is dead: its retries are spent"`,
 		`"msg":"embedded","stack":"ts-ledger-stack","worker":"ts-ledger-embed-line-items","api":"ts-ledger","lineItem":"pen","category":"travel"`,
+		"the ledger's members under workerd: a sign-in with a hash node:crypto wrote, the first member the administrator, an approval, cookie sessions and a permission-gated route",
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Errorf("workerd's output does not hold %s:\n%s", want, output)
 		}
+	}
+
+	// ada's hash, which the Worker's portable argon2id wrote, verifies on
+	// Bun with node:crypto's.
+	if got, want := member("login", "ada@example.com", "ada the administrator"), "signed in ada@example.com with node:crypto's argon2"; got != want {
+		t.Errorf("ada's sign-in on Bun said %q, want %q", got, want)
 	}
 }
 

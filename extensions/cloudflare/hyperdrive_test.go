@@ -57,6 +57,43 @@ func ledgerServices() []stack.Service {
 	}
 }
 
+// withMembers makes finances-api an API over the user model in
+// finances-db, as the finances app's members sign in (D50, D81).
+func withMembers(services []stack.Service) []stack.Service {
+	for i := range services {
+		if services[i].Name == financesAPI.Name {
+			db := financesDB
+			services[i].Identity = true
+			services[i].AuthDB = &db
+		}
+	}
+	return services
+}
+
+// TestWorkersServeTheUserModelOverHyperdrive: finances-api, an API over the
+// user model in finances-db, resolves on Workers while finances-db is on
+// Hyperdrive, where its identity store runs (D92); its identity config
+// field is unbound, so it runs with the runtime's defaults, a Secure
+// cookie, which a Worker's HTTPS takes.
+func TestWorkersServeTheUserModelOverHyperdrive(t *testing.T) {
+	reg := assemble(t)
+	for _, name := range []string{"Staging", "Production"} {
+		env, errs := resolveOver(t, reg, ledgerStack(), withMembers(ledgerServices()), name)
+		if errs != nil {
+			t.Fatalf("%s: %v", name, errs)
+		}
+		server := env.Deployable("finances-api")
+		if server == nil || server.Platform != cloudflare.Workers {
+			t.Fatalf("%s: finances-api = %+v, want it on Workers", name, server)
+		}
+		for _, b := range server.Bindings {
+			if b.IdentityOf != "" {
+				t.Errorf("%s: finances-api binds its identity config %+v, want it unbound", name, b)
+			}
+		}
+	}
+}
+
 // worker names a worker of finances-api in a settings element.
 func worker(name string) ir.DeployableRef {
 	api := financesAPI
@@ -320,6 +357,18 @@ func TestHyperdriveRefusals(t *testing.T) {
 			},
 			code: stack.CodeInvalidSettings,
 			want: "settings of finances-db on platform cloudflare.hyperdrive",
+		},
+		"an identity store on D1": {
+			env: "Staging",
+			edit: func(s *ir.Stack, services []stack.Service) []stack.Service {
+				services = withMembers(services)
+				services[0].Dialects = []string{registry.SQLDialectPostgres, registry.SQLDialectSQLite}
+				services[0].Vectors = false
+				s.Environments[0].Settings[0] = &ir.DeployableSettings{Of: s.Environments[0].Settings[0].Of, Platform: cloudflare.D1Platform}
+				return services
+			},
+			code: stack.CodeUnrealizable,
+			want: "server finances-api serves finances-api, an API over the user model, which authenticates with the identity runtime (D50) over finances-db, and environment Staging places finances-db on cloudflare.d1, where platform cloudflare.workers runs none: a Worker's identity store runs on Postgres through Hyperdrive (D92), and no identity store runs on D1 (D50); list postgres first in the authDb's DB service, which puts it on cloudflare.hyperdrive",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

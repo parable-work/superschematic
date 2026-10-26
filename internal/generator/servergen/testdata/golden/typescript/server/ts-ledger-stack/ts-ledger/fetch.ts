@@ -22,6 +22,12 @@
 // each request opens its connections through Hyperdrive and ends them after
 // its response.
 //
+// An API whose authDb has a User table authenticates its end users with
+// the identity runtime over that database (D50), through Hyperdrive, with
+// the identity config its identity config field holds: the runtime hashes
+// passwords with its portable argon2id, which writes node:crypto's hashes,
+// since a Worker's node:crypto has no argon2 (D92).
+//
 // Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
 // when the Worker's OTEL_ bindings name an endpoint, it makes each request
 // a server span and each call a client span, and hands the spans a request
@@ -38,16 +44,18 @@
 
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
-import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
+import { createLogger, type DatabaseConnection, type StackEnv } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { binding, perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
 import { ping as pingPool } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
+import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '@superschematic/http-runtime/identity';
 import { createOrm as createTsLedgerDbOrm } from '@schemas/ts-ledger-db-types/orm';
 import * as tsLedgerApi from '@schemas/ts-ledger-api';
 import * as tsLedgerImpl from '@schemas/ts-ledger-implementation';
+import { identityDescriptor as tsLedgerDbIdentityDescriptor } from '@schemas/ts-ledger-db-types/identity';
 
 /** What answers a request, once the isolate has built it. */
 type Handle = (request: Request) => Response | Promise<Response>;
@@ -78,6 +86,10 @@ async function build(): Promise<Handle> {
   // request alone, and the request's end ends its connections.
   const tsLedgerDbPool = hyperdriveDatabase('ts-ledger-db', 'TS_LEDGER_DB_DATABASE', tsLedgerConfig.TS_LEDGER_DB_DATABASE);
 
+  // The identity store of the user model in ts-ledger-db (D50), over the
+  // same pool, for every API that authenticates its users against it.
+  const tsLedgerDbIdentityStore = postgresIdentityStore(tsLedgerDbPool, tsLedgerDbIdentityDescriptor);
+
   const app = new Hono();
   app.use(telemetry.middleware());
   app.get('/healthz', c => c.json({ status: 'ok' }));
@@ -103,7 +115,12 @@ async function build(): Promise<Handle> {
     logger: logger.child({ api: 'ts-ledger' }),
   };
   const tsLedgerImplementations = await construct('ts-ledger', 'implementation', () => tsLedgerImpl.create(tsLedgerDeps));
-  app.route('/', tsLedgerApi.buildRouter(tsLedgerImplementations));
+  // The identity runtime authenticates its callers and serves its user
+  // model's routes, with the config its identity config field holds.
+  const tsLedgerIdentity = await construct('ts-ledger', 'identity', () =>
+    tsLedgerApi.identityService({ store: tsLedgerDbIdentityStore, config: identityConfig('TS_LEDGER_IDENTITY', values) })
+  );
+  app.route('/', tsLedgerApi.buildRouter(tsLedgerImplementations, { identity: tsLedgerIdentity }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 
@@ -147,6 +164,23 @@ function configure<T>(api: string, load: () => T): T {
     return load();
   } catch (error) {
     throw new Error(`configuration of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+/**
+ * Reads the identity config of an API over the user model (D50) from the
+ * Worker's string binding field, the API's identity config field: the JSON
+ * the identity runtimes read alike, which parseIdentityConfigJSON reads
+ * strictly. Unset or empty, it is the runtime's defaults: a Secure session
+ * cookie, which a Worker's HTTPS takes.
+ */
+function identityConfig(field: string, values: StackEnv): IdentityConfig | undefined {
+  const value = values[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    return parseIdentityConfigJSON(value);
+  } catch (error) {
+    throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 

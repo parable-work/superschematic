@@ -11717,7 +11717,7 @@ value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
 
-## D92. On the cloudflare target a Postgres database outside Cloudflare is reached through Hyperdrive, and a TypeScript queue worker drains its queue at each firing of a Cron Trigger (D53, D64 amended)
+## D92. On the cloudflare target a Postgres database outside Cloudflare is reached through Hyperdrive, a TypeScript queue worker drains its queue at each firing of a Cron Trigger, and an API over the user model signs its users in there (D50, D53, D64 amended)
 
 A finances app on Cloudflare needs what its schemas declare: a Postgres
 database with a pgvector column for embeddings, queues written in the
@@ -11725,8 +11725,12 @@ transaction that causes them, and workers that embed and sync. The
 cloudflare target placed every database on D1, which refused a DB service
 that did not list `sqlite`, and placed no queue worker at all
 (`TargetSpec.Unplaced`, D64 amended): a worker's claim loop runs as long
-as its process, and a Worker runs per request or per firing. D64 left
-"Hyperdrive to Cloud SQL later". This entry adds:
+as its process, and a Worker runs per request or per firing. The finances
+API also signs its users in with the identity runtime (`@userSessions`,
+approval-gated registration, cookie sessions), which D64's `NoIdentity`
+refused on Workers: the runtime hashed passwords with `node:crypto`'s
+argon2, which workerd does not have. D64 left "Hyperdrive to Cloud SQL
+later". This entry adds:
 - `cloudflare.hyperdrive`, a database platform for a DB service that lists
   postgres first, on a Postgres outside Cloudflare reached through a
   Hyperdrive config, and its connectors from a server, a job and a worker;
@@ -11737,7 +11741,10 @@ as its process, and a Worker runs per request or per firing. D64 left
   against the config;
 - `cloudflare.drainer`, a TypeScript queue worker as a Worker that drains
   its Postgres queue at each firing of a Cron Trigger, and its generated
-  `drain.ts`.
+  `drain.ts`;
+- the identity runtime on Workers over a Postgres `authDb` on Hyperdrive,
+  with an argon2id of the runtime's own that writes `node:crypto`'s
+  hashes.
 
 ### The database and its config
 
@@ -11779,6 +11786,17 @@ as its process, and a Worker runs per request or per firing. D64 left
 | A worker whose queue is on D1 is still refused (`NoQueueClaims`), now saying that the drainer claims on Postgres through Hyperdrive. The generator refuses a worker on Workers over a sqlite-first database, and a Go or Rust worker does not resolve on the drainer. | Claims on D1, which has no interactive transaction for a claim's `FOR UPDATE SKIP LOCKED`. |
 | `stack init`'s `cloudflare-target.ts` types a database's settings as D1's or Hyperdrive's, the union of the kind's platform and each `DatabasePlatforms` entry, and gains a `worker` key, the drainer's. | |
 
+### The identity runtime on Workers (D64 amended)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime's `password.ts` derives argon2id's key through a seam, `argon2idDeriver()`: `node:crypto`'s argon2 where the runtime has one, as Node.js 24.7 and Bun 1.4.2 do, off the main thread, and otherwise `identity/argon2.ts`, the runtime's own argon2id (RFC 9106, version 0x13) in TypeScript, on the calling thread. Bun and Node keep `node:crypto`'s; a Worker, whose `node:crypto` has `randomBytes`, `timingSafeEqual` and `createHash` but no argon2, takes the portable one. `setArgon2idDeriver` sets it for a test. | An argon2id WebAssembly module bundled into the Worker: workerd compiles no WebAssembly from bytes at run time, so it would be a second module in every version beside superscalar's, which `bundle.ts`'s check, the bundle store and the version's modules would each learn, and a binary in the repository built by a toolchain it would pin. A WebAssembly package from npm, a dependency the lockfile would add. Choosing it by target in the generated entrypoint, which a test of the runtime alone could not reach. |
+| The portable argon2id writes `node:crypto`'s keys for the same inputs, so a user's PHC string verifies on either: `argon2.test.ts` holds it to RFC 9106's vector, to `node:crypto` across costs, lanes, tag lengths, secrets and associated data, and to `identity_parity.json`'s hashes and verifications, which the Go runtime wrote. A 64-bit word is two 32-bit halves; BlaMka's product is `Math.imul`'s low half and the 16-bit parts' high half. | BigInt arithmetic, an order of magnitude slower. |
+| At the default cost, 19456 KiB, 2 passes and 1 lane, a hash takes about 120 ms of CPU under the pinned workerd (V8) on an Apple-silicon laptop, and 270 ms under Bun (JavaScriptCore); `node:crypto`'s native one is several times faster. A sign-in, a registration and a password change each hash once, and each isolate hashes once more as it builds the identity service, for the fixed hash an unknown user's sign-in verifies against, so its first request takes about 120 ms more. That is within Workers Paid's CPU (30 s by default, `cpuMs` up to 300000) and over Workers Free's 10 ms, which the docs say. | Lowering the cost on Workers, which would weaken every hash a user moves with. |
+| A hash keeps its memory, one `Uint32Array` of 19 MiB at the default cost, for the next, up to 64 MiB (`REUSED_MEMORY_KIB`), and zeroes it after each: workerd's peak stayed at 61 MiB across eleven hashes, against 137 MiB when each allocated its own, within a Worker's 128 MB. The hash is synchronous, so two requests of one isolate never share it. | A new array per hash, which the collector frees late. |
+| `PlatformSpec.IdentityDatabases`, beside `NoIdentity`, names the database platforms over which a server platform does serve the user model; resolution places every deployable first, then refuses one whose `authDb` is elsewhere with `NoIdentity`'s reason (`checkIdentityDatabases`), and `Finalize` checks each name is a registered database platform. `cloudflare.workers` names `cloudflare.hyperdrive`; `NoIdentity` now says a Worker's identity store runs on Postgres through Hyperdrive and none on D1. A sqlite-first `authDb` stays refused everywhere (D50). | Dropping `NoIdentity` from Workers, which would leave the D1 case to the dialect check's message alone and the seam to no platform. A function on the platform, which no other field of `PlatformSpec` is for a refusal. |
+| The generator no longer refuses a Workers server over the user model; `fetch.ts` builds the identity store over the database's Hyperdrive pool, so it runs per request as the ORM does, the identity service from the identity config it reads from the string bindings (`identityConfig(field, values)`), and mounts it as `main.ts` does. The cookie is the runtime's default, `__Host-session`, Secure, `SameSite=Lax`, which a Worker's HTTPS takes; the Workers platform declares no identity config. | An identity config of the platform's, which would say what the defaults say. |
+
 Status: built.
 - **The model and the runtimes:** `TestDerivedValuesMeetTheirContract`,
   `TestDerivedValuesThatBreakTheContract` and
@@ -11812,6 +11830,21 @@ Status: built.
   `TestHyperdriveCIGolden` and `TestBootstrapGitHubSetsTheOriginSecrets`;
   `TestTarget`, `TestD1Refusals` and `TestWorkersRefusals` updated;
   `TestStackInitWritesACloudflareEnvironment` for the target's types.
+- **The identity runtime on Workers:** `argon2.test.ts` (RFC 9106's
+  vector, `node:crypto`'s keys, the parity corpus's hashes through the
+  portable argon2id, and the default cost's time); the ledger fixture
+  is an API over the user model with approval-gated registration, user
+  administration and a route that needs `ledger.close`, and
+  `TestTypeScriptHyperdriveUnderWorkerd` registers carol on Bun with
+  `node:crypto`'s argon2, then under workerd signs carol in with a
+  cookie, registers ada, the first user and the administrator, registers
+  bob, who waits, approves him, signs him in with a cookie, refuses him
+  the gated route until ada grants him her role, signs him out, and after
+  the run signs ada in on Bun; `TestAPlatformThatServesTheUserModelOverSomeDatabases`,
+  `TestStackSpecsFailAfterFinalize` and `TestRegisterPlatformRejects`
+  for `IdentityDatabases`; `TestWorkersServeTheUserModelOverHyperdrive`
+  and `TestHyperdriveRefusals`' identity store on D1;
+  `TestTypeScriptWorkersRefusals` for the plan.
 
 Left:
 - What only a live deploy proves: Cloudflare accepting the version's
@@ -11823,9 +11856,11 @@ Left:
   handler's fetches share; node-postgres under Cloudflare's runtime rather
   than the pinned workerd; and a destroy that leaves the config and the
   origin.
-- An identity API on Workers, still refused (`NoIdentity`): its argon2 is
-  `node:crypto`'s, which workerd does not have, so an API with
-  `@userSessions` over Hyperdrive does not resolve there.
+- A sign-in on Cloudflare's runtime rather than the pinned workerd: its
+  CPU time at the default cost, and the cookie through a custom domain and
+  through D91's site Worker. Login's rate limit is each isolate's own, as
+  every rate limit on Workers is (section 18.15).
+- An identity store over D1 or SQLite (D50).
 - A database on Hyperdrive in a parameterized environment; a
   least-privilege config per API; a separate migrator user.
 - A worker woken sooner than its next firing, and `instances` over one.

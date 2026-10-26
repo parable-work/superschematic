@@ -196,8 +196,9 @@ secret member such as an edge's signing key; `secrets_store_secret` for a
 `binding: {name, worker}`, or a bucket's `binding`). A version that binds
 a Hyperdrive config under a compatibility date before `NodeModulesDate`
 names `nodejs_compat` too, for node-postgres. The platform refuses, as unrealizable, a server in another
-language, a Worker name over 63 characters, and an API over the user model,
-whose identity runtime needs `node:crypto` (`NoIdentity`); and it refuses
+language, a Worker name over 63 characters, and an API over the user model
+whose `authDb` is not on Hyperdrive, where its identity store runs
+(`NoIdentity`, `IdentityDatabases`, D92); and it refuses
 an exposed server without a domain while the environment records no
 `workersSubdomain`, or a secret while it records no `secretsStoreId`,
 saying to run bootstrap.
@@ -286,7 +287,10 @@ for a sql edge, which the Workers platform writes as the version's
 `hyperdrive` binding of the config's id, beside `<FIELD>_HYPERDRIVE_BINDING`
 and `<FIELD>_HYPERDRIVE_CONFIG`. It refuses, as unrealizable, a database
 in a parameterized environment, whose members would share the origin, and
-one that hosts two DB services.
+one that hosts two DB services. A server on Workers serves an API over the
+user model whose `authDb` is here, its identity store over the same
+binding (`IdentityDatabases`), and the HTTP runtime hashes its passwords
+with its own argon2id, since a Worker's `node:crypto` has none.
 
 The migration runner reads the config (`Cloud.HyperdriveConfig`, `GET
 /accounts/<id>/hyperdrive/configs/<id>`, with the deployer's `Hyperdrive
@@ -469,8 +473,9 @@ Postgres database with a vector column on Hyperdrive, in Staging and
 Production, against its golden files; deploys it over the fake `Cloud`;
 migrates its origin through a stand-in `superschematic-migrate`, refusing
 an origin the config does not name; checks its workflow and bootstrap's
-origin secrets; and holds servergen's workerd `ledger` fixture to its
-Staging bindings.
+origin secrets; holds servergen's workerd `ledger` fixture to its
+Staging bindings; and resolves finances-api over the user model with its
+`authDb` on Hyperdrive, and refuses it with the `authDb` on D1.
 The job runner runs a fake Workflow through `stack run` and a deploy's
 jobs step, and reports an errored, a terminated and a missing one;
 the telemetry tests read the `OTEL_` bindings, the compatibility flag

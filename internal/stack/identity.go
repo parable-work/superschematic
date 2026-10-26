@@ -1,6 +1,8 @@
 package stack
 
 import (
+	"slices"
+
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -14,6 +16,60 @@ import (
 // identity config (registry.PlatformSpec.IdentityConfig), as the local
 // platform turns the cookie's Secure off over plain HTTP; without either
 // the field is unbound and the server runs with the runtime's defaults.
+
+// checkIdentityDatabases refuses a server or an app on a platform that
+// serves the user model over some database platforms alone
+// (registry.PlatformSpec.IdentityDatabases, D92) when it serves an API over
+// the user model whose authDb the environment places on another, giving
+// the platform's NoIdentity reason. It runs once every deployable is
+// placed.
+func (r *resolver) checkIdentityDatabases() {
+	for _, name := range sortedKeys(r.deployables) {
+		d := r.deployables[name]
+		if d.platform.NoIdentity == "" || len(d.platform.IdentityDatabases) == 0 {
+			continue
+		}
+		if d.res.Kind != ir.DeployableServer && d.res.Kind != ir.DeployableApp {
+			continue
+		}
+		for _, served := range d.res.Services {
+			svc := r.services[served.Name]
+			if svc == nil || !svc.Identity {
+				continue
+			}
+			db := identityDatabaseOf(svc)
+			if db == "" {
+				continue // databaseOf refuses an API with no one database
+			}
+			host, ok := r.deployables[r.byService[db]]
+			if !ok || host.res.Platform == "" || slices.Contains(d.platform.IdentityDatabases, host.res.Platform) {
+				continue // a database no platform placed is refused already
+			}
+			r.fail(CodeUnrealizable, "%s %s serves %s, an API over the user model, which authenticates with the identity runtime (D50) over %s, and environment %s places %s on %s, where platform %s runs none: %s",
+				d.res.Kind, d.res.Name, svc.Name, db, r.envName(), db, host.res.Platform, d.platform.Name, d.platform.NoIdentity)
+		}
+	}
+}
+
+// identityDatabaseOf is the database an API over the user model keeps its
+// users in: its authDb, else its one DB dependency, else none (databaseOf,
+// which reports the ambiguity, without reporting it again).
+func identityDatabaseOf(svc *Service) string {
+	if svc.AuthDB != nil {
+		return svc.AuthDB.Name
+	}
+	db := ""
+	for _, dep := range svc.Dependencies {
+		if dep.Kind != ir.SchemaKindDB {
+			continue
+		}
+		if db != "" {
+			return ""
+		}
+		db = dep.Name
+	}
+	return db
+}
 
 // identityFields returns the identity config fields of server d: one per
 // API it serves whose server authenticates with the identity runtime, by

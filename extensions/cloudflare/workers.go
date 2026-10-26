@@ -67,9 +67,10 @@ var BundleModules = []struct{ Name, ContentType string }{
 // behaves as of, which the extension moves with its tests.
 const CompatibilityDate = "2026-09-15"
 
-// noIdentity is why a server on Workers serves no API over the user model
-// (section 18.15).
-const noIdentity = "the TypeScript identity runtime hashes passwords with node:crypto's argon2, which a Worker does not have (D64)"
+// noIdentity is why a server on Workers serves an API over the user model
+// only when its authDb is on Hyperdrive (D92): the identity store runs on
+// Postgres, and D1 holds none.
+const noIdentity = "a Worker's identity store runs on Postgres through Hyperdrive (D92), and no identity store runs on D1 (D50); list postgres first in the authDb's DB service, which puts it on " + HyperdrivePlatform
 
 // workersSettings is the schema of a server's settings on Workers (section
 // 18.1):
@@ -107,6 +108,10 @@ func workersPlatform() registry.PlatformSpec {
 		AddressOf:       workerAddress,
 		PublicAddressOf: workerPublicAddress,
 		Lower:           lowerServer,
+
+		// The identity runtime runs on Workers over Postgres through
+		// Hyperdrive, hashing with its portable argon2id (D92).
+		IdentityDatabases: []string{HyperdrivePlatform},
 	}
 }
 

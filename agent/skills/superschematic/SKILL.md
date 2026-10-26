@@ -211,7 +211,9 @@ the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
 and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
 for the deploy's migration. Don't make the config or handle the
 connection string yourself. Queue workers there must be TypeScript; each
-drains its queue once a minute under a Cron Trigger.
+drains its queue once a minute under a Cron Trigger. An API over the user
+model signs users in there when its `authDb` is that Postgres; each
+password hash takes about 120 ms of CPU, so it needs Workers Paid.
 
 ## Reference
 

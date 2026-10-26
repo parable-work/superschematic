@@ -17,6 +17,25 @@
 //     the first ended, while another item's ran beside the first; a sync
 //     that fails once is done on its retry, after the backoff, and one that
 //     fails every time is dead once its retries are spent.
+//   - Members sign in with the identity runtime over the database's user
+//     model, through Hyperdrive, its passwords hashed by the runtime's
+//     portable argon2id (D92): carol, whom a server on Bun registered with
+//     node:crypto's argon2, signs in with a cookie; the first member who
+//     registers here, ada, is the administrator; bob waits for approval,
+//     which ada gives; bob signs in with a cookie, and closes the books only
+//     once ada grants him the administrator's role.
+
+/** A call with a session cookie, which answers its status, its envelope's data or its problem (RFC 9457), and the session cookie it sets. */
+async function as(env, cookie, method, path, body) {
+  const headers = {};
+  if (cookie) headers.cookie = cookie;
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const response = await env.LEDGER.fetch(`https://ts-ledger/${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await response.text();
+  const parsed = text === '' ? {} : JSON.parse(text);
+  const set = response.headers.get('set-cookie');
+  return { status: response.status, data: parsed.data, error: response.ok ? undefined : parsed, cookie: set ? set.split(';')[0] : undefined, setCookie: set };
+}
 
 async function call(env, method, path, body) {
   const response = await env.LEDGER.fetch(`https://ts-ledger/${path}`, {
@@ -119,6 +138,71 @@ export default {
     check(Number(b.started) < Number(chain.ended) && Number(chain.started) < Number(b.ended), `b's sync ran ${b.started} to ${b.ended}, apart from a's ${chain.started} to ${chain.ended}: two items did not sync at once`);
     check(run('c', 'flaky', 2) && run('d', 'poison', 2), `the retries ran ${JSON.stringify(s.runs)}`);
 
+    await members(env);
+
     console.log('the ledger under workerd: Postgres through Hyperdrive, nearest, an enqueue that commits with its transaction, and both workers drained at a firing');
   },
 };
+
+/** The identity runtime on Workers, over the user model through Hyperdrive (D92). */
+async function members(env) {
+  const expect = (r, status, what) => check(r.status === status, `${what} answered ${r.status} ${JSON.stringify(r.error ?? r.data)}, want ${status}`);
+
+  // carol's hash is node:crypto's, which the server on Bun wrote: the
+  // portable argon2id verifies it.
+  const carol = await as(env, undefined, 'POST', 'api/auth/login', { login: 'carol@example.com', password: 'carol registered on bun', session: 'cookie' });
+  expect(carol, 200, "carol's sign-in");
+  check(carol.cookie?.startsWith('__Host-session=') && /; Secure/u.test(carol.setCookie) && /HttpOnly/iu.test(carol.setCookie), `carol's cookie is ${carol.setCookie}`);
+  expect(await as(env, carol.cookie, 'POST', 'api/books/close'), 403, "carol's closing of the books");
+
+  // The first member to register here is the administrator, signed in at once.
+  const ada = await as(env, undefined, 'POST', 'api/auth/register', { login: 'ada@example.com', name: 'Ada', password: 'ada the administrator', session: 'cookie' });
+  expect(ada, 200, "ada's registration");
+  check(ada.data.pending === false && ada.cookie?.startsWith('__Host-session='), `ada registered as ${JSON.stringify(ada.data)} with cookie ${ada.setCookie}`);
+  const me = await as(env, ada.cookie, 'GET', 'api/auth/me');
+  expect(me, 200, "ada's me");
+  check(me.data.user.login === 'ada@example.com', `ada's me is ${JSON.stringify(me.data)}`);
+
+  // bob waits for approval, with no session, and cannot sign in yet.
+  const bob = await as(env, undefined, 'POST', 'api/auth/register', { login: 'bob@example.com', name: 'Bob', password: 'bob waits his turn', session: 'cookie' });
+  expect(bob, 202, "bob's registration");
+  check(bob.data.pending === true && bob.cookie === undefined, `bob registered as ${JSON.stringify(bob.data)} with cookie ${bob.setCookie}`);
+  const early = await as(env, undefined, 'POST', 'api/auth/login', { login: 'bob@example.com', password: 'bob waits his turn', session: 'cookie' });
+  expect(early, 403, "bob's sign-in before approval");
+  check(early.error?.code === 'pending_approval', `bob's early sign-in failed with ${JSON.stringify(early.error)}`);
+
+  // ada, the administrator, closes the books and approves bob.
+  const closed = await as(env, ada.cookie, 'POST', 'api/books/close');
+  expect(closed, 200, "ada's closing of the books");
+  check(closed.data.closed === true, `ada closed the books with ${JSON.stringify(closed.data)}`);
+  expect(await as(env, undefined, 'POST', 'api/books/close'), 401, 'closing the books with no session');
+  const waiting = await as(env, ada.cookie, 'GET', 'api/auth/admin/users?pending=true');
+  expect(waiting, 200, 'the users waiting for approval');
+  check(JSON.stringify(waiting.data).includes(bob.data.user.id), `the users waiting are ${JSON.stringify(waiting.data)}, want bob`);
+  expect(await as(env, ada.cookie, 'POST', `api/auth/admin/users/${bob.data.user.id}/approve`), 200, "ada's approval of bob");
+
+  // bob signs in with a cookie; a wrong password does not.
+  expect(await as(env, undefined, 'POST', 'api/auth/login', { login: 'bob@example.com', password: 'not bobs password', session: 'cookie' }), 401, "bob's wrong password");
+  const signedIn = await as(env, undefined, 'POST', 'api/auth/login', { login: 'bob@example.com', password: 'bob waits his turn', session: 'cookie' });
+  expect(signedIn, 200, "bob's sign-in");
+  check(signedIn.cookie?.startsWith('__Host-session='), `bob's cookie is ${signedIn.setCookie}`);
+  const bobMe = await as(env, signedIn.cookie, 'GET', 'api/auth/me');
+  expect(bobMe, 200, "bob's me");
+  check(bobMe.data.user.login === 'bob@example.com', `bob's me is ${JSON.stringify(bobMe.data)}`);
+
+  // A member holds no ledger.close until ada grants him the administrator's role.
+  expect(await as(env, signedIn.cookie, 'POST', 'api/books/close'), 403, "bob's closing of the books as a member");
+  const roles = await as(env, ada.cookie, 'GET', 'api/auth/admin/roles');
+  expect(roles, 200, 'the roles');
+  const admin = (Array.isArray(roles.data) ? roles.data : (roles.data.roles ?? roles.data.items ?? [])).find(r => r.name === 'admin');
+  check(admin, `the roles are ${JSON.stringify(roles.data)}, want admin`);
+  expect(await as(env, ada.cookie, 'PUT', `api/auth/admin/users/${bob.data.user.id}/roles/${admin.id}`), 200, "ada's grant of admin to bob");
+  const bobCloses = await as(env, signedIn.cookie, 'POST', 'api/books/close');
+  expect(bobCloses, 200, "bob's closing of the books as an administrator");
+
+  // bob signs out, and his cookie signs nothing in.
+  expect(await as(env, signedIn.cookie, 'POST', 'api/auth/logout'), 200, "bob's sign-out");
+  expect(await as(env, signedIn.cookie, 'GET', 'api/auth/me'), 401, "bob's me after signing out");
+
+  console.log("the ledger's members under workerd: a sign-in with a hash node:crypto wrote, the first member the administrator, an approval, cookie sessions and a permission-gated route");
+}

@@ -120,6 +120,16 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 	if s, err := servergen.PlanTypeScript(input(postgresDB)); err != nil || len(s.PostgresDatabases()) != 1 || !s.NodeCompat() {
 		t.Fatalf("a server on Workers over a Postgres database = %+v, %v", s, err)
 	}
+	// An API over the user model in that database, whose identity store
+	// runs on the Hyperdrive pool, hashing with the runtime's portable
+	// argon2id (D92); over a sqlite-first one, it is refused as on Bun.
+	identity := func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+		postgresDB(o, c)
+		o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
+	}
+	if s, err := servergen.PlanTypeScript(input(identity)); err != nil || !s.Identity() || s.PostgresDatabases()[0].Store == "" {
+		t.Fatalf("a server on Workers over the user model in a Postgres database = %+v, %v", s, err)
+	}
 	for _, tc := range []struct {
 		name   string
 		edit   func(*tsrestgen.APIOutput, *envgen.ConfigOutput)
@@ -127,9 +137,10 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		want   string
 		engine bool
 	}{
-		{"the identity runtime", func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
+		{"the identity runtime over D1", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+			sqliteDB(o, c)
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
-		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run", false},
+		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over shop-db, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)", false},
 		{"an engine database", sqliteDB, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the server on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the server on a platform that builds an image", true},
 		{"a job's engine database", sqliteDB, true, "job shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the job on a platform whose artifact is a bundle", true},
 		{"an engine database that lists postgres first", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {

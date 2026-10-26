@@ -27,6 +27,14 @@
 // each request opens its connections through Hyperdrive and ends them after
 // its response.
 {{- end }}
+{{- if .Identity }}
+//
+// An API whose authDb has a User table authenticates its end users with
+// the identity runtime over that database (D50), through Hyperdrive, with
+// the identity config its identity config field holds: the runtime hashes
+// passwords with its portable argon2id, which writes node:crypto's hashes,
+// since a Worker's node:crypto has no argon2 (D92).
+{{- end }}
 //
 // Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
 // when the Worker's OTEL_ bindings name an endpoint, it makes each request
@@ -61,6 +69,9 @@ import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage
 import { ping as pingPool } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
 {{- end }}
+{{- if .Identity }}
+import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+{{- end }}
 {{- template "ts-orm-imports" . }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
@@ -68,6 +79,11 @@ import * as {{ .Impl }} from '{{ .ImplPackage }}';
 {{- end }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
+{{- end }}
+{{- range .Databases }}
+{{- if .Store }}
+import { identityDescriptor as {{ .Descriptor }} } from '{{ .DescriptorModule }}';
+{{- end }}
 {{- end }}
 
 /** What answers a request, once the isolate has built it. */
@@ -154,6 +170,14 @@ async function build(): Promise<Handle> {
 {{- range .PostgresDatabases }}
   const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
 {{- end }}
+{{- range .PostgresDatabases }}
+{{- if .Store }}
+
+  // The identity store of the user model in {{ .Service }} (D50), over the
+  // same pool, for every API that authenticates its users against it.
+  const {{ .Store }} = postgresIdentityStore({{ .Var }}, {{ .Descriptor }});
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .SQLiteDatabases }}
 
@@ -200,6 +224,13 @@ async function build(): Promise<Handle> {
   const {{ .Implementations }} = await construct({{ tsQuote .Service }}, 'implementation', () => {{ .Impl }}.create({{ .Deps }}));
 {{- if .Authenticate }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
+{{- end }}
+{{- if .Identity }}
+  // The identity runtime authenticates its callers and serves its user
+  // model's routes, with the config its identity config field holds.
+  const {{ .Identity }} = await construct({{ tsQuote .Service }}, 'identity', () =>
+    {{ .Module }}.identityService({ store: {{ .Database.Store }}, config: identityConfig({{ tsQuote .IdentityField }}, values) })
+  );
 {{- end }}
 {{- if .ManualRoutes }}
   // The handlers of its @manualRouteRegistration operations, which its
@@ -293,6 +324,25 @@ export default {
 {{- end }}
 
 {{ template "ts-configure" . }}
+{{- if .Identity }}
+
+/**
+ * Reads the identity config of an API over the user model (D50) from the
+ * Worker's string binding field, the API's identity config field: the JSON
+ * the identity runtimes read alike, which parseIdentityConfigJSON reads
+ * strictly. Unset or empty, it is the runtime's defaults: a Secure session
+ * cookie, which a Worker's HTTPS takes.
+ */
+function identityConfig(field: string, values: StackEnv): IdentityConfig | undefined {
+  const value = values[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    return parseIdentityConfigJSON(value);
+  } catch (error) {
+    throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+{{- end }}
 
 {{ template "ts-construct" . }}
 {{- if .PostgresDatabases }}

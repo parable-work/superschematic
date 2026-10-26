@@ -444,16 +444,6 @@ func TestWorkersRefusals(t *testing.T) {
 			t.Errorf("a 40-character name, 62 with the stack and the environment, without a parameter: %v", errs)
 		}
 	})
-	t.Run("an API over the user model", func(t *testing.T) {
-		services := stacktest.AcmeShop()
-		for i := range services {
-			if services[i].Name == "shop-storefront" {
-				services[i].Identity = true
-			}
-		}
-		_, errs := resolveOver(t, reg, storefrontStack(), services, "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-storefront serves shop-storefront, an API over the user model, which authenticates with the identity runtime (D50), and platform cloudflare.workers runs none: the TypeScript identity runtime hashes passwords with node:crypto's argon2")
-	})
 	t.Run("no workers.dev subdomain", func(t *testing.T) {
 		s := storefrontStack()
 		s.Environments[0].Values = map[string]any{"accountId": accountID}

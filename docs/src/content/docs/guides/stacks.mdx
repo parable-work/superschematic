@@ -36,7 +36,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself; a queue worker woken sooner than its next firing |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
@@ -1991,8 +1991,9 @@ workerd with Bun, and fails on a `node:` import other than
 superscalar's; `bun bundle.ts --check`,
 which the generated CI's `check` runs, bundles into a temporary
 directory. Resolution refuses a Go or Rust server, a name over 63
-characters and an API over the user model on Workers, whose runtime has
-no argon2.
+characters, and an API over the user model whose `authDb` is not on
+Hyperdrive ([Databases on Hyperdrive](#databases-on-hyperdrive)): its
+identity store runs on Postgres alone.
 
 Each server's and job's version names the `nodejs_als` compatibility flag:
 the runtime carries a trace's context through `AsyncLocalStorage`, which
@@ -2229,6 +2230,19 @@ the database's owner create. The generated CI's deploy job reads the
 connection string from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`
 in its GitHub environment, which `stack bootstrap --github` sets from your
 shell. `stack destroy` leaves the config and the origin alone.
+
+An API over the user model whose `authDb` is on Hyperdrive signs its
+users in on Workers as on Bun (D92): the identity store runs on the same
+per-request pool, and the session cookie is `__Host-session`, Secure,
+which a Worker's HTTPS takes. A Worker's `node:crypto` has no argon2, so
+the runtime hashes passwords there with its own argon2id in TypeScript,
+which writes the same PHC strings, so a user moves between a server on
+Bun and one on Workers with one password. At the default cost, 19 MiB and
+two passes, a sign-in or a registration takes about 120 ms of CPU and 19
+MiB of the isolate's 128 MB, measured under the pinned workerd, and an
+isolate's first request as much again, for the hash an unknown user's
+sign-in is compared against: within Workers Paid's CPU limit and over
+Workers Free's 10 ms.
 
 A parameterized environment's members would share the origin's
 database, so a database on Hyperdrive there is refused, as is one that

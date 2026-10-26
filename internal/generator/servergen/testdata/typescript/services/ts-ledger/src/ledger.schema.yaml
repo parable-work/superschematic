@@ -55,7 +55,39 @@ types:
       - name: json
         typeRef: { name: string }
         required: true
+  # Who closed the books.
+  ClosedView:
+    name: ClosedView
+    role: APIView
+    fields:
+      - name: closed
+        typeRef: { name: boolean }
+        required: true
 operationSets:
+  # Members register and sign in with a cookie: each waits for an
+  # administrator's approval as a member, and the first is the
+  # administrator, who may close the books (D81).
+  - name: Account
+    userSessions:
+      register: true
+      registration: approval
+      defaultRoles: [member]
+      firstUser: { role: admin, permissions: [identity, ledger.close] }
+    operations: []
+  # Approves members, and manages roles and grants.
+  - name: AccountAdmin
+    userAdministration: {}
+    operations: []
+  - name: Books
+    operations:
+      # Only a member who holds ledger.close closes the books.
+      - name: closeBooks
+        typeRef: { name: ClosedView }
+        required: true
+        auth: true
+        permissions: [ledger.close]
+        httpMethod: POST
+        restPath: books/close
   - name: Ledger
     operations:
       - name: createCategory
