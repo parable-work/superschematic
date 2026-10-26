@@ -161,3 +161,57 @@ func TestFilterOpsAndClauses(t *testing.T) {
 		t.Error("a bare % is a verb the runtimes' fill refuses")
 	}
 }
+
+// TestTablesOfModelsVectorsDecimalsAndSealedNames holds fixture-vectors-db's
+// model (D84, D85): a decimal filters as a number, an Encrypted<T> field
+// and a vector have no filter, and Chunk's table, vector column and
+// soft-delete column are the names @table and @column give them, quoted,
+// through to the nearest statement and its live condition.
+func TestTablesOfModelsVectorsDecimalsAndSealedNames(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-vectors-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := TablesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := map[string]*TableModel{}
+	for i := range models {
+		tables[models[i].Type] = &models[i]
+	}
+	line, chunk := tables["LedgerLine"], tables["Chunk"]
+	if line == nil || chunk == nil {
+		t.Fatalf("tables = %v, want LedgerLine and Chunk", tables)
+	}
+	for _, tc := range []struct {
+		table  *TableModel
+		column string
+		want   FilterKind
+	}{
+		{line, "rate", FilterDecimal}, {line, "confidence", FilterDecimal}, {line, "quantity", FilterDecimal}, {line, "amount", FilterInt},
+		{chunk, "note", FilterNone}, {chunk, "chunkVector", FilterNone}, {chunk, "chunkText", FilterString},
+	} {
+		c := tc.table.Column(tc.column)
+		if c == nil {
+			t.Fatalf("%s has no column %s", tc.table.Type, tc.column)
+		}
+		if c.Filter != tc.want {
+			t.Errorf("%s.%s filters as %q, want %q", tc.table.Type, tc.column, c.Filter, tc.want)
+		}
+	}
+	if note := chunk.Column("note"); !note.Encrypted || note.Type != "TEXT" {
+		t.Errorf("Chunk.note = %+v, want an encrypted TEXT column", note)
+	}
+	if ops := FilterOps(FilterDecimal); !slices.Equal(ops, []string{"eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"}) {
+		t.Errorf("a decimal's filter = %v", ops)
+	}
+	vectors := chunk.VectorColumns()
+	if len(vectors) != 1 || vectors[0].Qualified != `"NoteChunk"."chunkVector"` || vectors[0].Type != "vector(3)" {
+		t.Fatalf("Chunk's vector columns = %+v", vectors)
+	}
+	s := TableStatementsOf(chunk)
+	if s.Nearest != `SELECT %s, %s AS _distance FROM "NoteChunk"%s ORDER BY %s LIMIT %d` || s.LiveCondition != `"NoteChunk"."removedAt" IS NULL` {
+		t.Errorf("Chunk's nearest = %q, live condition %q", s.Nearest, s.LiveCondition)
+	}
+}

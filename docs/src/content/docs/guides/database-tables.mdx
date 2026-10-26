@@ -300,6 +300,13 @@ column is cleared or embedded again first. SQLite has no vector type, and
 a SQLite build of a service with one fails, naming the fix:
 `outputs.sql.dialects: ["postgres"]`.
 
+`@table` and `@column` name a table with a vector and the vector's column
+as they name any other, and the index and `nearest` follow them; changing
+either plans a rename that keeps every vector. `Encrypted<T>` takes text
+alone, so a vector or a decimal cannot be encrypted, but a table may hold
+an encrypted field beside its vector, and `nearest` opens it on each row
+it reads.
+
 `stack dev` runs Postgres on `pgvector/pgvector:0.8.7-pg16` when a DB
 service of the stack has a vector column and the environment names no
 `postgresImage`. On Cloud SQL for PostgreSQL, which ships pgvector, the

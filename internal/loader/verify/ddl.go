@@ -135,7 +135,9 @@ func checkVectorColumns(schema *ir.Schema, r *Result) {
 	scalarTypes := sqlutil.ScalarSQLTypes(schema)
 	for _, td := range sqlutil.TableTypes(schema) {
 		for _, fd := range td.Fields {
-			if fd.TypeRef.Name != ir.VectorScalarName {
+			// An Encrypted<T> vector is refused as one (D85): Encrypted<T>
+			// seals text alone.
+			if fd.TypeRef.Name != ir.VectorScalarName || fd.EncryptedAtRest {
 				continue
 			}
 			column := sqlutil.ColumnType(schema, fd, scalarTypes)

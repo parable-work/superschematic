@@ -133,6 +133,118 @@ func (s vectorPtrScanner) Scan(src any) error {
 	return nil
 }
 
+// ChunkVectorField is a vector field of Chunk Nearest orders rows by.
+type ChunkVectorField string
+
+const (
+	ChunkVectorEmbedding ChunkVectorField = "embedding"
+)
+
+// chunkVectorColumns are each vector field's column, qualified, its
+// dimensions, and, for a field that may be null, the condition that keeps
+// the rows that hold a vector, which alone have a distance.
+var chunkVectorColumns = map[ChunkVectorField]struct {
+	sql        string
+	dimensions int
+	present    string
+}{
+	ChunkVectorEmbedding: {`"NoteChunk"."chunkVector"`, 3, ""},
+}
+
+// ChunkNearestOptions are the options of ChunkRepository.Nearest.
+type ChunkNearestOptions struct {
+	// K is the most rows Nearest reads; 10 unless set.
+	K int
+	// Metric orders the rows; VectorCosine unless set.
+	Metric VectorMetric
+	// Filter keeps the rows it finds, as FindMany's does.
+	Filter *ChunkFilter
+	// Fields are the columns read; every one unless set.
+	Fields ChunkFields
+	// IncludeDeleted reads soft-deleted rows too.
+	IncludeDeleted bool
+}
+
+// ChunkNeighbour is a row Nearest read and its distance from the vector,
+// by the metric: the cosine distance, the Euclidean distance or the negative
+// inner product.
+type ChunkNeighbour struct {
+	Row      *types.Chunk
+	Distance float64
+}
+
+// Nearest reads the rows the filter keeps whose field is nearest vector, by
+// the metric, nearest first, at most K of them, each with its distance
+// (D84). A vector index on the field with the metric's operator class
+// serves the order; it finds approximate neighbours, and a filter that keeps
+// few rows may leave fewer than K.
+func (r *ChunkRepository) Nearest(ctx context.Context, field ChunkVectorField, vector types.EmbeddingVector, opts *ChunkNearestOptions) ([]ChunkNeighbour, error) {
+	if opts == nil {
+		opts = &ChunkNearestOptions{}
+	}
+	column, ok := chunkVectorColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Chunk has no vector field %q", string(field))
+	}
+	if len(vector) != column.dimensions {
+		return nil, fmt.Errorf("orm: Chunk.%s holds vectors of %d dimensions, not %d", string(field), column.dimensions, len(vector))
+	}
+	metric := opts.Metric
+	if metric == "" {
+		metric = VectorCosine
+	}
+	distance, ok := vectorDistances[metric]
+	if !ok {
+		return nil, fmt.Errorf("orm: Nearest orders by %s, %s or %s, not %q", VectorCosine, VectorL2, VectorInnerProduct, string(metric))
+	}
+	if opts.K < 0 {
+		return nil, fmt.Errorf("orm: Nearest reads 1 or more Chunk rows, not %d", opts.K)
+	}
+	k := opts.K
+	if k == 0 {
+		k = 10
+	}
+	fields := opts.Fields
+	if fields.IsZero() {
+		fields = (ChunkFields{}).All()
+	}
+	fieldStrings := chunkFieldStrings(fields)
+	if err := validateFields(fieldStrings, ChunkAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "NoteChunk")
+
+	// The filter's conditions, each qualified by the table, then the
+	// soft-delete condition, then a vector that may be null's presence;
+	// the vector is the last parameter.
+	var args []interface{}
+	conditions := opts.Filter.conditions(&args, 0)
+	if !opts.IncludeDeleted {
+		conditions = append(conditions, `"NoteChunk"."removedAt" IS NULL`)
+	}
+	if column.present != "" {
+		conditions = append(conditions, column.present)
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	args = append(args, vectorValue(vector))
+	distanceSQL := fmt.Sprintf(distance, column.sql, len(args))
+	query := fmt.Sprintf(`SELECT %s, %s AS _distance FROM "NoteChunk"%s ORDER BY %s LIMIT %d`, selectFields, distanceSQL, whereClause, distanceSQL, k)
+
+	var distances []float64
+	rows, err := r.findRows(ctx, "Nearest", query, args, fieldStrings, fields, &distances)
+	if err != nil {
+		return nil, err
+	}
+	neighbours := make([]ChunkNeighbour, len(rows))
+	for i, row := range rows {
+		neighbours[i] = ChunkNeighbour{Row: row, Distance: distances[i]}
+	}
+	return neighbours, nil
+}
+
 // PassageVectorField is a vector field of Passage Nearest orders rows by.
 type PassageVectorField string
 

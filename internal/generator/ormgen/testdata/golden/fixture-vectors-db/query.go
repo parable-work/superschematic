@@ -210,6 +210,196 @@ var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 // Type-Safe Field Selectors and Options
 // ========================================
 
+// ChunkFields specifies which Chunk fields to select
+type ChunkFields struct {
+	Id        bool
+	Text      bool
+	Embedding bool
+	Note      bool
+	DeletedAt bool
+}
+
+// ToStringSlice converts ChunkFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f ChunkFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Text {
+		fields = append(fields, "chunkText")
+	}
+	if f.Embedding {
+		fields = append(fields, "chunkVector")
+	}
+	if f.Note {
+		fields = append(fields, "note")
+	}
+	if f.DeletedAt {
+		fields = append(fields, "removedAt")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f ChunkFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a ChunkFields with all fields selected
+func (ChunkFields) All() ChunkFields {
+	return ChunkFields{
+		Id:        true,
+		Text:      true,
+		Embedding: true,
+		Note:      true,
+		DeletedAt: true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (ChunkFields) Minimal() ChunkFields {
+	return ChunkFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (ChunkFields) WithoutAudit() ChunkFields {
+	return ChunkFields{
+		Id:        true,
+		Text:      true,
+		Embedding: true,
+		Note:      true,
+	}
+}
+
+// ChunkOrderByField represents a field that can be used for ordering
+type ChunkOrderByField string
+
+const (
+	ChunkOrderById        ChunkOrderByField = "id"
+	ChunkOrderByText      ChunkOrderByField = "chunkText"
+	ChunkOrderByEmbedding ChunkOrderByField = "chunkVector"
+	ChunkOrderByDeletedAt ChunkOrderByField = "removedAt"
+)
+
+// ChunkOrderBy specifies ordering for Chunk queries
+type ChunkOrderBy struct {
+	Field ChunkOrderByField
+	Desc  bool
+}
+
+// ChunkGetOptions contains options for Chunk GetOne operations
+type ChunkGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields ChunkFields
+}
+
+// ChunkFindOptions contains options for Chunk Find operations
+type ChunkFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields ChunkFields
+	// OrderBy specifies sorting order
+	OrderBy []ChunkOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// ChunkSortField is a field FindPage orders Chunk rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type ChunkSortField string
+
+const (
+	ChunkSortById   ChunkSortField = "id"
+	ChunkSortByText ChunkSortField = "text"
+)
+
+// ChunkSort is the order FindPage reads Chunk rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type ChunkSort struct {
+	Field ChunkSortField
+	Desc  bool
+}
+
+// ParseChunkSort reads a sort as a page request writes it, "text" or
+// "-text": an error for a field Chunk cannot be sorted by.
+func ParseChunkSort(text string) (ChunkSort, error) {
+	parsed := ChunkSort{Field: ChunkSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case ChunkSortById, ChunkSortByText:
+		return parsed, nil
+	}
+	return ChunkSort{}, fmt.Errorf("orm: Chunk sorts by id and text, not %q", text)
+}
+
+// ChunkUniqueKey names a unique key of Chunk that UpsertOne is keyed by
+// (D79): its primary key, a @unique field, or a unique @index, by its fields
+// joined by ",".
+type ChunkUniqueKey string
+
+const (
+	ChunkUniqueById ChunkUniqueKey = "id"
+)
+
+// ChunkPageKey is the position of a Chunk row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type ChunkPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *ChunkPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Chunk key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// chunkPageKeyOf is row's key: its id.
+func chunkPageKeyOf(row *types.Chunk) *ChunkPageKey {
+	key := &ChunkPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// ChunkPageOptions are FindPage's options.
+type ChunkPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields ChunkFields
+	// Sort is the order the rows are read in.
+	Sort ChunkSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *ChunkPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// ChunkPage is a page of Chunk rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type ChunkPage struct {
+	Rows []*types.Chunk
+	Next *ChunkPageKey
+}
+
 // LedgerLineFields specifies which LedgerLine fields to select
 type LedgerLineFields struct {
 	Id         bool
@@ -805,6 +995,147 @@ type TextEmbeddingPage struct {
 // ========================================
 // Filters and Update Structs
 // ========================================
+
+// ChunkFilter provides filtering for Chunk queries
+type ChunkFilter struct {
+	Id   *UUIDFilter
+	Text *StringFilter
+	Note *StringFilter
+}
+
+// ChunkUpdate provides fields that can be updated
+type ChunkUpdate struct {
+	Text        *string
+	Embedding   *types.EmbeddingVector
+	Note        *string
+	NoteSetNull bool
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewChunkSnapshotUpdate maps every mutable field from a complete
+// Chunk value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewChunkSnapshotUpdate(input *types.Chunk) *ChunkUpdate {
+	update := &ChunkUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Text = &input.Text
+	update.Embedding = &input.Embedding
+	var zeroNote string
+	if input.Note == zeroNote {
+		update.NoteSetNull = true
+	} else {
+		update.Note = &input.Note
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *ChunkUpdate) ApplyTo(row *types.Chunk) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Text != nil {
+		row.Text = *u.Text
+	}
+	if u.Embedding != nil {
+		row.Embedding = *u.Embedding
+	}
+	if u.NoteSetNull {
+		var zeroNote string
+		row.Note = zeroNote
+	} else if u.Note != nil {
+		row.Note = *u.Note
+	}
+}
+
+// ChunkFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
+func ChunkFilterConditions(filter *ChunkFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a ChunkFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *ChunkFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk".id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk".id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `"NoteChunk".id IS NULL`)
+			} else {
+				conditions = append(conditions, `"NoteChunk".id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Text != nil {
+		if f.Text.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" = $%d`, paramNum))
+			*args = append(*args, *f.Text.Eq)
+		}
+		if len(f.Text.In) > 0 {
+			placeholders := make([]string, len(f.Text.In))
+			for i, value := range f.Text.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Text.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`"NoteChunk"."chunkText" ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Text.ILike+"%")
+		}
+		if f.Text.IsNull != nil {
+			if *f.Text.IsNull {
+				conditions = append(conditions, `"NoteChunk"."chunkText" IS NULL`)
+			} else {
+				conditions = append(conditions, `"NoteChunk"."chunkText" IS NOT NULL`)
+			}
+		}
+	}
+
+	return conditions
+}
 
 // LedgerLineFilter provides filtering for LedgerLine queries
 type LedgerLineFilter struct {

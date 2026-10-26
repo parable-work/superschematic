@@ -11,6 +11,7 @@ Generated at: 2026-01-02T03:04:05Z
 - `interfaces.go` -- repository/database/transaction interfaces + no-op implementations
 - `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
+- `repository_chunk.go` -- Chunk repository
 - `repository_ledger_line.go` -- LedgerLine repository
 - `repository_passage.go` -- Passage repository
 - `repository_text_embedding.go` -- TextEmbedding repository
@@ -29,7 +30,7 @@ if err != nil {
 }
 defer db.Close()
 
-record, err := db.LedgerLine.GetOne(ctx, id, nil)
+record, err := db.Chunk.GetOne(ctx, id, nil)
 ```
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,

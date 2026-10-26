@@ -81,6 +81,7 @@ var repositoryCases = []repositoryCase{
 		"a signed amount, a decimal in its column scale and an exact one read back as the wire holds them",
 		"a decimal filter compares numbers, each value bound as its text",
 		"a vector reads and writes as its numbers, and nearest finds the neighbours by each metric",
+		"a table @table and @column name, with a sealed note beside its vector: nearest orders by the renamed column and opens each note",
 		"nearest runs the statement sqlutil writes: the filter, the live rows, the vector last, and the order of its distance",
 	}},
 	{fixture: "fixture-ddl-db", files: []string{"ddl.test.ts"}, tests: []string{

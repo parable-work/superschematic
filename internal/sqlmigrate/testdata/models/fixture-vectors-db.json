@@ -11,6 +11,58 @@
         {
           "default": "gen_random_uuid()",
           "name": "id",
+          "origin": "Chunk.id",
+          "type": "UUID"
+        },
+        {
+          "name": "chunkText",
+          "origin": "Chunk.text",
+          "type": "TEXT"
+        },
+        {
+          "name": "chunkVector",
+          "origin": "Chunk.embedding",
+          "type": "vector(3)"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Chunk.note",
+          "type": "TEXT"
+        },
+        {
+          "name": "removedAt",
+          "nullable": true,
+          "origin": "Chunk.deletedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A chunk of a note, in a table a database named before the schema did\n(D85): @table and @column name the table, its vector column and its\nsoft-delete column, in mixed case, which every statement quotes, and its\nindex is named after them. Its note is Encrypted\u003cT\u003e, sealed at rest, so a\nrow nearest reads opens it as any read does.",
+      "indexes": [
+        {
+          "columns": [
+            "chunkVector"
+          ],
+          "method": "HNSW",
+          "name": "idx_NoteChunk_by_vector",
+          "opclass": "vector_l2_ops"
+        }
+      ],
+      "kind": "entity",
+      "name": "NoteChunk",
+      "origin": "Chunk",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "NoteChunk_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
           "origin": "LedgerLine.id",
           "type": "UUID"
         },

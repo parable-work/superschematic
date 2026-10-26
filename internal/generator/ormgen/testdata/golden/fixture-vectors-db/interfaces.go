@@ -10,6 +10,25 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ChunkRepositoryInterface defines the contract for Chunk data access.
+type ChunkRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ChunkGetOptions) (*types.Chunk, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Chunk, error)
+	FindOne(ctx context.Context, filter *ChunkFilter, opts *ChunkFindOptions) (*types.Chunk, error)
+	FindMany(ctx context.Context, filter *ChunkFilter, opts *ChunkFindOptions) ([]*types.Chunk, int, error)
+	FindPage(ctx context.Context, filter *ChunkFilter, opts *ChunkPageOptions) (*ChunkPage, error)
+	CreateOne(ctx context.Context, input *types.Chunk) (*types.Chunk, error)
+	CreateMany(ctx context.Context, inputs []*types.Chunk) ([]*types.Chunk, error)
+	UpsertOne(ctx context.Context, input *types.Chunk, on ChunkUniqueKey, update *ChunkUpdate) (*types.Chunk, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ChunkUpdate) (*types.Chunk, error)
+	UpdateMany(ctx context.Context, filter *ChunkFilter, update *ChunkUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *ChunkFilter) (int, error)
+	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
+	Reencrypt(ctx context.Context, batch int) (int, error)
+	Nearest(ctx context.Context, field ChunkVectorField, vector types.EmbeddingVector, opts *ChunkNearestOptions) ([]ChunkNeighbour, error)
+}
+
 // LedgerLineRepositoryInterface defines the contract for LedgerLine data access.
 type LedgerLineRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *LedgerLineGetOptions) (*types.LedgerLine, error)
@@ -66,6 +85,7 @@ type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
+	GetChunkRepository() ChunkRepositoryInterface
 	GetLedgerLineRepository() LedgerLineRepositoryInterface
 	GetPassageRepository() PassageRepositoryInterface
 	GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface
@@ -75,6 +95,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	GetChunkRepository() ChunkRepositoryInterface
 	GetLedgerLineRepository() LedgerLineRepositoryInterface
 	GetPassageRepository() PassageRepositoryInterface
 	GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface
@@ -83,6 +104,7 @@ type TxInterface interface {
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
 	tx            *NoOpTx
+	Chunk         *NoOpChunkRepository
 	LedgerLine    *NoOpLedgerLineRepository
 	Passage       *NoOpPassageRepository
 	TextEmbedding *NoOpTextEmbeddingRepository
@@ -90,6 +112,7 @@ type NoOpDatabase struct {
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
+	Chunk         *NoOpChunkRepository
 	LedgerLine    *NoOpLedgerLineRepository
 	Passage       *NoOpPassageRepository
 	TextEmbedding *NoOpTextEmbeddingRepository
@@ -99,6 +122,8 @@ type NoOpTx struct {
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.Chunk = &NoOpChunkRepository{}
+	tx.Chunk = db.Chunk
 	db.LedgerLine = &NoOpLedgerLineRepository{}
 	tx.LedgerLine = db.LedgerLine
 	db.Passage = &NoOpPassageRepository{}
@@ -140,6 +165,80 @@ func (noOpRows) Close()                        {}
 func (noOpRows) Err() error                    { return nil }
 func (noOpRows) Next() bool                    { return false }
 func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+func (db *NoOpDatabase) GetChunkRepository() ChunkRepositoryInterface {
+	return db.Chunk
+}
+
+func (tx *NoOpTx) GetChunkRepository() ChunkRepositoryInterface {
+	return tx.Chunk
+}
+
+// NoOpChunkRepository provides deterministic no-op repository behavior.
+type NoOpChunkRepository struct{}
+
+func (r *NoOpChunkRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *ChunkGetOptions) (*types.Chunk, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpChunkRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Chunk, error) {
+	return map[types.IdentityUUID]*types.Chunk{}, nil
+}
+
+func (r *NoOpChunkRepository) FindOne(_ context.Context, _ *ChunkFilter, _ *ChunkFindOptions) (*types.Chunk, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpChunkRepository) FindMany(_ context.Context, _ *ChunkFilter, _ *ChunkFindOptions) ([]*types.Chunk, int, error) {
+	return []*types.Chunk{}, 0, nil
+}
+
+func (r *NoOpChunkRepository) FindPage(_ context.Context, _ *ChunkFilter, _ *ChunkPageOptions) (*ChunkPage, error) {
+	return &ChunkPage{Rows: []*types.Chunk{}}, nil
+}
+
+func (r *NoOpChunkRepository) CreateOne(_ context.Context, input *types.Chunk) (*types.Chunk, error) {
+	return input, nil
+}
+
+func (r *NoOpChunkRepository) CreateMany(_ context.Context, inputs []*types.Chunk) ([]*types.Chunk, error) {
+	if inputs == nil {
+		return []*types.Chunk{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpChunkRepository) UpsertOne(_ context.Context, input *types.Chunk, _ ChunkUniqueKey, _ *ChunkUpdate) (*types.Chunk, error) {
+	return input, nil
+}
+
+func (r *NoOpChunkRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ChunkUpdate) (*types.Chunk, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpChunkRepository) UpdateMany(_ context.Context, _ *ChunkFilter, _ *ChunkUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpChunkRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpChunkRepository) DeleteMany(_ context.Context, _ *ChunkFilter) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpChunkRepository) HardDeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpChunkRepository) Reencrypt(_ context.Context, _ int) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpChunkRepository) Nearest(_ context.Context, _ ChunkVectorField, _ types.EmbeddingVector, _ *ChunkNearestOptions) ([]ChunkNeighbour, error) {
+	return nil, nil
+}
 
 func (db *NoOpDatabase) GetLedgerLineRepository() LedgerLineRepositoryInterface {
 	return db.LedgerLine
@@ -344,6 +443,8 @@ var (
 	_ DatabaseInterface                = (*NoOpDatabase)(nil)
 	_ TxInterface                      = (*Tx)(nil)
 	_ TxInterface                      = (*NoOpTx)(nil)
+	_ ChunkRepositoryInterface         = (*ChunkRepository)(nil)
+	_ ChunkRepositoryInterface         = (*NoOpChunkRepository)(nil)
 	_ LedgerLineRepositoryInterface    = (*LedgerLineRepository)(nil)
 	_ LedgerLineRepositoryInterface    = (*NoOpLedgerLineRepository)(nil)
 	_ PassageRepositoryInterface       = (*PassageRepository)(nil)

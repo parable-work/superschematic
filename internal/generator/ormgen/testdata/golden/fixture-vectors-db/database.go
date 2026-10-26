@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -22,7 +23,10 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool          *pgxpool.Pool
+	pool *pgxpool.Pool
+	// fieldKeys seal and open the Encrypted<T> fields (WithFieldKeys, D85).
+	fieldKeys     *fieldcrypt.Keyring
+	Chunk         *ChunkRepository
 	LedgerLine    *LedgerLineRepository
 	Passage       *PassageRepository
 	TextEmbedding *TextEmbeddingRepository
@@ -31,6 +35,7 @@ type Database struct {
 // Tx represents a database transaction with repositories
 type Tx struct {
 	tx            pgx.Tx
+	Chunk         *ChunkRepository
 	LedgerLine    *LedgerLineRepository
 	Passage       *PassageRepository
 	TextEmbedding *TextEmbeddingRepository
@@ -46,8 +51,8 @@ type Config struct {
 	SSLMode  string
 }
 
-// Connect creates a new database connection
-func Connect(ctx context.Context, connString string) (*Database, error) {
+// Connect creates a new database connection, configured by options
+func Connect(ctx context.Context, connString string, options ...Option) (*Database, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
@@ -60,8 +65,13 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	}
 
 	db := &Database{pool: pool}
+	if err := applyOptions(db, options); err != nil {
+		pool.Close()
+		return nil, err
+	}
 
 	// Initialize repositories
+	db.Chunk = &ChunkRepository{db: db}
 	db.LedgerLine = &LedgerLineRepository{db: db}
 	db.Passage = &PassageRepository{db: db}
 	db.TextEmbedding = &TextEmbeddingRepository{db: db}
@@ -78,12 +88,17 @@ func ConnectWithConfig(ctx context.Context, cfg *Config) (*Database, error) {
 	return Connect(ctx, connString)
 }
 
-// ConnectWithPool creates a Database using an existing pgxpool.Pool.
+// ConnectWithPool creates a Database using an existing pgxpool.Pool,
+// configured by options.
 // Use this when you need custom pool configuration not supported by Connect.
-func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
+func ConnectWithPool(pool *pgxpool.Pool, options ...Option) (*Database, error) {
 	db := &Database{pool: pool}
+	if err := applyOptions(db, options); err != nil {
+		return nil, err
+	}
 
 	// Initialize repositories
+	db.Chunk = &ChunkRepository{db: db}
 	db.LedgerLine = &LedgerLineRepository{db: db}
 	db.Passage = &PassageRepository{db: db}
 	db.TextEmbedding = &TextEmbeddingRepository{db: db}
@@ -94,6 +109,11 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 // Close closes the database connection
 func (db *Database) Close() {
 	db.pool.Close()
+}
+
+// GetChunkRepository returns the Chunk repository interface.
+func (db *Database) GetChunkRepository() ChunkRepositoryInterface {
+	return db.Chunk
 }
 
 // GetLedgerLineRepository returns the LedgerLine repository interface.
@@ -109,6 +129,11 @@ func (db *Database) GetPassageRepository() PassageRepositoryInterface {
 // GetTextEmbeddingRepository returns the TextEmbedding repository interface.
 func (db *Database) GetTextEmbeddingRepository() TextEmbeddingRepositoryInterface {
 	return db.TextEmbedding
+}
+
+// GetChunkRepository returns the Chunk transaction repository interface.
+func (tx *Tx) GetChunkRepository() ChunkRepositoryInterface {
+	return tx.Chunk
 }
 
 // GetLedgerLineRepository returns the LedgerLine transaction repository interface.
@@ -136,6 +161,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper := &Tx{tx: tx}
 
 	// Initialize transaction repositories with parent database reference
+	txWrapper.Chunk = &ChunkRepository{tx: tx, txDB: db}
 	txWrapper.LedgerLine = &LedgerLineRepository{tx: tx, txDB: db}
 	txWrapper.Passage = &PassageRepository{tx: tx, txDB: db}
 	txWrapper.TextEmbedding = &TextEmbeddingRepository{tx: tx, txDB: db}

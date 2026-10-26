@@ -346,6 +346,13 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 	if column.JSON && strings.EqualFold(c.Type, "TEXT") {
 		column.JSON, column.JSONText = false, true
 	}
+	// The codec reads a column one way: an Encrypted<T> envelope (D85), a
+	// vector's text, a NUMERIC's canonical text (D84), JSON text or a JSON
+	// value. Two would decode it twice, so a column that would take two is
+	// refused here, though the loader refuses each such field first.
+	if paths := codecPaths(column); len(paths) > 1 {
+		return column, fmt.Errorf("column %s would decode as %s, and the codec reads a column one way", c.Name, strings.Join(paths, " and as "))
+	}
 	switch {
 	case c.Relation != "":
 		column.Member = c.Field + "Id"
@@ -374,6 +381,21 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 		column.FilterType += " & NullFilter"
 	}
 	return column, nil
+}
+
+// codecPaths are the codec's own decode paths a column takes (pgcodec's
+// RowField): at most one.
+func codecPaths(c ORMColumn) []string {
+	var paths []string
+	for _, p := range []struct {
+		on   bool
+		name string
+	}{{c.Encrypted, "an envelope"}, {c.Vector, "a vector"}, {c.Numeric, "a decimal"}, {c.JSONText, "JSON text"}, {c.JSON, "JSON"}} {
+		if p.on {
+			paths = append(paths, p.name)
+		}
+	}
+	return paths
 }
 
 // filterType is the TypeScript filter of a column of kind whose values are

@@ -483,6 +483,17 @@ var planCases = []planCase{
 		after: func(s *ir.Schema) { addProductEmbedding(s, 3) }},
 	{name: "change-vector-dimensions", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
 		before: func(s *ir.Schema) { addProductEmbedding(s, 3) }, after: func(s *ir.Schema) { addProductEmbedding(s, 4) }},
+	// A changed @table and @column on a table's vector rename the table and
+	// the column, with the index named after them, and keep every vector: a
+	// rename, never the dimension change a vector(3) of another name would
+	// look like (D84, D85).
+	{name: "rename-vector-column-by-override", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		before: func(s *ir.Schema) { addProductEmbedding(s, 3) },
+		after: func(s *ir.Schema) {
+			addProductEmbedding(s, 3)
+			typeNamed(s, "Product").SQLName = "catalogItem"
+			fieldNamed(s, "Product", "embedding").SQLName = "embeddingVector"
+		}},
 	{name: "narrow-decimal", noSQLite: "sqlite stores every decimal as NUMERIC",
 		before: func(s *ir.Schema) { addProductRate(s, nil, nil) },
 		after: func(s *ir.Schema) {

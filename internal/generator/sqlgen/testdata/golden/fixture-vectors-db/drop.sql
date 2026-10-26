@@ -6,6 +6,7 @@
 DROP INDEX IF EXISTS idx_text_embedding_embedding CASCADE;
 DROP INDEX IF EXISTS idx_passage_embedding CASCADE;
 DROP INDEX IF EXISTS idx_passage_embedding_l2 CASCADE;
+DROP INDEX IF EXISTS "idx_NoteChunk_by_vector" CASCADE;
 
 -- Drop join tables first
 
@@ -13,6 +14,7 @@ DROP INDEX IF EXISTS idx_passage_embedding_l2 CASCADE;
 DROP TABLE IF EXISTS text_embedding CASCADE;
 DROP TABLE IF EXISTS passage CASCADE;
 DROP TABLE IF EXISTS ledger_line CASCADE;
+DROP TABLE IF EXISTS "NoteChunk" CASCADE;
 
 -- Note: Extensions are not dropped automatically
 -- To drop extensions, run:

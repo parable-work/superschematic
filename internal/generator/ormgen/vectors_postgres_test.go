@@ -24,7 +24,8 @@ const vectorsFixture = "fixture-vectors-db"
 // vector extension and declares NUMERIC(p,s), vector(n) and the HNSW and
 // IVFFlat indexes; the module writes and reads signed amounts, decimals and
 // vectors through the repositories, and finds neighbours with Nearest by
-// each metric, through a filter and around a soft-deleted row.
+// each metric, through a filter and around a soft-deleted row, in a table
+// whose names @table and @column give and whose note is sealed (D85) too.
 func TestVectorsAndDecimalsOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -89,6 +90,10 @@ func TestVectorsAndDecimalsOnPostgres(t *testing.T) {
 		"amount BIGINT NOT NULL,",
 		"rate NUMERIC(10,4) NOT NULL,",
 		"rates NUMERIC(6,3)[],",
+		// A table @table and @column name (D85), quoted, and the index
+		// named after them.
+		`"chunkVector" vector(3) NOT NULL,`,
+		`CREATE INDEX "idx_NoteChunk_by_vector" ON "NoteChunk" USING HNSW ("chunkVector" vector_l2_ops);`,
 	} {
 		if !strings.Contains(string(createSQL), want) {
 			t.Fatalf("create.sql has no %q:\n%s", want, createSQL)
@@ -96,8 +101,10 @@ func TestVectorsAndDecimalsOnPostgres(t *testing.T) {
 	}
 
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "vectors_test.go", vectorsORMTest)
-	if !strings.Contains(out, "--- PASS: TestVectorsOnPostgres") || !strings.Contains(out, "--- PASS: TestDecimalsOnPostgres") {
-		t.Fatal("the generated ORM module did not run TestVectorsOnPostgres and TestDecimalsOnPostgres")
+	for _, test := range []string{"TestVectorsOnPostgres", "TestDecimalsOnPostgres", "TestANamedSealedTableOnPostgres"} {
+		if !strings.Contains(out, "--- PASS: "+test) {
+			t.Fatalf("the generated ORM module did not run %s", test)
+		}
 	}
 }
 
@@ -151,12 +158,15 @@ func openVectors(t *testing.T) (context.Context, *pgxpool.Pool, *Database) {
 	if _, err := pool.Exec(ctx, string(createSQL)); err != nil {
 		t.Fatalf("apply create.sql: %v", err)
 	}
-	db, err := ConnectWithPool(pool)
+	db, err := ConnectWithPool(pool, WithFieldKeys(fieldKeys))
 	if err != nil {
 		t.Fatalf("connect generated orm: %v", err)
 	}
 	return ctx, pool, db
 }
+
+// fieldKeys is the key of Chunk's Encrypted<T> note (D85).
+const fieldKeys = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
 
 // TestDecimalsOnPostgres writes Finance.SignedMoney and Generic.Decimal
 // columns and reads them back: a NUMERIC(10,4) holds 1.5 as 1.5000, which
@@ -343,6 +353,72 @@ func TestVectorsOnPostgres(t *testing.T) {
 	near, err := db.TextEmbedding.Nearest(ctx, TextEmbeddingVectorEmbedding, wide, &TextEmbeddingNearestOptions{K: 1})
 	if err != nil || len(near) != 1 || near[0].Row.Text != "seven" {
 		t.Fatalf("Nearest text embedding = %+v, %v", near, err)
+	}
+}
+
+// TestANamedSealedTableOnPostgres: Chunk's table, its vector column and its
+// soft-delete column are the names @table and @column give them (D85), and
+// its note is sealed at rest: Nearest orders the rows by the renamed
+// column, keeps the live ones by the renamed soft-delete column, and opens
+// each row's note, as any read does (D84, D85).
+func TestANamedSealedTableOnPostgres(t *testing.T) {
+	ctx, pool, db := openVectors(t)
+	north, err := db.Chunk.CreateOne(ctx, &types.Chunk{Text: "north", Embedding: types.EmbeddingVector{0, 1, 0}, Note: "private"})
+	if err != nil {
+		t.Fatalf("CreateOne north: %v", err)
+	}
+	east, err := db.Chunk.CreateOne(ctx, &types.Chunk{Text: "east", Embedding: types.EmbeddingVector{1, 0, 0}})
+	if err != nil {
+		t.Fatalf("CreateOne east: %v", err)
+	}
+	var vector, note string
+	if err := pool.QueryRow(ctx, ` + "`" + `SELECT "chunkVector"::text, note FROM "NoteChunk" WHERE id = $1` + "`" + `, north.Id.ToUUID()).Scan(&vector, &note); err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	if vector != "[0,1,0]" || !strings.HasPrefix(note, "v1:") || strings.Contains(note, "private") {
+		t.Fatalf("the row holds vector %q and note %q; want the vector and an envelope", vector, note)
+	}
+	texts := func(neighbours []ChunkNeighbour) []string {
+		var out []string
+		for _, n := range neighbours {
+			out = append(out, n.Row.Text)
+		}
+		return out
+	}
+	query := types.EmbeddingVector{1, 0.1, 0}
+	near, err := db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 2, Metric: VectorL2})
+	if err != nil || !reflect.DeepEqual(texts(near), []string{"east", "north"}) {
+		t.Fatalf("Nearest = %v, %v", texts(near), err)
+	}
+	if near[1].Row.Note != "private" || near[0].Row.Note != "" {
+		t.Fatalf("Nearest opened the notes %q and %q", near[0].Row.Note, near[1].Row.Note)
+	}
+	kept, err := db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{Filter: &ChunkFilter{Text: &StringFilter{In: []string{"north"}}}})
+	if err != nil || !reflect.DeepEqual(texts(kept), []string{"north"}) {
+		t.Fatalf("Nearest with a filter = %v, %v", texts(kept), err)
+	}
+	if err := db.Chunk.DeleteOne(WithUserID(ctx, types.NewUUID()), *east.Id); err != nil {
+		t.Fatalf("DeleteOne: %v", err)
+	}
+	var removed bool
+	if err := pool.QueryRow(ctx, ` + "`" + `SELECT "removedAt" IS NOT NULL FROM "NoteChunk" WHERE id = $1` + "`" + `, east.Id.ToUUID()).Scan(&removed); err != nil || !removed {
+		t.Fatalf("the delete stamped removedAt: %v, %v", removed, err)
+	}
+	live, err := db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 1, Metric: VectorL2})
+	if err != nil || !reflect.DeepEqual(texts(live), []string{"north"}) {
+		t.Fatalf("Nearest after a delete = %v, %v", texts(live), err)
+	}
+	all, err := db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 1, Metric: VectorL2, IncludeDeleted: true})
+	if err != nil || !reflect.DeepEqual(texts(all), []string{"east"}) {
+		t.Fatalf("Nearest with deleted rows = %v, %v", texts(all), err)
+	}
+	// Without the keys, a row whose note is sealed does not open.
+	keyless, err := ConnectWithPool(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keyless.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 1, Metric: VectorL2}); err == nil {
+		t.Fatal("Nearest opened a sealed note without the keys")
 	}
 }
 `

@@ -10,6 +10,20 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Create tables (without foreign key constraints)
 
+CREATE TABLE "NoteChunk" (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "chunkText" TEXT NOT NULL,
+  "chunkVector" vector(3) NOT NULL,
+  note TEXT,
+  "removedAt" TIMESTAMPTZ
+);
+
+COMMENT ON TABLE "NoteChunk" IS 'A chunk of a note, in a table a database named before the schema did
+(D85): @table and @column name the table, its vector column and its
+soft-delete column, in mixed case, which every statement quotes, and its
+index is named after them. Its note is Encrypted<T>, sealed at rest, so a
+row nearest reads opens it as any read does.';
+
 CREATE TABLE ledger_line (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   amount BIGINT NOT NULL,
@@ -48,6 +62,8 @@ COMMENT ON TABLE text_embedding IS 'A text and its embedding, 1024 numbers, foun
 -- Add foreign key constraints
 
 -- Create indexes
+
+CREATE INDEX "idx_NoteChunk_by_vector" ON "NoteChunk" USING HNSW ("chunkVector" vector_l2_ops);
 
 CREATE INDEX idx_passage_embedding ON passage USING HNSW (embedding vector_cosine_ops);
 

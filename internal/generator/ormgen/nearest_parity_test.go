@@ -36,7 +36,7 @@ try {
     calls.push({ name, statements: [] });
     return fn();
   };
-  const orm = createOrm(pool, 'TKbHsHDO6x9RCjbs5c2u4');
+  const orm = createOrm(pool, { user: 'TKbHsHDO6x9RCjbs5c2u4', fieldKeys: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=' });
   const east = await call('createEast', () => orm.passage.createOne({ title: 'east', topic: 'maps', embedding: [1, 0, 0] }));
   await call('createUp', () => orm.passage.createOne({ title: 'up', topic: 'sky', embedding: [0, 0, 1], titleEmbedding: [0, 1, 0] }));
   await call('nearestCosine', () => orm.passage.nearest('embedding', [1, 0.5, 0], { k: 2 }));
@@ -48,6 +48,13 @@ try {
   const wide = Array.from({ length: 1024 }, (_, i) => (i === 3 ? 0.5 : 0));
   await call('createText', () => orm.textEmbedding.createOne({ text: 'three', embedding: wide }));
   await call('nearestText', () => orm.textEmbedding.nearest('embedding', wide, { k: 1 }));
+  // NoteChunk, which @table and @column name, and whose note is sealed
+  // (D85): its names quoted in every statement, its rows opened.
+  await call('createNorth', () => orm.chunk.createOne({ text: 'north', embedding: [0, 1, 0], note: 'private' }));
+  const eastChunk = await call('createEastChunk', () => orm.chunk.createOne({ text: 'east', embedding: [1, 0, 0] }));
+  await call('nearestChunk', () => orm.chunk.nearest('embedding', [1, 0.5, 0], { k: 2, metric: 'l2', filter: { text: { in: ['north', 'east'] } } }));
+  await call('deleteEastChunk', () => orm.chunk.deleteOne(eastChunk.id));
+  await call('nearestChunkWithDeleted', () => orm.chunk.nearest('embedding', [1, 0.5, 0], { includeDeleted: true }));
   writeFileSync(out!, JSON.stringify(calls, null, 2));
 } finally {
   await base.end();
@@ -137,7 +144,7 @@ func TestNearestParity(t *testing.T) {
 		pool.Close()
 		t.Fatal(err)
 	}
-	db, err := ConnectWithPool(pool)
+	db, err := ConnectWithPool(pool, WithFieldKeys("AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,6 +195,20 @@ func TestNearestParity(t *testing.T) {
 	must(err)
 	rec.call("nearestText")
 	_, err = db.TextEmbedding.Nearest(ctx, TextEmbeddingVectorEmbedding, wide, &TextEmbeddingNearestOptions{K: 1})
+	must(err)
+	rec.call("createNorth")
+	_, err = db.Chunk.CreateOne(ctx, &types.Chunk{Text: "north", Embedding: types.EmbeddingVector{0, 1, 0}, Note: "private"})
+	must(err)
+	rec.call("createEastChunk")
+	eastChunk, err := db.Chunk.CreateOne(ctx, &types.Chunk{Text: "east", Embedding: types.EmbeddingVector{1, 0, 0}})
+	must(err)
+	rec.call("nearestChunk")
+	_, err = db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 2, Metric: VectorL2, Filter: &ChunkFilter{Text: &StringFilter{In: []string{"north", "east"}}}})
+	must(err)
+	rec.call("deleteEastChunk")
+	must(db.Chunk.DeleteOne(ctx, *eastChunk.Id))
+	rec.call("nearestChunkWithDeleted")
+	_, err = db.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{IncludeDeleted: true})
 	must(err)
 
 	data, err := json.MarshalIndent(rec.calls, "", "  ")

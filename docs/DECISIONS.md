@@ -11594,6 +11594,7 @@ superscalar's to fix.
 | A vector crosses as pgvector's text form, `[0.5,-1,2]`. The Go ORM binds it as a string, which pgx sends as text for a type it does not know, and scans it through a `sql.Scanner`, so it needs no pgvector library and no type registered on the pool a server opens; TypeScript's codec reads and writes a `number[]` (`vectorText`). | `pgvector-go`, a new dependency for one text form. Registering a codec on each connection, which a pool `ConnectWithPool` is given never runs. |
 | `stack dev` runs Postgres on `pgvector/pgvector:<PGVECTOR_VERSION>-pg16` when a DB service of the stack has a vector column and the environment names no `postgresImage` (`StackEnvironment.Vectors`). On Cloud SQL, which ships pgvector, the migration job creates the extension: its user holds `cloudsqlsuperuser`, which may. | pgvector's image for every stack, where most need none. |
 | CI keeps `postgres:16-alpine` for the database tests and runs a second Postgres, `pgvector/pgvector:<PGVECTOR_VERSION>-pg16`, for the tests of vector columns, which read `SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL` (`pgtest.VectorDatabaseURL`) and skip without it, or fail under `SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS=1`, which CI sets. | pgvector's image for every test, whose Debian tzdata reads 1890 Amsterdam's offset differently, so a version-graph vector fails on it. pgvector built into the alpine image, a custom image or a build per run, which no official image provides. |
+| A vector or decimal column, a vector index and the `nearest` statement name the table and its columns through `sqlutil` (D85): a `@table` and an `@column` reach the `vector(n)` and `NUMERIC(p,s)` columns, the index named after them, `nearest`'s columns, its distance and its live condition, quoted in mixed case, and changing either on a vector plans a rename, never a dimension change. `Encrypted<T>` seals text alone (D85), so an encrypted `Embedding.Vector` or `Generic.Decimal` fails the load as one (TypeScript refuses the vector first), and the TypeScript generator refuses a column the codec would read two ways, an envelope and a vector, say. A table with an encrypted field and a vector reads its rows through `nearest` opened, as any read does. | |
 
 Status: built.
 - **The pin and the catalog:** `TestSuperscalarPinMatchesGoModPseudoVersions`,
@@ -11610,15 +11611,21 @@ Status: built.
 - **The DDL and the plans:** sqlgen's golden `fixture-vectors-db`, a
   `vector(1024)` column and its HNSW index with the extension, and
   `NUMERIC(p,s)`; the plan cases `add-vector-column`,
-  `change-vector-dimensions` and `narrow-decimal`, which
-  `TestVectorPlansOnPostgres` applies with fixture-vectors-db's plan from
-  empty; `TestSQLiteRefusals`.
+  `change-vector-dimensions`, `rename-vector-column-by-override` and
+  `narrow-decimal`, which `TestVectorPlansOnPostgres` applies with
+  fixture-vectors-db's plan from empty; `TestARenamedVectorIsNoDimensionChange`;
+  `TestSQLiteRefusals`.
 - **The ORMs:** `TestVectorsAndDecimalsOnPostgres` (Go) and
   `TestRepositoriesOnPostgres`'s `vectors.test.ts` (TypeScript), each a
   round trip of signed amounts, decimals and vectors and `nearest` by each
   metric, through a filter and around a soft-deleted row, on Postgres
-  with pgvector; `TestNearestParityOfGoAndTypeScriptOnPostgres`; the
-  codec's `pgcodec.test.ts`.
+  with pgvector, and in fixture-vectors-db's `NoteChunk`, which `@table`
+  and `@column` name and whose note is `Encrypted<T>` (D85);
+  `TestNearestParityOfGoAndTypeScriptOnPostgres`; the codec's
+  `pgcodec.test.ts`; `TestTablesOfModelsVectorsDecimalsAndSealedNames`,
+  `TestAColumnDecodesOneWay`, `TestVerifyEncryptedVectorsAndDecimalsJSON`,
+  `TestAnEncryptedVectorIsNoString` and `TestServiceCarriesVectorsAndFieldKeys`
+  for the meeting with D85.
 - **The stack:** `TestStackDevMigratesAVectorDatabase` runs `stack dev`
   over a database with a 1024-dimension embedding and an HNSW index, on
   pgvector's image, and finds the extension, the column and the index;

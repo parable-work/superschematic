@@ -1,6 +1,6 @@
 import { Embedding, Finance, Generic, Identity, Temporal } from "superscalar";
 import { Nullable, Validate, display } from "@superschematic/schema";
-import { AutoGenerate, index, key } from "@superschematic/db";
+import { AutoGenerate, Encrypted, column, index, key, table } from "@superschematic/db";
 
 // A line of a ledger: a signed amount in its currency's minor units, a
 // debit negative, and the exchange rate it was booked at, exact.
@@ -53,5 +53,28 @@ export abstract class Passage {
 
   rates: Nullable<Validate<Generic.Decimal, { precision: 6; scale: 3 }>[]>;
 
+  deletedAt: Nullable<Temporal.DateTime>;
+}
+
+// A chunk of a note, in a table a database named before the schema did
+// (D85): @table and @column name the table, its vector column and its
+// soft-delete column, in mixed case, which every statement quotes, and its
+// index is named after them. Its note is Encrypted<T>, sealed at rest, so a
+// row nearest reads opens it as any read does.
+@table("NoteChunk")
+@index<Chunk>(["embedding"], { name: "by_vector", method: "hnsw", ops: "vector_l2_ops" })
+export abstract class Chunk {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @column("chunkText")
+  text: string;
+
+  @column("chunkVector")
+  embedding: Validate<Embedding.Vector, { dimensions: 3 }>;
+
+  note: Nullable<Encrypted<string>>;
+
+  @column("removedAt")
   deletedAt: Nullable<Temporal.DateTime>;
 }

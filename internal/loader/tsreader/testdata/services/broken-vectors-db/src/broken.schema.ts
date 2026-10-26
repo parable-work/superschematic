@@ -1,6 +1,6 @@
-import { Embedding, Identity } from "superscalar";
+import { Embedding, Generic, Identity } from "superscalar";
 import { Validate } from "@superschematic/schema";
-import { AutoGenerate, index, key } from "@superschematic/db";
+import { AutoGenerate, Encrypted, index, key } from "@superschematic/db";
 
 // Each declaration below is one the loader refuses (D84).
 
@@ -19,4 +19,14 @@ export abstract class Doc {
   embedding: Validate<Embedding.Vector, { dimensions: 3 }>;
 
   wide: Validate<Embedding.Vector, { dimensions: 4096 }>;
+}
+
+// Encrypted<T> seals text alone (D85): a decimal, whose column is
+// NUMERIC(p,s), is no string, though its TypeScript type is one. (An
+// Encrypted<T> vector fails TypeScript's own check, as no string.)
+export abstract class Sealed {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  rate: Encrypted<Validate<Generic.Decimal, { precision: 5, scale: 2 }>>;
 }

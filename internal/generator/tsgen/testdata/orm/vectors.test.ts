@@ -3,7 +3,8 @@
 // in its column's scale as the canonical text the wire holds, a decimal
 // filter compares numbers, a vector crosses as its numbers, and nearest
 // finds a row's neighbours by each metric, through a filter and around a
-// soft-deleted row, with the statement sqlutil writes.
+// soft-deleted row, with the statement sqlutil writes; and in a table whose
+// names @table and @column give, beside a sealed note (D85).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { decodeRow, uuidToDb } from '@superschematic/http-runtime/postgres';
 import { createOrm, ledgerLineTable, type FixtureVectorsDbOrm, type PassageRow } from './orm';
@@ -92,6 +93,27 @@ describe.skipIf(dsn === '')('decimals and vectors under the repositories', () =>
     const seven = await orm.textEmbedding.createOne({ text: 'seven', embedding: wide });
     expect((await orm.textEmbedding.getOne(seven.id)).embedding).toEqual(wide);
     expect((await orm.textEmbedding.nearest('embedding', wide, { k: 1 })).map(n => n.row.text)).toEqual(['seven']);
+  });
+
+  test('a table @table and @column name, with a sealed note beside its vector: nearest orders by the renamed column and opens each note', async () => {
+    const sealed = createOrm(db.pool, { user: alice, fieldKeys: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=' });
+    const north = await sealed.chunk.createOne({ text: 'north', embedding: [0, 1, 0], note: 'private' });
+    const east = await sealed.chunk.createOne({ text: 'east', embedding: [1, 0, 0] });
+    const { rows } = await db.pool.query(`SELECT "chunkVector"::text AS vector, note FROM "NoteChunk" WHERE id = $1`, [uuidToDb(north.id)]);
+    expect(rows[0].vector).toBe('[0,1,0]');
+    expect(String(rows[0].note).startsWith('v1:')).toBe(true);
+    const query = [1, 0.1, 0];
+    const near = await sealed.chunk.nearest('embedding', query, { k: 2, metric: 'l2' });
+    expect(near.map(n => n.row.text)).toEqual(['east', 'north']);
+    expect([near[0]!.row.note, near[1]!.row.note?.reveal(), near[1]!.row.embedding]).toEqual([null, 'private', [0, 1, 0]]);
+    expect((await sealed.chunk.nearest('embedding', query, { filter: { text: { in: ['north'] } } })).map(n => n.row.text)).toEqual(['north']);
+    await sealed.chunk.deleteOne(east.id);
+    const removed = await db.pool.query(`SELECT "removedAt" IS NOT NULL AS removed FROM "NoteChunk" WHERE id = $1`, [uuidToDb(east.id)]);
+    expect(removed.rows[0].removed).toBe(true);
+    expect((await sealed.chunk.nearest('embedding', query, { k: 1, metric: 'l2' })).map(n => n.row.text)).toEqual(['north']);
+    expect((await sealed.chunk.nearest('embedding', query, { k: 1, metric: 'l2', includeDeleted: true })).map(n => n.row.text)).toEqual(['east']);
+    // Without the keys, a row whose note is sealed does not open.
+    await expect(createOrm(db.pool, alice).chunk.nearest('embedding', query, { k: 1, metric: 'l2' })).rejects.toThrow();
   });
 
   test('nearest runs the statement sqlutil writes: the filter, the live rows, the vector last, and the order of its distance', async () => {

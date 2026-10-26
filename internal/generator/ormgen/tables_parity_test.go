@@ -61,7 +61,8 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 // on the Postgres with pgvector that pgtest.VectorDatabaseURL names, and
 // requires the same statements, as TestTableParityOfGoAndTypeScriptOnPostgres
 // does: each metric, a filter, the live rows and deleted ones, an optional
-// vector field and the default k.
+// vector field and the default k, and a table @table and @column name with
+// an Encrypted<T> field beside its vector (D85).
 func TestNearestParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
