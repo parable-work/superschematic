@@ -203,6 +203,11 @@ type DecoratorSpec struct {
 	// a type argument in an extension slot.
 	typeArgs int
 
+	// typeArgAliases lets a type argument name an object type alias as
+	// well as a class: @query's params and row types, which a DB schema
+	// may write either way (D86).
+	typeArgAliases bool
+
 	// optionalArg lets the decorator be written without its argument when
 	// it has Args: @paginated() as well as @paginated({ maxLimit: 50 }).
 	// Apply then receives no argument. Only core decorators set it: the
@@ -224,6 +229,12 @@ func (s DecoratorSpec) RecordsErrors() bool {
 // decorator but the core ones that name a table (@projection, @join).
 func (s DecoratorSpec) TypeArgs() int {
 	return s.typeArgs
+}
+
+// TypeArgAliases reports whether a type argument may name an object type
+// alias of the schema as well as a class.
+func (s DecoratorSpec) TypeArgAliases() bool {
+	return s.typeArgAliases
 }
 
 // DeclaredIn reports whether pkg is one of the spec's authoring packages.

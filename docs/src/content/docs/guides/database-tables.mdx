@@ -722,7 +722,8 @@ whose total is then -1).
 
 An API whose database lists postgres first and has a table gets the
 repositories in its `Deps` as `orm`, beside the pool, `db`, which stays for
-the SQL they do not express: a report's aggregates, a CTE. `shop-cart`, on
+the SQL they do not express and no [declared query](#declared-queries)
+holds. `shop-cart`, on
 Bun, keeps a shopper's reviews and reorders through them, with no SQL of
 its own:
 
@@ -868,6 +869,27 @@ removed one's `down` in `contract`, and marks each such step `raw-sql`,
 since it cannot judge what the SQL does
 ([Raw SQL](/superschematic/reference/migrations/#raw-sql)).
 
+## Declared queries
+
+A report's SQL, its aggregates, a `generate_series` of time buckets, a
+paged list over joined tables, is a query the DB schema declares with
+`@query<Params, Row>({ name, sql })` on a class of its own (D86). Its
+`:name` parameters are fields of `Params`, its result columns fields of
+`Row`, and both ORMs run it as a typed function:
+`deps.orm.queries.categoryTotals(params)` and `tx.queries.categoryTotals(params)`
+in TypeScript, `db.Queries.CategoryTotals(ctx, params)` in Go. An enum
+parameter may pick one of fixed `ORDER BY` fragments, and a query may read
+its rows a page at a time by a keyset of its row's fields.
+
+`superschematic queries verify <db-service-dir>` prepares each query on
+Postgres, checks the types Postgres describes against `Params` and `Row`,
+and that a field that is not `Nullable<T>` reads a column that is never
+null, and writes `queries.lock`, which `check` and `build` hold the
+queries to with no database. A `migrate plan` prepares them on the new
+version's DDL too, so a renamed column a query reads fails the plan,
+naming the query. [Declared queries](/superschematic/reference/declared-queries/)
+covers the options, the codec, nullability and the lock.
+
 ## Change tables that hold data
 
 `create.sql` builds the database from nothing. `drop.sql` drops the
@@ -903,6 +925,9 @@ Three reference pages cover what a DB schema can add on top of this guide:
   whole, with engines in Go, TypeScript, Rust and Python.
 - [Projection views](/superschematic/reference/projections/): read-only SQL
   views over joined tables, with `@projection`, `@join` and `@column`.
+- [Declared queries](/superschematic/reference/declared-queries/): named,
+  type-checked SQL with `@query`, verified on Postgres into a lock and run
+  by both ORMs as typed functions.
 
 A type of a DB schema that composes a behavior, `@behavior("Workflow",
 ...)` say, is no table: it is an engine type, whose instances the engine

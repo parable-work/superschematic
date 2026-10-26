@@ -248,6 +248,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkVectorColumns(schema, r)
 	checkQueueMessageScalars(schema, r)
 	checkRawSQL(schema, r)
+	checkQueries(schema, r)
 	checkSearchColumns(schema, r)
 	reg := in.registry()
 	checkBehaviors(schema, reg, r)

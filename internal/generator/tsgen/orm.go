@@ -79,6 +79,10 @@ type ORMInfo struct {
 	// them, beside NearestMetrics (D89).
 	NearestSettings          []sqlutil.NearestSetting
 	NearestSettingsStatement string
+
+	// Queries are the database's declared queries (D86), which orm.queries
+	// runs; none on a database that declares none.
+	Queries []ORMQuery
 }
 
 // ORMTable is a table as orm.ts writes it.
@@ -252,7 +256,7 @@ var encryptedStatements = []string{"stale", "reseal"}
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "transaction", "query", "exec"}
+var ormMembers = []string{"actingUser", "withUser", "as", "transaction", "query", "exec", "queries"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
 // no table. output holds the types the rows' members take theirs from, and
@@ -262,7 +266,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	if err != nil {
 		return nil, err
 	}
-	if len(tables) == 0 {
+	if len(tables) == 0 && len(schema.Queries()) == 0 {
 		return nil, nil
 	}
 	types := map[string]*TypeInfo{}
@@ -374,6 +378,9 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		return nil, err
 	}
 	out.Views = views
+	if out.Queries, err = typeScriptQueries(schema, opts, types, known); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -674,6 +681,15 @@ func qualifyTypes(t string, known map[string]bool) string {
 // ./postgres entry, sorted: those its declarations use, each once.
 func (o *ORMInfo) RuntimeTypes() []string {
 	used := map[string]bool{"Orm": true, "OrmDefinition": true, "OrmOptions": true, "OrmPool": true, "OrmTx": true, "TableDefinition": true}
+	if len(o.Queries) > 0 {
+		used["QueryDefinition"] = true
+	}
+	for _, q := range o.Queries {
+		if q.Page != nil {
+			used["QueryPageOptions"] = true
+			used["RowPage"] = true
+		}
+	}
 	for _, t := range append(slices.Clone(o.Tables), o.Views...) {
 		if len(t.Relations) > 0 || len(t.Many) > 0 {
 			used["Related"] = true
@@ -721,6 +737,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 // UsesTypes reports whether a declaration of orm.ts refers to the
 // package's ./types entry.
 func (o *ORMInfo) UsesTypes() bool {
+	if len(o.Queries) > 0 {
+		return true
+	}
 	for _, t := range append(slices.Clone(o.Tables), o.Views...) {
 		if strings.Contains(t.KeyType, "T.") {
 			return true

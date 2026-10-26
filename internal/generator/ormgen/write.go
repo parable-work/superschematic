@@ -99,6 +99,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(sqliteQueuesFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove queues_sqlite.go: %w", err)
 	}
+	// queries.go runs the declared queries (D86); a schema without one has
+	// none, so a file an earlier build wrote goes.
+	queriesFile := filepath.Join(outputDir, "queries.go")
+	if output.HasQueries() {
+		if err := generateFile(generator, "queries.tmpl", queriesFile, output); err != nil {
+			return fmt.Errorf("failed to write queries.go: %w", err)
+		}
+	} else if err := os.Remove(queriesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queries.go: %w", err)
+	}
 	// encrypted.go seals and opens the Encrypted<T> fields (D85); a schema
 	// without one has none, so a file an earlier build wrote goes.
 	encryptedFile := filepath.Join(outputDir, "encrypted.go")

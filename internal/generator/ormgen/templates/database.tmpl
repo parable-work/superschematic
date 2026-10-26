@@ -47,6 +47,10 @@ type Database struct {
 	{{- range .Repositories }}
 	{{ .TypeName }} *{{ .Name }}
 	{{- end }}
+	{{- if .HasQueries }}
+	// Queries runs the declared queries on the pool (D86).
+	Queries *Queries
+	{{- end }}
 }
 
 // Tx represents a database transaction with repositories
@@ -58,6 +62,10 @@ type Tx struct {
 	depth int
 	{{- range .Repositories }}
 	{{ .TypeName }} *{{ .Name }}
+	{{- end }}
+	{{- if .HasQueries }}
+	// Queries runs the declared queries in the transaction (D86).
+	Queries *Queries
 	{{- end }}
 }
 
@@ -96,6 +104,9 @@ func Connect(ctx context.Context, connString string{{ if .HasEncryptedFields }},
 	{{- range .Repositories }}
 	db.{{ .TypeName }} = &{{ .Name }}{db: db}
 	{{- end }}
+	{{- if .HasQueries }}
+	db.Queries = &Queries{runner: pool}
+	{{- end }}
 
 	return db, nil
 }
@@ -123,6 +134,9 @@ func ConnectWithPool(pool *pgxpool.Pool{{ if .HasEncryptedFields }}, options ...
 	// Initialize repositories
 	{{- range .Repositories }}
 	db.{{ .TypeName }} = &{{ .Name }}{db: db}
+	{{- end }}
+	{{- if .HasQueries }}
+	db.Queries = &Queries{runner: pool}
 	{{- end }}
 
 	return db, nil
@@ -161,6 +175,9 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	// Initialize transaction repositories with parent database reference
 	{{- range .Repositories }}
 	txWrapper.{{ .TypeName }} = &{{ .Name }}{tx: tx, txDB: db}
+	{{- end }}
+	{{- if .HasQueries }}
+	txWrapper.Queries = &Queries{runner: tx}
 	{{- end }}
 
 	defer func() {

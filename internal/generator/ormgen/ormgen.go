@@ -190,6 +190,10 @@ type ORMOutput struct {
 	// Projections are the schema's projections with a key, which
 	// projections.go reads through read-only repositories (D90).
 	Projections []ProjectionRepository
+
+	// Queries are the database's declared queries (D86), which queries.go
+	// runs; none for a database that declares none.
+	Queries []Query
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -881,7 +885,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	schema = codegen.WithoutEngineTypes(schema)
 
 	tableTypes := tableTypeDefs(schema)
-	if len(tableTypes) == 0 && len(schema.Queues()) == 0 {
+	if len(tableTypes) == 0 && len(schema.Queues()) == 0 && len(schema.Queries()) == 0 {
 		return nil, nil
 	}
 
@@ -919,6 +923,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		return nil, err
 	}
 	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
+	if err != nil {
+		return nil, err
+	}
+	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -1064,6 +1072,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		NearestSettings:          sqlutil.NearestSettingsOf(),
 		NearestSettingsStatement: sqlutil.NearestSettings,
 		Projections:              projections,
+		Queries:                  queries,
 	}
 
 	return output, nil

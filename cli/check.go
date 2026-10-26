@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
+	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sentinel"
 	ir "github.com/parable-work/superschematic/ir"
@@ -611,6 +612,11 @@ func (l *checkLoad) check(service buildplan.Service) {
 		findings = append(findings, diagnosticsOf(err, service.Dir, result.blockedBy)...)
 	} else {
 		c.schemas[service.Name] = schema
+		// A DB service's queries are the ones its queries.lock verified
+		// (D86).
+		if err := queryverify.CheckLock(service.Dir, schema); err != nil {
+			findings = append(findings, checkDiagnostic{File: filepath.Join(service.Dir, queryverify.LockFile), Severity: string(verify.SeverityError), Message: err.Error()})
+		}
 		if hasServiceSentinel(service.Dir, cfg, c.reg) {
 			changed, err := sentinel.EmitHandle(service.Dir, cfg, c.reg, sentinel.HandleTypesOf(schema))
 			if err != nil {

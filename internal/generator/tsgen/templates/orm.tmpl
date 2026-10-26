@@ -235,13 +235,83 @@ export const {{.Const}}: TableDefinition = {
 };
 {{- end}}
 
-/** The repositories of {{$.SchemaName}}, by table{{if .Views}}, and of its projections, by projection{{end}}. */
+{{- if .Queries}}
+{{- range .Queries}}
+{{- $q := .}}
+{{- with .Page}}
+
+/** The position of a row of the query {{$q.Name}} in its order: the members its pages are keyed by. */
+export interface {{.KeyType}} {
+{{- range .Key}}
+  readonly {{.Member}}: {{.Type}};
+{{- end}}
+}
+{{- end}}
+{{- end}}
+
+/** The declared queries of {{$.SchemaName}} (D86), each a typed function of its params. */
+export interface {{.Name}}Queries {
+{{- range .Queries}}
+  /** {{if .Doc}}{{tsDoc .Doc "   * "}}{{else}}The query {{.Name}}.{{end}} */
+{{- if .Page}}
+  {{.Name}}(params: {{.ParamsType}}, page?: QueryPageOptions<{{.Page.KeyType}}>): Promise<RowPage<{{.RowType}}, {{.Page.KeyType}}>>;
+{{- else}}
+  {{.Name}}(params: {{.ParamsType}}): Promise<{{.RowType}}[]>;
+{{- end}}
+{{- end}}
+}
+
+/** The declared queries of {{$.SchemaName}} as the runtime runs them: each statement, its parameters and its row as the codec reads them. */
+export const {{.QueriesConst}}: Readonly<Record<string, QueryDefinition>> = {
+{{- range .Queries}}
+  {{.Name}}: {
+    text: {{jsonString .Text}},
+    params: [
+{{- range .Params}}
+      { name: {{jsonString .Member}}, column: {{jsonString .Column}}{{.QueryFlags}} },
+{{- end}}
+    ],
+    row: [
+{{- range .Row}}
+      { name: {{jsonString .Member}}, column: {{jsonString .Column}}{{.QueryFlags}} },
+{{- end}}
+    ],
+{{- with .OrderBy}}
+    orderBy: {
+      param: {{jsonString .Param}},
+      options: {
+{{- range .Options}}
+        {{jsonString .Value}}: {{jsonString .SQL}},
+{{- end}}
+      },
+{{- if .Default}}
+      default: {{jsonString .Default}},
+{{- end}}
+    },
+{{- end}}
+{{- with .Page}}
+    page: {
+      first: {{jsonString .First}},
+      after: {{jsonString .After}},
+      key: [{{range $i, $k := .Key}}{{if $i}}, {{end}}{{jsonString $k.Member}}{{end}}],
+    },
+{{- end}}
+  },
+{{- end}}
+};
+{{- end}}
+
+/** The repositories of {{$.SchemaName}}, by table{{if .Views}}, and of its projections, by projection{{end}}{{if .Queries}}, and its declared queries{{end}}. */
 export interface {{.Name}}Repositories {
 {{- range .Tables}}
   readonly {{.Member}}: {{.Type}}Repository;
 {{- end}}
 {{- range .Views}}
   readonly {{.Member}}: {{.Type}}Repository;
+{{- end}}
+{{- if .Queries}}
+  /** The declared queries (D86), run on the pool or in the transaction. */
+  readonly queries: {{.Name}}Queries;
 {{- end}}
 }
 
@@ -288,6 +358,9 @@ export const {{.Const}}: OrmDefinition = {
     {{.Member}}: {{.Const}},
 {{- end}}
   },
+{{- if .Queries}}
+  queries: {{.QueriesConst}},
+{{- end}}
 };
 
 /**

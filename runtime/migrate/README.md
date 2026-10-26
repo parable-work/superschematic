@@ -412,6 +412,48 @@ of the result deletes the marker too. A write that fails after a retry
 or a drop committed says the operation was applied. An error, on stderr,
 names no message's columns.
 
+## Describe
+
+```
+superschematic-migrate describe --statements statements.json [--database-url URL]
+```
+
+Runs a describe document, which `superschematic queries verify` and a
+Postgres `migrate plan` write for a DB service's declared queries
+(`@query`, D86): the service's `create.sql` and each statement its
+queries run. The runner creates a database of its own on the Postgres
+server the URL names (`superschematic_describe_<random>`), applies the
+DDL there, prepares each statement unnamed, and prints what Postgres
+described of each, then drops the database, whatever happened. The role
+must be able to create a database. A URL of another dialect is refused.
+The runner judges nothing: the compiler compares the description with
+the types the schema declares and writes the service's `queries.lock`.
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `version` | integer | `1`. |
+| `ddl` | string | The service's `create.sql`, applied as one simple-protocol query. |
+| `statements` | array | `{ id, sql }`: each statement to prepare, its parameters positional. |
+
+It prints one JSON object, each statement's description in the
+document's order: its `params`, each a type, and its `columns`, each a
+`name` and a type, and, for a column straight from a table's, its
+`table`, `column` and whether it is `notNull`. A type is its
+`format_type` (`type`, with a column's precision: `numeric(12,2)`), its
+`pg_type` name (`typeName`) and an array's `element`. A statement
+Postgres refuses is described by its `error`, Postgres's message with
+its position and hint, and is no failure of the run.
+
+```json
+{"version": 1, "statements": [
+  {"id": "totals/0", "params": [{"type": "uuid[]", "typeName": "_uuid", "element": "uuid"}],
+   "columns": [{"name": "name", "type": "text", "typeName": "text", "table": "line", "column": "name", "notNull": true}]},
+  {"id": "totals/1", "error": "column \"amout\" does not exist (at character 12)"}]}
+```
+
+`testdata/describe/` holds a document and a result both sides' tests
+read and write.
+
 ## Layout
 
 | Path | What it holds |
@@ -426,6 +468,7 @@ names no message's columns.
 | `go/internal/d1fake/` | A fake D1 REST API over a SQLite file, for the tests |
 | `go/testdata/` | Hand-written plans per dialect, and the canonical JSON vectors |
 | `testdata/plans/<case>/` | The plans the compiler writes for the runner, `NN-<name>.plan.json` |
+| `testdata/describe/` | A describe document and its result, which the runner's and the compiler's tests both read and write |
 
 Nothing in the module needs cgo, so the binary builds with
 `CGO_ENABLED=0` for any platform Go targets.

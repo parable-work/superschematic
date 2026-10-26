@@ -76,6 +76,7 @@ breaks your code, the type checker of each language points at the line.
 | Every past version of a row | `@versioned` | a history table, triggers, history readers, writes fenced by version | nothing | [Versioned tables](/superschematic/reference/versioned-tables/) |
 | Branches, commits and merges over a set of tables | `@versionGraph`, `@graphMember` | the graph's tables and an engine in each language | nothing | [Version graphs](/superschematic/reference/version-graphs/) |
 | A read-only SQL view | `@projection`, `@join`, `@column` | the view, its row type and a read-only repository in both ORMs, and an API view's `@source` | nothing | [Projections](/superschematic/reference/projections/) |
+| A report: aggregates, time buckets, a paged list over joined tables | `@query<Params, Row>({ name, sql, orderBy?, page? })`, its params and row as types | a typed function of both ORMs, `orm.queries.<name>(params)` and `Queries.<Name>(ctx, params)`, its rows decoded; `queries verify` prepares it on Postgres into `queries.lock`, which `check`, `build` and `migrate plan` hold it to | the SQL | [Declared queries](/superschematic/reference/declared-queries/) |
 | A schema change on a database that holds data | the next version of the DB schema | `migrate plan`: expand and contract steps, each with its hazards | the review of the plan | [Migrations](/superschematic/reference/migrations/) |
 
 ## APIs

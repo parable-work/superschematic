@@ -128,7 +128,7 @@ var symbolPackages = map[string]string{
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
-	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
+	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",

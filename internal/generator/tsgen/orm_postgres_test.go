@@ -42,7 +42,8 @@ type repositoryCase struct {
 // and updates only if changed under a trigger, and its options of a find, a
 // transaction and a raw query (D89); fixture-finances-db's reads (D90), a
 // filter through a relation, anyOf, select and include, and a projection's
-// repository; fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
+// repository; fixture-queries-db's declared queries (D86);
+// fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
 // refused and resealed; and fixture-vectors-db's decimals, vectors and
 // nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
@@ -111,6 +112,15 @@ var repositoryCases = []repositoryCase{
 		"select reads the members it names, and an include reads the foreign key it needs without keeping it",
 		"a to-one include of a soft-deleted or unset target is null, and one-to-many includes map each row's rows",
 		"the TransactionListRow projection reads through findPage, filtered on joined columns",
+	}},
+	{fixture: "fixture-queries-db", files: []string{"queries.test.ts"}, tests: []string{
+		"categoryTotals rolls a sub-category up to its parent, over a range and some accounts, its rows typed and decoded",
+		"timeBuckets reads every bucket of a range through generate_series, an empty one with zeros",
+		"transactionList pages newest first by its key, filters by its optional params, and answers the next key until the last page",
+		"accountLines orders by the fragment its enum names, the default when null, and refuses any other value",
+		"budgets read an exact decimal and a date as the wire holds them, and an optional parent",
+		"transferCandidates finds the other side of a move within the window",
+		"a query runs in a transaction, and sends the statement sqlutil writes, its parameters positional",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

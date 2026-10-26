@@ -544,6 +544,28 @@ export interface PruneReference {
   versionColumn: string;
 }
 
+export interface QueryDef {
+  dialects?: string[];
+  name: string;
+  notNull?: string[];
+  orderBy?: QueryOrderBy;
+  page?: QueryPage;
+  params: string;
+  row: string;
+  sql: string;
+}
+
+export interface QueryOrderBy {
+  default?: string;
+  options: { [key: string]: string };
+  param: string;
+}
+
+export interface QueryPage {
+  desc?: boolean;
+  key: string[];
+}
+
 export interface QueueDef {
   backoff?: string;
   key?: string;
@@ -694,10 +716,11 @@ export interface TypeDef {
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
+  query?: QueryDef;
   queue?: QueueDef;
   rawHeritage?: RawHeritage;
   rawSql?: RawSQLDef[];
-  role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
+  role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;

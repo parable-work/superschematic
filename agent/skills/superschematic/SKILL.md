@@ -18,6 +18,12 @@ does. You never write, edit or duplicate:
 
 - SQL DDL or migrations: the DB schema is the table; `migrate plan` diffs
   two versions of it.
+- Report SQL as raw strings on the pool: an aggregate, a time series or a
+  joined list is a `@query<Params, Row>({ sql })` in the DB schema, which
+  both ORMs run as a typed function (`orm.queries.<name>(params)`), its
+  rows decoded. Run `superschematic queries verify schemas/services/<db>`
+  after changing one, or a table one reads: it prepares each on Postgres
+  and writes `queries.lock`, which `check` and `build` require current.
 - Validation: a field's scalar type and `Validate<T, {...}>` are checked
   by every generated decoder, server and SDK alike. Never re-check in a
   handler what a constraint can say.
@@ -178,8 +184,9 @@ Most are load errors; knowing them saves a build round-trip:
 - A DB schema cannot import `@superschematic/api`, and an API schema
   cannot import `@superschematic/db`.
 - Every plain class in a DB schema is a table; give each one a `@key`.
-  A `@jsonField` class, a `@queue` message, a `@projection` and a type
-  that composes a behavior are not tables.
+  A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
+  class and the params and row types it names, and a type that composes
+  a behavior are not tables.
 
 ## Starting a project
 
