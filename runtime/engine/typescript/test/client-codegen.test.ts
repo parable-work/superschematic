@@ -7,7 +7,10 @@
 // types, by behavior, to the describe document's and to what reads return,
 // and the wrappers run against an engine over HTTP: a streamed reply
 // through begin, appendDraft and finish, and the signals a subscription
-// hands out, typed by the module's guard (D77). typos() is never called:
+// hands out, typed by the module's guard (D77); read markers, follows, and
+// Comments' namespace client, whose inbox lists what mentions the caller and
+// whose claimDeliveries and settleDeliveries an agent dispatcher runs. typos()
+// is never called:
 // each of its lines must fail to compile, which tsc -p tsconfig.test.json
 // checks.
 import assert from 'node:assert/strict';
@@ -24,12 +27,18 @@ import type { Engine, Principal } from '../dist/index.js';
 import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
 import {
+  commentsNamespaceClient,
+  isCommentsNamespaceVeto,
   isNoteSignal,
   isNoteVeto,
   notesClient,
+  type CommentsDelivery,
+  type CommentsInboxItem,
+  type CommentsNamespaceClient,
   type NoteAppendDraftResult,
   type NoteCommentMessage,
   type NoteDraftSignal,
+  type NoteMarkReadResult,
   type NotesClient,
   type NoteSignalMessage,
 } from './generated/notes.ts';
@@ -50,8 +59,11 @@ interface ParityCorpus {
 
 const corpus = JSON.parse(readFileSync(new URL('../../testdata/client_codegen_parity.json', import.meta.url), 'utf8')) as ParityCorpus;
 
-/** An editor may publish and review notes. */
-const editor: Principal = { subject: 'editor', permissions: ['notes.publish', 'notes.review'] };
+/** An editor may publish and review notes, and claim and settle the deliveries of Tasks' messages (Task's Comments deliverPermission). */
+const editor: Principal = { subject: 'editor', permissions: ['notes.publish', 'notes.review', 'tasks.deliver'] };
+
+/** Ada writes to the editor and to an agent. */
+const ada: Principal = { subject: 'ada', permissions: [] };
 
 /** An approver signs a Spec off for final. */
 const approver: Principal = { subject: 'ada', permissions: ['specs.approve'] };
@@ -185,7 +197,7 @@ describe('the generated client', () => {
     assert.deepEqual([tidy.Comments.messages, tidy.Comments.threads, typeof tidy.Comments.lastMessageAt], [1, { open: 0, resolved: 1 }, 'number']);
     const launch = engine.instances.get(editor, 'notes', 'n1')?.behaviors as Record<string, any>;
     assert.deepEqual([launch.Comments.messages, launch.Comments.threads], [2, { open: 1, resolved: 0 }]);
-    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
     assert.deepEqual(tidy.Timers.deadlines, { overdue: { dueAt: Date.UTC(2026, 10, 2, 9), fired: false } });
     const started = engine.instances.get(editor, 'Task', 't2')?.behaviors as Record<string, any>;
     assert.deepEqual(Object.keys(started.Timers.deadlines), ['stuck']);
@@ -205,7 +217,7 @@ describe('the generated client', () => {
 
     const note = await notes.create({ title: 'Launch', tags: ['plan'] }, { id: 'launch' });
     assert.equal(note.behaviors.Workflow.status, 'draft');
-    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
     assert.deepEqual(await notes.transition('launch', { to: 'review' }), { from: 'draft', to: 'review' });
     const reviewing = await notes.get('launch');
     const posted = await notes.operate('launch', 'post', { body: 'Looks good', blocks: [{ kind: 'ref', schema: 'notes', id: 'launch' }] });
@@ -277,6 +289,8 @@ describe('the generated client', () => {
     const finished: NoteCommentMessage = await notes.finish('launch', { message: begun.id });
     assert.deepEqual([finished.id, finished.state, finished.body, finished.createdAt], [begun.id, 'posted', 'Ships in the fall ✓', begun.createdAt]);
     assert.equal(typeof finished.postedAt, 'number');
+    // A message stands when it is finished, not when it began.
+    assert.deepEqual([begun.stand, finished.stand], [undefined, 1]);
     const after = (await notes.get('launch')).behaviors.Comments;
     assert.deepEqual([after.messages, after.composing], [1, []]);
 
@@ -312,6 +326,104 @@ describe('the generated client', () => {
     await assert.rejects(notes.appendDraft('launch', { message: second.id, text: '.' }), (error) => isNoteVeto(error, 'Comments', 'not_composing'));
     subscription.close();
   });
+
+  test("marks read and follows, and a namespace client lists the inbox and claims and settles an agent's deliveries", async () => {
+    const engine = open();
+    const client = serve(engine);
+    const tasks = taskClient(client);
+    const comments: CommentsNamespaceClient = commentsNamespaceClient(client);
+    engine.instances.create(editor, 'Project', { name: 'Launch' }, { id: 'p1' });
+    engine.instances.create(editor, 'Task', { title: 'Index', kind: 'chore' }, { id: 't1', behaviors: { Links: { project: 'p1' } } });
+
+    // Ada mentions the editor and an agent. A conversation the editor has
+    // never read is unread for nobody; the mention reaches it anyway.
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Can you   look\nat this?', mentions: ['editor', 'agent:reviewer'] });
+    assert.equal((await tasks.get('t1')).behaviors.Comments.unread, 0);
+    const first = await comments.inbox();
+    const mention: CommentsInboxItem | undefined = first.items[0];
+    assert.equal(typeof mention?.postedAt, 'number');
+    assert.deepEqual(
+      { ...mention, postedAt: 0 },
+      { kind: 'mention', schema: 'Task', instanceId: 't1', message: 1, author: 'ada', postedAt: 0, excerpt: 'Can you look at this?', unread: 1 }
+    );
+    assert.deepEqual([first.items.length, first.next], [1, null]);
+
+    // markRead reads the mention; the conversation is in the inbox from
+    // then on, and the unread items are none.
+    const read: NoteMarkReadResult = await tasks.markRead('t1', { upTo: 1 });
+    assert.deepEqual(read, { readUpTo: 1, unread: 0 });
+    assert.deepEqual((await comments.inbox({ unread: true })).items, []);
+    assert.deepEqual(
+      (await comments.inbox()).items.map((item) => [item.kind, item.unread]),
+      [
+        ['mention', 0],
+        ['conversation', 0],
+      ]
+    );
+
+    // A reply in the thread the mention made the editor follow, and a new
+    // top-level message: the field counts the top-level one alone, for the
+    // editor; the thread is read in the inbox.
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Ping', thread: 1 });
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Also this' });
+    assert.equal((await tasks.get('t1')).behaviors.Comments.unread, 1);
+    assert.equal((engine.instances.get(ada, 'Task', 't1')?.behaviors as Record<string, any>).Comments.unread, 0);
+    const unread = await comments.inbox({ unread: true, kinds: ['thread', 'conversation'] });
+    // Newest first; two items of one millisecond list the thread first.
+    assert.deepEqual(
+      unread.items.map((item) => [item.kind, item.message, item.thread, item.unread]).sort(),
+      [
+        ['conversation', 3, undefined, 1],
+        ['thread', 2, 1, 1],
+      ]
+    );
+    assert.deepEqual((await tasks.listMessages('t1', { thread: 1 })).readUpTo, 1);
+    assert.deepEqual(await tasks.follow('t1', { thread: 1, on: false }), { thread: 1, following: false });
+
+    // An agent dispatcher claims the agents' deliveries, acts on mentions
+    // alone, and settles what it claimed. The mention made the agent follow
+    // the thread, so Ada's reply is a delivery to it too, for a reply,
+    // which the dispatcher drops.
+    const claim = await comments.claimDeliveries({ prefix: 'agent:', ttlMs: 30_000 });
+    assert.equal(typeof claim.token, 'string');
+    assert.equal(typeof claim.expiresAt, 'number');
+    const mentions: CommentsDelivery[] = claim.items.filter((delivery) => delivery.reasons.includes('mention'));
+    assert.deepEqual(
+      mentions.map((delivery) => ({ ...delivery, id: typeof delivery.id, postedAt: typeof delivery.postedAt })),
+      [
+        {
+          id: 'string',
+          schema: 'Task',
+          instanceId: 't1',
+          message: 1,
+          subject: 'agent:reviewer',
+          reasons: ['mention'],
+          author: 'ada',
+          state: 'posted',
+          postedAt: 'number',
+          body: 'Can you   look\nat this?',
+          truncated: false,
+          attempt: 1,
+        },
+      ]
+    );
+    const replies = claim.items.filter((delivery) => !delivery.reasons.includes('mention'));
+    assert.deepEqual(
+      replies.map((delivery) => [delivery.subject, delivery.message, delivery.thread, delivery.reasons]),
+      [['agent:reviewer', 2, 1, ['reply']]]
+    );
+    const settled = await comments.settleDeliveries({ token: claim.token ?? '', ids: mentions.map((delivery) => delivery.id), outcome: 'sent' });
+    assert.deepEqual(settled.items, [{ id: mentions[0]?.id, state: 'sent', attempts: 1 }]);
+    const dropped = await comments.settleDeliveries({ token: claim.token ?? '', ids: replies.map((delivery) => delivery.id), outcome: 'dropped', error: 'not a mention' });
+    assert.deepEqual(dropped.items, [{ id: replies[0]?.id, state: 'dropped', attempts: 1 }]);
+    await assert.rejects(
+      comments.settleDeliveries({ token: claim.token ?? '', ids: mentions.map((delivery) => delivery.id), outcome: 'sent' }),
+      (error) => isCommentsNamespaceVeto(error, 'token_stale')
+    );
+    assert.deepEqual(await comments.claimDeliveries({ prefix: 'agent:' }), { token: null, expiresAt: null, items: [] });
+    // A namespace client binds the namespace it is given.
+    await assert.rejects(commentsNamespaceClient(client, 'elsewhere').inbox(), (error) => error instanceof EngineProblem);
+  });
 });
 
 /**
@@ -319,7 +431,15 @@ describe('the generated client', () => {
  * it (@ts-expect-error fails the typecheck when it does not), where the
  * untyped client takes it and the engine refuses it at run time.
  */
-export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, jobs: JobsClient, workers: WorkersClient, message: StreamMessage | SignalMessage): void {
+export function typos(
+  notes: NotesClient,
+  tasks: TaskClient,
+  specs: SpecClient,
+  jobs: JobsClient,
+  workers: WorkersClient,
+  message: StreamMessage | SignalMessage,
+  comments: CommentsNamespaceClient
+): void {
   // @ts-expect-error titel is not a field of a Note
   void notes.create({ titel: 'Launch' });
   // @ts-expect-error status is not an own field: it is Workflow's, which transition moves
@@ -391,4 +511,24 @@ export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, 
     const thread: string | undefined = message.signal.data.thread;
     void thread;
   }
+  // @ts-expect-error markRead's upTo is a message's id, a number
+  void notes.markRead('launch', { upTo: '1' });
+  // @ts-expect-error follow says whether to follow
+  void notes.follow('launch', { thread: 1 });
+  // @ts-expect-error inbox is Comments' namespace operation: no schema's client has it
+  void notes.inbox({});
+  // @ts-expect-error inbox runs on no instance: it is no operation of a Task
+  void tasks.operate('t1', 'inbox', {});
+  // @ts-expect-error delivered is not an outcome of settleDeliveries: sent, failed or dropped
+  void comments.settleDeliveries({ token: 't', ids: ['d'], outcome: 'delivered' });
+  // @ts-expect-error settleDeliveries names the claim's token
+  void comments.settleDeliveries({ ids: ['d'], outcome: 'sent' });
+  // @ts-expect-error claimDeliveries takes subjects or a prefix, not a subject
+  void comments.claimDeliveries({ subject: 'agent:reviewer' });
+  // @ts-expect-error reply is not a kind of inbox item: mention, thread or conversation
+  void comments.inbox({ kinds: ['reply'] });
+  // @ts-expect-error the namespace client is bound to its namespace
+  void comments.inbox({}, { namespace: 'elsewhere' });
+  // @ts-expect-error token_staled is not a code of Comments' vetoes
+  isCommentsNamespaceVeto(new Error('refused'), 'token_staled');
 }

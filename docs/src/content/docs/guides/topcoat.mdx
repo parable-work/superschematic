@@ -897,7 +897,11 @@ A behavior the crate knows has a panel:
   form.
 
 Any other behavior, a project's own among them, gets a generic panel: its
-fields as the read returns them, and its operations as forms.
+fields as the read returns them, and its operations as forms. Comments
+is one: its counts, `unread` the caller's own, and its instance
+operations, `markRead` and `follow` among them. A behavior's namespace
+operations, Comments' `inbox` and deliveries, belong to no type, so no
+page shows them.
 
 acme's console pages `shop-db`'s `Inventory`, `CollectionPoint`,
 `Checkout` and `Refund` for staff. Ada, the demo's staff, holds the roles

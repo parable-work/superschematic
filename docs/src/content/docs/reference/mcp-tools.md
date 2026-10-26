@@ -488,6 +488,13 @@ and instance operation tools also take `preconditions`, by behavior
 name, and where one takes create parameters, as `Links` and
 `Dependencies` do, the create tool takes `behaviors`
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#create-parameters)).
+A behavior's namespace operation (`scope: "namespace"`), which runs
+across every schema of the namespace that composes the behavior, has one
+tool, named after the behavior (`comments.inbox`, handle
+`comments_inbox`), that takes `params` alone; the access policy's
+question for it, which names the behavior and no schema, with
+`listing: true`, hides it from a caller it refuses
+([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
 Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
