@@ -1133,11 +1133,15 @@ func (r *LineItemRepository) CreateOne(ctx context.Context, input *types.LineIte
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 	values = append(values, input.AmountCents)
-	// Required field: postedOn
-	fields = append(fields, `"postedOn"`)
-	paramNum++
-	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.PostedOn)
+	// Optional field: postedOn - only add if set
+	{
+		if !reflect.ValueOf(input.PostedOn).IsZero() {
+			fields = append(fields, `"postedOn"`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.PostedOn)
+		}
+	}
 	// Optional field: memo - only add if set
 	{
 		if !reflect.ValueOf(input.Memo).IsZero() {
@@ -1298,11 +1302,15 @@ func (r *LineItemRepository) UpsertOne(ctx context.Context, input *types.LineIte
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 	values = append(values, input.AmountCents)
-	// Required field: postedOn
-	fields = append(fields, `"postedOn"`)
-	paramNum++
-	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.PostedOn)
+	// Optional field: postedOn - only add if set
+	{
+		if !reflect.ValueOf(input.PostedOn).IsZero() {
+			fields = append(fields, `"postedOn"`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.PostedOn)
+		}
+	}
 	// Optional field: memo - only add if set
 	{
 		if !reflect.ValueOf(input.Memo).IsZero() {
@@ -1511,10 +1519,13 @@ func (r *LineItemRepository) CreateMany(ctx context.Context, inputs []*types.Lin
 			cell.value = input.AmountCents
 			row = append(row, cell)
 		}
-		// Required field: postedOn
+		// Optional field: postedOn
 		{
-			cell := batchInsertCell{column: `"postedOn"`, set: true}
-			cell.value = input.PostedOn
+			cell := batchInsertCell{column: `"postedOn"`}
+			if !reflect.ValueOf(input.PostedOn).IsZero() {
+				cell.value = input.PostedOn
+				cell.set = true
+			}
 			row = append(row, cell)
 		}
 		// Optional field: memo

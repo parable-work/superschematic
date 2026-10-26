@@ -31,9 +31,11 @@ CREATE TABLE line_item (
   amount_cents BIGINT NOT NULL,
   memo TEXT DEFAULT 'it''s unexplained' NOT NULL,
   confidence DOUBLE PRECISION,
-  posted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  posted_at TIMESTAMPTZ NOT NULL,
+  entered_on DATE DEFAULT CURRENT_DATE NOT NULL,
   external_id TEXT,
   merchant JSONB,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   CONSTRAINT ck_line_item_confidence CHECK (confidence >= 0 AND confidence <= 1)
 );
 
@@ -42,7 +44,10 @@ The dashboard reads each category''s total from a materialized view the
 raw SQL keeps, keyed by its category so it refreshes concurrently. Lines
 are read by when they were posted; a migration builds that index inside
 its step, as the table is small. A line a bank import posted holds the
-bank''s id for it, unique among such lines, which the import upserts by.';
+bank''s id for it, unique among such lines, which the import upserts by.
+A line has no default posting time, so an import that leaves it out
+fails; the day it was entered on defaults to the day of the insert, and
+its createdAt, an audit timestamp, to the time of it.';
 
 -- Add foreign key constraints
 

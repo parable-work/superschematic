@@ -31,7 +31,7 @@ CREATE TABLE ledger_line (
   rate NUMERIC(10,4) NOT NULL,
   confidence NUMERIC(5,2),
   quantity NUMERIC,
-  booked_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+  booked_at TIMESTAMPTZ NOT NULL
 );
 
 COMMENT ON TABLE ledger_line IS 'A line of a ledger: a signed amount in its currency''s minor units, a

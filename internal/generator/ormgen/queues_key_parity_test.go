@@ -783,7 +783,7 @@ func testTriggerEnqueuesOnChange(t *testing.T) {
 	p := newParity(t)
 	const productOne, productTwo = "20000000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000002"
 	line := lineID(1)
-	p.exec("INSERT INTO \"order\" (id) VALUES ('" + orderA + "')")
+	p.exec("INSERT INTO \"order\" (id, placed_at) VALUES ('" + orderA + "', '2026-10-14T12:00:00.000Z')")
 	p.exec("INSERT INTO product (id, name) VALUES ('" + productOne + "', 'one'), ('" + productTwo + "', 'two')")
 	count := func() int {
 		var n int

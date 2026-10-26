@@ -128,6 +128,7 @@ var symbolPackages = map[string]string{
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
+	"seedRoles":  "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
@@ -387,7 +388,24 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 		message = append(message, propertyName(field)+": "+quote(def.Message[field]))
 	}
 	parts = append(parts, "message: "+objectLiteral(message))
+	if def.Backfill {
+		parts = append(parts, "backfill: true")
+	}
 	return def.Queue + ", " + objectLiteral(parts)
+}
+
+// seedRolesArgs renders @seedRoles's list (D88): each role's name and
+// permissions, in declaration order.
+func seedRolesArgs(seeds []*ir.RoleSeed) string {
+	roles := make([]string, 0, len(seeds))
+	for _, seed := range seeds {
+		permissions := make([]string, len(seed.Permissions))
+		for i, p := range seed.Permissions {
+			permissions[i] = quote(p)
+		}
+		roles = append(roles, objectLiteral([]string{"name: " + quote(seed.Name), "permissions: [" + strings.Join(permissions, ", ") + "]"}))
+	}
+	return "[" + strings.Join(roles, ", ") + "]"
 }
 
 // emitJob renders a job as the class the reader reads it from (D52):

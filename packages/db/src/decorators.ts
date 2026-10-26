@@ -382,6 +382,13 @@ export interface EnqueueOnChangeOptions<TMessage, TTable = any> {
   readonly when?: readonly EnqueueCondition<TTable>[];
   /** Each field of the message the trigger sets, and the table's field whose value it takes. */
   readonly message: { readonly [K in keyof TMessage]?: TableField<TTable> };
+  /**
+   * The migration step that creates the trigger on a table that has rows also enqueues one message for each row
+   * that meets `when`, as an insert of it would, under the queue's `onDuplicate`. Without it only writes after the
+   * trigger exists enqueue; `superschematic stack queue backfill` enqueues for the rows already there. Needs an
+   * insert or an update among `on`.
+   */
+  readonly backfill?: boolean;
 }
 
 /**

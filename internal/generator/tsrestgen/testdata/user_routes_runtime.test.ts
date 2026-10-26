@@ -145,7 +145,11 @@ describe('generated fixture-user-routes-api router with the identity runtime', (
     const other = sdkFor(served, { auth: { token: second.token } });
     const me = await grace.account.me();
     expect(me.user).toEqual({ id: registered.user.id, login: 'grace@example.com', name: 'Grace' });
-    expect({ roles: me.roles.map((role: { name: string }) => role.name), permissions: me.permissions }).toEqual({ roles: ['member'], permissions: [] });
+    // member carries identity.roles.read, which the DDL seeds (D88).
+    expect({ roles: me.roles.map((role: { name: string }) => role.name), permissions: me.permissions }).toEqual({
+      roles: ['member'],
+      permissions: ['identity.roles.read'],
+    });
 
     // Capabilities answers for every operation of the API, by operation id.
     const { operations } = await grace.account.capabilities();
@@ -155,6 +159,7 @@ describe('generated fixture-user-routes-api router with the identity runtime', (
       AccountMeHandler: true,
       AccountLoginHandler: true,
       AccountAdminListUsersHandler: false,
+      AccountAdminListRolesHandler: true,
       AccountAdminGrantRoleHandler: false,
     });
 

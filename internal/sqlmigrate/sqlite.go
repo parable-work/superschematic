@@ -186,6 +186,9 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 	case opGraphContent:
 		return noSQL(c), nil
 	case opCreateTrigger:
+		if c.backfill {
+			return one(backfillStep(sqliteStep(c, c.trigger.Definition, c.trigger.Backfill), c)), nil
+		}
 		return one(sqliteStep(c, c.trigger.Definition)), nil
 	case opReplaceTrigger:
 		// A trigger's statements are its definition: SQLite has no
@@ -197,6 +200,10 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldName))), nil
 	case opDropTrigger:
 		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldTrigger.Name))), nil
+	case opSeedRole:
+		return one(sqliteStep(c, c.role.Insert)), nil
+	case opUpdateRole:
+		return one(sqliteStep(c, c.role.Update)), nil
 	case opDropTable:
 		// The tables of a reference cycle go in one step (dropTables).
 		// Every other table that references one of them is gone by then.
@@ -364,6 +371,13 @@ func (d sqliteDialect) rebuild(rb *tableRebuild) (rendered, error) {
 	for _, rt := range kept {
 		for _, t := range rb.triggers[rt.name] {
 			statements = append(statements, t.Definition)
+		}
+	}
+	// A trigger the plan adds with backfill enqueues for the rows the
+	// copy kept, once every trigger is back (D88).
+	for _, c := range rb.changes {
+		if c.op == opCreateTrigger && c.backfill {
+			statements = append(statements, c.trigger.Backfill)
 		}
 	}
 	step := &Step{

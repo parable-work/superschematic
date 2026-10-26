@@ -64,8 +64,14 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return nil, err
 	}
 	for _, e := range out.EnqueueTriggers {
-		for _, t := range e.SQLiteTriggers(qs) {
-			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: e.Origin})
+		for i, t := range e.SQLiteTriggers(qs) {
+			trigger := &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: e.Origin}
+			// The first trigger is the insert's or the update's, which
+			// backfill needs one of (D88).
+			if e.Backfill && i == 0 {
+				trigger.Backfill = e.SQLiteBackfillSQL(qs)
+			}
+			m.Triggers = append(m.Triggers, trigger)
 		}
 	}
 
@@ -79,6 +85,9 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return nil, err
 	}
 	m.RawSQL = modelRawSQL(pieces)
+	for _, s := range out.RoleSeeds {
+		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
+	}
 	m.sort()
 	return m, nil
 }

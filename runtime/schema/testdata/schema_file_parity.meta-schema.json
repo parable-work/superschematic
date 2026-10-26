@@ -3712,6 +3712,10 @@
     "EnqueueOnChange": {
       "additionalProperties": false,
       "properties": {
+        "backfill": {
+          "default": false,
+          "type": "boolean"
+        },
         "fields": {
           "default": [],
           "items": {
@@ -5346,6 +5350,25 @@
       },
       "type": "object"
     },
+    "RoleSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "permissions"
+      ],
+      "type": "object"
+    },
     "ScalarDef": {
       "additionalProperties": false,
       "properties": {
@@ -5841,6 +5864,13 @@
             "Projection"
           ],
           "type": "string"
+        },
+        "seedRoles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RoleSeed"
+          },
+          "type": "array"
         },
         "server": {
           "$ref": "#/$defs/ServerDecl"

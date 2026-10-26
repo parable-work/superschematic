@@ -120,12 +120,15 @@ path for when the store is unavailable.
 - **Permissions on the operation.** `extends Authenticated`, `@auth`,
   `@requirePermission([...])`, `@publicRoute`. For users and sign-in, turn
   on the user model (`implements User<{ login }>` on a DB table,
-  `@userSessions` on an API class) instead of writing auth.
+  `@userSessions` on an API class) instead of writing auth. Seed the
+  roles new users get with `@seedRoles([{ name, permissions }])` on the
+  `UserRole` table, so an approved user can act with no admin step.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
   transaction as the change that causes them; `key` with `onDuplicate` or
   `serialize` for one waiting or one running message per key;
-  `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
+  `@enqueueOnChange` on a table to enqueue whatever writes its rows, with
+  `backfill: true` (or `stack queue backfill`) for the rows already there; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
@@ -164,6 +167,10 @@ Most are load errors; knowing them saves a build round-trip:
 - Every plain class in a DB schema is a table; give each one a `@key`.
   A `@jsonField` class, a `@queue` message, a `@projection` and a type
   that composes a behavior are not tables.
+- A required date or time column has no default unless it is `createdAt`
+  or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
+  Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
+  the time of the insert is the right value.
 
 ## Starting a project
 

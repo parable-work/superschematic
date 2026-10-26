@@ -197,10 +197,12 @@ func (d *differ) diffTriggers() {
 				seed.seed.triggers = append(seed.seed.triggers, tt)
 				continue
 			}
-			d.add(&change{
+			c := d.add(&change{
 				op: opCreateTrigger, phase: Expand, subject: triggerSubject(tt.Table, tt.Name),
 				table: tt.Table, trigger: tt,
 			})
+			// A new table has no rows to backfill (D88).
+			c.backfill = tt.Backfill != "" && d.existing(c)
 			continue
 		}
 		matched[ft.Table+"/"+ft.Name] = true

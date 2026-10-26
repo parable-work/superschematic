@@ -104,11 +104,11 @@ stops waiting for may still finish.`
 func newStackQueueCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "queue",
-		Short: "List, retry and drop the dead messages of a queue",
+		Short: "List, retry and drop the dead messages of a queue, and backfill it",
 		Long:  stackQueueLong,
 		Args:  cobra.NoArgs,
 	}
-	cmd.AddCommand(newStackQueueDeadCmd(a), newStackQueueRetryCmd(a), newStackQueueDropCmd(a))
+	cmd.AddCommand(newStackQueueDeadCmd(a), newStackQueueRetryCmd(a), newStackQueueDropCmd(a), newStackQueueBackfillCmd(a))
 	return cmd
 }
 
@@ -269,6 +269,11 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 	}
 	req := request(service, queue)
 	req.Key, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
+	if req.Operation == queueops.Backfill {
+		if req.Backfills, err = c.queueBackfills(service, queue); err != nil {
+			return err
+		}
+	}
 	doc, err := queueops.Document(req)
 	if err != nil {
 		return err
@@ -428,6 +433,8 @@ func writeQueueText(w io.Writer, environment, ref string, r *queueops.Result) er
 		for _, id := range r.IDs {
 			fmt.Fprintf(&b, "  %s\n", id)
 		}
+	case queueops.Backfill:
+		writeBackfillText(&b, environment, ref, r)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "49b7866e0ba67c03f26f6a4711ebd6e175438a4e9720871194d49e33a683ab36",
+  "hash": "640f0967aa4d092403cad30ec8b37b93beee6ed7cbbb1b1943a0304500ae614d",
+  "service": "fixture-user-model-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "seedRole",
+      "phase": "expand",
+      "statements": [
+        "INSERT INTO \"role\" (\"name\", \"permissions\") VALUES ('member', '[\"identity.roles.read\"]')\nON CONFLICT (\"name\") DO UPDATE SET \"permissions\" = excluded.\"permissions\" WHERE json_array_length(\"role\".\"permissions\") = 0"
+      ],
+      "subject": "role/role/member",
+      "transactional": true
+    }
+  ],
+  "to": "f7e84ea694670e6241c12fcade6f5f053891cc1cf445717ac060cf90ed3178b7",
+  "toModel": null,
+  "version": 1
+}

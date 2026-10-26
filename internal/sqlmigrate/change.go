@@ -54,6 +54,10 @@ const (
 	opDropIndex        op = "dropIndex"
 	opDropColumn       op = "dropColumn"
 	opDropTable        op = "dropTable"
+
+	// The roles @seedRoles keeps in a UserRole table (D88).
+	opSeedRole   op = "seedRole"
+	opUpdateRole op = "updateRole"
 )
 
 // rank is a change's place in its phase. Expand runs renames, then creates
@@ -107,6 +111,11 @@ var rank = map[op]int{
 	opDropIndex:      35,
 	opDropColumn:     36,
 	opDropTable:      37,
+
+	// A role is seeded, or updated, once its table and the unique name
+	// its insert's conflict reads exist; in contract, before any drop.
+	opSeedRole:   17,
+	opUpdateRole: 17,
 }
 
 // rankOf is c's place in its phase: its op's rank, scaled so the raw SQL
@@ -191,6 +200,16 @@ type change struct {
 	// onDuplicate keeps, so the build finds none it refuses.
 	dedupe *QueueKey
 
+	// backfill is set on the creation of an @enqueueOnChange trigger with
+	// backfill on a table the previous model has (D88): the step runs the
+	// trigger's Backfill after creating it.
+	backfill bool
+
+	// role is a @seedRoles role the change inserts or updates, oldRole the
+	// previous model's (D88).
+	role    *RoleSeed
+	oldRole *RoleSeed
+
 	hazards []*Hazard
 }
 
@@ -259,6 +278,8 @@ func triggerSubject(table, name string) string {
 func viewSubject(v *View) string { return "view/" + v.Schema + "." + v.Name }
 
 func rawSQLSubject(id string) string { return "rawSql/" + id }
+
+func roleSubject(table, name string) string { return "role/" + table + "/" + name }
 
 // addHazard adds a hazard of class to c, or appends reason to the one c
 // already has of that class and reader.

@@ -163,6 +163,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_enqueue.go, D80).
 	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
 
+	// The roles a UserRole table holds from its first migration on
+	// (core_seed_roles.go, D88).
+	specs = append(specs, seedRolesDecorator())
+
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
 	specs = append(specs, deriverDecorator())

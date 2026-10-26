@@ -131,6 +131,13 @@ default that breaks them fails the build. A new order starts `Placed`:
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="export abstract class Order extends" to="status: Default" />
 
+`Default<T, "now">` on a required `Temporal.DateTime`, `Temporal.Date` or
+`Temporal.Time` field of a DB table is the time of the insert, which the
+database writes: its column's `DEFAULT` is `CURRENT_TIMESTAMP`,
+`CURRENT_DATE` or `CURRENT_TIME`, and no decoder fills it in. Without it
+such a column has no default, unless it is `createdAt` or `updatedAt`
+([Columns](/superschematic/guides/database-tables/#columns)).
+
 ## Constraints
 
 `Validate<T, C>` adds constraints to a field. `shop-db`'s address bounds

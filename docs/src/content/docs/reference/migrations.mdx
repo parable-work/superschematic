@@ -269,8 +269,8 @@ Each step lists the hazard classes it falls in.
 
 | Class | The step | For example |
 | --- | --- | --- |
-| `destructive` | deletes data the new version cannot recover | dropping a table, a column or a history table; a narrowing cast that truncates; changing a vector's dimensions, whose stored vectors must be cleared or embedded again |
-| `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
+| `destructive` | deletes data the new version cannot recover | dropping a table, a column or a history table; a narrowing cast that truncates; changing a vector's dimensions, whose stored vectors must be cleared or embedded again; setting a seeded role's permissions, which replaces any an administrator gave it |
+| `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table, backfilling a queue from a new `@enqueueOnChange` |
 | `compat` | breaks a server built from the previous version, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
 | `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default on a table with rows |
 | `copy-table` | rebuilds the table by copying it, with the tables that reference it | SQLite only: a change its `ALTER TABLE` cannot make |
@@ -282,7 +282,7 @@ A hazard's id is `<class>:<subject>`, where the subject is the object the
 step changes as a path: `table/order`, `table/order/column/total`,
 `table/order/index/order_total_idx`, `table/order/constraint/<name>`,
 `function/<name>`, `trigger/<table>/<name>`, `view/<pool>.<name>`,
-`schema/<pool>`, `extension/<name>` or `rawSql/<id>`. An `api-breaking` id also names the
+`schema/<pool>`, `extension/<name>`, `rawSql/<id>` or `role/<table>/<name>`. An `api-breaking` id also names the
 reader: `api-breaking:table/order/column/total@shop-api/OrderView.total`.
 
 `compat` is judged against the server generated from the previous version.
@@ -380,6 +380,30 @@ the rows the generated code wrote and fails, naming the constraint, on any
 other. A field typed by a `@jsonField` class was `TEXT` then and is `JSONB`
 now: the plan casts it with `USING col::JSONB` (`data-dependent`).
 
+A database built before D88 gave every required date, time and timestamp
+column the time of the insert as its default. Now only an audit
+timestamp (`createdAt`, `updatedAt`), a timestamp of the tables the user
+model adds and a field declared `Default<T, "now">` have one, so the next
+plan drops the others' in `contract`, with no hazard (on SQLite, with the
+table's rebuild, `copy-table`), and an insert that leaves out such a
+column then fails `NOT NULL` rather than record the time it ran.
+
+## Seeded roles
+
+The roles a `UserRole` table's
+[`@seedRoles`](/superschematic/guides/users-and-sessions/#seed-the-roles)
+declares are rows the plan keeps there (D88), each a step of its own with
+the subject `role/<table>/<name>`:
+
+| Change | Plan |
+| --- | --- |
+| a role is seeded | `INSERT ... ON CONFLICT (name)` in `expand`, with no hazard: a role of the name that exists keeps its permissions, unless it has none, as one the first registration created before the seed existed has, which takes the seed's |
+| a seeded role gains permissions | `UPDATE` of its permissions in `expand` (`destructive`: it replaces any an administrator gave the role) |
+| a seeded role loses a permission | the same `UPDATE` in `contract`, since a server of the previous version may still serve a route the permission admits (`destructive`) |
+| a seed is removed | nothing: the role stays, since users may hold it |
+
+`create.sql` inserts every seeded role.
+
 ## Raw SQL
 
 `@rawSql` declares SQL the DB service runs after the objects its schema
@@ -439,6 +463,7 @@ and what a trigger enqueues add these (D80):
 | a queue keeps one waiting message per key (`onDuplicate` `replace` or `skip`) | the partial unique index of its ready messages by key, built after one statement marks `done` every ready message of a key but the one `onDuplicate` keeps (`destructive`). A server built from the previous version enqueues without `ON CONFLICT`, so its enqueue of a waiting key fails once the index is built (`compat`), and a duplicate it enqueues between the two statements fails the build (`data-dependent`) |
 | a queue serializes its keys | the partial unique index of its claimed messages by key, which fails while two claims hold one key (`data-dependent`) |
 | a table gains, changes or loses an [`@enqueueOnChange`](/superschematic/guides/queues/#enqueue-on-a-change) | on Postgres its function is created or replaced in `expand`, and its trigger created, or replaced when `on` changes; both are dropped in `contract`. On SQLite each trigger is created, replaced (dropped and created) or dropped, and a rebuild of the table creates its triggers again |
+| a table the previous version has gains an `@enqueueOnChange` with `backfill: true` | the step that creates the trigger then inserts a message for each row that meets `when`, under the queue's `onDuplicate`, in the same transaction (`blocking`: the trigger's lock keeps writes out while it runs). On SQLite the first of its triggers' steps does, or the table's rebuild, after the triggers. Changing an existing trigger backfills nothing ([Backfill](/superschematic/guides/queues/#backfill)) |
 
 ## Encrypted fields
 

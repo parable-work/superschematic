@@ -86,6 +86,7 @@ var repositoryCases = []repositoryCase{
 	}},
 	{fixture: "fixture-ddl-db", files: []string{"ddl.test.ts"}, tests: []string{
 		"a create that leaves a defaulted field unset writes what the column's DEFAULT gives a raw insert",
+		`a create leaves a Default<T, "now"> field and createdAt to the database, and no line is posted without postedAt`,
 		"a value a column's CHECK refuses fails the write, naming the constraint",
 		"deleting a category clears the references SET NULL names, and keeps their rows",
 		"a @jsonField value is a JSON object in its JSONB column, read back as the object",

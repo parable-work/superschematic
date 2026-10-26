@@ -42,6 +42,9 @@ export abstract class Merchant {
 // are read by when they were posted; a migration builds that index inside
 // its step, as the table is small. A line a bank import posted holds the
 // bank's id for it, unique among such lines, which the import upserts by.
+// A line has no default posting time, so an import that leaves it out
+// fails; the day it was entered on defaults to the day of the insert, and
+// its createdAt, an audit timestamp, to the time of it.
 @rawSql({
   id: "category_totals",
   dialects: ["postgres"],
@@ -77,7 +80,11 @@ export abstract class LineItem {
 
   postedAt: Temporal.DateTime;
 
+  enteredOn: Default<Temporal.Date, "now">;
+
   externalId: Nullable<string>;
 
   merchant: Nullable<Merchant>;
+
+  createdAt: Temporal.DateTime;
 }

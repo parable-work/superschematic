@@ -171,6 +171,11 @@ type TypeDef struct {
 	// trait (D50). Nil for every other type. See [UserRoleTrait].
 	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
 
+	// SeedRoles are the roles a UserRole table's @seedRoles declares (D88),
+	// which create.sql inserts and a migration plan keeps in step. Empty
+	// for every other type. See [RoleSeed].
+	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
+
 	// Origin names the declaration the loader expanded this type from:
 	// [OriginVersionGraph] for the graph tables a version graph adds.
 	// Empty for every authored type. The data forms have no key for it.

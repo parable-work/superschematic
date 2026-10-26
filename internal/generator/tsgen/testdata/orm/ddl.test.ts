@@ -1,6 +1,8 @@
 // The repositories of fixture-ddl-db on Postgres, over DDL that says what
 // its schema says (D83, D79): a create that leaves a defaulted field unset
-// writes the value the column's DEFAULT gives a raw insert, a value a
+// writes the value the column's DEFAULT gives a raw insert, one that leaves
+// a Default<T, "now"> field unset leaves it to the database and one that
+// leaves out a required timestamp is refused (D88), a value a
 // column's CHECK refuses fails the write, deleting a category clears the
 // references SET NULL names, a @jsonField value is a JSON object in its
 // JSONB column, and an upsert by a unique @index over an expression, or
@@ -48,8 +50,20 @@ describe.skipIf(dsn === '')('the DDL under the repositories', () => {
       { amountCents: cents(100), postedAt: new Date() },
       { amountCents: cents(200), postedAt: new Date(), memo: 'rent' },
     ]);
-    const raw = await db.pool.query(`INSERT INTO line_item (amount_cents) VALUES (300) RETURNING memo`);
+    const raw = await db.pool.query(`INSERT INTO line_item (amount_cents, posted_at) VALUES (300, now()) RETURNING memo`);
     expect(lines.map(l => l.memo)).toEqual([raw.rows[0].memo, 'rent']);
+  });
+
+  test('a create leaves a Default<T, "now"> field and createdAt to the database, and no line is posted without postedAt', async () => {
+    const line = await orm.lineItem.createOne({ amountCents: cents(600), postedAt: new Date('2026-01-02T03:04:05Z') });
+    const { rows } = await db.pool.query(
+      `SELECT entered_on = CURRENT_DATE AND created_at IS NOT NULL AS stamped FROM line_item WHERE id = $1`,
+      [uuidToDb(line.id)],
+    );
+    expect(rows[0].stamped).toBe(true);
+    expect(line.enteredOn).toBeTruthy();
+    await expect(orm.lineItem.createOne({ amountCents: cents(601) } as never)).rejects.toThrow(/postedAt is required/);
+    expect(await refusal(db.pool.query(`INSERT INTO line_item (amount_cents) VALUES (602)`))).toEqual({ code: '23502', constraint: undefined });
   });
 
   test("a value a column's CHECK refuses fails the write, naming the constraint", async () => {

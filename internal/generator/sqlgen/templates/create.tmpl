@@ -182,6 +182,15 @@ CREATE SCHEMA IF NOT EXISTS {{ $view.QuotedPool }};
 {{ projectionViewDDL $view }}
 {{- end }}
 {{- end }}
+{{- if .RoleSeeds }}
+
+-- Seed the roles a UserRole table's @seedRoles declares: a role of the
+-- name that exists keeps its permissions unless it has none
+{{- range $seed := .RoleSeeds }}
+
+{{ $seed.InsertSQL }};
+{{- end }}
+{{- end }}
 {{- template "rawSQL" (rawSQLAt .RawSQL "indexes") }}
 {{- define "rawSQL" }}
 {{- if .Pieces }}

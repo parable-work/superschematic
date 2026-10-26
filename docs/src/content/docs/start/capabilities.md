@@ -63,6 +63,7 @@ breaks your code, the type checker of each language points at the line.
 | A fixed set of values | an `enum` | the enum in each language, checked on decode | nothing | [Modeling types](/superschematic/guides/modeling-types/#enums) |
 | A table | an abstract class in a DB schema, with a `@key` | the DDL, a Go repository, the types | nothing | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
 | A generated key | `@key id: AutoGenerate<Identity.UUID>` | the database's default on insert | nothing | [Database tables](/superschematic/guides/database-tables/#tables-and-keys) |
+| A timestamp the database stamps | `createdAt` and `updatedAt`; `Default<Temporal.DateTime, "now">` on any other | `DEFAULT CURRENT_TIMESTAMP`; every other required time has none, so an insert that leaves it out fails | nothing | [Database tables](/superschematic/guides/database-tables/#columns) |
 | A foreign key, one-to-many | `Relation<T, { onDelete }>`, `HasMany<T>` | the constraint, and the ORM's reads across it | nothing | [Database tables](/superschematic/guides/database-tables/#relations) |
 | A unique column, an index | `@unique`, `@index<T>([...], { unique })` | the constraint or index | nothing | [Database tables](/superschematic/guides/database-tables/#indexes) |
 | Text search over a table | `@searchField` on the fields to search | a trigram-indexed `search_text` column | nothing | [Database tables](/superschematic/guides/database-tables/#text-search) |
@@ -100,6 +101,7 @@ breaks your code, the type checker of each language points at the line.
 | Permissions | `@requirePermission(["orders.write"])` | the check, a 403 without one | nothing | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | Users, sessions, sign-in | a table that `implements User<{ login }>` and one that `implements UserRole`; an API whose `authDb` is that database, with a `@userSessions` class | the `Session` and credential tables, the sign-in, sign-out and password routes, roles and grants | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#turn-it-on) |
 | User and role administration | `@userAdministration` | the routes that manage users, roles and grants | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#serve-the-session-routes) |
+| Roles every database starts with | `@seedRoles([{ name, permissions }])` on the `UserRole` table | the rows in `create.sql`, and the plan steps that keep them in step | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#seed-the-roles) |
 | One service calling another | `calls: [Other]` in the caller's config; `@requireService` or `@allowService` on the callee | a typed client of the callee in the caller's `Deps`, and the callee's check of the calling service | the call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#service-callers) |
 | An encrypted request body | `extends Encrypted`, `@encrypted` or `EncryptedField<T>` | the envelope's handling in the server and the SDKs | the decryptor | [API routes](/superschematic/guides/api-routes/#encrypted-payloads) |
 
@@ -112,6 +114,7 @@ breaks your code, the type checker of each language points at the line.
 | A worker that handles a queue | a class with `@worker({ queue, concurrency })` in an API schema | the claim loop, a deployable the stack runs | the handler | [Queues and workers](/superschematic/guides/queues/#write-a-worker) |
 | One waiting message per key, or one running | `@queue({ key, onDuplicate: "replace", serialize: true })` | the unique indexes, the enqueue's `ON CONFLICT`, claims that hold a key to one worker | nothing | [Queues and workers](/superschematic/guides/queues/#one-message-per-key) |
 | A message whatever writes a row | `@enqueueOnChange(Queue, { on, fields, when, message })` on a DB table | a trigger on Postgres and SQLite, its migration | nothing | [Queues and workers](/superschematic/guides/queues/#enqueue-on-a-change) |
+| A message for each row already there | `backfill: true` on `@enqueueOnChange`, or `stack queue backfill` | the inserts in the migration step that adds the trigger, or in one run of the command | nothing | [Queues and workers](/superschematic/guides/queues/#backfill) |
 
 ## Files, front ends and clients
 
