@@ -297,11 +297,13 @@ key is the primary key, a `@unique` field or a unique `@index`, named by
 its fields: `orm.ReviewUniqueByProductAuthor` in Go, and
 `['product', 'author']` in TypeScript (`upsertOne(input, on, update)`).
 The update writes what `UpdateOne` writes, `updatedAt` among it, but an
-update that sets no field leaves the row as it is and returns it. On a
-soft-deletable table a unique `@index` covers the live rows alone, so a
-deleted row never conflicts; a conflict with a deleted row on a full key,
-such as the primary key, is not updated, and the upsert fails with
-`ErrNotFound` (`NotFoundError`).
+update that sets no field leaves the row as it is and returns it. An
+upsert by a unique `@index` names the index's own target: its
+`expression`, `ON CONFLICT ((lower(label)))`, and its `where`, so Postgres
+infers a partial index. On a soft-deletable table a unique `@index` covers
+the live rows alone, so a deleted row never conflicts; a conflict with a
+deleted row on a full key, such as the primary key, is not updated, and
+the upsert fails with `ErrNotFound` (`NotFoundError`).
 
 ## Soft delete
 

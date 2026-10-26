@@ -414,7 +414,8 @@ type RelationModel struct {
 // UniqueKey is a key an upsert may be keyed by: Fields are its schema
 // fields, Name them joined by ",", Columns its columns, and Conflict the
 // conflict target of an upsert on it, "(sku)", or with the predicate of a
-// partial index, "(product_id, author_id) WHERE deleted_at IS NULL". Keep
+// partial index, "(product_id, author_id) WHERE deleted_at IS NULL", or
+// over an expression index's expression, "((lower(email)))". Keep
 // is the assignment an upsert that sets nothing writes, so the conflicting
 // row is returned: its first column set to itself.
 type UniqueKey struct {
@@ -733,7 +734,9 @@ func (t *TableModel) columnOfKey(key string) *ColumnModel {
 func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 	var keys []UniqueKey
 	seen := map[string]bool{}
-	add := func(fields []string, partial bool) error {
+	// idx is the unique @index a key is, nil for the primary key and a
+	// @unique field.
+	add := func(fields []string, idx *ir.IndexDef) error {
 		key := UniqueKey{Name: strings.Join(fields, ","), Fields: fields}
 		if seen[key.Name] {
 			return nil
@@ -752,35 +755,59 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 		for i, column := range key.Columns {
 			quoted[i] = QuoteIdentifier(column)
 		}
+		// The conflict target infers the index sqlgen writes: over its
+		// expression, when it has one (D83), and naming its predicate, the
+		// @index's where and, on a soft-deletable table, the live rows
+		// alone (IndexPredicate).
 		key.Conflict = "(" + strings.Join(quoted, ", ") + ")"
-		// sqlgen makes a unique @index on a soft-deletable table partial,
-		// over the live rows alone (uniqueIndexPredicate), and an upsert's
-		// conflict target names the predicate to infer it.
-		if partial && table.SoftDelete && !deletedAt {
-			key.Conflict += " WHERE deleted_at IS NULL"
+		if idx != nil {
+			if idx.Expression != "" {
+				key.Conflict = "((" + idx.Expression + "))"
+			}
+			live := ""
+			if table.SoftDelete && !deletedAt {
+				live = "deleted_at IS NULL"
+			}
+			if predicate := IndexPredicate(idx.Where, live); predicate != "" {
+				key.Conflict += " WHERE " + predicate
+			}
 		}
 		key.Keep = quoted[0] + " = EXCLUDED." + quoted[0]
 		keys = append(keys, key)
 		return nil
 	}
-	if err := add([]string{table.KeyField}, false); err != nil {
+	if err := add([]string{table.KeyField}, nil); err != nil {
 		return nil, err
 	}
 	for _, f := range td.Fields {
 		if f.Unique && !f.Key {
-			if err := add([]string{f.Name}, false); err != nil {
+			if err := add([]string{f.Name}, nil); err != nil {
 				return nil, err
 			}
 		}
 	}
-	for _, idx := range td.Indexes {
-		if idx.Unique && len(idx.Keys) > 0 {
-			if err := add(append([]string(nil), idx.Keys...), true); err != nil {
+	for i := range td.Indexes {
+		if idx := &td.Indexes[i]; idx.Unique && len(idx.Keys) > 0 {
+			if err := add(append([]string(nil), idx.Keys...), idx); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return keys, nil
+}
+
+// IndexPredicate is the predicate of a partial index, as sqlgen writes it
+// after WHERE and an upsert's conflict target names it to infer the index
+// (D83): an @index's where, and live, the predicate of a unique index over
+// a soft-deletable table's live rows, ANDed with it; "" for a full index.
+func IndexPredicate(where, live string) string {
+	switch {
+	case where == "":
+		return live
+	case live == "":
+		return where
+	}
+	return "(" + where + ") AND " + live
 }
 
 // UniqueKeyNamed returns the unique key named name (its fields joined by

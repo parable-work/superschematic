@@ -843,16 +843,10 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 
 // indexPredicate returns an index's partial-index predicate: @index's
 // where (D83), and for a unique index on a soft-deletable table
-// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it.
+// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it, as an
+// upsert's conflict target names it (sqlutil.IndexPredicate).
 func indexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
-	softDelete := uniqueIndexPredicate(idx, columns, indexColumns)
-	switch {
-	case idx.Where == "":
-		return softDelete
-	case softDelete == "":
-		return idx.Where
-	}
-	return "(" + idx.Where + ") AND " + softDelete
+	return sqlutil.IndexPredicate(idx.Where, uniqueIndexPredicate(idx, columns, indexColumns))
 }
 
 // uniqueIndexPredicate returns the partial-index predicate for a unique

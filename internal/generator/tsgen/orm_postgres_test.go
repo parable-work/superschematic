@@ -31,8 +31,10 @@ type repositoryCase struct {
 // queued message and raw rows through the codec; fixture-db's pages, the
 // counterpart of page_postgres_test.go; fixture-queue-db's order by on a
 // keyword table, order_by_postgres_test.go's; fixture-db's JSON column
-// through the codec; and fixture-user-model-db's user model tables,
-// user_model_postgres_test.go's. A fixture may run more than one file.
+// through the codec; fixture-user-model-db's user model tables,
+// user_model_postgres_test.go's; and fixture-ddl-db's defaults, checks,
+// SET NULL, JSONB and expression and partial unique indexes (D83) under
+// the repositories. A fixture may run more than one file.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", test: "ledger.test.ts", tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -67,6 +69,13 @@ var repositoryCases = []repositoryCase{
 		"a login that differs only in case is the same login, and the identity tables keep their keys unique",
 		"deleting a user deletes its sessions, credential and grants, and deleting a role its grants",
 		"a principal's base62 subject matches its user row through uuidToDb",
+	}},
+	{fixture: "fixture-ddl-db", test: "ddl.test.ts", tests: []string{
+		"a create that leaves a defaulted field unset writes what the column's DEFAULT gives a raw insert",
+		"a value a column's CHECK refuses fails the write, naming the constraint",
+		"deleting a category clears the references SET NULL names, and keeps their rows",
+		"a @jsonField value is a JSON object in its JSONB column, read back as the object",
+		"an upsert by a unique @index over an expression, or with a where, infers the index",
 	}},
 }
 

@@ -20,7 +20,8 @@ import (
 //   - deleting a category clears the nullable relations that SET NULL
 //     names, a child category's parent and a line's category, and keeps
 //     their rows;
-//   - the expression index and the partial index exist as declared;
+//   - the expression indexes and the partial indexes exist as declared,
+//     unique where the schema says so;
 //   - the raw SQL made a materialized view and its unique index, in the
 //     order the pieces run, so the view refreshes concurrently.
 //
@@ -99,16 +100,17 @@ func TestDDLOnPostgres(t *testing.T) {
 
 	// The indexes, as declared.
 	for name, want := range map[string]string{
-		"idx_category_label_lower": "USING btree (lower(label))",
+		"uq_category_label_lower":  "USING btree (lower(label))",
 		"idx_category_active_kind": "USING btree (kind) WHERE active",
 		"idx_line_item_posted_at":  "USING btree (posted_at)",
+		"uq_line_item_external":    "USING btree (external_id) WHERE (external_id IS NOT NULL)",
 	} {
 		var def string
 		if err := conn.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE indexname = $1`, name).Scan(&def); err != nil {
 			t.Errorf("index %s: %v", name, err)
 			continue
 		}
-		if !strings.Contains(def, want) {
+		if !strings.Contains(def, want) || strings.HasPrefix(name, "uq_") != strings.HasPrefix(def, "CREATE UNIQUE INDEX") {
 			t.Errorf("index %s is %s, want %s", name, def, want)
 		}
 	}

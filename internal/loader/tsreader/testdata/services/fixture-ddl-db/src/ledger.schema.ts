@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Default, Nullable, Validate } from "@superschematic/schema";
+import { Default, Nullable, Validate, jsonField } from "@superschematic/schema";
 import { AutoGenerate, Relation, index, key, rawSql } from "@superschematic/db";
 
 // What a category is for.
@@ -10,9 +10,9 @@ export enum CategoryKind {
 }
 
 // A category of spending. A category may sit under another, and deleting
-// the parent leaves its children at the top level. Labels are looked up
-// whatever their case, and the active categories by kind.
-@index<Category>(["label"], { name: "label_lower", expression: "lower(label)" })
+// the parent leaves its children at the top level. A label is unique
+// whatever its case, and the active categories are looked up by kind.
+@index<Category>(["label"], { unique: true, name: "label_lower", expression: "lower(label)" })
 @index<Category>(["kind"], { name: "active_kind", where: "active" })
 export abstract class Category {
   @key
@@ -29,11 +29,19 @@ export abstract class Category {
   parent: Nullable<Relation<Category, { onDelete: "SET NULL" }>>;
 }
 
+// The merchant a bank reports for a line, kept as JSON.
+@jsonField
+export abstract class Merchant {
+  name: string;
+  city: Nullable<string>;
+}
+
 // A line of spending. Deleting its category leaves the line uncategorized.
 // The dashboard reads each category's total from a materialized view the
 // raw SQL keeps, keyed by its category so it refreshes concurrently. Lines
 // are read by when they were posted; a migration builds that index inside
-// its step, as the table is small.
+// its step, as the table is small. A line a bank import posted holds the
+// bank's id for it, unique among such lines, which the import upserts by.
 @rawSql({
   id: "category_totals",
   dialects: ["postgres"],
@@ -54,6 +62,7 @@ export abstract class Category {
   up: "CREATE UNIQUE INDEX IF NOT EXISTS category_totals_category ON category_totals (category_id)"
 })
 @index<LineItem>(["postedAt"], { method: "btree", concurrently: false })
+@index<LineItem>(["externalId"], { unique: true, name: "external", where: "external_id IS NOT NULL" })
 export abstract class LineItem {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -67,4 +76,8 @@ export abstract class LineItem {
   confidence: Nullable<Validate<number, { min: 0; max: 1 }>>;
 
   postedAt: Temporal.DateTime;
+
+  externalId: Nullable<string>;
+
+  merchant: Nullable<Merchant>;
 }

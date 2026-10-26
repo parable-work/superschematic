@@ -22,8 +22,8 @@ CREATE TABLE category (
 );
 
 COMMENT ON TABLE category IS 'A category of spending. A category may sit under another, and deleting
-the parent leaves its children at the top level. Labels are looked up
-whatever their case, and the active categories by kind.';
+the parent leaves its children at the top level. A label is unique
+whatever its case, and the active categories are looked up by kind.';
 
 CREATE TABLE line_item (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -32,6 +32,8 @@ CREATE TABLE line_item (
   memo TEXT DEFAULT 'it''s unexplained' NOT NULL,
   confidence DOUBLE PRECISION,
   posted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  external_id TEXT,
+  merchant JSONB,
   CONSTRAINT ck_line_item_confidence CHECK (confidence >= 0 AND confidence <= 1)
 );
 
@@ -39,7 +41,8 @@ COMMENT ON TABLE line_item IS 'A line of spending. Deleting its category leaves 
 The dashboard reads each category''s total from a materialized view the
 raw SQL keeps, keyed by its category so it refreshes concurrently. Lines
 are read by when they were posted; a migration builds that index inside
-its step, as the table is small.';
+its step, as the table is small. A line a bank import posted holds the
+bank''s id for it, unique among such lines, which the import upserts by.';
 
 -- Add foreign key constraints
 
@@ -57,11 +60,13 @@ ALTER TABLE line_item
 
 -- Create indexes
 
-CREATE INDEX idx_category_label_lower ON category USING BTREE ((lower(label)));
+CREATE UNIQUE INDEX uq_category_label_lower ON category USING BTREE ((lower(label)));
 
 CREATE INDEX idx_category_active_kind ON category USING BTREE (kind) WHERE active;
 
 CREATE INDEX idx_line_item_posted_at ON line_item USING BTREE (posted_at);
+
+CREATE UNIQUE INDEX uq_line_item_external ON line_item USING BTREE (external_id) WHERE external_id IS NOT NULL;
 
 -- Raw SQL the schema declares (@rawSql), after every object above
 
