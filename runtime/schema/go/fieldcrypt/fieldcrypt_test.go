@@ -110,7 +110,7 @@ func buildVectors(t *testing.T) vectors {
 	}
 	token := seal("a Plaid access token", both, "PlaidItem", "accessToken", row, "access-sandbox-8ab976e3-8c64-4ff1-9f71-a3e5f9d1b2c0", fixedNonce(7))
 	empty := seal("the empty text", current, "PlaidItem", "accessToken", row, "", fixedNonce(30))
-	unicode := seal("text past ASCII", current, "Note", "body", "42", "café ☃ \U0001f511", fixedNonce(60))
+	unicode := seal("text past ASCII", current, "Note", "body", "42", "caf\u00e9 \u2603 \U0001f511", fixedNonce(60))
 	old := seal("under the previous key", previous, "PlaidItem", "accessToken", row, "access-sandbox-old", fixedNonce(90))
 	tampered := []byte(token.Envelope)
 	last := len(tampered) - 1
