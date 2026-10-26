@@ -15,12 +15,13 @@ import (
 var workerdCallsFixture = filepath.Join("..", "..", "runtime", "http", "typescript", "test", "workerd", "fixtures", "calls", "config.capnp")
 
 // capnpBinding is a binding of a Worker in a workerd config: its kind,
-// `text`, `service` or `wrapped`, and a text's or a service's value.
+// `text`, `service`, `wrapped` or `hyperdrive`, and a text's or a service's
+// value.
 type capnpBinding struct{ kind, value string }
 
 var (
 	capnpWorker      = regexp.MustCompile(`(?m)^const (\w+) :Workerd\.Worker = \(`)
-	capnpBindingLine = regexp.MustCompile(`\(name = "([A-Z0-9_]+)", (text|service|wrapped) = ("[^"]*")?`)
+	capnpBindingLine = regexp.MustCompile(`\(name = "([A-Z0-9_]+)", (text|service|wrapped|hyperdrive) = ("[^"]*")?`)
 )
 
 // workerdBindings reads each Worker's bindings from a workerd config.

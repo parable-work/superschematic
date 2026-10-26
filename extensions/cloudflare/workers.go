@@ -255,11 +255,18 @@ func bundleVersion(ctx registry.PlatformContext, v accountValues) (map[string]an
 			"contentSha256": ir.BundleFileToken(m.Name),
 		})
 	}
+	date := settingString(d.Settings, "compatibilityDate", CompatibilityDate)
+	flags := slices.Clone(WorkersCompatibilityFlags)
+	if date < NodeModulesDate && bindsHyperdrive(bindings) {
+		// node-postgres imports Node's modules, which an earlier date gives
+		// a Worker only under nodejs_compat (D92).
+		flags = append(flags, nodeCompatFlag)
+	}
 	version := map[string]any{
 		"mainModule":         MainModule,
 		"modules":            modules,
-		"compatibilityDate":  settingString(d.Settings, "compatibilityDate", CompatibilityDate),
-		"compatibilityFlags": slices.Clone(WorkersCompatibilityFlags),
+		"compatibilityDate":  date,
+		"compatibilityFlags": flags,
 	}
 	if len(bindings) > 0 {
 		version["bindings"] = bindings
@@ -282,9 +289,20 @@ const (
 	bindingSecretText   = "secret_text"
 	bindingSecretsStore = "secrets_store_secret"
 	bindingD1           = "d1"
+	bindingHyperdrive   = "hyperdrive"
 	bindingService      = "service"
 	bindingR2           = "r2_bucket"
 )
+
+// nodeCompatFlag is the compatibility flag that gives a Worker Node's
+// modules under a compatibility date before NodeModulesDate.
+const nodeCompatFlag = "nodejs_compat"
+
+// bindsHyperdrive reports whether a version's bindings hold a Hyperdrive
+// config's, whose Worker runs node-postgres (D92).
+func bindsHyperdrive(bindings []any) bool {
+	return slices.ContainsFunc(bindings, func(b any) bool { return b.(map[string]any)["type"] == bindingHyperdrive })
+}
 
 // configBindings returns a Worker's config as its version's bindings,
 // sorted by name (section 18.2):
@@ -301,7 +319,7 @@ const (
 //     environment (SecretName), which the entrypoint awaits once per
 //     isolate;
 //   - a derived value that names a binding (resourceBinding) adds it: a D1
-//     database, a callee's Worker, an R2 bucket.
+//     database, a Hyperdrive config, a callee's Worker, an R2 bucket.
 //
 // A secret binding needs the store bootstrap records as secretsStoreId.
 func configBindings(ctx registry.PlatformContext, v accountValues) ([]any, error) {
@@ -370,13 +388,16 @@ func configBindings(ctx registry.PlatformContext, v accountValues) ([]any, error
 //
 //   - a database connection on D1, `d1: {binding, database}`, is a d1
 //     binding named binding of the database's id;
+//   - a database connection through Hyperdrive, `hyperdrive: {binding,
+//     config}`, is a hyperdrive binding named binding of the config's id
+//     (D92);
 //   - a service endpoint whose `binding` is `{name, worker}` is a service
 //     binding named name to the callee's Worker;
 //   - a bucket connection whose `binding` is a name is an r2_bucket binding
 //     of that name to the bucket its `name` names.
 //
-// The connectors of D1 databases, of calls between Workers and of R2
-// buckets derive them.
+// The connectors of D1 databases, of databases on Hyperdrive, of calls
+// between Workers and of R2 buckets derive them.
 func resourceBinding(field string, value any) (map[string]any, error) {
 	m, _ := value.(map[string]any)
 	if m == nil {
@@ -391,6 +412,13 @@ func resourceBinding(field string, value any) (map[string]any, error) {
 			return nil, bad("a D1 connection names its binding and its database")
 		}
 		return map[string]any{"type": bindingD1, "name": name, "id": d1["database"]}, nil
+	}
+	if hyperdrive, ok := m["hyperdrive"].(map[string]any); ok {
+		name, _ := hyperdrive["binding"].(string)
+		if name == "" || hyperdrive["config"] == nil {
+			return nil, bad("a Hyperdrive connection names its binding and its config")
+		}
+		return map[string]any{"type": bindingHyperdrive, "name": name, "id": hyperdrive["config"]}, nil
 	}
 	switch binding := m["binding"].(type) {
 	case nil:

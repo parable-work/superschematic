@@ -164,8 +164,10 @@ func TestAWorkerBindsItsD1Database(t *testing.T) {
 	}
 }
 
-// TestD1Refusals: D1 runs SQLite alone, so a database whose DB service
-// lists no sqlite is refused; D1 ignores a location hint under a
+// TestD1Refusals: D1 runs SQLite alone, so a database a setting places on
+// it whose DB service lists no sqlite is refused, while one that lists
+// postgres first goes on Hyperdrive by default (D92); D1 ignores a location
+// hint under a
 // jurisdiction, so a database that sets both is refused; and a setting D1
 // has no value for is refused by the settings' schema.
 func TestD1Refusals(t *testing.T) {
@@ -176,7 +178,11 @@ func TestD1Refusals(t *testing.T) {
 	}{
 		"postgres alone": {
 			edit: func(s *ir.Stack) {
-				s.Deploy = append(s.Deploy, ir.ServiceRef{Name: "ledger-db", Kind: ir.SchemaKindDB})
+				ledger := ir.ServiceRef{Name: "ledger-db", Kind: ir.SchemaKindDB}
+				s.Deploy = append(s.Deploy, ledger)
+				s.Environments[0].Settings = append(s.Environments[0].Settings, &ir.DeployableSettings{
+					Of: ir.DeployableRef{Service: &ledger}, Platform: cloudflare.D1Platform,
+				})
 			},
 			want: "database ledger-db hosts ledger-db (postgres), and platform cloudflare.d1 runs only sqlite",
 		},
