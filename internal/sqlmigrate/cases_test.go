@@ -496,6 +496,23 @@ var planCases = []planCase{
 			enqueueShip(s, []string{"insert", "update"}, "note")
 			fieldNamed(s, "Order", "note").Required = true
 		}},
+	// SQLite rebuilds order for the check its note gains (D83), which
+	// drops the triggers its @enqueueOnChange made (D80) and the index raw
+	// SQL made on it: the copy creates the table with the check, the
+	// triggers after its indexes, and the phase ends by running the raw SQL
+	// again.
+	{name: "enqueue-on-change-rebuilt-with-check",
+		before: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+		},
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+			fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100)
+		}},
 
 	// Projections.
 	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {

@@ -317,6 +317,67 @@ func TestSQLiteRebuildCreatesTheTriggersAgain(t *testing.T) {
 	}
 }
 
+// TestSQLiteRebuildKeepsChecksTriggersAndRawSQLInOrder: a rebuild of a
+// table that gains a check (D83), with an @enqueueOnChange (D80) and raw
+// SQL that indexes it (D83), creates the new table with the check, so the
+// copy is held to it, creates the triggers once the table has its name and
+// its indexes, after the copy, which so enqueues nothing, and the phase
+// ends with the step that runs the raw SQL again.
+func TestSQLiteRebuildKeepsChecksTriggersAndRawSQLInOrder(t *testing.T) {
+	var pc planCase
+	for _, c := range sqlitePlanCases() {
+		if c.name == "enqueue-on-change-rebuilt-with-check" {
+			pc = c
+		}
+	}
+	plan := pc.plan(t)
+	var rebuild, rerun *Step
+	last := map[Phase]*Step{}
+	for _, step := range plan.Steps {
+		switch step.Op {
+		case "copyTable":
+			rebuild = step
+		case "rerunRawSQL":
+			rerun = step
+		}
+		last[step.Phase] = step
+	}
+	if rebuild == nil || rerun == nil {
+		t.Fatalf("the plan has no rebuild or no rerun of the raw SQL: %+v", plan.Steps)
+	}
+	if rerun.Phase != rebuild.Phase || last[rebuild.Phase] != rerun || rerun.Index < rebuild.Index {
+		t.Errorf("the raw SQL runs again in step %d of %s, and the rebuild is step %d of %s; want it last in the rebuild's phase", rerun.Index, rerun.Phase, rebuild.Index, rebuild.Phase)
+	}
+	if !slices.ContainsFunc(rerun.Statements, func(s string) bool { return strings.Contains(s, "order_code_lower") }) {
+		t.Errorf("the rerun runs %q, want the raw SQL's index", rerun.Statements)
+	}
+	index := func(match func(string) bool) []int {
+		var at []int
+		for i, statement := range rebuild.Statements {
+			if match(statement) {
+				at = append(at, i)
+			}
+		}
+		return at
+	}
+	created := index(func(s string) bool { return strings.HasPrefix(s, `CREATE TABLE "_new_order"`) })
+	if len(created) != 1 || !strings.Contains(rebuild.Statements[created[0]], `CHECK (length("note") <= 100)`) {
+		t.Fatalf("the rebuild creates order as %q, want it with the check on note", rebuild.Statements)
+	}
+	copied := index(func(s string) bool { return strings.HasPrefix(s, `INSERT INTO "_new_order"`) })
+	renamed := index(func(s string) bool { return s == `ALTER TABLE "_new_order" RENAME TO "order"` })
+	indexes := index(func(s string) bool {
+		return strings.HasPrefix(s, "CREATE INDEX ") || strings.HasPrefix(s, "CREATE UNIQUE INDEX ")
+	})
+	triggers := index(func(s string) bool { return strings.HasPrefix(s, "CREATE TRIGGER ") })
+	if len(copied) != 1 || len(renamed) != 1 || len(triggers) != 2 || len(indexes) == 0 {
+		t.Fatalf("the rebuild runs %q", rebuild.Statements)
+	}
+	if !(created[0] < copied[0] && copied[0] < renamed[0] && renamed[0] < indexes[len(indexes)-1] && indexes[len(indexes)-1] < triggers[0]) {
+		t.Errorf("the rebuild runs the create at %d, the copy at %d, the rename at %d, the last index at %d and the first trigger at %d; want them in that order", created[0], copied[0], renamed[0], indexes[len(indexes)-1], triggers[0])
+	}
+}
+
 // TestSQLiteRebuildBatches: each table is copied or dropped by at most one
 // rebuild per phase, and a table a rebuild copies or drops in a phase has
 // no other step in it but its renames.

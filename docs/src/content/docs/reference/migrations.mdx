@@ -533,8 +533,8 @@ references it, directly or through another table, in one step:
 1. `PRAGMA defer_foreign_keys = ON`, which defers the foreign key checks
    to the step's commit;
 2. create each table as the phase leaves it under a temporary name
-   (`_new_order`), with its primary key and foreign keys, which name the
-   other new tables;
+   (`_new_order`), with its primary key, its checks and its foreign keys,
+   which name the other new tables;
 3. copy the rows, referenced tables first, mapping each column to its
    name after the renames, filling the columns a table gains from their
    defaults, leaving `search_text` to SQLite, which computes it, casting
@@ -544,7 +544,11 @@ references it, directly or through another table, in one step:
 4. drop the old tables, referencing tables first;
 5. rename each new table, which rewrites the foreign keys that name it;
 6. create the unique indexes and indexes again, and the triggers the phase
-   leaves on each table, which SQLite drops with the old one.
+   leaves on each table, which SQLite drops with the old one, after the
+   copy, so the copied rows enqueue nothing.
+
+The phase then ends by running the raw SQL again
+([Raw SQL](#raw-sql)), which the old tables took with them too.
 
 A table that references the rebuilt one and does not change is copied as
 it is. Every change the phase makes to the tables of a rebuild shares it:
