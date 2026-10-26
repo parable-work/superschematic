@@ -59,6 +59,12 @@ type walker struct {
 	// belong in Imports.
 	suppressRecording bool
 
+	// foreignClass is set while resolving the fields of a class another
+	// service declares (a cross-service @source target): its decorators
+	// answer to that service's kind, which that service's own load checks,
+	// so a DB table's or a projection's @column passes here (D90).
+	foreignClass bool
+
 	// identityTables records the class node of each type that takes a user
 	// model trait and stands where one may, for the base-class check once
 	// every file is walked (finishIdentityTraits).
@@ -173,7 +179,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 		return errorAtNode(d.node, "decorator @%s is not valid on %s", d.id.name, target)
 	}
 	kind := string(w.cfg.Kind)
-	if !spec.AllowsKind(kind) {
+	if !spec.AllowsKind(kind) && !w.foreignClass {
 		return errorAtNode(d.node, "%s", spec.KindError(kind))
 	}
 	if spec.Apply == nil {
@@ -1241,10 +1247,10 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		// verification data.
 	}
 
-	prevSuppress := w.suppressRecording
-	w.suppressRecording = true
+	prevSuppress, prevForeign := w.suppressRecording, w.foreignClass
+	w.suppressRecording, w.foreignClass = true, external
 	sourceFields, _ := w.resolveClassFieldDefs(id.decl)
-	w.suppressRecording = prevSuppress
+	w.suppressRecording, w.foreignClass = prevSuppress, prevForeign
 
 	target := targetService + "." + id.name
 	if external {

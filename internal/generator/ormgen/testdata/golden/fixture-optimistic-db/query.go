@@ -626,6 +626,11 @@ type ShelfFilter struct {
 	// ReferencedByStockShelf filters on the presence or absence of a
 	// Stock whose shelf points at this row.
 	ReferencedByStockShelf *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []ShelfFilter
 }
 
 // ShelfUpdate provides fields that can be updated
@@ -904,6 +909,30 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -915,6 +944,15 @@ type StockFilter struct {
 	Version    *Int64Filter
 	// ShelfID allows filtering by foreign key
 	ShelfID *UUIDFilter
+	// Shelf keeps the rows whose shelf is among the live Shelf rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Shelf *ShelfFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []StockFilter
 }
 
 // StockUpdate provides fields that can be updated
@@ -1158,6 +1196,41 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			} else {
 				conditions = append(conditions, `stock.shelf_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.Shelf != nil {
+		before := len(*args)
+		through := f.Shelf.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `shelf.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`stock.shelf_id IN (SELECT shelf.id FROM shelf%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

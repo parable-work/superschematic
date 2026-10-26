@@ -825,6 +825,11 @@ type CategoryFilter struct {
 	// ReferencedByLineItemCategory filters on the presence or absence of a
 	// LineItem whose category points at this row.
 	ReferencedByLineItemCategory *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []CategoryFilter
 }
 
 // CategoryUpdate provides fields that can be updated
@@ -1031,6 +1036,30 @@ func (f *CategoryFilter) conditions(args *[]interface{}, paramOffset int) []stri
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1045,6 +1074,10 @@ type LineItemFilter struct {
 	UpdatedAt   *DateTimeFilter
 	// CategoryID allows filtering by foreign key
 	CategoryID *UUIDFilter
+	// Category keeps the rows whose category is among the Category rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose category is null is not kept.
+	Category *CategoryFilter
 	// SearchText keeps the rows whose search fields hold each of its words,
 	// in any case (D62): its runs of characters that are not White_Space,
 	// the first 8 of them. Each word is a condition on the table's
@@ -1052,6 +1085,11 @@ type LineItemFilter struct {
 	// with its \, % and _ escaped, so they match themselves. A text without
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LineItemFilter
 }
 
 // LineItemUpdate provides fields that can be updated
@@ -1464,12 +1502,46 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 			}
 		}
 	}
+	if f.Category != nil {
+		before := len(*args)
+		through := f.Category.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"lineItem"."categoryId" IN (SELECT "budgetCategory".id FROM "budgetCategory"%s)`, where))
+	}
 
 	if f.SearchText != nil {
 		for _, term := range searchTerms(*f.SearchText) {
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"lineItem".search_text ILIKE $%d ESCAPE '\'`, paramNum))
 			*args = append(*args, searchLikePattern(term))
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 
@@ -1482,6 +1554,11 @@ type NoteFilter struct {
 	Body      *StringFilter
 	UpdatedAt *DateTimeFilter
 	Version   *Int64Filter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []NoteFilter
 }
 
 // NoteUpdate provides fields that can be updated
@@ -1695,6 +1772,30 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			} else {
 				conditions = append(conditions, `"ledgerNote"._version IS NOT NULL`)
 			}
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

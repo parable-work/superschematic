@@ -15,12 +15,18 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -48,6 +54,8 @@ export interface OrderFilter {
   placedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows a OrderLine row's order points at, or none does. */
   referencedByOrderLineOrder?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderFilter[];
 }
 
 /** The members findOne and findMany order rows of Order by. */
@@ -64,6 +72,11 @@ export interface OrderPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Order includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderRelations {
+  readonly orderLines: Related<OrderLineRow, OrderLineRelations, 'many'>;
+}
+
 /** The repository of Order. */
 export type OrderRepository = Repository<
   OrderRow,
@@ -74,7 +87,8 @@ export type OrderRepository = Repository<
   OrderSortField,
   OrderUniqueKey,
   T.IdentityUUID,
-  OrderPageKey
+  OrderPageKey,
+  OrderRelations
 >;
 
 /** The "order" table, as the runtime reads and writes it. */
@@ -89,7 +103,9 @@ export const orderTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"placed_at\"",
     qualifiedColumns: "\"order\".\"id\", \"order\".\"placed_at\"",
+    selectColumn: "\"order\".\"%s\"",
     getOne: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"order\" WHERE id = $1",
     getMany: "SELECT \"id\", \"placed_at\" FROM \"order\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -121,6 +137,9 @@ export const orderTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
+  ],
+  many: [
+    { name: "orderLines", target: "orderLine", column: "orderId" },
   ],
 };
 
@@ -161,6 +180,12 @@ export interface OrderLineFilter {
   productId?: UuidFilter<T.IdentityUUID> & NullFilter;
   quantity?: NumberFilter<T.GenericInt64>;
   note?: StringFilter<string> & NullFilter;
+  /** The rows whose order is among the Order rows the filter finds (D90). */
+  order?: OrderFilter;
+  /** The rows whose product is among the Product rows the filter finds; a row whose product is null is not among them (D90). */
+  product?: ProductFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderLineFilter[];
 }
 
 /** The members findOne and findMany order rows of OrderLine by. */
@@ -177,6 +202,12 @@ export interface OrderLinePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of OrderLine includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderLineRelations {
+  readonly order: Related<OrderRow, OrderRelations, 'one'>;
+  readonly product: Related<ProductRow, ProductRelations, 'optional'>;
+}
+
 /** The repository of OrderLine. */
 export type OrderLineRepository = Repository<
   OrderLineRow,
@@ -187,7 +218,8 @@ export type OrderLineRepository = Repository<
   OrderLineSortField,
   OrderLineUniqueKey,
   T.IdentityUUID,
-  OrderLinePageKey
+  OrderLinePageKey,
+  OrderLineRelations
 >;
 
 /** The order_line table, as the runtime reads and writes it. */
@@ -205,7 +237,9 @@ export const orderLineTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
     qualifiedColumns: "\"order_line\".\"id\", \"order_line\".\"order_id\", \"order_line\".\"product_id\", \"order_line\".\"quantity\", \"order_line\".\"note\"",
+    selectColumn: "\"order_line\".\"%s\"",
     getOne: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id = $1",
+    getOneFields: "SELECT %s FROM order_line WHERE id = $1",
     getMany: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -235,6 +269,10 @@ export const orderLineTable: TableDefinition = {
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\" FROM order_line WHERE (id) IN (%s)" },
   },
+  relations: [
+    { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
+    { field: "product", column: "productId", target: "product", probe: "order_line.product_id IN (SELECT product.id FROM product%s)" },
+  ],
 };
 
 /**
@@ -262,6 +300,8 @@ export interface ProductFilter {
   name?: StringFilter<string>;
   /** The rows a OrderLine row's product points at, or none does. */
   referencedByOrderLineProduct?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ProductFilter[];
 }
 
 /** The members findOne and findMany order rows of Product by. */
@@ -278,6 +318,11 @@ export interface ProductPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Product includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ProductRelations {
+  readonly orderLines: Related<OrderLineRow, OrderLineRelations, 'many'>;
+}
+
 /** The repository of Product. */
 export type ProductRepository = Repository<
   ProductRow,
@@ -288,7 +333,8 @@ export type ProductRepository = Repository<
   ProductSortField,
   ProductUniqueKey,
   T.IdentityUUID,
-  ProductPageKey
+  ProductPageKey,
+  ProductRelations
 >;
 
 /** The product table, as the runtime reads and writes it. */
@@ -303,7 +349,9 @@ export const productTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"name\"",
     qualifiedColumns: "\"product\".\"id\", \"product\".\"name\"",
+    selectColumn: "\"product\".\"%s\"",
     getOne: "SELECT \"id\", \"name\" FROM product WHERE id = $1",
+    getOneFields: "SELECT %s FROM product WHERE id = $1",
     getMany: "SELECT \"id\", \"name\" FROM product WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -335,6 +383,9 @@ export const productTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
+  ],
+  many: [
+    { name: "orderLines", target: "orderLine", column: "productId" },
   ],
 };
 
@@ -371,6 +422,8 @@ export const fixtureQueueDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -385,6 +438,7 @@ export const fixtureQueueDbOrm: OrmDefinition = {
     notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

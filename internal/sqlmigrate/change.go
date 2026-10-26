@@ -256,7 +256,16 @@ func triggerSubject(table, name string) string {
 	return "trigger/" + table + "/" + name
 }
 
-func viewSubject(v *View) string { return "view/" + v.Schema + "." + v.Name }
+func viewSubject(v *View) string { return "view/" + viewRelation(v) }
+
+// viewRelation is the view as a reader names it: schema.name, or its name
+// alone in the search_path's schema (D90).
+func viewRelation(v *View) string {
+	if v.Schema == "" {
+		return v.Name
+	}
+	return v.Schema + "." + v.Name
+}
 
 func rawSQLSubject(id string) string { return "rawSql/" + id }
 

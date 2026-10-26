@@ -569,7 +569,7 @@ func (r *RecipeRefRepository) batchRootByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -647,7 +647,7 @@ func (r *RecipeRefRepository) batchParentRefByIDs(ctx context.Context, ids []typ
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -725,7 +725,7 @@ func (r *RecipeRefRepository) batchBaseCommitByIDs(ctx context.Context, ids []ty
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -803,7 +803,7 @@ func (r *RecipeRefRepository) batchHeadCommitByIDs(ctx context.Context, ids []ty
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -1709,6 +1709,37 @@ func (r *RecipeRefRepository) FindMany(ctx context.Context, filter *RecipeRefFil
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *RecipeRefRepository) findRelated(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) ([]*types.RecipeRef, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := recipeRefFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, RecipeRefAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_ref")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildRecipeRefOrderByClause(opts.OrderBy, `recipe_ref`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM recipe_ref%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // recipeRefFieldStrings are the columns fields selects, in OrderedMembers

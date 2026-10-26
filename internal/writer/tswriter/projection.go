@@ -28,7 +28,11 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 	e.comment("", def.Comment)
 
 	fmt.Fprintf(&e.body, "@%s<%s>({\n", e.use("projection"), e.renderTypeName(p.Source, def.Name))
-	fmt.Fprintf(&e.body, "  pool: %s,\n  name: %s,\n  migration: %s,\n", quote(p.Pool), quote(p.Name), quote(p.Migration))
+	// A view without a pool is created beside the tables (D90).
+	if p.Pool != "" {
+		fmt.Fprintf(&e.body, "  pool: %s,\n", quote(p.Pool))
+	}
+	fmt.Fprintf(&e.body, "  name: %s,\n  migration: %s,\n", quote(p.Name), quote(p.Migration))
 	if len(p.Predicates) > 0 {
 		e.body.WriteString("  where: [\n")
 		for _, pred := range p.Predicates {

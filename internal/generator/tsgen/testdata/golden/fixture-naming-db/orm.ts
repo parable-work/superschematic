@@ -15,12 +15,18 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -55,6 +61,8 @@ export interface CategoryFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows a LineItem row's category points at, or none does. */
   referencedByLineItemCategory?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CategoryFilter[];
 }
 
 /** The members findOne and findMany order rows of Category by. */
@@ -71,6 +79,11 @@ export interface CategoryPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Category includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CategoryRelations {
+  readonly lineItems: Related<LineItemRow, LineItemRelations, 'many'>;
+}
+
 /** The repository of Category. */
 export type CategoryRepository = Repository<
   CategoryRow,
@@ -81,7 +94,8 @@ export type CategoryRepository = Repository<
   CategorySortField,
   CategoryUniqueKey,
   T.IdentityUUID,
-  CategoryPageKey
+  CategoryPageKey,
+  CategoryRelations
 >;
 
 /** The "budgetCategory" table, as the runtime reads and writes it. */
@@ -98,7 +112,9 @@ export const categoryTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"displayName\", \"kind\", \"createdAt\"",
     qualifiedColumns: "\"budgetCategory\".\"id\", \"budgetCategory\".\"displayName\", \"budgetCategory\".\"kind\", \"budgetCategory\".\"createdAt\"",
+    selectColumn: "\"budgetCategory\".\"%s\"",
     getOne: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"budgetCategory\" WHERE id = $1",
     getMany: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -130,6 +146,9 @@ export const categoryTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByLineItemCategory", probe: "SELECT 1 FROM \"lineItem\" WHERE \"lineItem\".\"categoryId\" = \"budgetCategory\".id", live: " AND \"lineItem\".\"deletedAt\" IS NULL" },
+  ],
+  many: [
+    { name: "lineItems", target: "lineItem", column: "categoryId" },
   ],
 };
 
@@ -183,6 +202,10 @@ export interface LineItemFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows whose category is among the Category rows the filter finds; a row whose category is null is not among them (D90). */
+  category?: CategoryFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly LineItemFilter[];
 }
 
 /** The members findOne and findMany order rows of LineItem by. */
@@ -199,6 +222,11 @@ export interface LineItemPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of LineItem includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface LineItemRelations {
+  readonly category: Related<CategoryRow, CategoryRelations, 'optional'>;
+}
+
 /** The repository of LineItem. */
 export type LineItemRepository = SoftDeleteRepository<
   LineItemRow,
@@ -209,7 +237,8 @@ export type LineItemRepository = SoftDeleteRepository<
   LineItemSortField,
   LineItemUniqueKey,
   T.IdentityUUID,
-  LineItemPageKey
+  LineItemPageKey,
+  LineItemRelations
 >;
 
 /** The "lineItem" table, as the runtime reads and writes it. */
@@ -231,7 +260,9 @@ export const lineItemTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\"",
     qualifiedColumns: "\"lineItem\".\"id\", \"lineItem\".\"amountCents\", \"lineItem\".\"postedOn\", \"lineItem\".\"memo\", \"lineItem\".\"externalId\", \"lineItem\".\"categoryId\", \"lineItem\".\"createdAt\", \"lineItem\".\"updatedAt\", \"lineItem\".\"deletedAt\"",
+    selectColumn: "\"lineItem\".\"%s\"",
     getOne: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"lineItem\" WHERE id = $1",
     getMany: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE id IN (%s)",
     live: " AND \"deletedAt\" IS NULL",
     liveWhere: " WHERE \"deletedAt\" IS NULL",
@@ -264,6 +295,9 @@ export const lineItemTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (id) IN (%s)" },
     "category,externalId": { conflict: "(\"categoryId\", \"externalId\") WHERE \"deletedAt\" IS NULL", keep: "\"categoryId\" = EXCLUDED.\"categoryId\"", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (\"categoryId\", \"externalId\") IN (%s) AND (\"deletedAt\" IS NULL)" },
   },
+  relations: [
+    { field: "category", column: "categoryId", target: "category", probe: "\"lineItem\".\"categoryId\" IN (SELECT \"budgetCategory\".id FROM \"budgetCategory\"%s)" },
+  ],
 };
 
 /**
@@ -297,6 +331,8 @@ export interface NoteFilter {
   body?: StringFilter<string>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   _version?: NumberFilter<number>;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly NoteFilter[];
 }
 
 /** The members findOne and findMany order rows of Note by. */
@@ -313,6 +349,10 @@ export interface NotePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Note includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface NoteRelations {
+}
+
 /** The repository of Note. */
 export type NoteRepository = Repository<
   NoteRow,
@@ -323,7 +363,8 @@ export type NoteRepository = Repository<
   NoteSortField,
   NoteUniqueKey,
   T.IdentityUUID,
-  NotePageKey
+  NotePageKey,
+  NoteRelations
 >;
 
 /** The "ledgerNote" table, as the runtime reads and writes it. */
@@ -341,7 +382,9 @@ export const noteTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\"",
     qualifiedColumns: "\"ledgerNote\".\"id\", \"ledgerNote\".\"bodyText\", \"ledgerNote\".\"updatedAt\", \"ledgerNote\".\"updatedBy\", \"ledgerNote\".\"_version\"",
+    selectColumn: "\"ledgerNote\".\"%s\"",
     getOne: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"ledgerNote\" WHERE id = $1",
     getMany: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -407,6 +450,8 @@ export const fixtureNamingDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -421,6 +466,7 @@ export const fixtureNamingDbOrm: OrmDefinition = {
     notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

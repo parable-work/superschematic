@@ -624,6 +624,30 @@ func (r *AccountRepository) FindMany(ctx context.Context, filter *AccountFilter,
 	return results, totalCount, nil
 }
 
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *AccountRepository) findRelated(ctx context.Context, filter *AccountFilter, opts *AccountFindOptions) ([]*types.Account, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := accountFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, AccountAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "account")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildAccountOrderByClause(opts.OrderBy, `account`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM account%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+}
+
 // accountFieldStrings are the columns fields selects, in OrderedMembers
 // order so FK columns match scan order, and the primary key when fields
 // hydrates a hasMany relation, which maps the children by it.

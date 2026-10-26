@@ -461,8 +461,12 @@ func (postgresDialect) seedHistory(c *change) *Step {
 	return step
 }
 
-// qualifiedView is a view's schema-qualified name.
+// qualifiedView is a view's schema-qualified name, or its name alone for a
+// view beside the tables in the search_path's schema (D90).
 func qualifiedView(v *View) string {
+	if v.Schema == "" {
+		return q(v.Name)
+	}
 	return q(v.Schema) + "." + q(v.Name)
 }
 

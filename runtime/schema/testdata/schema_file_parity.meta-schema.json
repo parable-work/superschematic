@@ -5013,6 +5013,7 @@
           "type": "string"
         },
         "pool": {
+          "default": "",
           "type": "string"
         },
         "predicates": {
@@ -5027,7 +5028,6 @@
         }
       },
       "required": [
-        "pool",
         "name",
         "migration",
         "source"

@@ -701,6 +701,11 @@ type TenantFilter struct {
 	// with its \, % and _ escaped, so they match themselves. A text without
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []TenantFilter
 }
 
 // TenantUpdate provides fields that can be updated
@@ -1200,6 +1205,30 @@ func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1212,6 +1241,15 @@ type TenantUserFilter struct {
 	Version     *Int64Filter
 	// TenantID allows filtering by foreign key
 	TenantID *UUIDFilter
+	// Tenant keeps the rows whose tenant is among the Tenant rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Tenant *TenantFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []TenantUserFilter
 }
 
 // TenantUserUpdate provides fields that can be updated
@@ -1513,6 +1551,40 @@ func (f *TenantUserFilter) conditions(args *[]interface{}, paramOffset int) []st
 			} else {
 				conditions = append(conditions, `tenant_user.tenant_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.Tenant != nil {
+		before := len(*args)
+		through := f.Tenant.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`tenant_user.tenant_id IN (SELECT tenant.id FROM tenant%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

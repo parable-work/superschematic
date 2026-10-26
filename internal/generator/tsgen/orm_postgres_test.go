@@ -40,9 +40,11 @@ type repositoryCase struct {
 // SET NULL, JSONB and expression and partial unique indexes (D83) under
 // the repositories; fixture-sync-db's upserts of many rows, their results
 // and updates only if changed under a trigger, and its options of a find, a
-// transaction and a raw query (D89); fixture-vault-db's Encrypted<T> fields
-// (D85), sealed, opened, refused and resealed; and fixture-vectors-db's
-// decimals, vectors and nearest (D84), on the Postgres with pgvector.
+// transaction and a raw query (D89); fixture-finances-db's reads (D90), a
+// filter through a relation, anyOf, select and include, and a projection's
+// repository; fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
+// refused and resealed; and fixture-vectors-db's decimals, vectors and
+// nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -101,6 +103,14 @@ var repositoryCases = []repositoryCase{
 		"findMany with count false reads the rows without counting them, and in on a time and a boolean keeps the rows that hold one",
 		"a transaction begins at its isolation, read only or not, and a nested one is a savepoint a throw rolls back to",
 		"a raw query reads its rows through a table definition as the repository does, on the ORM and in a transaction",
+	}},
+	{fixture: "fixture-finances-db", files: []string{"finances.test.ts"}, tests: []string{
+		"a filter through a to-one relation leaves out a row whose relation is null or soft-deleted",
+		"anyOf ORs filters, and a filter of no member keeps every row",
+		"the dashboard's transaction list is one findPage, each row with its relations",
+		"select reads the members it names, and an include reads the foreign key it needs without keeping it",
+		"a to-one include of a soft-deleted or unset target is null, and one-to-many includes map each row's rows",
+		"the TransactionListRow projection reads through findPage, filtered on joined columns",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

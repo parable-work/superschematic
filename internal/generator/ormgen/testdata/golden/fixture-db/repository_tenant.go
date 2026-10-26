@@ -530,7 +530,7 @@ func (r *TenantRepository) GetOne(ctx context.Context, id types.IdentityUUID, op
 		// of the guard does not apply and only the depth cap can refuse it.
 		children := []*types.TenantUser{}
 		if hydrationCtx, allowed := enterRelationHydration(ctx, "Tenant", "users", "TenantUser", false); allowed {
-			fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &TenantUserFindOptions{
+			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &TenantUserFindOptions{
 				Fields: childFields,
 				Limit:  1000000,
 			})
@@ -951,6 +951,30 @@ func (r *TenantRepository) FindMany(ctx context.Context, filter *TenantFilter, o
 	return results, totalCount, nil
 }
 
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *TenantRepository) findRelated(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) ([]*types.Tenant, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := tenantFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, TenantAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "tenant")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildTenantOrderByClause(opts.OrderBy, `tenant`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM tenant%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+}
+
 // tenantFieldStrings are the columns fields selects, in OrderedMembers
 // order so FK columns match scan order, and the primary key when fields
 // hydrates a hasMany relation, which maps the children by it.
@@ -1168,7 +1192,7 @@ func (r *TenantRepository) findRows(ctx context.Context, method, query string, a
 			// of the guard does not apply and only the depth cap can refuse it.
 			children := []*types.TenantUser{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "Tenant", "users", "TenantUser", false); allowed {
-				fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &TenantUserFindOptions{
+				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &TenantUserFindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})

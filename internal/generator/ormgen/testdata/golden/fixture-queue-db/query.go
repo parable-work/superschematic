@@ -756,6 +756,11 @@ type OrderFilter struct {
 	// ReferencedByOrderLineOrder filters on the presence or absence of a
 	// OrderLine whose order points at this row.
 	ReferencedByOrderLineOrder *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OrderFilter
 }
 
 // OrderUpdate provides fields that can be updated
@@ -898,6 +903,30 @@ func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -910,6 +939,19 @@ type OrderLineFilter struct {
 	OrderID *UUIDFilter
 	// ProductID allows filtering by foreign key
 	ProductID *UUIDFilter
+	// Order keeps the rows whose order is among the Order rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Order *OrderFilter
+	// Product keeps the rows whose product is among the Product rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose product is null is not kept.
+	Product *ProductFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OrderLineFilter
 }
 
 // OrderLineUpdate provides fields that can be updated
@@ -1147,6 +1189,50 @@ func (f *OrderLineFilter) conditions(args *[]interface{}, paramOffset int) []str
 			}
 		}
 	}
+	if f.Order != nil {
+		before := len(*args)
+		through := f.Order.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`order_line.order_id IN (SELECT "order".id FROM "order"%s)`, where))
+	}
+	if f.Product != nil {
+		before := len(*args)
+		through := f.Product.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`order_line.product_id IN (SELECT product.id FROM product%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -1158,6 +1244,11 @@ type ProductFilter struct {
 	// ReferencedByOrderLineProduct filters on the presence or absence of a
 	// OrderLine whose product points at this row.
 	ReferencedByOrderLineProduct *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []ProductFilter
 }
 
 // ProductUpdate provides fields that can be updated
@@ -1274,6 +1365,30 @@ func (f *ProductFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

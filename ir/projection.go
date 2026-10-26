@@ -2,8 +2,9 @@ package ir
 
 // RoleProjection marks a @projection declaration in a DB schema: a read-only
 // relation over tables of the same schema, generated as a Postgres view.
-// A projection is never a table and never a language type; the type
-// generators do not emit it.
+// A projection is never a table; the type generators do not emit it, and
+// the ORMs read it as a row type of their own, through a read-only
+// repository (D90).
 const RoleProjection Role = "Projection"
 
 // ProjectionBaseAlias is the alias every projection addresses its source
@@ -20,10 +21,11 @@ const ProjectionBaseAlias = "base"
 // (a relation field to its foreign-key column).
 type ProjectionDef struct {
 	// Pool is the Postgres schema the view is created in; readers address
-	// the view as pool.name.
-	Pool string `json:"pool" yaml:"pool"`
+	// the view as pool.name. Empty creates the view beside the service's
+	// tables, a plain view the ORMs read (D90).
+	Pool string `json:"pool,omitempty" yaml:"pool,omitempty"`
 
-	// Name is the view's name inside Pool.
+	// Name is the view's name inside Pool, or beside the tables.
 	Name string `json:"name" yaml:"name"`
 
 	// Migration is the 14-digit version stamp of the generated migration
@@ -216,6 +218,15 @@ func (f *FieldDef) ProjectionSource() string {
 		return f.ProjectedFrom
 	}
 	return ProjectionBaseAlias + "." + f.Name
+}
+
+// Relation is the view as a reader names it: pool.name, or its name alone
+// when it has no pool and is created beside the service's tables (D90).
+func (d *ProjectionDef) Relation() string {
+	if d.Pool == "" {
+		return d.Name
+	}
+	return d.Pool + "." + d.Name
 }
 
 // Projections returns the schema's RoleProjection types sorted by name.

@@ -15,12 +15,18 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -78,6 +84,10 @@ export interface OrderFilter {
   totalCents?: NumberFilter<T.GenericInt64>;
   /** The rows a OrderLine row's order points at, or none does. */
   referencedByOrderLineOrder?: ReferencedByFilter;
+  /** The rows whose customer is among the User rows the filter finds (D90). */
+  customer?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderFilter[];
 }
 
 /** The members findOne and findMany order rows of Order by. */
@@ -94,6 +104,12 @@ export interface OrderPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Order includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderRelations {
+  readonly customer: Related<UserRow, UserRelations, 'one'>;
+  readonly lines: Related<OrderLineRow, OrderLineRelations, 'many'>;
+}
+
 /** The repository of Order. */
 export type OrderRepository = Repository<
   OrderRow,
@@ -104,7 +120,8 @@ export type OrderRepository = Repository<
   OrderSortField,
   OrderUniqueKey,
   T.IdentityUUID,
-  OrderPageKey
+  OrderPageKey,
+  OrderRelations
 >;
 
 /** The "order" table, as the runtime reads and writes it. */
@@ -127,7 +144,9 @@ export const orderTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\"",
     qualifiedColumns: "\"order\".\"created_at\", \"order\".\"updated_at\", \"order\".\"id\", \"order\".\"customer_id\", \"order\".\"status\", \"order\".\"placed_at\", \"order\".\"shipping_address\", \"order\".\"cancel_reason\", \"order\".\"checkout_id\", \"order\".\"total_cents\"",
+    selectColumn: "\"order\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"order\" WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -160,6 +179,12 @@ export const orderTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
+  ],
+  relations: [
+    { field: "customer", column: "customerId", target: "user", probe: "\"order\".customer_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
+  many: [
+    { name: "lines", target: "orderLine", column: "orderId" },
   ],
 };
 
@@ -198,6 +223,12 @@ export interface OrderLineFilter {
   productId?: UuidFilter<T.IdentityUUID>;
   quantity?: NumberFilter<T.GenericInt64>;
   unitPriceCents?: NumberFilter<T.GenericInt64>;
+  /** The rows whose order is among the Order rows the filter finds (D90). */
+  order?: OrderFilter;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderLineFilter[];
 }
 
 /** The members findOne and findMany order rows of OrderLine by. */
@@ -214,6 +245,12 @@ export interface OrderLinePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of OrderLine includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderLineRelations {
+  readonly order: Related<OrderRow, OrderRelations, 'one'>;
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
+}
+
 /** The repository of OrderLine. */
 export type OrderLineRepository = Repository<
   OrderLineRow,
@@ -224,7 +261,8 @@ export type OrderLineRepository = Repository<
   OrderLineSortField,
   OrderLineUniqueKey,
   T.IdentityUUID,
-  OrderLinePageKey
+  OrderLinePageKey,
+  OrderLineRelations
 >;
 
 /** The order_line table, as the runtime reads and writes it. */
@@ -242,7 +280,9 @@ export const orderLineTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\"",
     qualifiedColumns: "\"order_line\".\"id\", \"order_line\".\"order_id\", \"order_line\".\"product_id\", \"order_line\".\"quantity\", \"order_line\".\"unit_price_cents\"",
+    selectColumn: "\"order_line\".\"%s\"",
     getOne: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE id = $1",
+    getOneFields: "SELECT %s FROM order_line WHERE id = $1",
     getMany: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -272,6 +312,10 @@ export const orderLineTable: TableDefinition = {
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE (id) IN (%s)" },
   },
+  relations: [
+    { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
+    { field: "product", column: "productId", target: "product", probe: "order_line.product_id IN (SELECT product.id FROM product%s)" },
+  ],
 };
 
 /**
@@ -325,6 +369,8 @@ export interface ProductFilter {
   referencedByReviewProduct?: ReferencedByFilter;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ProductFilter[];
 }
 
 /** The members findOne and findMany order rows of Product by. */
@@ -341,6 +387,13 @@ export interface ProductPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Product includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ProductRelations {
+  readonly orderLines: Related<OrderLineRow, OrderLineRelations, 'many'>;
+  readonly restockRequests: Related<RestockRequestRow, RestockRequestRelations, 'many'>;
+  readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
+}
+
 /** The repository of Product. */
 export type ProductRepository = Repository<
   ProductRow,
@@ -351,7 +404,8 @@ export type ProductRepository = Repository<
   ProductSortField,
   ProductUniqueKey,
   T.IdentityUUID,
-  ProductPageKey
+  ProductPageKey,
+  ProductRelations
 >;
 
 /** The product table, as the runtime reads and writes it. */
@@ -372,7 +426,9 @@ export const productTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\"",
     qualifiedColumns: "\"product\".\"created_at\", \"product\".\"updated_at\", \"product\".\"id\", \"product\".\"sku\", \"product\".\"name\", \"product\".\"price_cents\", \"product\".\"in_stock\", \"product\".\"image_object\"",
+    selectColumn: "\"product\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE id = $1",
+    getOneFields: "SELECT %s FROM product WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -408,6 +464,11 @@ export const productTable: TableDefinition = {
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
     { filter: "referencedByRestockRequestProduct", probe: "SELECT 1 FROM restock_request WHERE restock_request.product_id = product.id" },
     { filter: "referencedByReviewProduct", probe: "SELECT 1 FROM review WHERE review.product_id = product.id", live: " AND review.deleted_at IS NULL" },
+  ],
+  many: [
+    { name: "orderLines", target: "orderLine", column: "productId" },
+    { name: "restockRequests", target: "restockRequest", column: "productId" },
+    { name: "reviews", target: "review", column: "productId" },
   ],
 };
 
@@ -459,6 +520,10 @@ export interface RestockRequestFilter {
   quantity?: NumberFilter<T.GenericInt64>;
   openProductId?: UuidFilter<T.IdentityUUID> & NullFilter;
   orderedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RestockRequestFilter[];
 }
 
 /** The members findOne and findMany order rows of RestockRequest by. */
@@ -475,6 +540,11 @@ export interface RestockRequestPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of RestockRequest includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RestockRequestRelations {
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
+}
+
 /** The repository of RestockRequest. */
 export type RestockRequestRepository = Repository<
   RestockRequestRow,
@@ -485,7 +555,8 @@ export type RestockRequestRepository = Repository<
   RestockRequestSortField,
   RestockRequestUniqueKey,
   T.IdentityUUID,
-  RestockRequestPageKey
+  RestockRequestPageKey,
+  RestockRequestRelations
 >;
 
 /** The restock_request table, as the runtime reads and writes it. */
@@ -506,7 +577,9 @@ export const restockRequestTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\"",
     qualifiedColumns: "\"restock_request\".\"created_at\", \"restock_request\".\"updated_at\", \"restock_request\".\"id\", \"restock_request\".\"product_id\", \"restock_request\".\"status\", \"restock_request\".\"quantity\", \"restock_request\".\"open_product_id\", \"restock_request\".\"ordered_at\"",
+    selectColumn: "\"restock_request\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE id = $1",
+    getOneFields: "SELECT %s FROM restock_request WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -537,6 +610,9 @@ export const restockRequestTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (id) IN (%s)" },
     "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (open_product_id) IN (%s)" },
   },
+  relations: [
+    { field: "product", column: "productId", target: "product", probe: "restock_request.product_id IN (SELECT product.id FROM product%s)" },
+  ],
 };
 
 /**
@@ -588,6 +664,12 @@ export interface ReviewFilter {
   body?: StringFilter<string>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows whose author is among the User rows the filter finds (D90). */
+  author?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ReviewFilter[];
 }
 
 /** The members findOne and findMany order rows of Review by. */
@@ -604,6 +686,12 @@ export interface ReviewPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Review includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ReviewRelations {
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
+  readonly author: Related<UserRow, UserRelations, 'one'>;
+}
+
 /** The repository of Review. */
 export type ReviewRepository = SoftDeleteRepository<
   ReviewRow,
@@ -614,7 +702,8 @@ export type ReviewRepository = SoftDeleteRepository<
   ReviewSortField,
   ReviewUniqueKey,
   T.IdentityUUID,
-  ReviewPageKey
+  ReviewPageKey,
+  ReviewRelations
 >;
 
 /** The review table, as the runtime reads and writes it. */
@@ -637,7 +726,9 @@ export const reviewTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\"",
     qualifiedColumns: "\"review\".\"created_at\", \"review\".\"updated_at\", \"review\".\"id\", \"review\".\"product_id\", \"review\".\"author_id\", \"review\".\"rating\", \"review\".\"title\", \"review\".\"body\", \"review\".\"deleted_at\", \"review\".\"deleted_by\"",
+    selectColumn: "\"review\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE id = $1",
+    getOneFields: "SELECT %s FROM review WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -670,6 +761,10 @@ export const reviewTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (id) IN (%s)" },
     "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (product_id, author_id) IN (%s) AND (deleted_at IS NULL)" },
   },
+  relations: [
+    { field: "product", column: "productId", target: "product", probe: "review.product_id IN (SELECT product.id FROM product%s)" },
+    { field: "author", column: "authorId", target: "user", probe: "review.author_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -709,6 +804,8 @@ export interface RoleFilter {
   name?: StringFilter<T.IdentitySlug>;
   /** The rows a UserRoleGrant row's role points at, or none does. */
   referencedByUserRoleGrantRole?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RoleFilter[];
 }
 
 /** The members findOne and findMany order rows of Role by. */
@@ -725,6 +822,11 @@ export interface RolePageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Role includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RoleRelations {
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
+}
+
 /** The repository of Role. */
 export type RoleRepository = Repository<
   RoleRow,
@@ -735,7 +837,8 @@ export type RoleRepository = Repository<
   RoleSortField,
   RoleUniqueKey,
   T.IdentityUUID,
-  RolePageKey
+  RolePageKey,
+  RoleRelations
 >;
 
 /** The role table, as the runtime reads and writes it. */
@@ -753,7 +856,9 @@ export const roleTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\"",
     qualifiedColumns: "\"role\".\"created_at\", \"role\".\"updated_at\", \"role\".\"id\", \"role\".\"name\", \"role\".\"permissions\"",
+    selectColumn: "\"role\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE id = $1",
+    getOneFields: "SELECT %s FROM role WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -786,6 +891,9 @@ export const roleTable: TableDefinition = {
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
+  ],
+  many: [
+    { name: "userRoleGrants", target: "userRoleGrant", column: "roleId" },
   ],
 };
 
@@ -830,6 +938,10 @@ export interface SessionFilter {
   expiresAt?: DateTimeFilter<T.TemporalDateTime>;
   lastSeenAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly SessionFilter[];
 }
 
 /** The members findOne and findMany order rows of Session by. */
@@ -846,6 +958,11 @@ export interface SessionPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Session includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface SessionRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+}
+
 /** The repository of Session. */
 export type SessionRepository = Repository<
   SessionRow,
@@ -856,7 +973,8 @@ export type SessionRepository = Repository<
   SessionSortField,
   SessionUniqueKey,
   T.IdentityUUID,
-  SessionPageKey
+  SessionPageKey,
+  SessionRelations
 >;
 
 /** The "session" table, as the runtime reads and writes it. */
@@ -876,7 +994,9 @@ export const sessionTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
     qualifiedColumns: "\"session\".\"id\", \"session\".\"user_id\", \"session\".\"token_hash\", \"session\".\"created_at\", \"session\".\"expires_at\", \"session\".\"last_seen_at\", \"session\".\"revoked_at\"",
+    selectColumn: "\"session\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"session\" WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -907,6 +1027,9 @@ export const sessionTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
     "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "\"session\".user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -954,6 +1077,8 @@ export interface UserFilter {
   referencedByUserCredentialUser?: ReferencedByFilter;
   /** The rows a UserRoleGrant row's user points at, or none does. */
   referencedByUserRoleGrantUser?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserFilter[];
 }
 
 /** The members findOne and findMany order rows of User by. */
@@ -970,6 +1095,15 @@ export interface UserPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRelations {
+  readonly orders: Related<OrderRow, OrderRelations, 'many'>;
+  readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
+  readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
+  readonly userCredentials: Related<UserCredentialRow, UserCredentialRelations, 'many'>;
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
+}
+
 /** The repository of User. */
 export type UserRepository = Repository<
   UserRow,
@@ -980,7 +1114,8 @@ export type UserRepository = Repository<
   UserSortField,
   UserUniqueKey,
   T.IdentityUUID,
-  UserPageKey
+  UserPageKey,
+  UserRelations
 >;
 
 /** The "user" table, as the runtime reads and writes it. */
@@ -998,7 +1133,9 @@ export const userTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"email\", \"name\"",
     qualifiedColumns: "\"user\".\"created_at\", \"user\".\"updated_at\", \"user\".\"id\", \"user\".\"email\", \"user\".\"name\"",
+    selectColumn: "\"user\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"user\" WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1035,6 +1172,13 @@ export const userTable: TableDefinition = {
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
     { filter: "referencedByUserCredentialUser", probe: "SELECT 1 FROM user_credential WHERE user_credential.user_id = \"user\".id" },
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
+  ],
+  many: [
+    { name: "orders", target: "order", column: "customerId" },
+    { name: "reviews", target: "review", column: "authorId" },
+    { name: "sessions", target: "session", column: "userId" },
+    { name: "userCredentials", target: "userCredential", column: "userId" },
+    { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
   ],
 };
 
@@ -1077,6 +1221,10 @@ export interface UserCredentialFilter {
   passwordChangedAt?: DateTimeFilter<T.TemporalDateTime>;
   disabledAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   pendingAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserCredentialFilter[];
 }
 
 /** The members findOne and findMany order rows of UserCredential by. */
@@ -1093,6 +1241,11 @@ export interface UserCredentialPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of UserCredential includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserCredentialRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+}
+
 /** The repository of UserCredential. */
 export type UserCredentialRepository = Repository<
   UserCredentialRow,
@@ -1103,7 +1256,8 @@ export type UserCredentialRepository = Repository<
   UserCredentialSortField,
   UserCredentialUniqueKey,
   T.IdentityUUID,
-  UserCredentialPageKey
+  UserCredentialPageKey,
+  UserCredentialRelations
 >;
 
 /** The user_credential table, as the runtime reads and writes it. */
@@ -1122,7 +1276,9 @@ export const userCredentialTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
     qualifiedColumns: "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+    selectColumn: "\"user_credential\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_credential WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1153,6 +1309,9 @@ export const userCredentialTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
     "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_credential.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -1186,6 +1345,12 @@ export interface UserRoleGrantFilter {
   userId?: UuidFilter<T.IdentityUUID>;
   roleId?: UuidFilter<T.IdentityUUID>;
   grantedAt?: DateTimeFilter<T.TemporalDateTime>;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows whose role is among the Role rows the filter finds (D90). */
+  role?: RoleFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserRoleGrantFilter[];
 }
 
 /** The members findOne and findMany order rows of UserRoleGrant by. */
@@ -1202,6 +1367,12 @@ export interface UserRoleGrantPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of UserRoleGrant includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRoleGrantRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+  readonly role: Related<RoleRow, RoleRelations, 'one'>;
+}
+
 /** The repository of UserRoleGrant. */
 export type UserRoleGrantRepository = Repository<
   UserRoleGrantRow,
@@ -1212,7 +1383,8 @@ export type UserRoleGrantRepository = Repository<
   UserRoleGrantSortField,
   UserRoleGrantUniqueKey,
   T.IdentityUUID,
-  UserRoleGrantPageKey
+  UserRoleGrantPageKey,
+  UserRoleGrantRelations
 >;
 
 /** The user_role_grant table, as the runtime reads and writes it. */
@@ -1229,7 +1401,9 @@ export const userRoleGrantTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
     qualifiedColumns: "\"user_role_grant\".\"id\", \"user_role_grant\".\"user_id\", \"user_role_grant\".\"role_id\", \"user_role_grant\".\"granted_at\"",
+    selectColumn: "\"user_role_grant\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_role_grant WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1260,6 +1434,10 @@ export const userRoleGrantTable: TableDefinition = {
     "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
     "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_role_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "role", column: "roleId", target: "role", probe: "user_role_grant.role_id IN (SELECT role.id FROM role%s)" },
+  ],
 };
 
 /** The repositories of shop-db, by table. */
@@ -1302,6 +1480,8 @@ export const shopDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -1316,6 +1496,7 @@ export const shopDbOrm: OrmDefinition = {
     notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

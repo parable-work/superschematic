@@ -130,6 +130,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(nearestFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove nearest.go: %w", err)
 	}
+	// projections.go reads the schema's projections with a key (D90); a
+	// schema without one has none.
+	projectionsFile := filepath.Join(outputDir, "projections.go")
+	if len(output.Projections) > 0 {
+		if err := generateFile(generator, "projections.tmpl", projectionsFile, output); err != nil {
+			return fmt.Errorf("failed to write projections.go: %w", err)
+		}
+	} else if err := os.Remove(projectionsFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove projections.go: %w", err)
+	}
 	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
 	}

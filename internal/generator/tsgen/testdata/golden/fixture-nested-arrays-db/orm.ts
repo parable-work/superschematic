@@ -15,6 +15,12 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
@@ -54,6 +60,8 @@ export interface BoardUpdate {
 /** The rows of Board a read or a write finds: each member set is one condition, all of them ANDed. */
 export interface BoardFilter {
   id?: UuidFilter<T.IdentityUUID>;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly BoardFilter[];
 }
 
 /** The members findOne and findMany order rows of Board by. */
@@ -70,6 +78,10 @@ export interface BoardPageKey {
   readonly id: T.IdentityUUID;
 }
 
+/** The relations a read of Board includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface BoardRelations {
+}
+
 /** The repository of Board. */
 export type BoardRepository = Repository<
   BoardRow,
@@ -80,7 +92,8 @@ export type BoardRepository = Repository<
   BoardSortField,
   BoardUniqueKey,
   T.IdentityUUID,
-  BoardPageKey
+  BoardPageKey,
+  BoardRelations
 >;
 
 /** The board table, as the runtime reads and writes it. */
@@ -98,7 +111,9 @@ export const boardTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"labels\", \"states\", \"walls\", \"scores\"",
     qualifiedColumns: "\"board\".\"id\", \"board\".\"labels\", \"board\".\"states\", \"board\".\"walls\", \"board\".\"scores\"",
+    selectColumn: "\"board\".\"%s\"",
     getOne: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE id = $1",
+    getOneFields: "SELECT %s FROM board WHERE id = $1",
     getMany: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -161,6 +176,8 @@ export const fixtureNestedArraysDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
@@ -175,6 +192,7 @@ export const fixtureNestedArraysDbOrm: OrmDefinition = {
     notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

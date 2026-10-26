@@ -519,6 +519,30 @@ func (r *ApiCredentialRepository) FindMany(ctx context.Context, filter *ApiCrede
 	return results, totalCount, nil
 }
 
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *ApiCredentialRepository) findRelated(ctx context.Context, filter *ApiCredentialFilter, opts *ApiCredentialFindOptions) ([]*types.ApiCredential, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := apiCredentialFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, ApiCredentialAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "api_credential")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildApiCredentialOrderByClause(opts.OrderBy, `api_credential`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM api_credential%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+}
+
 // apiCredentialFieldStrings are the columns fields selects, in OrderedMembers
 // order so FK columns match scan order, and the primary key when fields
 // hydrates a hasMany relation, which maps the children by it.

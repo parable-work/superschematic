@@ -29,9 +29,10 @@ type parityCall struct {
 }
 
 // hydratingCalls are the calls after whose statements the Go ORM hydrates
-// the to-one relations a full field selection names, with a statement or
-// two of its own per relation, which the TypeScript repositories leave to
-// getManyByIds: the TypeScript statements are the Go ones' prefix.
+// the to-one relations a full field selection names, with a statement of
+// its own per relation, which the TypeScript repositories load only when a
+// read includes them (D90): the TypeScript statements are the Go ones'
+// prefix.
 var hydratingCalls = map[string]bool{"findEntries": true, "pageEntries": true}
 
 // TestTableParityOfGoAndTypeScriptOnPostgres runs one script of repository

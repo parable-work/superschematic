@@ -1198,6 +1198,11 @@ type RoleFilter struct {
 	// ReferencedByUserRoleGrantRole filters on the presence or absence of a
 	// UserRoleGrant whose role points at this row.
 	ReferencedByUserRoleGrantRole *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RoleFilter
 }
 
 // RoleUpdate provides fields that can be updated
@@ -1322,6 +1327,30 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1335,6 +1364,15 @@ type SessionFilter struct {
 	RevokedAt  *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []SessionFilter
 }
 
 // SessionUpdate provides fields that can be updated
@@ -1706,6 +1744,40 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"session".user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -1725,6 +1797,11 @@ type UserFilter struct {
 	// ReferencedByUserRoleGrantUser filters on the presence or absence of a
 	// UserRoleGrant whose user points at this row.
 	ReferencedByUserRoleGrantUser *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserFilter
 }
 
 // UserUpdate provides fields that can be updated
@@ -1944,6 +2021,30 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1956,6 +2057,15 @@ type UserCredentialFilter struct {
 	PendingAt         *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserCredentialFilter
 }
 
 // UserCredentialUpdate provides fields that can be updated
@@ -2276,6 +2386,40 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			}
 		}
 	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_credential.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -2288,6 +2432,19 @@ type UserRoleGrantFilter struct {
 	UserID *UUIDFilter
 	// RoleID allows filtering by foreign key
 	RoleID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// Role keeps the rows whose role is among the Role rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Role *RoleFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserRoleGrantFilter
 }
 
 // UserRoleGrantUpdate provides fields that can be updated
@@ -2475,6 +2632,50 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			} else {
 				conditions = append(conditions, `user_role_grant.role_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_role_grant.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+	if f.Role != nil {
+		before := len(*args)
+		through := f.Role.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id IN (SELECT role.id FROM role%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

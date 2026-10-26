@@ -175,7 +175,7 @@ func (r *LineItemRepository) batchAccountByIDs(ctx context.Context, ids []types.
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&BankAccountFilter{
 			Id: &UUIDFilter{
@@ -940,6 +940,37 @@ func (r *LineItemRepository) FindMany(ctx context.Context, filter *LineItemFilte
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *LineItemRepository) findRelated(ctx context.Context, filter *LineItemFilter, opts *LineItemFindOptions) ([]*types.LineItem, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := lineItemFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, LineItemAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "line_item")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildLineItemOrderByClause(opts.OrderBy, `line_item`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM line_item%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // lineItemFieldStrings are the columns fields selects, in OrderedMembers

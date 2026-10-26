@@ -986,7 +986,7 @@ func (r *{{ $.Name }}) batch{{ toGoName $rel.FieldName }}ByIDs(ctx context.Conte
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&{{ $rel.TargetType }}Filter{
 			Id: &UUIDFilter{
@@ -1293,7 +1293,7 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 		// of the guard does not apply and only the depth cap can refuse it.
 		children := []*types.{{ $rel.TargetType }}{}
 		if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-			fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
+			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
 				Fields: childFields,
 				Limit:  1000000,
 			})
@@ -1800,6 +1800,39 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	return results, totalCount, nil
 }
 
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *{{ .Name }}) findRelated(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := {{ lowerFirst .TypeName }}FieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	{{- if .HasSoftDelete }}
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
+		} else {
+			whereClause += {{ printf "%q" .SQL.Live }}
+		}
+	}
+	{{- end }}
+	orderByClause := build{{ .TypeName }}OrderByClause(opts.OrderBy, `{{ .QuotedTableName }}`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf({{ goRawString .SQL.FindMany }}, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
+}
+
 // {{ lowerFirst .TypeName }}FieldStrings are the columns fields selects, in OrderedMembers
 // order so FK columns match scan order, and the primary key when fields
 // hydrates a hasMany relation, which maps the children by it.
@@ -2113,7 +2146,7 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			// of the guard does not apply and only the depth cap can refuse it.
 			children := []*types.{{ $rel.TargetType }}{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-				fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
+				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})

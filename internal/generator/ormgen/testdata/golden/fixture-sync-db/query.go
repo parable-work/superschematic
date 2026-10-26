@@ -662,6 +662,11 @@ type BankAccountFilter struct {
 	// ReferencedByLineItemAccount filters on the presence or absence of a
 	// LineItem whose account points at this row.
 	ReferencedByLineItemAccount *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []BankAccountFilter
 }
 
 // BankAccountUpdate provides fields that can be updated
@@ -817,6 +822,30 @@ func (f *BankAccountFilter) conditions(args *[]interface{}, paramOffset int) []s
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -836,6 +865,15 @@ type LineItemFilter struct {
 	UpdatedAt          *DateTimeFilter
 	// AccountID allows filtering by foreign key
 	AccountID *UUIDFilter
+	// Account keeps the rows whose account is among the BankAccount rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Account *BankAccountFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LineItemFilter
 }
 
 // LineItemUpdate provides fields that can be updated
@@ -1361,6 +1399,40 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 			} else {
 				conditions = append(conditions, `line_item.account_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.Account != nil {
+		before := len(*args)
+		through := f.Account.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`line_item.account_id IN (SELECT bank_account.id FROM bank_account%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

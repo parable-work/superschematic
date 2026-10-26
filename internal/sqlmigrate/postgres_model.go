@@ -114,7 +114,11 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
-		schemas[view.Pool] = true
+		// A view without a pool is created beside the tables (D90), in a
+		// schema the plan does not create.
+		if view.Pool != "" {
+			schemas[view.Pool] = true
+		}
 		m.Views = append(m.Views, modelView(view))
 	}
 	for name := range schemas {
@@ -321,7 +325,7 @@ func modelTrigger(t sqlgen.Trigger, origin string) (*Trigger, error) {
 
 func modelView(view sqlgen.ProjectionView) *View {
 	v := &View{
-		Schema:     view.Pool,
+		Schema:     view.Schema,
 		Name:       view.Name,
 		Owner:      view.ViewOwner,
 		Definition: sqlgen.ProjectionViewStatements(view),

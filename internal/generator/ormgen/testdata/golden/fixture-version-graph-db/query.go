@@ -3094,6 +3094,19 @@ type CoverFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []CoverFilter
 }
 
 // CoverUpdate provides fields that can be updated
@@ -3367,6 +3380,51 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			}
 		}
 	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`cover.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`cover.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -3384,6 +3442,19 @@ type IngredientFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []IngredientFilter
 }
 
 // IngredientUpdate provides fields that can be updated
@@ -3718,6 +3789,51 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 			}
 		}
 	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`ingredient.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`ingredient.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -3734,6 +3850,19 @@ type NoteFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []NoteFilter
 }
 
 // NoteUpdate provides fields that can be updated
@@ -4042,6 +4171,51 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`note.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`note.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -4078,6 +4252,11 @@ type RecipeFilter struct {
 	// ReferencedByUtensilRecipe filters on the presence or absence of a
 	// Utensil whose recipe points at this row.
 	ReferencedByUtensilRecipe *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipeFilter
 }
 
 // RecipeUpdate provides fields that can be updated
@@ -4315,6 +4494,30 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -4332,6 +4535,18 @@ type RecipeCommitFilter struct {
 	RefID *UUIDFilter
 	// ParentCommitID allows filtering by foreign key
 	ParentCommitID *UUIDFilter
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Root *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// ParentCommit keeps the rows whose parentCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose parentCommit is null is not kept.
+	ParentCommit *RecipeCommitFilter
 	// ReferencedByRecipeCommitParentCommit filters on the presence or absence of a
 	// RecipeCommit whose parentCommit points at this row.
 	ReferencedByRecipeCommitParentCommit *ReferencedByFilter
@@ -4350,6 +4565,11 @@ type RecipeCommitFilter struct {
 	// ReferencedByRecipeSnapshotEntryCommit filters on the presence or absence of a
 	// RecipeSnapshotEntry whose commit points at this row.
 	ReferencedByRecipeSnapshotEntryCommit *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipeCommitFilter
 }
 
 // RecipeCommitUpdate provides fields that can be updated
@@ -4762,6 +4982,37 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 			}
 		}
 	}
+	if f.Root != nil {
+		before := len(*args)
+		through := f.Root.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.root_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+	if f.ParentCommit != nil {
+		before := len(*args)
+		through := f.ParentCommit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
 	if f.ReferencedByRecipeCommitParentCommit != nil {
 		probe := `SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id`
 		if f.ReferencedByRecipeCommitParentCommit.Exists {
@@ -4817,6 +5068,30 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -4830,6 +5105,15 @@ type RecipePatchFilter struct {
 	Operation     *StringFilter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Commit *RecipeCommitFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipePatchFilter
 }
 
 // RecipePatchUpdate provides fields that can be updated
@@ -5113,6 +5397,40 @@ func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []s
 			}
 		}
 	}
+	if f.Commit != nil {
+		before := len(*args)
+		through := f.Commit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_patch.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -5133,6 +5451,22 @@ type RecipeRefFilter struct {
 	BaseCommitID *UUIDFilter
 	// HeadCommitID allows filtering by foreign key
 	HeadCommitID *UUIDFilter
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Root *RecipeFilter
+	// ParentRef keeps the rows whose parentRef is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose parentRef is null is not kept.
+	ParentRef *RecipeRefFilter
+	// BaseCommit keeps the rows whose baseCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose baseCommit is null is not kept.
+	BaseCommit *RecipeCommitFilter
+	// HeadCommit keeps the rows whose headCommit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose headCommit is null is not kept.
+	HeadCommit *RecipeCommitFilter
 	// ReferencedByCoverRef filters on the presence or absence of a
 	// Cover whose ref points at this row.
 	ReferencedByCoverRef *ReferencedByFilter
@@ -5157,6 +5491,11 @@ type RecipeRefFilter struct {
 	// ReferencedByUtensilRef filters on the presence or absence of a
 	// Utensil whose ref points at this row.
 	ReferencedByUtensilRef *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipeRefFilter
 }
 
 // RecipeRefUpdate provides fields that can be updated
@@ -5619,6 +5958,47 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 			}
 		}
 	}
+	if f.Root != nil {
+		before := len(*args)
+		through := f.Root.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.root_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.ParentRef != nil {
+		before := len(*args)
+		through := f.ParentRef.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.parent_ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+	if f.BaseCommit != nil {
+		before := len(*args)
+		through := f.BaseCommit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.base_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+	if f.HeadCommit != nil {
+		before := len(*args)
+		through := f.HeadCommit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_ref.head_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
 	if f.ReferencedByCoverRef != nil {
 		probe := `SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id`
 		if f.ReferencedByCoverRef.Exists {
@@ -5687,6 +6067,30 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -5700,6 +6104,19 @@ type RecipeReleaseFilter struct {
 	RootID *UUIDFilter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
+	// Root keeps the rows whose root is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Root *RecipeFilter
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Commit *RecipeCommitFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipeReleaseFilter
 }
 
 // RecipeReleaseUpdate provides fields that can be updated
@@ -5989,6 +6406,50 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 			}
 		}
 	}
+	if f.Root != nil {
+		before := len(*args)
+		through := f.Root.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_release.root_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Commit != nil {
+		before := len(*args)
+		through := f.Commit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_release.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -6002,6 +6463,15 @@ type RecipeSnapshotEntryFilter struct {
 	EntityVersion *Int64Filter
 	// CommitID allows filtering by foreign key
 	CommitID *UUIDFilter
+	// Commit keeps the rows whose commit is among the RecipeCommit rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Commit *RecipeCommitFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RecipeSnapshotEntryFilter
 }
 
 // RecipeSnapshotEntryUpdate provides fields that can be updated
@@ -6252,6 +6722,40 @@ func (f *RecipeSnapshotEntryFilter) conditions(args *[]interface{}, paramOffset 
 			}
 		}
 	}
+	if f.Commit != nil {
+		before := len(*args)
+		through := f.Commit.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -6272,6 +6776,19 @@ type StepFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []StepFilter
 }
 
 // StepUpdate provides fields that can be updated
@@ -6781,6 +7298,51 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`step.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`step.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -6808,6 +7370,19 @@ type TastingFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []TastingFilter
 }
 
 // TastingUpdate provides fields that can be updated
@@ -7489,6 +8064,51 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`tasting.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`tasting.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -7504,6 +8124,19 @@ type UtensilFilter struct {
 	RecipeID *UUIDFilter
 	// RefID allows filtering by foreign key
 	RefID *UUIDFilter
+	// Recipe keeps the rows whose recipe is among the Recipe rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Recipe *RecipeFilter
+	// Ref keeps the rows whose ref is among the live RecipeRef rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Ref *RecipeRefFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UtensilFilter
 }
 
 // UtensilUpdate provides fields that can be updated
@@ -7775,6 +8408,51 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			} else {
 				conditions = append(conditions, `utensil.ref_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.Recipe != nil {
+		before := len(*args)
+		through := f.Recipe.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`utensil.recipe_id IN (SELECT recipe.id FROM recipe%s)`, where))
+	}
+	if f.Ref != nil {
+		before := len(*args)
+		through := f.Ref.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `recipe_ref.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`utensil.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

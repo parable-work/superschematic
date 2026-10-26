@@ -15,6 +15,12 @@ UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
 fn in a transaction, whose query takes enqueue's statements too.
 
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
+
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
@@ -70,6 +76,12 @@ export interface {{.Type}}Filter {
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
 {{- end}}
+{{- range .Relations}}
+  /** The rows whose {{.Field}} is among the{{if .TargetSoftDelete}} live{{end}} {{.Target}} rows the filter finds{{if .Nullable}}; a row whose {{.Field}} is null is not among them{{end}} (D90). */
+  {{.Field}}?: {{.Target}}Filter;
+{{- end}}
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly {{.Type}}Filter[];
 }
 
 /** The members findOne and findMany order rows of {{.Type}} by. */
@@ -84,6 +96,16 @@ export type {{.Type}}UniqueKey ={{range $i, $k := .UniqueKeys}}{{if $i}} |{{end}
 /** The position of a row of {{.Type}} in a findPage order: its {{.Key}}. */
 export interface {{.Type}}PageKey {
   readonly {{.Key}}: {{.KeyType}};
+}
+
+/** The relations a read of {{.Type}} includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface {{.Type}}Relations {
+{{- range .Relations}}
+  readonly {{.Field}}: Related<{{.Target}}Row, {{.Target}}Relations, '{{.Kind}}'>;
+{{- end}}
+{{- range .Many}}
+  readonly {{.Name}}: Related<{{.Source}}Row, {{.Source}}Relations, 'many'>;
+{{- end}}
 }
 
 {{- if .VectorFields}}
@@ -102,7 +124,8 @@ export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}
   {{.Type}}SortField,
   {{.Type}}UniqueKey,
   {{.KeyType}},
-  {{.Type}}PageKey
+  {{.Type}}PageKey,
+  {{.Type}}Relations
 >{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
   VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}};
 
@@ -142,12 +165,82 @@ export const {{.Const}}: TableDefinition = {
 {{- end}}
   ],
 {{- end}}
+{{- if .Relations}}
+  relations: [
+{{- range .Relations}}
+    { field: {{jsonString .Field}}, column: {{jsonString .Column}}, target: {{jsonString .TargetMember}}, probe: {{jsonString .Probe}} },
+{{- end}}
+  ],
+{{- end}}
+{{- if .Many}}
+  many: [
+{{- range .Many}}
+    { name: {{jsonString .Name}}, target: {{jsonString .SourceMember}}, column: {{jsonString .Column}} },
+{{- end}}
+  ],
+{{- end}}
 };
 {{- end}}
 
-/** The repositories of {{$.SchemaName}}, by table. */
+{{- range .Views}}
+
+/**
+ * A row of the {{.Relation}} view (D90){{if .Doc}}: {{tsDoc .Doc " * "}}{{else}}.{{end}}
+ */
+export interface {{.Type}} {
+{{- range .Columns}}
+  {{.Member}}: {{.RowType}}{{if .Nullable}} | null{{end}};
+{{- end}}
+}
+
+/** The rows of {{.Type}} a read finds: each member set is one condition, all of them ANDed. */
+export interface {{.Type}}Filter {
+{{- range .FilterColumns}}
+  {{.Member}}?: {{.FilterType}};
+{{- end}}
+  /** The rows any of the filters finds, beside the other members; a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly {{.Type}}Filter[];
+}
+
+/** The members findOne and findMany order rows of {{.Type}} by. */
+export type {{.Type}}OrderField = {{tsUnion .OrderFields}};
+
+/** The members findPage orders rows of {{.Type}} by; ties break by {{.Key}}. */
+export type {{.Type}}SortField = {{tsUnion .SortFields}};
+
+/** The position of a row of {{.Type}} in a findPage order: its {{.Key}}. */
+export interface {{.Type}}PageKey {
+  readonly {{.Key}}: {{.KeyType}};
+}
+
+/** The repository of {{.Type}}, which reads the {{.Relation}} view. */
+export type {{.Type}}Repository = ReadRepository<{{.Type}}, {{.Type}}Filter, {{.Type}}OrderField, {{.Type}}SortField, {{.KeyType}}, {{.Type}}PageKey>;
+
+/** The {{.Relation}} view, as the runtime reads it. */
+export const {{.Const}}: TableDefinition = {
+  name: {{jsonString .Type}},
+  table: {{jsonString .Table}},
+  key: {{jsonString .Key}},
+  columns: [
+{{- range .Columns}}
+    { name: {{jsonString .Member}}, column: {{jsonString .Column}}, field: {{jsonString .Field}}, qualified: {{jsonString .Qualified}}{{.Flags}} },
+{{- end}}
+  ],
+  statements: {
+{{- range .Statements}}
+    {{.Name}}: {{jsonString .SQL}},
+{{- end}}
+  },
+  uniqueKeys: {},
+};
+{{- end}}
+
+/** The repositories of {{$.SchemaName}}, by table{{if .Views}}, and of its projections, by projection{{end}}. */
 export interface {{.Name}}Repositories {
 {{- range .Tables}}
+  readonly {{.Member}}: {{.Type}}Repository;
+{{- end}}
+{{- range .Views}}
   readonly {{.Member}}: {{.Type}}Repository;
 {{- end}}
 }
@@ -166,6 +259,7 @@ export const {{.Const}}: OrmDefinition = {
 {{- end}}
   },
   defaultLimit: {{.DefaultLimit}},
+  manyLimit: {{.ManyLimit}},
 {{- if .NearestMetrics}}
   nearest: {
     metrics: {
@@ -188,6 +282,9 @@ export const {{.Const}}: OrmDefinition = {
   clearHistoryActor: {{jsonString .ClearHistoryActor}},
   tables: {
 {{- range .Tables}}
+    {{.Member}}: {{.Const}},
+{{- end}}
+{{- range .Views}}
     {{.Member}}: {{.Const}},
 {{- end}}
   },

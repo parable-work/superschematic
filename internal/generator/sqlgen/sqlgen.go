@@ -545,6 +545,11 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		}
 		qualifier := sqlutil.QuoteIdentifier(opts.SourceSchema) + "."
 		for i := range projections {
+			if projections[i].Pool == "" {
+				// A view without a pool is created beside the tables (D90).
+				projections[i].Schema = opts.SourceSchema
+				projections[i].QualifiedView = qualifier + projections[i].QuotedName
+			}
 			projections[i].QuotedBaseTable = qualifier + projections[i].QuotedBaseTable
 			for j := range projections[i].Joins {
 				projections[i].Joins[j].QuotedTable = qualifier + projections[i].Joins[j].QuotedTable
