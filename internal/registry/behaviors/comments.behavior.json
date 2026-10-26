@@ -1,6 +1,6 @@
 {
   "name": "Comments",
-  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. A message may be streamed as it is written: begin holds its place as composing, appendDraft adds to its draft and sends the draft signal to the streams open on the instance, and finish posts it; one whose author stops appending for composeTimeoutMs is interrupted, keeping what was written. Readers send typing and viewing, signals the engine delivers and does not keep. Every writing operation is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation.",
+  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. A message may be streamed as it is written: begin holds its place as composing, appendDraft adds to its draft and sends the draft signal to the streams open on the instance, and finish posts it; one whose author stops appending for composeTimeoutMs is interrupted, keeping what was written. Readers send typing and viewing, signals the engine delivers and does not keep. Each caller has a read marker on the conversation and on each thread, which markRead moves, and follows the threads it posts in, is mentioned in, or follows with follow. Each message that comes to stand, and each edit that adds a mention, records a delivery for each subject it mentions and each follower of its thread but its author, which a notifier or an agent dispatcher outside the engine claims and settles with claimDeliveries and settleDeliveries; the engine sends nothing. inbox reads a caller's mentions, followed threads and read conversations across every schema of the namespace it may read. Every writing operation on an instance is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation, with its read markers, follows and deliveries.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -35,7 +35,30 @@
         "minLength": 1
       },
       "pinPermission": { "description": "The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may.", "type": "string", "minLength": 1 },
-      "resolvePermission": { "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.", "type": "string", "minLength": 1 }
+      "resolvePermission": { "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.", "type": "string", "minLength": 1 },
+      "deliverPermission": {
+        "description": "The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages, beside the policy's Comments.claimDeliveries and Comments.settleDeliveries. Absent, nobody claims them, and they serve only the inbox.",
+        "type": "string",
+        "minLength": 1
+      },
+      "maxAttempts": {
+        "description": "How many times a delivery is claimed before a failure, or a claim that lapses, drops it; 5 when absent.",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "retryBackoffMs": {
+        "description": "How long after its first failure a delivery is due again, in milliseconds, doubled after each later failure up to an hour; 30000 when absent.",
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 3600000
+      },
+      "deliveryRetentionMs": {
+        "description": "How long a delivery is kept from when it was made, in milliseconds, whatever its state but a live claim; the inbox's mentions reach back as far. 2592000000, 30 days, when absent.",
+        "type": "integer",
+        "minimum": 86400000,
+        "maximum": 31536000000
+      }
     }
   },
   "fields": [
@@ -45,6 +68,11 @@
     {
       "name": "composing",
       "description": "The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.",
+      "volatile": true
+    },
+    {
+      "name": "unread",
+      "description": "The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.",
       "volatile": true
     }
   ],
@@ -148,6 +176,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -225,6 +254,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -372,6 +402,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -447,6 +478,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -567,6 +599,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -641,6 +674,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -744,6 +778,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -821,6 +856,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -895,6 +931,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -969,6 +1006,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -1043,6 +1081,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -1117,6 +1156,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -1138,6 +1178,57 @@
       },
       "writes": true,
       "beside": true
+    },
+    {
+      "name": "markRead",
+      "description": "Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["upTo"],
+        "properties": {
+          "upTo": { "description": "The greatest id of the messages read: a bound, which need not name a message.", "type": "integer", "minimum": 1 },
+          "thread": { "description": "The id of a top-level message: the marker moved is the caller's on its thread's replies, whether the caller follows it or not. The conversation's when absent.", "type": "integer", "minimum": 1 }
+        }
+      },
+      "resultSchema": {
+        "description": "The caller's marker after the call.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["readUpTo", "unread"],
+        "properties": {
+          "readUpTo": { "description": "The marker: the greatest stand of the messages read; 0 when none is.", "type": "integer" },
+          "unread": { "description": "How many posted or interrupted messages of others in the listing stand above the marker.", "type": "integer" }
+        }
+      },
+      "writes": true,
+      "beside": true,
+      "log": false
+    },
+    {
+      "name": "follow",
+      "description": "Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["thread", "on"],
+        "properties": {
+          "thread": { "description": "The id of the thread's top-level message.", "type": "integer", "minimum": 1 },
+          "on": { "description": "true to follow, false to stop.", "type": "boolean" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["thread", "following"],
+        "properties": {
+          "thread": { "description": "The id of the thread's top-level message.", "type": "integer" },
+          "following": { "description": "Whether the caller follows it now.", "type": "boolean" }
+        }
+      },
+      "writes": true,
+      "beside": true,
+      "log": false
     },
     {
       "name": "listMessages",
@@ -1202,6 +1293,7 @@
                 },
                 "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
                 "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+                "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
                 "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
                 "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
                 "pinned": { "type": "boolean" },
@@ -1229,6 +1321,10 @@
           "after": {
             "description": "The id to pass as after for the page of newer messages: the last item's, when the listing has a newer message; null when it has none or the page is empty.",
             "type": ["integer", "null"]
+          },
+          "readUpTo": {
+            "description": "The caller's read marker on the listing, the conversation's or with thread the thread's: a message of another whose stand is above it is unread. Absent while the caller has none.",
+            "type": "integer"
           },
           "root": {
             "description": "With thread, the thread's top-level message.",
@@ -1273,6 +1369,7 @@
               },
               "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
               "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+              "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
               "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
               "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
               "pinned": { "type": "boolean" },
@@ -1347,6 +1444,7 @@
           },
           "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
           "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
           "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
           "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
           "pinned": { "type": "boolean" },
@@ -1448,6 +1546,164 @@
           "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
         }
       }
+    },
+    {
+      "name": "inbox",
+      "description": "The caller's inbox across every schema of the namespace that composes Comments and that the caller may read, newest first: the messages that mention it, the threads it follows that have replies of others, and the conversations it has read that have top-level messages of others. Each item names the latest such message and how many of them the caller has not read; an item with none unread is done. A mention is read once the caller's marker on the conversation, for a top-level message, or on its thread, for a reply, passes it. Mentions reach back as far as the config's deliveryRetentionMs.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kinds": {
+            "description": "The kinds of item to list; every kind when absent.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["mention", "thread", "conversation"] }
+          },
+          "unread": { "description": "true lists only items with unread messages, false only done ones; both when absent.", "type": "boolean" },
+          "limit": { "description": "At most this many items; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 100 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "schema", "instanceId", "message", "author", "postedAt", "excerpt", "unread"],
+              "properties": {
+                "kind": {
+                  "description": "mention, a message that mentions the caller; thread, a thread the caller follows, by its latest reply of another; conversation, a conversation the caller has read, by its latest top-level message of another.",
+                  "enum": ["mention", "thread", "conversation"]
+                },
+                "schema": { "description": "The instance's schema.", "type": "string" },
+                "instanceId": { "description": "The instance's id.", "type": "string" },
+                "message": { "description": "The id of the message the item shows.", "type": "integer" },
+                "thread": { "description": "The id of the thread's top-level message, when the message is a reply; on a thread item, the thread followed.", "type": "integer" },
+                "author": { "description": "The message's author.", "type": "string" },
+                "postedAt": { "description": "When the message came to stand, in epoch milliseconds: the item's place in the inbox.", "type": "integer" },
+                "excerpt": { "description": "The message's body with each run of white space made one space, at most 200 code points, ending with an ellipsis when cut.", "type": "string" },
+                "unread": { "description": "On a mention, 1 while the caller has not read the message and 0 after; on a thread or a conversation, how many messages of others stand above the caller's marker. 0 makes the item done.", "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      },
+      "scope": "namespace"
+    },
+    {
+      "name": "claimDeliveries",
+      "description": "Claims deliveries that are due, at most limit, oldest due first, under one new token that lapses after ttlMs, so two notifiers never send one twice: each pending one, each failed one whose next attempt has come, and each claimed one whose claim lapsed. Only deliveries of schemas the caller may read whose config names a deliverPermission the caller holds; with subjects or prefix, only theirs. A due delivery whose message no longer stands, or whose subject has read it, is dropped and not returned. Each delivery carries what a notifier needs to act with no other read.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "subjects": {
+            "description": "Only deliveries to these subjects.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\S+$" }
+          },
+          "prefix": { "description": "Only deliveries to subjects that start with it, agent: say; not with subjects.", "type": "string", "minLength": 1, "maxLength": 256 },
+          "limit": { "description": "At most this many deliveries; 20 when absent.", "type": "integer", "minimum": 1, "maximum": 100 },
+          "ttlMs": { "description": "How long the claim holds, in milliseconds; 60000 when absent. A delivery not settled by then is due again.", "type": "integer", "minimum": 1000, "maximum": 600000 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token", "expiresAt", "items"],
+        "properties": {
+          "token": { "description": "The claim's token, which settleDeliveries takes; null when nothing was claimed.", "type": ["string", "null"] },
+          "expiresAt": { "description": "When the claim lapses, in epoch milliseconds; null when nothing was claimed.", "type": ["integer", "null"] },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "schema", "instanceId", "message", "subject", "reasons", "author", "state", "postedAt", "body", "truncated", "attempt"],
+              "properties": {
+                "id": { "description": "The delivery's id, which settleDeliveries takes: opaque, and the same at each claim.", "type": "string" },
+                "schema": { "description": "The instance's schema.", "type": "string" },
+                "instanceId": { "description": "The instance's id.", "type": "string" },
+                "message": { "description": "The id of the message.", "type": "integer" },
+                "thread": { "description": "The id of the thread's top-level message, when the message is a reply.", "type": "integer" },
+                "subject": { "description": "Who should hear of it: a person's, an agent's or a group's (role:<name>) subject, as the message gave it; a notifier expands a group.", "type": "string" },
+                "reasons": {
+                  "description": "Why: mention, the message mentions the subject; reply, the subject follows the thread. Both, in that order, when both hold.",
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "enum": ["mention", "reply"] }
+                },
+                "author": { "description": "The message's author.", "type": "string" },
+                "via": { "description": "The deployable of the service whose call posted or began the message (D37).", "type": "string" },
+                "state": { "description": "The message's: posted, or interrupted when its author stopped before finishing it.", "enum": ["posted", "interrupted"] },
+                "postedAt": { "description": "When the message came to stand, in epoch milliseconds.", "type": "integer" },
+                "body": { "description": "The message's body as it is now, Markdown, at most its first 4000 code points.", "type": "string" },
+                "truncated": { "description": "Whether body was cut.", "type": "boolean" },
+                "attempt": { "description": "Which claim of the delivery this is: 1 for the first.", "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "writes": true,
+      "scope": "namespace"
+    },
+    {
+      "name": "settleDeliveries",
+      "description": "Settles deliveries the caller claimed under token: sent; failed, which makes each due again after a backoff until the config's maxAttempts claims, then drops it; or dropped. Needs the deliverPermission of each delivery's schema. Every id must be held under the token, or nothing is settled.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token", "ids", "outcome"],
+        "properties": {
+          "token": { "description": "The token claimDeliveries returned.", "type": "string", "minLength": 1, "maxLength": 128 },
+          "ids": {
+            "description": "The ids of the deliveries to settle.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+          },
+          "outcome": { "description": "sent, failed or dropped.", "enum": ["sent", "failed", "dropped"] },
+          "error": { "description": "Why it failed or was dropped, kept on the delivery; not with sent.", "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "description": "Each delivery, in the order of ids.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "state", "attempts"],
+              "properties": {
+                "id": { "type": "string" },
+                "state": { "description": "sent, failed or dropped: a failure on its last attempt is dropped.", "enum": ["sent", "failed", "dropped"] },
+                "attempts": { "description": "How many times it has been claimed.", "type": "integer" },
+                "nextAttemptAt": { "description": "When a failed one is due again, in epoch milliseconds.", "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "writes": true,
+      "scope": "namespace"
     }
   ],
   "signals": [
@@ -1488,7 +1744,7 @@
       "code": "no_message",
       "description": "The id a call names, as message, thread, quotes or around, is not a message of the conversation, or a purged one; or around names a message outside the listing. details: message."
     },
-    { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, begin, listMessages, resolve and reopen. details: message, thread, the reply's thread." },
+    { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, begin, listMessages, resolve, reopen, markRead and follow. details: message, thread, the reply's thread." },
     { "code": "not_in_thread", "description": "post or begin with quotes naming a message outside the thread it replies in. details: message, thread." },
     { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve or reopen of a deleted message, or a post or begin quoting one. details: message." },
     {
@@ -1517,6 +1773,18 @@
     },
     { "code": "too_many_drafts", "description": "begin by a caller that has the config's maxDrafts composing messages on the instance already. details: composing, how many it has; max." },
     { "code": "draft_too_long", "description": "appendDraft whose text would make the draft longer than the config's maxBodyLength. details: message, length, append, maxBodyLength." },
-    { "code": "not_configured", "description": "purge on a type whose config names no moderatePermission. details: permission, \"moderatePermission\"." }
+    {
+      "code": "not_configured",
+      "description": "purge on a type whose config names no moderatePermission; or claimDeliveries or settleDeliveries in a namespace none of whose schemas the caller may read names a deliverPermission. details: permission, \"moderatePermission\" or \"deliverPermission\"."
+    },
+    {
+      "code": "unknown_delivery",
+      "description": "settleDeliveries with ids that name no delivery of a schema the caller may read and whose deliverPermission it holds: never made, pruned, or removed with its message or its instance. details: ids, those ids, in the order given."
+    },
+    { "code": "token_stale", "description": "settleDeliveries with a token no delivery holds now: each it claimed has been settled, or claimed again after the claim lapsed. details: token." },
+    {
+      "code": "not_claimed",
+      "description": "settleDeliveries with ids of deliveries that do not hold the token: pending, settled, or claimed under another token after this claim lapsed. details: token; ids, those ids, in the order given."
+    }
   ]
 }
