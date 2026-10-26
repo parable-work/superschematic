@@ -11799,7 +11799,12 @@ Status: built.
   `TestTableParityOfGoAndTypeScriptOnPostgres` as before.
 - **Projections:** `TestProjectionWithoutPool` (sqlgen),
   `TestProjectionWithoutPoolPassesVerification` and the refusal of one
-  named as a table, and `TestAPIViewSourcedFromAProjection`, an API view
+  named as a table; fixture-finances-db among sqlmigrate's model
+  fixtures, whose plan from an empty database `TestConvergenceOnPostgres`
+  applies; the writer's round trip of it; `TestSettingBoundProjectionCompiles`
+  and `TestASettingBoundProjectionHasARepository`, fixture-projection's
+  view, bound to settings and collapsed by its key, read in Go and
+  TypeScript; and `TestAPIViewSourcedFromAProjection`, an API view
   `@source(TransactionListRow)` whose package and the database's
   type-check together.
 
