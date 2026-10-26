@@ -86,7 +86,7 @@ func TestDescribeDocumentMatchesTheRunner(t *testing.T) {
 // they are of one family, both lists or neither.
 func TestCompatible(t *testing.T) {
 	for _, tc := range []struct {
-		declared string
+		declared  string
 		described Type
 		want      bool
 	}{
