@@ -144,6 +144,14 @@ path for when the store is unavailable.
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
   with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+- **Tools for agents are declared too.** `@mcp` with `@docs` makes an
+  operation an MCP tool, and `outputs.api.mcp` serves the tools from a
+  TypeScript API. Mark a tool that moves money or changes data in bulk
+  `@mcp({ invocationPolicy: "ask" })`: the endpoint then runs it only once
+  the person confirms the call, by elicitation or a two-step
+  `confirmationToken`, and the API's config names the `@envVars` secret
+  that signs confirmations, `outputs.api.mcpConfirmationKey`. Never pass a
+  `confirmationToken` the person has not confirmed.
 - **Outputs must line up.** A server or SDK in a language needs
   `outputs.types` in that language, and a DB always needs Go types; the
   config fails to load and says so otherwise.

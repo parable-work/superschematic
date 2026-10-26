@@ -661,6 +661,11 @@ APIs answers both routes from the first API's router.
 With `outputs.api.mcp` on, a TypeScript API also serves its MCP tools at
 `POST /api/mcp`
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once
+the person confirms the call, by MCP elicitation or a two-step token, so
+the API's config names the secret the endpoint signs confirmations with,
+`outputs.api.mcpConfirmationKey`
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
 
 ## The TypeScript server
 
