@@ -536,25 +536,32 @@ fn permission_policy_allows_a_read_to_anyone_and_a_write_to_a_holder_of_the_oper
                 .unwrap()
                 .iter()
                 .filter(|tool| tool["namespace"] == json!("test-inbox"))
-                .map(|tool| json!([tool["name"], tool["mcp"]["hidden"]]))
+                .map(|tool| {
+                    json!([
+                        tool["name"],
+                        tool["mcp"]["hidden"],
+                        tool["mcp"].get("hiddenBy").cloned().unwrap_or(json!([]))
+                    ])
+                })
                 .collect()
         };
+        // A tool the behavior listing question refuses is hidden by policy.
         assert_eq!(
             tools(&clearer),
             json!([
-                ["test-inbox.notes", false],
-                ["test-inbox.clear", false],
-                ["test-inbox.hold", true],
-                ["test-inbox.probe", false]
+                ["test-inbox.notes", false, []],
+                ["test-inbox.clear", false, []],
+                ["test-inbox.hold", true, ["policy"]],
+                ["test-inbox.probe", false, []]
             ])
         );
         assert_eq!(
             tools(&note_reader),
             json!([
-                ["test-inbox.notes", false],
-                ["test-inbox.clear", true],
-                ["test-inbox.hold", true],
-                ["test-inbox.probe", false]
+                ["test-inbox.notes", false, []],
+                ["test-inbox.clear", true, ["policy"]],
+                ["test-inbox.hold", true, ["policy"]],
+                ["test-inbox.probe", false, []]
             ])
         );
         // carol reads no schema that composes test.Inbox: no tools at all.
@@ -582,6 +589,8 @@ fn an_archived_namespace_refuses_a_writing_one_and_runs_a_read() {
     for target in targets("namespace_archived") {
         let engine = opened(&target, Policy::allow_all());
         engine.namespaces().create(&alice(), "acme").unwrap();
+        // A schema there composes test.Inbox, so its tools are listed.
+        publish_in(&engine, &document("Note", Some("notes")), "acme");
         engine.namespaces().archive(&alice(), "acme").unwrap();
         let at = |operation: &str| {
             engine.behaviors().invoke(
@@ -595,7 +604,42 @@ fn an_archived_namespace_refuses_a_writing_one_and_runs_a_read() {
             )
         };
         assert_eq!(code(at("clear")), EngineErrorCode::NamespaceArchived);
-        assert_eq!(at("notes").unwrap(), json!({"items": [], "readable": []}));
+        assert_eq!(
+            at("notes").unwrap(),
+            json!({"items": [], "readable": ["Note"]})
+        );
+        // Its tools say so: a writing one is hidden by archived, a read
+        // one is listed.
+        let hidden: Vec<Value> = engine
+            .tools()
+            .manifest(
+                &alice(),
+                ToolTarget {
+                    namespace: Some("acme"),
+                    filter: None,
+                },
+            )
+            .unwrap()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool["namespace"] == json!("test-inbox"))
+            .map(|tool| {
+                json!([
+                    tool["name"],
+                    tool["mcp"].get("hiddenBy").cloned().unwrap_or(json!([]))
+                ])
+            })
+            .collect();
+        assert_eq!(
+            hidden,
+            [
+                json!(["test-inbox.notes", []]),
+                json!(["test-inbox.clear", ["archived"]]),
+                json!(["test-inbox.hold", ["archived"]]),
+                json!(["test-inbox.probe", []])
+            ]
+        );
     }
 }
 

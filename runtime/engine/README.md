@@ -5284,9 +5284,11 @@ asks what its call asks, and `define_schema` and the namespace tools,
 which name their schema or namespace only when called, ask a listing
 question ("Access"), and so does a namespace operation's tool, with its
 behavior and operation. So is, in an archived namespace, every tool that
-writes there, the namespace tools aside: the namespace refuses the
-write; and every tool a mount's `tools` filter leaves out of the
-caller's set ("MCP").
+writes there, the namespace tools and an operation that asks read
+(`markRead`, `follow`) aside: the namespace refuses the write; a
+namespace operation's tool that writes, `comments.claimDeliveries` say,
+is hidden there as `archived`; and every tool a mount's `tools` filter
+leaves out of the caller's set ("MCP").
 
 A hidden tool's `mcp` is `{ hidden: true, hiddenReason, hiddenBy }`.
 `hiddenBy` lists each cause, in this order: `deployment` (the tool

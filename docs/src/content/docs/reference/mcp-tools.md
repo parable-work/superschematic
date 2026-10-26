@@ -495,6 +495,10 @@ tool, named after the behavior (`comments.inbox`, handle
 question for it, which names the behavior and no schema, with
 `listing: true`, hides it from a caller it refuses
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
+Its `hiddenBy` names the same causes as a schema's tool (below):
+`deployment` when `tools.hidden` names it, `archived` for one that writes
+in an archived namespace, `policy` when that question refuses the caller,
+`handle` when its handle collides or is refused, and `filter`.
 Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
@@ -592,7 +596,7 @@ engine found, in this order, and `hiddenReason` is the first one's.
 | `hiddenBy` | The engine hides the tool because |
 | --- | --- |
 | `deployment` | `tools.hidden` names its operation; the policy is not asked |
-| `archived` | it writes in an archived namespace |
+| `archived` | it writes in an archived namespace; an operation that asks read (`markRead`, `follow`) writes only the caller's own state and is not hidden |
 | `policy` | the access policy refuses the caller what its call asks |
 | `handle` | `@mcp` would refuse its handle: not snake case, longer than 48 characters, an engine tool's, or another tool's too; the policy is asked all the same, since the API still offers the operation |
 | `filter` | the mount's `tools` filter leaves it out; asked only of a tool nothing else hides |
