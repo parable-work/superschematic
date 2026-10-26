@@ -98,8 +98,11 @@ path for when the store is unavailable.
    the schemas root. Each method answers 501 until you fill it. Compile
    errors after a schema change point at exactly the code to follow.
 6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
-   whole stack locally, with Postgres in Docker and migrations applied. Run
-   the language's own tests against the generated SDKs.
+   whole stack locally, with Postgres in Docker and migrations applied. A
+   site whose config names `site.dev` runs its dev server there, with its
+   APIs under `/api/<service>` on the site's origin; `--build-sites`
+   builds it as a deploy does. Run the language's own tests against the
+   generated SDKs.
 7. **Changing a table that holds data?** `superschematic migrate plan
    schemas/services/<db> --from-ref origin/main` plans expand and contract
    steps with their hazards. Show the hazards to the user.
