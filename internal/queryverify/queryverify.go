@@ -395,10 +395,7 @@ func StartPostgres(ctx context.Context, image string) (string, func(), error) {
 	// The image's first server, which initdb runs, listens on its socket
 	// alone; ready on TCP is the server that stays.
 	deadline := time.Now().Add(90 * time.Second)
-	for {
-		if exec.CommandContext(ctx, "docker", "exec", id, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run() == nil {
-			break
-		}
+	for exec.CommandContext(ctx, "docker", "exec", id, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").Run() != nil {
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			stop()
 			return "", nil, fmt.Errorf("the Postgres container %s did not take connections within 90s", image)
