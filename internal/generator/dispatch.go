@@ -734,6 +734,15 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		// opens in the background (D58).
 		tsDeps.Engine = &tsrestgen.DepsEngine{Database: e.Database, Namespace: e.Namespace, Package: r.Options.Naming.EngineNpmPackage}
 	}
+	// The MCP endpoint signs the confirmations of the tools that ask with
+	// the secret the API's config names, which its @envVars holds (D93).
+	confirmationKey, err := r.mcpConfirmationKeyField(output.MCP)
+	if err != nil {
+		return nil, nil, err
+	}
+	if confirmationKey != nil {
+		tsDeps.MCPConfirmationKey = confirmationKey.Name
+	}
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}

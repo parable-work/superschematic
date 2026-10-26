@@ -34,6 +34,10 @@ const (
 
 var agentOrder = []string{"users-db", agentAPI, agentStack}
 
+// agentConfirmationKey is the environment's value of the secret
+// users-ts-agent's outputs.api.mcpConfirmationKey names (D93).
+const agentConfirmationKey = "AGENT_MCP_CONFIRMATION_KEY=a random key of at least thirty-two bytes"
+
 // loadAgentFixture loads users-db and the agent API and stack with the
 // core registry.
 func loadAgentFixture(t *testing.T) fixture {
@@ -93,7 +97,11 @@ export const create: Constructor = () => ({
 // lists the tools (the hidden, the unclassified and the one it lacks the
 // permission for absent, the ask policy in _meta) and calls them, each
 // through its route: a result as the user, and a value the route refuses
-// as a tool error with its problem. After logout the token is refused.
+// as a tool error with its problem. set_motto, whose policy is ask, runs
+// only with the confirmation token its first call answered, signed with
+// the key the entrypoint reads from the config field
+// outputs.api.mcpConfirmationKey names, and that token once (D93). After
+// logout the token is refused.
 func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -133,7 +141,14 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	field := ir.IdentityConfigField(agentAPI)
 	identityConfig := field + `={"cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
 	unreachable := "USERS_DB_DATABASE_URL=postgres://users@127.0.0.1:9/users_db?connect_timeout=1&sslmode=disable"
-	offline := bunServer(t, bun, dir, unreachable, identityConfig)
+	main, err := os.ReadFile(filepath.Join(dir, servergen.TypeScriptMainFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(main), "mcp: { confirmationKey: usersTsAgentConfig.AGENT_MCP_CONFIRMATION_KEY }") {
+		t.Errorf("main.ts does not build the router with the confirmation key:\n%s", main)
+	}
+	offline := bunServer(t, bun, dir, unreachable, identityConfig, agentConfirmationKey)
 	offline.expect(t, http.MethodGet, "/api/openapi.json", http.StatusOK, `"/api/greeting"`, `"version": "1.0.0"`, `"url": "http://localhost:8080"`)
 	offline.expect(t, http.MethodGet, "/api/docs", http.StatusOK, "<rapi-doc", "users-ts-agent API Documentation")
 	if status, _ := offline.rpc(t, "", initialize); status != http.StatusUnauthorized {
@@ -147,7 +162,7 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 		return
 	}
 	databaseURL := identitySchemaTS(t, bun, dir, postgres, filepath.Join(generator.SQLDir(out, "users-db"), "create.sql"))
-	online := bunServer(t, bun, dir, "USERS_DB_DATABASE_URL="+databaseURL, identityConfig)
+	online := bunServer(t, bun, dir, "USERS_DB_DATABASE_URL="+databaseURL, identityConfig, agentConfirmationKey)
 	online.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
 	token := online.login(t, "ada@example.com", "ada's password")
 
@@ -186,6 +201,9 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if tools[1].Annotations["readOnlyHint"] != false || tools[1].Meta["invocationPolicy"] != "ask" || mustMarshal(t, tools[1].InputSchema["required"]) != `["motto"]` {
 		t.Errorf("set_motto is listed as %+v", tools[1])
 	}
+	if properties, _ := tools[1].InputSchema["properties"].(map[string]any); properties["confirmationToken"] == nil {
+		t.Errorf("set_motto, which asks, takes no confirmationToken: %+v", tools[1].InputSchema)
+	}
 
 	greeted := online.toolCall(t, token, "greet", `{}`)
 	if testing.Verbose() {
@@ -194,11 +212,32 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if mustMarshal(t, greeted["structuredContent"]) != `{"message":"Hello, Ada"}` || greeted["isError"] != nil {
 		t.Errorf("greet answered %v", greeted)
 	}
-	set := online.toolCall(t, token, "set_motto", `{"motto": "Ship it"}`)
-	if mustMarshal(t, set["structuredContent"]) != `{"message":"Ada's motto: Ship it"}` {
-		t.Errorf("set_motto answered %v", set)
+	// set_motto asks: its first call runs nothing and answers a token, and
+	// the same call with the token runs, once (D93).
+	confirmation := func(arguments string) string {
+		t.Helper()
+		asked := online.toolCall(t, token, "set_motto", arguments)
+		problem, _ := asked["structuredContent"].(map[string]any)
+		details, _ := problem["details"].(map[string]any)
+		confirmation, _ := details["confirmationToken"].(string)
+		if asked["isError"] != true || problem["status"] != float64(428) || problem["code"] != "confirmation_required" || confirmation == "" {
+			t.Fatalf("set_motto's first call answered %v, want confirmation_required with a token", asked)
+		}
+		return confirmation
 	}
-	refused := online.toolCall(t, token, "set_motto", `{"motto": ""}`)
+	withToken := func(arguments, confirmation string) string {
+		return strings.TrimSuffix(arguments, "}") + `, "confirmationToken": "` + confirmation + `"}`
+	}
+	confirmed := confirmation(`{"motto": "Ship it"}`)
+	set := online.toolCall(t, token, "set_motto", withToken(`{"motto": "Ship it"}`, confirmed))
+	if mustMarshal(t, set["structuredContent"]) != `{"message":"Ada's motto: Ship it"}` {
+		t.Errorf("set_motto with its token answered %v", set)
+	}
+	replayed := online.toolCall(t, token, "set_motto", withToken(`{"motto": "Ship it"}`, confirmed))
+	if problem, _ := replayed["structuredContent"].(map[string]any); problem["code"] != "confirmation_required" || mustMarshal(t, problem["details"].(map[string]any)["refused"]) != `"used"` {
+		t.Errorf("set_motto with a used token answered %v, want it asked about again", replayed)
+	}
+	refused := online.toolCall(t, token, "set_motto", withToken(`{"motto": ""}`, confirmation(`{"motto": ""}`)))
 	if problem, _ := refused["structuredContent"].(map[string]any); refused["isError"] != true || problem["status"] != float64(400) || problem["code"] != "bad_request" {
 		t.Errorf("set_motto with an empty motto answered %v, want the route's 400 as a tool error", refused)
 	}

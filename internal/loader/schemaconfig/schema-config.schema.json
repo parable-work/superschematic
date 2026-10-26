@@ -26,6 +26,10 @@
           "description": "Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API serves it; the build refuses it on a Go or Rust API, where support follows. Unset is off.",
           "type": "boolean"
         },
+        "mcpConfirmationKey": {
+          "description": "The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: \"McpKeys.MCP_CONFIRMATION_KEY\". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.",
+          "type": "string"
+        },
         "scaffoldsOutputDir": {
           "type": "string"
         }

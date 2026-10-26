@@ -130,7 +130,7 @@ var docsJSONPointerPattern = regexp.MustCompile(`^(?:/(?:[^~/]|~[01])*)+$`)
 // where, else what is wrong with its segments.
 func capabilityProblem(capability string) string {
 	for i, r := range []rune(capability) {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-') {
+		if !capabilityRune(r) {
 			return fmt.Sprintf("holds %q at character %d", string(r), i+1)
 		}
 	}
@@ -147,6 +147,12 @@ func capabilityProblem(capability string) string {
 		}
 	}
 	return "is not dot-separated lowercase segments"
+}
+
+// capabilityRune reports whether a capability may hold r: a lowercase
+// letter, a digit, a dot or a hyphen.
+func capabilityRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-'
 }
 
 // capabilityExample is capability with each character it may not hold

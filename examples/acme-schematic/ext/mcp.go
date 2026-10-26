@@ -45,6 +45,9 @@ func registerMCPPolicy(r *registry.Registry) error {
 		Key:       ConfirmKey,
 		Values:    []string{ConfirmNever, ConfirmAlways},
 		Default:   ConfirmNever,
+		// An API's MCP endpoint runs an always tool once the person
+		// confirms the call (D93).
+		Confirm: []string{ConfirmAlways},
 	}); err != nil {
 		return err
 	}

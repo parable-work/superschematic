@@ -1,6 +1,17 @@
 name: users-ts-agent
 kind: API
 types:
+  # The key the MCP endpoint signs the confirmations of set_motto with,
+  # which the config's outputs.api.mcpConfirmationKey names (D93).
+  AgentKeys:
+    name: AgentKeys
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: AGENT_MCP_CONFIRMATION_KEY
+        typeRef: { name: string }
+        required: true
+        secret: true
   Greeting:
     name: Greeting
     role: APIView

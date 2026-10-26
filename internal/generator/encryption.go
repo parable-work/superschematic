@@ -105,10 +105,20 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 	}
 	typeName, field, _ := registry.SplitEncryptionKey(key)
 	needs := fmt.Sprintf("%s opens the ORM of %s, whose Encrypted<T> fields take their keys from the secret %s (outputs.sql.encryption.key in %s's config)", r.Config.Name, db, key, db)
-	fix := fmt.Sprintf("declare %s: Secret<string> in an @envVars class %s, in %s's schema or in a General service %s depends on, and make %s's @envVars class %s or extend it (see %s)",
-		field, typeName, r.Config.Name, r.Config.Name, r.Config.Name, typeName, EncryptionKeyDocs)
-	for _, name := range slices.Sorted(maps.Keys(r.Schema.Types)) {
-		td := r.Schema.Types[name]
+	fd, problem := envVarsSecret(r.Schema, typeName, field)
+	if fd == nil {
+		return nil, fmt.Errorf("generator: %s, and %s; %s", needs, problem, r.envVarsSecretFix(typeName, field, EncryptionKeyDocs))
+	}
+	return fd, nil
+}
+
+// envVarsSecret is the field of schema's @envVars classes that is the
+// secret typeName.field, as a stack names one, or why there is none: no
+// class holds a field of its name, the one that does is another class's
+// secret, or it is no required Secret<string>.
+func envVarsSecret(schema *ir.Schema, typeName, field string) (*ir.FieldDef, string) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
+		td := schema.Types[name]
 		if !td.EnvVars {
 			continue
 		}
@@ -122,12 +132,19 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 			}
 			switch {
 			case declared != typeName:
-				return nil, fmt.Errorf("generator: %s, and its @envVars field %s is declared by %s, so it is the secret %s.%s; %s", needs, field, declared, declared, field, fix)
+				return nil, fmt.Sprintf("its @envVars field %s is declared by %s, so it is the secret %s.%s", field, declared, declared, field)
 			case !fd.Secret || fd.TypeRef.Name != "string" || fd.TypeRef.IsArray || fd.TypeRef.IsMap || !fd.Required:
-				return nil, fmt.Errorf("generator: %s, and its @envVars field %s is no required Secret<string>; %s", needs, field, fix)
+				return nil, fmt.Sprintf("its @envVars field %s is no required Secret<string>", field)
 			}
-			return fd, nil
+			return fd, ""
 		}
 	}
-	return nil, fmt.Errorf("generator: %s, and its @envVars class holds no field %s; %s", needs, field, fix)
+	return nil, fmt.Sprintf("its @envVars class holds no field %s", field)
+}
+
+// envVarsSecretFix says how the API holds the secret typeName.field: where
+// the class that declares it lives, and the docs section that says more.
+func (r run) envVarsSecretFix(typeName, field, docs string) string {
+	return fmt.Sprintf("declare %s: Secret<string> in an @envVars class %s, in %s's schema or in a General service %s depends on, and make %s's @envVars class %s or extend it (see %s)",
+		field, typeName, r.Config.Name, r.Config.Name, r.Config.Name, typeName, docs)
 }
