@@ -593,7 +593,8 @@ for (const driver of drivers) {
       invoke(engine, worker, 'acquire');
       invoke(engine, worker, 'transition', { to: 'running' }, 'j1', 1);
       clock.advance(60000);
-      assert.equal(engine.runner.runDue().scheduled, 1);
+      // Lease's sweep, and Comments' interrupt, which the type composes too.
+      assert.equal(engine.runner.runDue().scheduled, 2);
       assert.deepEqual([statusOf(engine), leaseOf(engine).holder, leaseOf(engine).ended], ['queued', undefined, { reason: 'ttl', at: T0 + 60000 }]);
     });
 
@@ -714,8 +715,8 @@ for (const driver of drivers) {
         runner: { principal: runner },
       });
       engine.runner.runDue();
-      const [schedule] = engine.runner.status().schedules;
-      assert.deepEqual([schedule.behavior, schedule.schedule, schedule.everyMs, schedule.next], ['Lease', 'expire', 2000, T0 + 2000]);
+      const schedule = engine.runner.status().schedules.find((one) => one.behavior === 'Lease');
+      assert.deepEqual([schedule?.behavior, schedule?.schedule, schedule?.everyMs, schedule?.next], ['Lease', 'expire', 2000, T0 + 2000]);
       for (const id of ['j2', 'j3']) {
         engine.instances.create(alice, 'Job', { title: id }, { id });
       }
@@ -727,13 +728,14 @@ for (const driver of drivers) {
       engine.instances.update(operator, 'Job', 'j3', { timeLimitMs: 30000 });
       clock.advance(30000);
       invoke(engine, worker, 'heartbeat', {}, 'j2', 1);
-      assert.equal(engine.runner.runDue().scheduled, 1);
+      // Lease's sweep, and Comments' interrupt, which the type composes too.
+      assert.equal(engine.runner.runDue().scheduled, 2);
       assert.deepEqual(
         ['j1', 'j2', 'j3'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder]),
         [['running', 'wren'], ['running', 'wren'], ['queued', undefined]]
       );
       clock.advance(30000);
-      assert.equal(engine.runner.runDue().scheduled, 1);
+      assert.equal(engine.runner.runDue().scheduled, 2);
       assert.deepEqual(
         ['j1', 'j2', 'j3'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder, leaseOf(engine, id).expiries]),
         [['queued', undefined, 1], ['running', 'wren', 0], ['queued', undefined, 1]]

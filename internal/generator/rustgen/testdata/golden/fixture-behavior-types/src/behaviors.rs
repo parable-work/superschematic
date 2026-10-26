@@ -468,13 +468,15 @@ pub struct TicketWorkflow {
 /// TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TicketComments {
-    /// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    /// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
     pub messages: i64,
-    /// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    /// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
     #[serde(default, rename = "lastMessageAt", skip_serializing_if = "Option::is_none")]
     pub last_message_at: Option<i64>,
-    /// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    /// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
     pub threads: TicketCommentsThreads,
+    /// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    pub composing: Vec<String>,
 }
 
 /// TicketCommentsThreads types TicketComments.threads.

@@ -281,6 +281,29 @@
         {"call":"close"},
         {"stream":"s1","end":true}
       ]
+    },
+    {
+      "name": "event stream > a stream with signals=1 sends each signal as an event with no id, and one without sends none",
+      "behaviors": ["test.Chatter"],
+      "principals": {"alice":{"subject":"alice","permissions":[]}},
+      "steps": [
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","metaSchema":"open","behaviors":["test.Chatter"],"ids":"seeded","clock":"wall"}]},
+        {"app":"a1","kind":"engine","options":{"authenticate":"host","stream":{"heartbeatMs":60000}}},
+        {"call":"schemas.define","principal":"alice","args":[{"kind":"General","name":"Chat","types":{"Chat":{"name":"Chat","role":"EmbeddedStruct","fields":[{"name":"title","typeRef":{"name":"string"},"required":true}],"behaviors":[{"name":"test.Chatter"}]}}}],"expect":{"namespace":"default","name":"Chat","version":null,"instanceType":"Chat","document":{"kind":"General","name":"Chat","types":{"Chat":{"behaviors":[{"name":"test.Chatter"}],"fields":[{"name":"title","required":true,"typeRef":{"name":"string"}}],"name":"Chat","role":"EmbeddedStruct"}}},"canonical":"{\"kind\":\"General\",\"name\":\"Chat\",\"types\":{\"Chat\":{\"behaviors\":[{\"name\":\"test.Chatter\"}],\"fields\":[{\"name\":\"title\",\"required\":true,\"typeRef\":{\"name\":\"string\"}}],\"name\":\"Chat\",\"role\":\"EmbeddedStruct\"}}}","hash":"ab1158e2f38c515b0af36106744b19bd51916cae9f8a78038d0f70e49ae68558","definedAt":"{{time:1}}","definedBy":"alice","publishedAt":null,"publishedBy":null}},
+        {"call":"schemas.publish","principal":"alice","args":["Chat"],"expect":{"namespace":"default","name":"Chat","version":1,"published":true}},
+        {"call":"instances.create","principal":"alice","args":["Chat",{"title":"Desk"},{"id":"c1"}],"expect":{"namespace":"default","schema":"Chat","id":"c1","schemaNamespace":"default","version":1,"seq":1,"data":{"title":"Desk"},"behaviors":{},"createdAt":"{{time:2}}","createdBy":"alice","updatedAt":"{{time:2}}","updatedBy":"alice"}},
+        {"request":{"method":"GET","path":"/namespaces/default/events","query":"after=head&signals=1","headers":{"accept":"text/event-stream","authorization":"Bearer alice"},"caller":{"principal":{"subject":"alice","permissions":[]}}},"response":{"status":200,"headers":{"cache-control":"no-store","content-type":"text/event-stream","x-request-id":"{{id:1}}"}},"stream":"s1"},
+        {"stream":"s1","frames":[{"comment":"open"},{"event":"ready","id":"3","data":{"cursor":3}}]},
+        {"request":{"method":"GET","path":"/namespaces/default/events","query":"after=head","headers":{"accept":"text/event-stream","authorization":"Bearer alice"},"caller":{"principal":{"subject":"alice","permissions":[]}}},"response":{"status":200,"headers":{"cache-control":"no-store","content-type":"text/event-stream","x-request-id":"{{id:2}}"}},"stream":"s2"},
+        {"stream":"s2","frames":[{"comment":"open"},{"event":"ready","id":"3","data":{"cursor":3}}]},
+        {"request":{"method":"POST","path":"/namespaces/default/schemas/Chat/instances/c1/signals/test.Chatter/typing","headers":{"accept":"*/*","authorization":"Bearer bob","content-type":"application/json"},"body":{"thread":1},"caller":{"principal":{"subject":"bob","permissions":[]}}},"response":{"status":204,"headers":{"cache-control":"no-store","x-request-id":"{{id:3}}"}}},
+        {"stream":"s1","frames":[{"event":"signal","data":{"namespace":"default","schema":"Chat","instanceId":"c1","behavior":"test.Chatter","name":"typing","data":{"thread":1},"from":"bob","at":"{{time:3}}"}}]},
+        {"call":"instances.invoke","principal":"alice","args":["Chat","c1","draft",{"text":"hello"}],"expect":null},
+        {"stream":"s1","frames":[{"id":"4","data":{"cursor":4,"kind":"operation","namespace":"default","schema":"Chat","instanceId":"c1","seq":null,"beside":true,"version":1,"actor":"alice","at":"{{time:4}}","change":{"behavior":"test.Chatter","operation":"draft","params":{"text":"hello"},"result":null}}},{"event":"signal","data":{"namespace":"default","schema":"Chat","instanceId":"c1","behavior":"test.Chatter","name":"draft","data":{"text":"hello"},"from":"alice","at":"{{time:4}}"}}]},
+        {"stream":"s2","frames":[{"id":"4","data":{"cursor":4,"kind":"operation","namespace":"default","schema":"Chat","instanceId":"c1","seq":null,"beside":true,"version":1,"actor":"alice","at":"{{time:4}}","change":{"behavior":"test.Chatter","operation":"draft","params":{"text":"hello"},"result":null}}}]},
+        {"stream":"s1","end":true},
+        {"stream":"s2","end":true}
+      ]
     }
   ]
 }

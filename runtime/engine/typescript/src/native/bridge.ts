@@ -746,6 +746,9 @@ export class Bridge {
       context.unchanged = () => {
         invoke('unchanged');
       };
+      context.signal = (signal: string, data?: unknown) => {
+        invoke('signal', [String(signal), data ?? {}]);
+      };
     }
     return Object.freeze(context);
   }

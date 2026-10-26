@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -349,4 +350,80 @@ func TestABackgroundEnginesRoutes(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the stream did not end once Done closed")
 	}
+}
+
+// The signal route and a stream with signals (D77), over the core's
+// archive, whose behaviors declare no signal: the route answers the
+// engine's refusal, the call by name too, and a stream with signals=1
+// replays and goes on as one without. The HTTP corpus's signal cases
+// deliver signals through the test kit's archive (make engine-go).
+func TestTheSignalRouteAndAStreamWithSignals(t *testing.T) {
+	e := openNotes(t)
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{
+		Caller: bearer,
+		Stream: engine.StreamOptions{HeartbeatMs: 60000},
+	}))
+	defer server.Close()
+	if _, err := e.Call(context.Background(), "instances.create", &engine.Principal{Subject: "alice"},
+		"Note", map[string]any{"body": "hello"}, map[string]any{"id": "n1"}); err != nil {
+		t.Fatal(err)
+	}
+	route := server.URL + "/namespaces/default/schemas/Note/instances/n1/signals/Comments/typing"
+	response, body := send(t, "POST", route, `{}`, "Authorization", "Bearer bob", "Content-Type", "application/json")
+	if response.StatusCode != 404 || !strings.Contains(body, `"code":"not_found"`) || !strings.Contains(body, "does not compose behavior Comments") {
+		t.Fatalf("a signal of a behavior the schema does not compose: %d %s", response.StatusCode, body)
+	}
+	_, err := e.Call(context.Background(), "sendSignal", &engine.Principal{Subject: "bob"},
+		map[string]any{"schema": "Note", "instanceId": "n1", "behavior": "Comments", "name": "typing"})
+	var refused *engine.Error
+	if !errors.As(err, &refused) || refused.Code != engine.CodeNotFound {
+		t.Fatalf("sendSignal: %v", err)
+	}
+	if engine.CodeRateLimited.Status() != http.StatusTooManyRequests {
+		t.Fatalf("rate_limited answers %d", engine.CodeRateLimited.Status())
+	}
+
+	req, _ := http.NewRequest("GET", server.URL+"/namespaces/default/events?signals=1", nil)
+	req.Header.Set("Authorization", "Bearer alice")
+	req.Header.Set("Accept", "text/event-stream")
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != 200 {
+		t.Fatalf("a stream with signals: %d", stream.StatusCode)
+	}
+	lines := make(chan string, 100)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(stream.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	until := func(want string) {
+		t.Helper()
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case line, ok := <-lines:
+				if !ok {
+					t.Fatalf("the stream ended before %q", want)
+				}
+				if strings.Contains(line, want) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no %q within 10s", want)
+			}
+		}
+	}
+	until(`"instanceId":"n1"`)
+	until("event: ready")
+	if _, err := e.Call(context.Background(), "instances.create", &engine.Principal{Subject: "alice"},
+		"Note", map[string]any{"body": "live"}, map[string]any{"id": "n2"}); err != nil {
+		t.Fatal(err)
+	}
+	until(`"instanceId":"n2"`)
 }

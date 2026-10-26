@@ -146,6 +146,11 @@ export class Transport {
     return (await this.attempt({ ...spec, stream: true }, FIRST_ATTEMPT)).response;
   }
 
+  /** empty sends a request whose success has no body (204), and answers its response. */
+  async empty(spec: RequestSpec): Promise<Response> {
+    return (await this.attempt({ ...spec, stream: false }, FIRST_ATTEMPT)).response;
+  }
+
   /** json sends a request and unwraps the success envelope's `data`. */
   async json<T>(spec: RequestSpec): Promise<{ data: T; response: Response }> {
     const { response, text = '' } = await this.attempt({ ...spec, stream: false }, FIRST_ATTEMPT);

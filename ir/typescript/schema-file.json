@@ -883,7 +883,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "blocks": {
-                    "description": "The block kinds a post or an edit may give; every kind when absent, none when empty.",
+                    "description": "The block kinds a post, an edit or a finish may give; every kind when absent, none when empty.",
                     "items": {
                       "enum": [
                         "ref",
@@ -893,19 +893,31 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "composeTimeoutMs": {
+                    "description": "How long a composing message's author may append nothing before the engine's runner interrupts it, in milliseconds; 60000 when absent. The runner looks for such messages every quarter of it, or every 15 seconds when that is sooner.",
+                    "maximum": 3600000,
+                    "minimum": 5000,
+                    "type": "integer"
+                  },
                   "editWindowMs": {
-                    "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+                    "description": "How long after a message's postedAt its author may edit it, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
                     "minimum": 1000,
                     "type": "integer"
                   },
                   "maxBodyLength": {
-                    "description": "The longest body a post or an edit may give, in code points; 40000 when absent.",
+                    "description": "The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points; 40000 when absent.",
                     "maximum": 40000,
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "maxDrafts": {
+                    "description": "The most composing messages one subject may have on an instance at once; begin refuses another. 5 when absent.",
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
                   "moderatePermission": {
-                    "description": "The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges.",
+                    "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
                     "minLength": 1,
                     "type": "string"
                   },
