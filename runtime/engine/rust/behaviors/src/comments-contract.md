@@ -1043,8 +1043,8 @@ Batch 3 adds four members, every one optional:
 | `deliveryRetentionMs` | integer 86400000..31536000000 | 2592000000 (30 days) | how long a delivery is kept from its `created_at`, whatever its state but a live claim; the inbox's mention items reach back as far ("The schedule prune") |
 
 Each namespace operation reads the config of a delivery's own schema
-(`cx.schemas().config(schema, "Comments")`, parsed as `CommentsConfig`):
-a namespace has no single config. A config change applies to the next
+(`cx.config(schema)`, the `CommentsConfig` its live version parsed; a
+`NamespaceCx` has no `schemas()`): a namespace has no single config. A config change applies to the next
 call; a delivery already failed keeps the `due_at` its settle gave it.
 
 ### The record and listMessages
