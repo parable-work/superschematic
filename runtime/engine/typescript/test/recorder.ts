@@ -1298,8 +1298,14 @@ function writeFiles(): void {
   }
 }
 
-/** The most JSON text, in characters, of a case the corpus writes (before its shared values are taken out). */
-const MAX_CASE_CHARS = 125_000;
+/**
+ * The most JSON text, in characters, of a case the corpus writes (before
+ * its shared values are taken out). It only keeps a file's size in bounds:
+ * a case past it is not replayed. A case that opens an engine carries the
+ * whole meta-schema, which grows with each behavior's config, so the limit
+ * leaves room for that growth.
+ */
+const MAX_CASE_CHARS = 200_000;
 
 // The members of a step whose own members, not they, are shared.
 const OPENED = new Set(['args', 'request', 'response']);
