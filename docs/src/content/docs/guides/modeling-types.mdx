@@ -341,3 +341,10 @@ TypeScript API package's `loadEnvConfig()` and the Rust API crate's
   `SecretValue` that prints as `[secret]` until you call `reveal()`.
 
 Rust types have no mask helper.
+
+`Secret<T>` does not encrypt a value: a DB table's `Secret<T>` field is
+stored as it is, and anyone who reads the database, a backup or a replica
+reads it. A field that must be encrypted at rest is `Encrypted<string>`
+from `@superschematic/db`, which is a `Secret<T>` too, and which the ORMs
+seal and open with the DB service's keys
+([Encrypted fields](/superschematic/guides/database-tables/#encrypted-fields)).
