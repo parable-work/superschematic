@@ -87,6 +87,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		}
 	case ir.SchemaKindDB:
 		svc.Dialects = outputs.SQLDialects()
+		svc.FieldKeys = outputs.EncryptionKey()
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 		}

@@ -143,6 +143,20 @@ export type SqlOutputConfig = {
    * The databases the service is built for. With sqlite listed, the build also writes sqlite/create.sql and refuses a schema that uses what SQLite does not support, and migrate plan --dialect sqlite plans for it. The list must hold postgres: the Go ORM the kind always generates runs on Postgres. Unset is ["postgres"].
    */
   readonly dialects?: readonly SqlDialect[];
+  /**
+   * Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it.
+   */
+  readonly encryption?: SqlEncryptionConfig;
+};
+
+/**
+ * The keys of a DB service's Encrypted<T> fields (D85).
+ */
+export type SqlEncryptionConfig = {
+  /**
+   * The Secret<string> field of an env vars class that holds the keys, by the type that declares the field and the field's name, as a stack names the secret: "FieldKeys.FINANCES_DB_KEY". Its value is one or more 32-byte keys in base64, separated by commas; the first encrypts, and each decrypts what it encrypted. Every API whose servers, jobs and workers open the service's ORM must hold the field in its env vars class.
+   */
+  readonly key: string;
 };
 
 /**

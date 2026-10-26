@@ -1,7 +1,9 @@
 import pg from 'pg';
-import { decodeRow, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
+import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
+import { columnKey, decodeRow, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
+import { SecretValue, revealed } from './secret.js';
 import { uuidToDb, uuidValue } from './uuid.js';
 
 /*
@@ -33,6 +35,15 @@ query and exec for raw SQL on it, and rolls back when fn throws. Its query
 takes a pg query config too, so enqueue(tx, queue, message) writes a queue's
 message in the transaction.
 
+A table's Encrypted<T> columns (D85) hold envelopes, which a write seals
+and a read opens with the DB service's field keys (createOrm(pool, {
+fieldKeys })), bound to the table, the field and the row's key: a create
+of such a table generates a UUID key the input leaves unset, a read holds
+each value in a SecretValue, and reencrypt reseals the envelopes of an
+older key under the current one. No filter holds such a column; updateMany
+cannot set one, and upsertOne can only by the primary key, since each
+row's envelope is bound to that row's key.
+
 Field selection, include and one-to-many loading, and the @versioned
 history readers are the Go ORM's alone for now; a relation's rows load
 through the target's getManyByIds.
@@ -60,6 +71,8 @@ export interface TableColumn extends RowField {
   readonly filter?: readonly string[];
   /** A column findPage orders by. */
   readonly sortable?: boolean;
+  /** An Encrypted<T> field's column, which holds its envelope (D85). */
+  readonly encrypted?: boolean;
 }
 
 /** A table's statements on Postgres, sqlutil.TableStatements: format strings of %s and %d alone. */
@@ -92,6 +105,9 @@ export interface TableStatements {
   readonly softDeleteMany: string;
   readonly delete: string;
   readonly deleteMany: string;
+  /** A table with an Encrypted<T> column's: the rows another key sealed, and their reseal (D85). */
+  readonly stale?: string;
+  readonly reseal?: string;
 }
 
 /** The parts of statements written around a column, sqlutil.Clauses: format strings whose first %s is the column. */
@@ -372,11 +388,35 @@ export interface Repository<Row, Create, Update, Filter, OrderField extends stri
   deleteMany(filter: Filter | null): Promise<number>;
 }
 
+/** What the repository of a table with an Encrypted<T> column adds (D85). */
+export interface EncryptedRepository {
+  /**
+   * Reseals under the current field key every envelope another key of the
+   * keyring sealed, batch rows at a time, deleted rows among them, and
+   * resolves to how many rows it resealed. Run it after a rotation puts a
+   * new key first, before the old one leaves the secret.
+   */
+  reencrypt(options?: { readonly batch?: number }): Promise<number>;
+}
+
 /** The repository of a soft-deletable table, which can remove a row too. */
 export interface SoftDeleteRepository<Row, Create, Update, Filter, OrderField extends string, SortField extends string, UniqueKey extends readonly string[], Key, PageKey>
   extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey> {
   /** Removes the row whose key is id, deleted or not; NotFoundError when there is none. */
   hardDeleteOne(id: Key): Promise<void>;
+}
+
+/** What createOrm and ormOf take beside the pool. */
+export interface OrmOptions {
+  /** The acting user's id, as withUser takes one. */
+  readonly user?: string | null;
+  /**
+   * The keys of the database's Encrypted<T> fields (D85): the DB service's
+   * key secret, as its text, the SecretValue an env config holds it in, or
+   * a keyring. A read or a write of such a field without them throws
+   * FieldEncryptionError.
+   */
+  readonly fieldKeys?: FieldKeys;
 }
 
 /** Who acts: a principal, as ctx.principal holds one. */
@@ -457,12 +497,17 @@ type Values = Record<string, unknown>;
 
 /** The repository of one table over a runner, acting as user. */
 class TableRepository {
+  private readonly encrypted: readonly TableColumn[];
+
   constructor(
     private readonly orm: OrmDefinition,
     private readonly def: TableDefinition,
     private readonly runner: Runner,
-    private readonly user: string | undefined
-  ) {}
+    private readonly user: string | undefined,
+    private readonly keys: FieldKeyring | undefined
+  ) {
+    this.encrypted = def.columns.filter(c => c.encrypted);
+  }
 
   private get clauses(): Clauses {
     return this.orm.clauses;
@@ -483,7 +528,74 @@ class TableRepository {
   }
 
   private decode(row: Record<string, unknown>): Values {
-    return decodeRow<Values>(row, this.def.columns);
+    return this.open(decodeRow<Values>(row, this.def.columns));
+  }
+
+  /** The cell of column in the row whose key is key, in its wire or database form. */
+  private cell(column: TableColumn, key: unknown): FieldCell {
+    const keyColumn = this.keyColumn();
+    return { table: this.def.name, field: column.field, row: keyColumn.uuid ? uuidToDb(key) : String(key) };
+  }
+
+  private ring(column: TableColumn): FieldKeyring {
+    if (!this.keys) throw new FieldEncryptionError('no-keys', { table: this.def.name, field: column.field });
+    return this.keys;
+  }
+
+  /** row with each encrypted member opened into a SecretValue, under the row's key. */
+  private open(row: Values): Values {
+    for (const column of this.encrypted) {
+      const value = row[column.name];
+      if (value === null || value === undefined) continue;
+      row[column.name] = new SecretValue(this.ring(column).open(this.cell(column, row[this.def.key]), String(value)));
+    }
+    return row;
+  }
+
+  /** The envelope of an encrypted member's value, a string or a SecretValue of one, in the row whose key is key. */
+  private seal(column: TableColumn, value: unknown, key: unknown, what: string): string {
+    const plaintext = revealed(value);
+    if (typeof plaintext !== 'string') throw new Error(`orm: ${what} ${this.def.name}: ${column.name} is Encrypted<string>, and takes a string or a SecretValue of one`);
+    if (key === undefined || key === null || key === '') {
+      throw new Error(`orm: ${what} ${this.def.name}: ${this.def.key} is required, since ${column.name}'s envelope is bound to it`);
+    }
+    return this.ring(column).seal(this.cell(column, key), plaintext);
+  }
+
+  /**
+   * input with its key, which a table with an encrypted column generates
+   * when input leaves a UUID key unset (D85), and each encrypted member
+   * sealed under it; input itself for any other table.
+   */
+  private sealed(input: Values, what: string): Values {
+    if (this.encrypted.length === 0) return input;
+    const out = { ...input };
+    const key = this.keyColumn();
+    const unset = (v: unknown): boolean => v === undefined || v === null || v === '';
+    if (key.uuid && unset(out[key.name])) out[key.name] = newRowKey();
+    for (const column of this.encrypted) {
+      const value = out[column.name];
+      if (value === undefined || value === null) continue;
+      out[column.name] = this.seal(column, value, out[key.name], what);
+    }
+    return out;
+  }
+
+  /** update with each encrypted member it sets sealed for the row whose key is id. */
+  private sealedUpdate(update: Values, id: unknown, what: string): Values {
+    if (this.encrypted.length === 0 || !update) return update;
+    const out = { ...update };
+    for (const column of this.encrypted) {
+      const value = out[column.name];
+      if (value === undefined || value === null) continue;
+      out[column.name] = this.seal(column, value, id, what);
+    }
+    return out;
+  }
+
+  /** The first encrypted member update sets to a value, or undefined. */
+  private setsEncrypted(update: Values | null | undefined): TableColumn | undefined {
+    return update ? this.encrypted.find(c => update[c.name] !== undefined && update[c.name] !== null) : undefined;
   }
 
   private encode(value: unknown, column: TableColumn, what: string): unknown {
@@ -750,7 +862,7 @@ class TableRepository {
 
   async createOne(input: Values): Promise<Values> {
     const args: unknown[] = [];
-    const { columns, placeholders } = this.insertOne(this.stamped(input), args);
+    const { columns, placeholders } = this.insertOne(this.sealed(this.stamped(input), 'create'), args);
     const s = this.def.statements;
     const { rows } = await run(this.runner, fill(s.insert, columns.join(', '), placeholders.join(', '), s.columns), args);
     return this.decode(rows[0]!);
@@ -766,7 +878,7 @@ class TableRepository {
       ...this.def.columns.filter(c => c.relation),
     ];
     const rows = inputs.map(input => {
-      const stamped = this.stamped(input);
+      const stamped = this.sealed(this.stamped(input), 'create');
       return order.map(column => this.insertValue(stamped, column));
     });
     const inserted = order.map((_, i) => rows.some(row => row[i]!.set));
@@ -834,7 +946,7 @@ class TableRepository {
 
   async updateOne(id: unknown, update: Values): Promise<Values> {
     const args: unknown[] = [];
-    const sets = this.setClauses(update, args, true);
+    const sets = this.setClauses(this.sealedUpdate(update, id, 'update'), args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
     args.push(this.encode(id, this.keyColumn(), 'key'));
     const s = this.def.statements;
@@ -845,6 +957,10 @@ class TableRepository {
   }
 
   async updateMany(filter: Values | null, update: Values): Promise<number> {
+    const encrypted = this.setsEncrypted(update);
+    if (encrypted) {
+      throw new Error(`orm: updateMany of ${this.def.name} cannot set ${encrypted.name}, an Encrypted<T> field: each row's envelope is bound to its key; set it with updateOne`);
+    }
     const args: unknown[] = [];
     const sets = this.setClauses(update, args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
@@ -858,8 +974,15 @@ class TableRepository {
     const key = this.def.uniqueKeys[name];
     if (!key) throw new Error(`orm: ${this.def.name} has no unique key ${JSON.stringify(name)}; its keys are ${Object.keys(this.def.uniqueKeys).join('; ')}`);
     const args: unknown[] = [];
-    const { columns, placeholders } = this.insertOne(this.stamped(input), args);
-    let sets = this.setClauses(update ?? {}, args, false);
+    const sealed = this.sealed(this.stamped(input), 'upsert');
+    const encrypted = this.setsEncrypted(update);
+    if (encrypted && name !== this.def.key) {
+      throw new Error(
+        `orm: upsertOne of ${this.def.name} on ${name} cannot set ${encrypted.name}, an Encrypted<T> field: the row it updates has a key of its own, which its envelope is bound to; upsert on ${this.def.key}, or find the row and updateOne it`
+      );
+    }
+    const { columns, placeholders } = this.insertOne(sealed, args);
+    let sets = this.setClauses(this.sealedUpdate(update ?? {}, sealed[this.def.key], 'upsert'), args, false);
     if (sets.length === 0) {
       // An update that sets no field leaves the row as it is, stamps and
       // all, and returns it.
@@ -911,6 +1034,30 @@ class TableRepository {
     if (rowCount === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
   }
 
+  async reencrypt(options: { readonly batch?: number } = {}): Promise<number> {
+    const s = this.def.statements;
+    if (this.encrypted.length === 0 || !s.stale || !s.reseal) throw new Error(`orm: ${this.def.name} has no Encrypted<T> field to reencrypt`);
+    const ring = this.ring(this.encrypted[0]!);
+    const batch = options.batch !== undefined && options.batch > 0 ? Math.trunc(options.batch) : this.orm.defaultLimit;
+    const key = columnKey(this.keyColumn().column);
+    let resealed = 0;
+    for (;;) {
+      const { rows } = await run(this.runner, s.stale, [ring.currentPrefix, batch]);
+      if (rows.length === 0) return resealed;
+      for (const row of rows) {
+        const held = this.encrypted.map(c => row[columnKey(c.column)] ?? null);
+        const sealed = this.encrypted.map((c, i) => {
+          const envelope = held[i];
+          if (envelope === null || ring.isCurrent(String(envelope))) return envelope;
+          const cell = this.cell(c, row[key]);
+          return ring.seal(cell, ring.open(cell, String(envelope)));
+        });
+        const { rowCount } = await run(this.runner, s.reseal, [...sealed, row[key], ...held]);
+        resealed += rowCount;
+      }
+    }
+  }
+
   /** The history actor of a hard delete: the acting user, hyphenated, or null. */
   private actor(): string | null {
     return this.user === undefined ? null : uuidToDb(this.user);
@@ -927,11 +1074,11 @@ function jsonNull(column: TableColumn): boolean {
   return Boolean((column.json || column.jsonText) && column.required);
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, user: string | undefined): Record<string, TableRepository> {
+function repositories(orm: OrmDefinition, runner: Runner, user: string | undefined, keys: FieldKeyring | undefined): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, user);
+    out[member] = new TableRepository(orm, def, runner, user, keys);
   }
   return out;
 }
@@ -942,8 +1089,8 @@ function userOf(id: string | null | undefined): string | undefined {
   return id;
 }
 
-/** A transaction over client, acting as user. */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefined): OrmTx<R> {
+/** A transaction over client, acting as user, with the field keys. */
+function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefined, keys: FieldKeyring | undefined): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = async <Row>(text: string | OrmQueryConfig, values?: readonly unknown[]): Promise<OrmQueryResult<Row>> => {
     const config = typeof text === 'string' ? { text, values: [...(values ?? [])] } : { ...text, values: [...(text.values ?? values ?? [])] };
@@ -951,10 +1098,10 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefi
     return { rows: result.rows as Row[], rowCount: result.rowCount };
   };
   return {
-    ...repositories(orm, runner, user),
+    ...repositories(orm, runner, user, keys),
     actingUser: user,
-    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id)),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject)),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
   } as unknown as OrmTx<R>;
@@ -962,17 +1109,24 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, user: string | undefi
 
 /**
  * The repositories of a database's tables over pool, as its types package's
- * ./orm entry describes them, acting as user: createOrm there calls it with
- * the definitions and types the result.
+ * ./orm entry describes them, acting as the user options names, or as the
+ * user it is when a string: createOrm there calls it with the definitions
+ * and types the result. The field keys are read once, and a malformed
+ * secret throws FieldEncryptionError here.
  */
-export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, user?: string | null): Orm<R> {
-  const acting = userOf(user);
+export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | null | OrmOptions): Orm<R> {
+  const opts: OrmOptions = typeof options === 'object' && options !== null ? options : { user: options };
+  const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
+  return ormWith<R>(pool, orm, userOf(opts.user), keys);
+}
+
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: string | undefined, keys: FieldKeyring | undefined): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false };
   return {
-    ...repositories(orm, runner, acting),
+    ...repositories(orm, runner, acting, keys),
     actingUser: acting,
-    withUser: (id: string | null | undefined) => ormOf<R>(pool, orm, id),
-    as: (principal: Actor | null | undefined) => ormOf<R>(pool, orm, principal?.subject ?? null),
+    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys),
+    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>): Promise<T> {
       const client = await pool.connect();
       // A connection whose transaction could not be ended is not returned
@@ -982,7 +1136,7 @@ export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, user?: string | null
         await client.query({ text: 'BEGIN', values: [] });
         let out: T;
         try {
-          out = await fn(txOf<R>(orm, client, acting));
+          out = await fn(txOf<R>(orm, client, acting, keys));
         } catch (error) {
           try {
             await client.query({ text: 'ROLLBACK', values: [] });

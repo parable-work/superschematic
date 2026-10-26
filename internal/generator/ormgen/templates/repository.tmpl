@@ -1007,6 +1007,13 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 		}
 		{{- end }}
+		{{- if .EncryptedFields }}
+		// An encrypted field's envelope is bound to the row's key, which
+		// opening it reads (D85).
+		if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}opts.Fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+		}
+		{{- end }}
 		// Validate fields
 		if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
 			return nil, err
@@ -1312,6 +1319,13 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -1407,6 +1421,11 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 		}
 		{{- end }}
 		{{- end }}
+		{{- if .EncryptedFields }}
+		if err := r.open(entity); err != nil {
+			return nil, err
+		}
+		{{- end }}
 		{{- if .PrimaryKeyIsUUID }}
 
 		entityID, ok := {{ lowerFirst .TypeName }}UUIDValue(entity.{{ toGoName .PrimaryKeyField }})
@@ -1459,6 +1478,13 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		{{- end }}
 		{{- end }}
 		if hasManyRequested && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+		}
+		{{- end }}
+		{{- if .EncryptedFields }}
+		// An encrypted field's envelope is bound to the row's key, which
+		// opening it reads (D85).
+		if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}opts.Fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
 			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 		}
 		{{- end }}
@@ -1650,6 +1676,13 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -1750,6 +1783,13 @@ func {{ lowerFirst .TypeName }}FieldStrings(fields {{ .TypeName }}Fields) []stri
 		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 	}
 	{{- end }}
+	{{- if .EncryptedFields }}
+	// An encrypted field's envelope is bound to the row's key, which opening
+	// it reads (D85).
+	if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+	}
+	{{- end }}
 	return fieldStrings
 }
 
@@ -1821,6 +1861,11 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
 		}
+		{{- if .EncryptedFields }}
+		if err := r.open(result); err != nil {
+			return nil, err
+		}
+		{{- end }}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
 		{{- range $i, $rel := .Relationships }}
@@ -2239,6 +2284,16 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	input.UpdatedBy = GetUserID(ctx)
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// The key, generated when unset, and each encrypted field sealed under
+	// it (D85).
+	sealedInput, sealErr := r.seal(input)
+	if sealErr != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: %w", sealErr)
+	}
+	input = sealedInput
+	{{- end }}
 
 	// Build INSERT query
 	var fields []string
@@ -2430,6 +2485,13 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -2480,6 +2542,27 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 	{{- if eq .Name "updatedBy" }}
 	input.UpdatedBy = GetUserID(ctx)
 	{{- end }}
+	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// The key, generated when unset, and each encrypted field sealed under
+	// it (D85). The update's are sealed for the row it updates, which only
+	// the primary key names before the statement runs.
+	sealedInput, sealErr := r.seal(input)
+	if sealErr != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", sealErr)
+	}
+	input = sealedInput
+	if field := {{ lowerFirst .TypeName }}SetsEncrypted(update); field != "" {
+		if on != {{ (index .UniqueKeys 0).Const }} {
+			return nil, fmt.Errorf("upsert {{ .TypeName }} on %s: %w", string(on), &EncryptedWriteError{Table: "{{ .TypeName }}", Field: field, Write: "UpsertOne on another key than {{ .PrimaryKeyField }}"})
+		}
+		sealedUpdate, sealErr := r.sealUpdate(input.{{ toGoName .PrimaryKeyField }}, update)
+		if sealErr != nil {
+			return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", sealErr)
+		}
+		update = sealedUpdate
+	}
 	{{- end }}
 
 	// Build INSERT query
@@ -2772,6 +2855,13 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -2805,6 +2895,21 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		input.UpdatedBy = GetUserID(ctx)
 	}
 	{{- end }}
+	{{- end }}
+
+	{{- if .EncryptedFields }}
+
+	// Each row's key, generated when unset, and its encrypted fields sealed
+	// under it (D85).
+	sealedInputs := make([]*types.{{ .TypeName }}, len(inputs))
+	for i, input := range inputs {
+		sealed, err := r.seal(input)
+		if err != nil {
+			return nil, fmt.Errorf("create {{ .TypeName }} %d: %w", i, err)
+		}
+		sealedInputs[i] = sealed
+	}
+	inputs = sealedInputs
 	{{- end }}
 
 	// Build the batch INSERT in one pass over the fields. Each row records every
@@ -3002,6 +3107,11 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		{{- end }}
 
 		{{- end }}
+		{{- if .EncryptedFields }}
+		if err := r.open(result); err != nil {
+			return nil, err
+		}
+		{{- end }}
 		results = append(results, result)
 	}
 
@@ -3053,6 +3163,14 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
 		return nil, fmt.Errorf("update {{ .TypeName }}: %w", err)
 	}
+	{{- end }}
+	{{- if .EncryptedFields }}
+	// Each encrypted field the update sets, sealed for the row (D85).
+	sealedUpdate, sealErr := r.sealUpdate(id, update)
+	if sealErr != nil {
+		return nil, fmt.Errorf("update {{ .TypeName }}: %w", sealErr)
+	}
+	update = sealedUpdate
 	{{- end }}
 	// Build UPDATE query
 	var setClauses []string
@@ -3228,6 +3346,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -3238,6 +3363,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
 		return 0, fmt.Errorf("update {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	{{- if .EncryptedFields }}
+	// Each row's envelope is bound to its own key, so one statement cannot
+	// set an encrypted field of many rows (D85).
+	if field := {{ lowerFirst .TypeName }}SetsEncrypted(update); field != "" {
+		return 0, fmt.Errorf("update {{ .TypeName }}: %w", &EncryptedWriteError{Table: "{{ .TypeName }}", Field: field, Write: "UpdateMany"})
 	}
 	{{- end }}
 	// Build UPDATE query

@@ -425,6 +425,20 @@
       ],
       "type": "string"
     },
+    "SqlEncryptionConfig": {
+      "additionalProperties": false,
+      "description": "The keys of a DB service's Encrypted<T> fields (D85).",
+      "properties": {
+        "key": {
+          "description": "The Secret<string> field of an env vars class that holds the keys, by the type that declares the field and the field's name, as a stack names the secret: \"FieldKeys.FINANCES_DB_KEY\". Its value is one or more 32-byte keys in base64, separated by commas; the first encrypts, and each decrypts what it encrypted. Every API whose servers, jobs and workers open the service's ORM must hold the field in its env vars class.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "SqlOutputConfig": {
       "additionalProperties": false,
       "description": "The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations and lists the dialects the DDL is written for.",
@@ -435,6 +449,10 @@
             "$ref": "#/definitions/SqlDialect"
           },
           "type": "array"
+        },
+        "encryption": {
+          "$ref": "#/definitions/SqlEncryptionConfig",
+          "description": "Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it."
         },
         "migrationsDir": {
           "description": "Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.",

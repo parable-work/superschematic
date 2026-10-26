@@ -494,6 +494,9 @@ func writeSQLiteDDL(schema *ir.Schema, opts sqlgen.Options, dir string) error {
 
 // generateORM emits the Go ORM for DB schemas.
 func (r run) generateORM() error {
+	if err := r.checkEncryptionKey(); err != nil {
+		return err
+	}
 	// Dependencies name the imported unions a JSONB field decodes through,
 	// and their types modules get replace lines in the ORM's go.mod.
 	deps, err := r.loadDependencySchemas()
@@ -707,9 +710,21 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		}
 		if orm != "" {
 			// Deps holds the database's repositories, from its types'
-			// ./orm entry (D79).
+			// ./orm entry (D79), which open with the keys of its
+			// Encrypted<T> fields, which the API's config holds (D85).
 			tsDeps.ORM = orm
 			tsDeps.DatabaseTypesPackage = r.Options.Naming.NpmTypesPackage(tsDeps.Database)
+			schema, err := r.LoadDependency(tsDeps.Database)
+			if err != nil {
+				return nil, nil, fmt.Errorf("generator: load %s, the database of %s: %w", tsDeps.Database, r.Config.Name, err)
+			}
+			keys, err := r.fieldKeysField(tsDeps.Database, schema)
+			if err != nil {
+				return nil, nil, err
+			}
+			if keys != nil {
+				tsDeps.ORMFieldKeys = keys.Name
+			}
 		}
 	}
 	if e := apiOutput.Engine; e != nil {
@@ -1190,6 +1205,19 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.Database = db
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
+		// The ORM opens with the keys of the database's Encrypted<T>
+		// fields, which the API's config holds (D85).
+		keys, err := r.fieldKeysField(db, schema)
+		if err != nil {
+			return deps, nil, err
+		}
+		if keys != nil && output.EnvConfig != nil {
+			for _, f := range output.EnvConfig.Fields {
+				if f.Key == keys.Name {
+					deps.FieldKeys = f.GoName
+				}
+			}
+		}
 		if db != output.UpstreamSchema {
 			roots = append(roots, schema)
 		}

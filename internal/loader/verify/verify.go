@@ -6,7 +6,8 @@
 // full @source structural verification,
 // trait shape checks, version graph declarations,
 // the User and UserRole traits and the user model's route sets, projection view
-// declarations, the contexts that refuse an array of arrays, the arguments
+// declarations, the fields Encrypted<T> stores (D85), the contexts that
+// refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the operations @paginated cannot page, the service
 // clauses an operation cannot take,
@@ -215,6 +216,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	r := &Result{}
 	checkImports(schema, in, r)
 	checkClassRefs(schema, r)
+	checkEncryptedFields(schema, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)
 	checkVersioned(schema, r)

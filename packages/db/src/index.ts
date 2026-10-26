@@ -12,6 +12,7 @@ export {
   rawSql,
   searchField,
   sourceMustProject,
+  table,
   unique,
   versioned,
   versionGraph,
@@ -35,5 +36,5 @@ export type {
   VersionedOptions,
   VersionGraphOptions,
 } from "./decorators";
-export type { AutoGenerate, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
+export type { AutoGenerate, Encrypted, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
 export type { User, UserConfig, UserRole } from "./user";

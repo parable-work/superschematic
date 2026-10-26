@@ -96,6 +96,12 @@ type Service struct {
 	// postgres.
 	Dialects []string
 
+	// FieldKeys is a DB service's `outputs.sql.encryption.key` (D85): the
+	// secret, by its ir.SecretID, that holds the keys of its Encrypted<T>
+	// fields, which every deployable that runs code on the database reads
+	// through its API's `@envVars`. Empty for a database without one.
+	FieldKeys string
+
 	// Config is the service's `@envVars` type, or nil when it has none.
 	Config *Config
 

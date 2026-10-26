@@ -6,7 +6,10 @@ ormOf runs them: a repository per table, with its row, create, update and
 filter types, and each table as data, its columns, what each holds, and its
 statements on Postgres, which the Go ORM runs too.
 
-createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them.
+createOrm(pool) opens them over a pg Pool, as an API's Deps.orm holds them;
+createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
+of the Encrypted<T> fields (D85), whose rows hold each one's value in a
+SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
 UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
 user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
@@ -16,7 +19,7 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, Orm, OrmDefinition, OrmPool, OrmTx, Repository, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateTimeFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -161,7 +164,10 @@ export const fixtureQueueDbOrm: OrmDefinition = {
   },
 };
 
-/** Opens the repositories of fixture-queue-db over pool, acting as user when one is given. */
-export function createOrm(pool: OrmPool, user?: string | null): FixtureQueueDbOrm {
-  return ormOf<FixtureQueueDbRepositories>(pool, fixtureQueueDbOrm, user);
+/**
+ * Opens the repositories of fixture-queue-db over pool, acting as the user
+ * options names, or as the user it is when a string.
+ */
+export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): FixtureQueueDbOrm {
+  return ormOf<FixtureQueueDbRepositories>(pool, fixtureQueueDbOrm, options);
 }

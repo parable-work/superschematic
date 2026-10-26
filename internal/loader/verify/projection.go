@@ -299,6 +299,10 @@ func checkProjectionColumns(schema *ir.Schema, td *ir.TypeDef, scope *projection
 			r.errorf(td.Owner, "%s: %s.%s is not a scalar column of %s", owner, alias, source.Name, table.Name)
 			continue
 		}
+		if source.EncryptedAtRest {
+			r.errorf(td.Owner, "%s: %s.%s is Encrypted<T>, so the view would show its ciphertext, which no reader of the view can decrypt; leave it out of the view", owner, alias, source.Name)
+			continue
+		}
 
 		// A relation field stores the target's key; the projection exposes
 		// that key's type, never the object.

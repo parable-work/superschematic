@@ -409,6 +409,12 @@ export function app(_options?: AppOptions): ClassDecorator {
 
 /** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/**
+ * A field of a `@source` view that carries the plaintext of its table's
+ * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
+ * so: whatever the view holds, a response sends.
+ */
+export const decrypted: PropertyDecorator = noopPropertyDecorator;
 /** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 /**

@@ -198,4 +198,6 @@ export type {
 } from './bucket.js';
 export { MAX_SEARCH_TERMS, foldText, likePattern, searchMatches, searchTerms } from './search.js';
 export { LOG_LEVELS, createLogger } from './logger.js';
+export { SECRET_MASK, SecretValue, revealed } from './secret.js';
+export type { Revealable } from './secret.js';
 export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

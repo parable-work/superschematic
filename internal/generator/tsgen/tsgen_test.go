@@ -49,6 +49,8 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-queue-db", sqlite: true},
 		// The repositories (D79): orm.ts over a ledger's tables.
 		{service: "fixture-ledger-db"},
+		// Encrypted<T> fields (D85): rows hold them as SecretValues.
+		{service: "fixture-vault-db"},
 	}
 
 	for _, tc := range cases {

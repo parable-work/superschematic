@@ -166,12 +166,26 @@ export function join<TTable>(
 }
 
 /**
- * Names the `alias.field` a projection column reads, or computes it with a
- * SQL function the migrations own. A function column has the field's
- * declared type and nullability; the function must honor them.
+ * On a table's field, names the column it is stored in, which a to-one
+ * relation's foreign key is itself (`@column("categoryId")`), in place of
+ * the field's name in snake case (D85): a SQL identifier, quoted wherever
+ * it must be. On a projection column, names the `alias.field` it reads
+ * instead, or computes it with a SQL function the migrations own; a
+ * function column has the field's declared type and nullability, which the
+ * function must honor.
  */
-export function column(_source: string | ProjectionFunctionCall): PropertyDecorator {
+export function column(_nameOrSource: string | ProjectionFunctionCall): PropertyDecorator {
   return noopPropertyDecorator;
+}
+
+/**
+ * Names the table a DB type is stored in, in place of its name in snake
+ * case (D85), as when the schema adopts a database that names its tables
+ * otherwise: `@table("lineItem")`. A SQL identifier, quoted wherever it
+ * must be.
+ */
+export function table(_name: string): ClassDecorator {
+  return noopClassDecorator;
 }
 
 /** An index's access method. `hnsw` and `ivfflat` index vector columns. */

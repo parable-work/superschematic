@@ -549,6 +549,12 @@ type Database struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+
+	// FieldKeys is the expression of the first API's config that holds the
+	// keys of the database's Encrypted<T> fields, which the ORM opens with
+	// (D85): every API on the database holds the one secret. Empty for a
+	// database without one.
+	FieldKeys string
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -812,6 +818,9 @@ func Plan(in Input) (*Server, error) {
 					Module:  o.Deps.ORMModule,
 					Field:   derived[string(ir.EdgeSQL)+" field "+db],
 					From:    api.Var + "Config." + goName,
+				}
+				if keys := o.Deps.FieldKeys; keys != "" {
+					d.FieldKeys = api.Var + "Config." + keys
 				}
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
