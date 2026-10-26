@@ -18,7 +18,7 @@ such as an API's database or the address of an API another one calls, is
 derived and never written by hand.
 
 `superschematic stack dev` runs an environment on your machine, with
-Postgres and a storage emulator in Docker and each server as a process. The `stack` commands
+Postgres, a storage emulator and Valkey in Docker and each server as a process. The `stack` commands
 bootstrap, plan and deploy the cloud environments, and the gcp target
 lowers them to Cloud Run, Cloud Scheduler, Cloud SQL, Secret Manager, load
 balancer and DNS resources that the Pulumi provisioner applies.
@@ -40,6 +40,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
+| [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
@@ -165,10 +166,13 @@ A stack has three tiers:
   serves API schemas, a job runs one of an API's `@job` classes to
   completion, a worker handles the messages of a queue for one of an API's
   `@worker` classes until it is stopped, a site serves a Site service's
-  built files, and a bucket keeps a Bucket service's objects. With nothing
+  built files, a bucket keeps a Bucket service's objects, an app runs your
+  own HTTP program over one of a Rust API's `@app` classes, and a memory
+  store holds a MemoryStore service's channels and keys. With nothing
   declared, each API service is one server, each of its jobs one job, each
-  of its workers one worker, each DB service one database, each Site
-  service one site, and each Bucket service an API lists one bucket.
+  of its workers one worker, each of its apps one app, each DB service one
+  database, each Site service one site, each Bucket service an API lists
+  one bucket, and each MemoryStore service an API lists one memory store.
 - **Environments** place the deployables on a target and set the values
   only a person decides: a project, a region, a domain, instance sizes and
   settings.
@@ -182,9 +186,11 @@ most of them:
 | http | a server, a job or a worker | a server | `calls` in the config of each API the calling server serves |
 | site | a site | an exposed server | `calls` in a Site service's config ([static sites](/superschematic/guides/static-sites/)) |
 | bucket | a server or a job | a bucket | `buckets` in the config of each API the server serves |
+| memoryStore | a server, a job, a worker or a deriver | a memory store | `memoryStores` and `rateLimitStore` in the config of each API the server serves ([Memory stores](/superschematic/guides/memory-stores/)) |
 
 A server's edges are the union of its APIs' edges, so grouping two APIs on
-one server restates nothing. A job's are its API's, and so are a worker's.
+one server restates nothing. A job's are its API's, and so are a worker's
+and an app's.
 
 ## Wire the services
 
@@ -212,7 +218,10 @@ export default defineConfig({
 ```
 
 `buckets`, beside it, lists the Bucket services the implementation keeps
-objects in ([Buckets](/superschematic/guides/buckets/)).
+objects in ([Buckets](/superschematic/guides/buckets/)), and
+`memoryStores` the MemoryStore services its replicas share wake-ups,
+counters and claims in, with `rateLimitStore` the one its `@rateLimit`
+routes count in ([Memory stores](/superschematic/guides/memory-stores/)).
 
 `calls` takes only API handles, so tsc refuses a DB handle there and
 discovery refuses one in any form. The callee must generate a Go SDK, and
@@ -283,6 +292,7 @@ upper snake case.
 | `SHOP_DB_DATABASE` | `SHOP_DB_DATABASE_URL`, or `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `_CLOUD_SQL_DATABASE` and `_CLOUD_SQL_USER` |
 | `SHOP_API_SERVICE` | `SHOP_API_SERVICE_URL`; with a credential, `SHOP_API_SERVICE_CREDENTIAL_SOURCE` and the members that source reads (`_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY`), and `_HEADERS`, joined by commas |
 | `SHOP_MEDIA_BUCKET` | `SHOP_MEDIA_BUCKET_NAME`, and `SHOP_MEDIA_BUCKET_ENDPOINT` for a bucket an emulator serves |
+| `SHOP_CACHE_MEMORY_STORE` | `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL` and `_AUTH`; `_CA` with a `rediss://` URL, and `_MEMBER` in a member of a parameterized environment. None set is a disabled store |
 
 On Cloudflare Workers a field also names the binding a Worker reaches its
 database, callee or bucket through: `SHOP_DB_DATABASE_D1_BINDING` and
@@ -294,8 +304,8 @@ Go and Rust readers refuse them.
 
 The names come from the naming file's
 [`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
-templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
-`{SERVICE}_BUCKET` by default. The
+templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE`,
+`{SERVICE}_BUCKET` and `{SERVICE}_MEMORY_STORE` by default. The
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
@@ -323,7 +333,10 @@ type Constructor func(deps Deps) (Implementations, error)
 A field is left out when the API has nothing for it. An API that lists a
 bucket also gets it, `ShopMedia bucket.Bucket`, the runtime's
 provider-neutral interface, which the entrypoint opens on GCS or on the
-local emulator ([Buckets](/superschematic/guides/buckets/)). The generated
+local emulator ([Buckets](/superschematic/guides/buckets/)). An API that
+lists a memory store gets it too, `ShopCache memorystore.Store`, which the
+entrypoint opens on Redis or Valkey, or disabled when its field is unset
+([Memory stores](/superschematic/guides/memory-stores/)). The generated
 server entrypoint fills `Deps` and calls your `New`.
 
 ## Declare a stack
@@ -397,8 +410,9 @@ export abstract class Preview extends Staging {}
   `deploy` names the entry points, API and DB handles; every service they
   reach through `authDb`, DB dependencies and `calls` joins the stack, so
   `shop-db` needs no mention. `expose` names what is reachable from
-  outside the environment, an API's handle or an `@server` class.
-  Everything else is internal.
+  outside the environment, an API's handle, an `@server` class, or an app
+  beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`
+  ([Apps](#apps)). Everything else is internal.
 - **`@server({ serves })`** declares one server for the listed APIs in
   place of their default servers. Here `Orders` serves `shop-orders`, and
   takes its edges from it: `shop-db` through `authDb`, `shop-api` through
@@ -466,6 +480,10 @@ declare module "@superschematic/stack" {
         versioning?: boolean;
         deleteAfterDays?: number;
       };
+      memoryStore: {
+        nodeType?: "SHARED_CORE_NANO" | "STANDARD_SMALL" | "HIGHCPU_MEDIUM" | "HIGHMEM_MEDIUM" | "HIGHMEM_XLARGE" | "STANDARD_LARGE" | "HIGHMEM_2XLARGE" | "CUSTOM_PICO" | "CUSTOM_MICRO" | "CUSTOM_MINI";
+        replicas?: number;
+      };
       worker: {
         cpu?: string;
         memory?: string;
@@ -521,10 +539,10 @@ TypeScript twin.
 | Key | What it sets |
 | --- | --- |
 | `target` | the target that places every deployable no setting places elsewhere: `local`, or `gcp` in the installed binary |
-| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort }` |
+| `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, memoryStoreImage, memoryStorePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)) |
+| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency` and `enabled` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -845,6 +863,118 @@ On `local` it is a process with no port, and on gcp a Cloud Run worker
 pool of one instance; cloudflare refuses it. acme-shop's shop-cart runs
 one, `TriageTickets`, whose keyword rules stand in for a model.
 
+## Apps
+
+An app is your own HTTP program over a Rust API: its routes are yours,
+and it runs beside the API's servers as a deployable of its own, with the
+API's connections, implementations, identity and engine. A
+[Topcoat](/superschematic/guides/topcoat/#run-the-app-in-a-stack) app's
+pages are the case it was made for. Declare it on an empty class of the
+API, naming the extensions its build needs:
+
+```ts
+// schemas/services/shop-stock/src/apps.schema.ts
+import { app } from "@superschematic/api";
+
+@app({ extensions: ["topcoat"] })
+export abstract class Backoffice {}
+```
+
+The API must be Rust: a Go or TypeScript API's app is refused until they
+follow. The program is a library crate at the naming file's
+[`[implementation_paths] rust_app`](/superschematic/reference/naming/#implementation_pathsrust_app),
+`apps/{app}` by default (`apps/backoffice`), and it exports one function:
+
+```rust
+pub async fn serve(parts: acme_shop_stock_api::apps::BackofficeParts) -> std::io::Result<()>
+```
+
+The API crate's generated `apps` module declares the parts:
+
+| Field | What it holds |
+| --- | --- |
+| `deps` | the API's `Deps`, which its implementation was built from |
+| `implementations` | the API's implementations as its router takes them, with its authenticator and its service authenticator |
+| `engine` | the engine of the API's engine database, open, when it has one |
+| `addr` | every interface at `PORT`, or 8080 when `PORT` is unset |
+
+`serve` binds `parts.addr` and serves until the process should exit. A
+build that finds no crate there writes one, once, whose `serve` answers
+every request with 501 Not Implemented and `app Backoffice of shop-stock
+does not serve yet: write its serve`, so the stack runs it, ready, before
+you write it. A crate whose `src/lib.rs` declares no `serve` is refused.
+
+The stack's build writes the app's entrypoint to
+`server/<stack>/<api>-<app>/`. Its `main` builds the API's `Deps` and
+implementations as the API's server does, waits for the engine, then
+calls `serve`, and exits 1 when `serve` returns an error. The app opens
+the engine without deploying its document: it waits until the API's
+server has deployed the document the app was built with, and logs
+`engine not open` until then. So an app rolls out in the wave after its
+API's servers. Its image is built from the server's Dockerfile, with
+every crate your crate reaches by path, a Topcoat crate under
+`schemas/dist/topcoat/` among them.
+
+The app is a deployable named after its API and its class,
+`shop-stock-backoffice`. Its edges, config, secrets and identity are its
+API's. People reach an app at its address, and nothing calls it over an
+edge, so an app that people use must be exposed; `stack init` exposes
+every app of the APIs it deploys:
+
+```ts
+@stack({
+  deploy: [ShopApi, ShopOrders, ShopStock],
+  expose: [ShopApi, ShopOrders, ShopStock, { of: ShopStock, app: "Backoffice" }]
+})
+export abstract class Shop {}
+```
+
+Exposing an app exposes its address apart from its API's. A Topcoat
+app's `<service>_with_parts` serves the pages alone, which call the API
+in-process, so an API the stack keeps internal stays internal;
+`<service>_with_parts_and_api` mounts the JSON API and the engine's
+routes on the app's address too
+([Run the app in a stack](/superschematic/guides/topcoat/#run-the-app-in-a-stack)).
+
+An element names it the same way and takes `enabled`, `env`, a
+`platform` and the platform's settings: a local `port`, or a Cloud Run
+service's `minInstances` or `memory`. It takes no `schedule`, `instances`
+or `concurrency`:
+
+```ts
+settings: [{ of: ShopStock, app: "Backoffice", enabled: false }]
+```
+
+An app that is off runs nothing and needs no image: a deploy neither
+builds nor pins one, and keeps the image it last ran for when it is
+turned on again. `--image` for it, and `stack build --deployable` naming
+it, are refused.
+
+`extensions` names the extensions the app's build needs. A
+`superschematic` binary that does not link one still resolves, plans and
+inits the stack, but refuses every command that builds it, `build-all`,
+`stack dev`, `stack build`, and `stack deploy` and `stack prepare` unless
+`--no-build`:
+
+```text
+app Backoffice of shop-stock needs the topcoat extension, which this superschematic binary does not link; run superschematic-topcoat
+```
+
+Run those commands with `superschematic-topcoat`, which the release
+ships beside `superschematic`
+([Build the crate](/superschematic/guides/topcoat/#build-the-crate)). The
+generated CI installs it for a services root with such an app
+([Generated CI](#generated-ci)).
+
+On `local` the app is a process with a port, built with cargo, and ready
+once it accepts a TCP connection: it serves no `/readyz`, since its
+routes are yours. On gcp it is a Cloud Run service, `gcp.cloudrunapp`,
+with its own account, its API's Cloud SQL and egress, and a TCP startup
+and liveness probe on its port; one not exposed is internal-only, and no
+one reaches it. cloudflare refuses an app the environment runs, since a
+Worker runs TypeScript only, and leaves out one the environment turns
+off.
+
 ## Static sites
 
 A Site service is a static site: its config names the APIs its browser
@@ -870,9 +1000,13 @@ Build the stack like any service. A single build loads the services it
 reaches from its siblings:
 
 ```sh
-superschematic build schemas/services/shop-stack
-superschematic build-all schemas/services
+superschematic-topcoat build schemas/services/shop-stack
+superschematic-topcoat build-all schemas/services
 ```
+
+acme's `shop-stack` has an app that needs Topcoat, so its build runs with
+`superschematic-topcoat` ([Apps](#apps)); a stack without one builds
+with `superschematic`.
 
 Under the output root, `schemas/dist` by default, the build writes:
 
@@ -968,7 +1102,8 @@ default TypeScript server, and exposes all five; `shop-db`, the `authDb`
 of `shop-api`, `shop-orders`, `shop-stock` and `shop-cart`, joins as their
 database, and its engine types (D70) bring its engine runner,
 `shop-db-engine-runner`, in `shop-api`'s Go; `shop-media`, the bucket
-`shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`, which
+`shop-api` lists, as a bucket; `shop-cache`, the memory store `shop-api`
+lists and counts its rate limits in, as a memory store; `shop-orders`' `FulfilOrders`, which
 handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
 `shop-orders`' `ShipOrders` and `SettlePayments` and `shop-stock`'s
@@ -985,6 +1120,18 @@ runs `ShipOrders` and `SettlePayments` every minute, and turns
 `OrderRestocks`' schedule off, so it runs only when `stack run` asks:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
+
+`shop-stock` also declares an app, `Backoffice`: a Topcoat app over
+`shop-stock`'s crate at `apps/backoffice`, with its pages under `/stock`
+and the engine console over `shop-db` under `/stock/engine`, which the
+stack exposes ([Apps](#apps)). Its build needs the Topcoat extension, so
+the example builds its tree and runs `stack dev` with
+`superschematic-topcoat`; the installed `superschematic` still inits and
+plans the stack. `stack dev`'s summary prints where the app is,
+`app shop-stock-backoffice http://127.0.0.1:<port>, Backoffice of
+shop-stock`. Sign in at `/stock/sign-in` as a `shop-db` user who holds
+`stock.write`, then receive stock on a product's Inventory page,
+`/stock/engine/Inventory/{id}`, through its Stock panel.
 
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
@@ -1005,16 +1152,19 @@ call its `create_workers(deps)` and `create_jobs(deps)`.
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
 the storefront's.
 
-From `examples/acme-shop`, `superschematic stack dev
+From `examples/acme-shop`, `superschematic-topcoat stack dev
 schemas/services/shop-stack` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
-`shop-media`, both Go servers on their generated entrypoints, `shop-stock`'s
+`shop-media`, Valkey in a third for `shop-cache`, both Go servers on their generated entrypoints, `shop-stock`'s
 on its generated crate, which cargo builds, the storefront's on Bun, each
-worker as a process, `ShipOrders` on its schedule, and the site, built
-once and served with its config.
+worker as a process, `ShipOrders` on its schedule, the site, built
+once and served with its config, and `Backoffice` after `shop-stock`'s
+server.
 `go/stack_dev_test.go` runs it in the example's check whenever Docker is
 running, calls each Go and Rust server through its Go SDK, uploads a
-product's image to `shop-media` through the URL `shop-api` signs, counts
+product's image to `shop-media` through the URL `shop-api` signs, sees
+`shop-cache` wake a request waiting for the image, refuse an upload
+another replica claims and count `getProduct`'s rate limit, counts
 the product's stock on `shop-stock` as staff, low at two, opens a
 collection point through `shop-db`'s engine routes, fills a cart on
 `shop-cart` and picks a pickup slot, starts the checkout on `shop-orders`,
@@ -1023,7 +1173,11 @@ stock refused, pays at acmepay, the fake provider in `go/acmepay`, whose
 signed webhook `shop-orders` records, sees the checkout placed, its order
 written and the sale reported to `shop-stock` in one trace, a sale
 reported with a shopper's session alone refused 401, the worker fulfil
-the order and `ReorderStock` file the product's restock request, and a
+the order and `ReorderStock` file the product's restock request, a member
+of staff who holds `stock.write` sign in to `Backoffice` at
+`/stock/sign-in` and receive five units through the Stock panel's form on
+`/stock/engine/Inventory/{id}`, which `shop-stock`'s `GetStock` then
+counts, and a
 refund two members of staff sign off made by `SettlePayments`, run with
 `stack run`; reads a cart from the storefront and the site and its
 config, checks that `shop-api` answers CORS for the site's origin and no
@@ -1069,8 +1223,13 @@ refuses a secret that has none and names the file it reads:
 
 ```sh
 superschematic stack secrets set Dev --stack schemas/services/shop-stack
-superschematic stack dev schemas/services/shop-stack
+superschematic-topcoat stack dev schemas/services/shop-stack
 ```
+
+A stack with an [app](#apps) that names an extension runs with the binary
+that links it: acme's `shop-stack`, whose `Backoffice` needs Topcoat,
+runs with `superschematic-topcoat`, and a stack without one with
+`superschematic`.
 
 It needs Docker, Go, [Bun](https://bun.sh) for a stack with a TypeScript
 server, cargo for a stack with a Rust server, and the migration runner, `superschematic-migrate`, on `PATH` or
@@ -1083,7 +1242,8 @@ says how to install it). It then:
 2. starts one Postgres container for the environment, published on
    127.0.0.1 only, and creates a database per DB schema; and, when the
    stack has a bucket, one fake-gcs-server container, with a bucket per
-   Bucket service. A DB schema that lists `sqlite` first is instead a
+   Bucket service; and, when it has a memory store, one Valkey container,
+   which keeps nothing between runs. A DB schema that lists `sqlite` first is instead a
    SQLite file under the environment's state directory, which needs no
    Docker ([Databases on D1](#databases-on-d1));
 3. migrates each database from the model it recorded to its schema's,
@@ -1147,13 +1307,16 @@ leaves it and its data, and prints the `docker rm` that removes it.
 | server | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo |
 | job | a Go process per run, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | worker | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
+| app | a Rust process, built from its crate with cargo as a Rust server is, with its API's config and `PORT`, started in the wave after its API's servers; ready once it accepts a TCP connection on its port, none when it is off ([Apps](#apps)) |
 | database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another; for a DB schema that lists `sqlite` first, a SQLite file, `<schemas-root>/.superschematic/local/<stack>/<environment>/databases/<database>.sqlite` |
 | bucket | a bucket on the checkout's one fake-gcs-server container for the environment, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
 | bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |
+| memory store | the checkout's one Valkey container for the environment, `valkey/valkey:8.0.2-alpine` unless `memoryStoreImage` names another, shared by every store, with no persistence |
+| memoryStore edge | `SHOP_CACHE_MEMORY_STORE_STORE=shop-cache`, `SHOP_CACHE_MEMORY_STORE_URL=redis://127.0.0.1:<port>/0` and `SHOP_CACHE_MEMORY_STORE_AUTH=none` |
 | sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable`, or for a SQLite file `REVIEWS_DB_DATABASE_URL=sqlite:<state directory>/databases/reviews_db.sqlite` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
 | secret | a line in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`: `PaymentsSecrets.STRIPE_KEY=sk_test_...` |
-| port | a server's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout; otherwise a hash of the stack, the environment and the server, which the checkout shifts, the same on every run |
+| port | a server's `port` setting and the `postgresPort`, `storagePort` and `memoryStorePort` values, the same in every checkout; otherwise a hash of the stack, the environment and the server, which the checkout shifts, the same on every run |
 
 `stack secrets set` writes the secrets file, or you edit it by hand. The
 `.superschematic` directory ignores itself in git, and holds the key
@@ -1448,18 +1611,21 @@ every environment with Cloud Run.
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | worker | a Cloud Run worker pool with its own service account, named after the worker (`shop-orders-fulfil-orders`), with its API's config, secrets and connections and `WORKER_CONCURRENCY`; no port and no URL, scaled by hand to the worker's `instances`, zero when it is off. A `grace` of ten seconds or more is refused, since Cloud Run stops an instance ten seconds after SIGTERM |
 | runner | a Cloud Run worker pool with its own service account, named after the runner (`shop-db-engine-runner`), with its database's connection as its one config; scaled by hand to one instance, zero when it is off |
+| app | a Cloud Run service with its own service account, named after the app (`shop-stock-backoffice`), with its API's config, secrets and connections, as a server; a TCP startup probe and a TCP liveness probe on its port, and no HTTP probe. Internal only and reachable by no one unless exposed. When it is off, its account and grants alone, with no service and no image ([Apps](#apps)) |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user, which the migration job gives read and write privileges on the DB service's tables. On an engine database it also grants the user a role of the database's own, `<database>_engine`, which owns the engine's schema, `engine`, so each deployable that opens the engine, as its own user, may change what another created there; and it creates the `unaccent` extension the engine's Search needs. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback, with the server's own loopback credential ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)) |
 | bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
+| memory store | a Memorystore for Valkey instance `<project>-<stack>-<store>`, cluster mode disabled with one shard, TLS and IAM authentication, which creates its Private Service Connect endpoint under a service connection policy the environment's stores share ([Memory stores](/superschematic/guides/memory-stores/#on-google-cloud)) |
+| memoryStore edge | `roles/memorystore.dbConnectionUser` on the project for the workload's account, held to the instance by an IAM condition, and Direct VPC egress. The derived value is the `rediss://` URL, the instance's CA and `auth: iam` |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
 | site | a Cloud Storage bucket, `<project>-<site>`, readable by `allUsers`, and a backend bucket with Cloud CDN behind a load balancer of its own, whose URL map serves the files of the build the deploy switched to; with a domain at `https://<site>.<domain>`, without one over HTTP at the load balancer's address ([Static sites](/superschematic/guides/static-sites/#on-google-cloud)) |
 | secret | a Secret Manager secret named `<stack>-<Type>-<FIELD>`, an accessor grant to each reading server and job, and an environment variable that reads its latest version |
 | image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
-| parameter | names suffixed with the parameter and its value (`shop-api-pr123`), a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits, and a bucket per value, which the member's destroy empties |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`), a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits, and a bucket per value, which the member's destroy empties; a memory store is the parent's, under names that carry the member's |
 
 Settings and their defaults:
 
@@ -1479,6 +1645,8 @@ Settings and their defaults:
 | `gcp.cloudsql` | `diskSize` | Cloud SQL's |
 | `gcp.storage` | `versioning` | false |
 | `gcp.storage` | `deleteAfterDays` | none: objects stay until deleted |
+| `gcp.memorystore` | `nodeType` | `SHARED_CORE_NANO` |
+| `gcp.memorystore` | `replicas` | `1`, of 0 to 5 |
 
 A server's CPU is allocated only while an instance handles a request, so
 Cloud Run bills its instances for the requests they handle. A server that
@@ -1495,7 +1663,9 @@ anything but an exposed server or a site, a grant to `allUsers` or
 `allAuthenticatedUsers`, a job's included, but a site's bucket's, and an
 instance open to `0.0.0.0/0`; `buckets-never-public` refuses a Bucket
 service's bucket without uniform bucket-level access or public access
-prevention, and a grant of one to the public on behalf of any deployable.
+prevention, and a grant of one to the public on behalf of any deployable;
+and `memory-stores-tls-and-iam` refuses a Memorystore instance without TLS
+or IAM authentication.
 Every
 resource type is pinned at pulumi-gcp 9.37.1 in `extensions/gcp/schemas`,
 and resolution checks each node's properties against it.
@@ -1528,7 +1698,10 @@ superschematic stack unlock Staging
   repository of the git remote. It enables Cloud Scheduler when the
   environment runs a job's schedule, and gives `deployer` Cloud
   Scheduler's admin role to apply it, and Storage Admin to create the
-  buckets and set their grants. `--repository owner/name` names another
+  buckets and set their grants. It enables Memorystore and Network
+  Connectivity when the environment has a memory store, and gives
+  `deployer` the roles that create an instance and its service connection
+  policy. `--repository owner/name` names another
   repository, and `--repository ""` leaves the federation out, for a
   project no CI deploys to. Last, it records the project's number,
   which the generated CI's Workload Identity Federation needs, as
@@ -2221,12 +2394,21 @@ The cloud jobs also install the tools the environment's provisioner runs:
 the `pulumi` CLI at the release of the Pulumi SDK the binary links.
 
 The workflow installs the release of superschematic that generated it,
-from the project's release page, and checks it against the release's
-`SHA256SUMS`, so a repository's CI changes only when you build with
-another release. It checks the static archives against the digest the
+from the project's release page, checks it against the release's
+`SHA256SUMS`, and checks that it reports that release (`superschematic
+--version`), so a repository's CI changes only when you build with
+another release. Every job builds the whole services root, so when an
+[app](#apps) of any stack of the root names the `topcoat` extension,
+which `superschematic` does not link, every job installs and runs the
+release's `superschematic-topcoat` instead, the same way, and the
+workflow's header says which app needs it: acme's `storefront-stack`,
+with no app of its own, runs it because `shop-stack`'s Backoffice needs
+Topcoat. Apps that name two extensions between them, or one the release
+ships no binary of, fail the build of the workflow, since its every run
+would refuse the services root. It checks the static archives against the digest the
 binary that generated it names. A binary built from a checkout names no release: its
 workflow's install step fails and says to generate the workflow again
-with a released superschematic. Every action is pinned by commit, and
+with a released binary. Every action is pinned by commit, and
 nothing in the file depends on when it was generated.
 
 ## DNS

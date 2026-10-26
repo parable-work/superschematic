@@ -287,6 +287,16 @@ func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*Sc
 	if cfg.Buckets, err = handleList(obj, "buckets", at); err != nil {
 		return nil, err
 	}
+	if cfg.MemoryStores, err = handleList(obj, "memoryStores", at); err != nil {
+		return nil, err
+	}
+	if raw, set := obj["rateLimitStore"]; set {
+		handle, ok := raw.(serviceHandle)
+		if !ok {
+			return nil, errorAtNode(at, "rateLimitStore must be a service({...}) sentinel")
+		}
+		cfg.RateLimitStore = &ServiceDependency{Name: handle.name, Kind: ir.SchemaKind(handle.kind)}
+	}
 	if outputs, ok := obj["outputs"].(map[string]any); ok {
 		cfg.Outputs = outputs
 	}

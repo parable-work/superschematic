@@ -34,6 +34,15 @@
       "deps": null
     },
     {
+      "id": "shop-cache-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-cache",
+      "path": "types/go/shop-cache",
+      "service": "shop-cache",
+      "deps": null
+    },
+    {
       "id": "shop-common-types",
       "language": "go",
       "kind": "types",

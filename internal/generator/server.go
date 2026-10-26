@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
@@ -61,6 +62,20 @@ func (r run) generateServers() error {
 	}
 	services, err := stackgen.Services(r.GenerateContext, st)
 	if err != nil {
+		return err
+	}
+	// An app needs the extensions it names, which this binary may not link
+	// (D78): its build is refused before anything is planned, while
+	// resolution, plans and stack init read it as any deployable.
+	apps, err := stack.Apps(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	var linked []string
+	if r.Registry != nil {
+		linked = r.Registry.Extensions()
+	}
+	if err := stack.CheckAppExtensions(apps, linked); err != nil {
 		return err
 	}
 	servers, err := stack.Servers(stack.Input{Stack: st, Services: services})
@@ -254,6 +269,28 @@ func (r run) generateServers() error {
 		}
 	}
 
+	var appScaffolds []appScaffold
+	appDirs := map[string]string{}
+	for _, a := range apps {
+		if a.Language != APILanguageRust {
+			// stack.Apps refuses a Go or TypeScript API's app.
+			return fmt.Errorf("stack %s: app %s is a %s app; %s (D78)", st.Name, a.Name, a.Language, stack.AppLanguages)
+		}
+		dir := r.Options.Naming.RustAppDir(r.Options.RepositoryRoot, a.App.API, a.App.Name)
+		if other, clash := appDirs[dir]; clash {
+			return fmt.Errorf("stack %s: app %s and app %s of %s would share the crate at %s; put %s in the naming file's [implementation_paths] rust_app (D78)", st.Name, other, a.App.Name, a.App.API, dir, naming.ServicePathPlaceholder)
+		}
+		appDirs[dir] = fmt.Sprintf("%s of %s", a.App.Name, a.App.API)
+		app, scaffold, err := r.planRustApp(st.Name, a, dir)
+		if err != nil {
+			return err
+		}
+		rustPlans = append(rustPlans, app)
+		if scaffold != nil {
+			appScaffolds = append(appScaffolds, *scaffold)
+		}
+	}
+
 	for _, p := range plans {
 		for _, sc := range p.scaffold {
 			if err := sc.write(r); err != nil {
@@ -268,6 +305,11 @@ func (r run) generateServers() error {
 	}
 	for _, output := range rustScaffolds {
 		if err := r.scaffoldRustImplementation(output, r.Options.RepositoryRoot); err != nil {
+			return err
+		}
+	}
+	for _, sc := range appScaffolds {
+		if err := sc.write(r); err != nil {
 			return err
 		}
 	}
@@ -1183,6 +1225,14 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 // it. It returns the APIs whose implementation is missing, which the
 // caller scaffolds.
 func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map[string]bool) (*servergen.RustServer, []*rustrestgen.APIOutput, error) {
+	server, scaffolds, _, err := r.planRust(stackName, s, cors, nil)
+	return server, scaffolds, err
+}
+
+// planRust plans a Rust server's, job's, worker's, deriver's or, with app,
+// app's entrypoint (planRustServer), returning beside it the scaffolds of
+// the implementations it reads and the crate of the first API it serves.
+func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[string]bool, app *servergen.AppInput) (*servergen.RustServer, []*rustrestgen.APIOutput, *rustrestgen.APIOutput, error) {
 	out := r.Options.OutputRoot
 	in := servergen.RustInput{
 		Stack:              stackName,
@@ -1204,36 +1254,41 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 	if s.Deriver != nil {
 		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
 	}
+	in.App = app
 	var scaffolds []*rustrestgen.APIOutput
+	var first *rustrestgen.APIOutput
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		output, config, err := served.rustAPI()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if output == nil {
-			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+			return nil, nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		if first == nil {
+			first = output
 		}
 		routes, err := served.APIOutput()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if routes.Engine != nil {
 			// The engine of the API's engine database (D58): its Rust types
 			// hold its document, and its project's engine crate the
 			// behaviors the core's do not.
 			if err := r.rustEngineTypes(stackName, s, ref.Name, routes.Engine.Database, &in); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			project, err := r.projectEngine(fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name), routes.Engine.Database)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if err := linkEngineProject(fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), &in.EngineProject, project); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if s.Kind == ir.DeployableServer && routes.IsPublic && !routes.Auth.Identity {
 				r.Logf("  - server %s: %s authenticates its users with its own Authenticator, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, ref.Name, routes.Engine.Database, routes.Engine.Mount)
@@ -1242,18 +1297,18 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, ref.Name)
 		exists, err := rustrestgen.ImplementationExists(dir)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
 		} else if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
 			if err := r.checkRustManualRoutes(stackName, output); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		in.APIs = append(in.APIs, servergen.RustAPIInput{
 			Output:         output,
@@ -1269,9 +1324,9 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 	}
 	server, err := servergen.PlanRust(in)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return server, scaffolds, nil
+	return server, scaffolds, first, nil
 }
 
 // checkIdentityDescriptor refuses a TypeScript server of an API over the
@@ -1497,6 +1552,18 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	}
 	for _, call := range o.Deps.Calls {
 		modules = append(modules, servergen.Module{Path: call.Module, Dir: SDKDir(out, LangGo, call.Service), Direct: true})
+	}
+	for _, m := range o.Deps.MemoryStores {
+		// The implementation names the store's channels and keys with its
+		// Go definitions, which reach the types modules of its payloads
+		// and enums (D75).
+		if m.Definitions == "" {
+			continue
+		}
+		modules = append(modules, servergen.Module{Path: m.Definitions, Dir: TypesDir(out, LangGo, m.Service)})
+		for _, t := range m.Modules {
+			modules = append(modules, servergen.Module{Path: t, Dir: TypesDir(out, LangGo, path.Base(t))})
+		}
 	}
 	modules = append(modules,
 		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),

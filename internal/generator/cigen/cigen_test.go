@@ -145,12 +145,50 @@ func (r *repo) build(t *testing.T) (*registry.Result, error) {
 		Release:     &r.release,
 		Log:         &r.log,
 		LoadDependency: func(name string) (*ir.Schema, error) {
-			return loader.LoadService(filepath.Join(services, name), loader.WithRegistry(r.reg))
+			return loader.LoadService(r.serviceDir(name), loader.WithRegistry(r.reg))
 		},
 		LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
-			return buildplan.ReadConfig(filepath.Join(services, name), r.reg)
+			return buildplan.ReadConfig(r.serviceDir(name), r.reg)
 		},
 	})
+}
+
+// serviceDir is where the build loads the service name from: the
+// repository's services root, when a test put it there, else the services
+// the stack deploys.
+func (r *repo) serviceDir(name string) string {
+	if dir := filepath.Join(r.root, "schemas", "services", name); name != "shop-stack" {
+		if _, err := os.Stat(dir); err == nil {
+			return dir
+		}
+	}
+	return filepath.Join(services, name)
+}
+
+// withRootStack puts testdata/root's stock-stack and the API it deploys,
+// stock-app-api, whose app Backoffice needs topcoat, in the repository's
+// services root beside shop-stack.
+func withRootStack(t *testing.T, root string) {
+	for _, service := range []string{"stock-stack", "stock-app-api"} {
+		src := filepath.Join("testdata", "root", service)
+		err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(src, path)
+			if err != nil {
+				return err
+			}
+			dst := filepath.Join(root, "schemas", "services", service, rel)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(dst, readFile(t, path), 0o644)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func (r *repo) mustBuild(t *testing.T) *registry.Result {

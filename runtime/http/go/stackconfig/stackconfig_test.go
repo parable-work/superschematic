@@ -101,3 +101,27 @@ func TestLoadFromTheEnvironment(t *testing.T) {
 		t.Errorf("LoadService = %+v, %v", svc, err)
 	}
 }
+
+// TestLoadMemoryStoreFromTheEnvironment: LoadMemoryStore reads the
+// process's environment; a field none of whose variables is set is a
+// disabled store, and a set one is enabled, over TLS for rediss (D75).
+func TestLoadMemoryStoreFromTheEnvironment(t *testing.T) {
+	disabled, err := LoadMemoryStore("SHOP_CACHE_MEMORY_STORE")
+	if err != nil || disabled.Enabled() || disabled != (MemoryStore{}) {
+		t.Fatalf("unset = %+v, %v; want the zero MemoryStore", disabled, err)
+	}
+	t.Setenv("SHOP_CACHE_MEMORY_STORE_STORE", "shop-cache")
+	t.Setenv("SHOP_CACHE_MEMORY_STORE_URL", "rediss://10.1.2.3:6379")
+	t.Setenv("SHOP_CACHE_MEMORY_STORE_AUTH", AuthIAM)
+	store, err := LoadMemoryStore("SHOP_CACHE_MEMORY_STORE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.Enabled() || !store.TLS() || store.Store != "shop-cache" || store.Auth != AuthIAM {
+		t.Errorf("store = %+v", store)
+	}
+	t.Setenv("SHOP_CACHE_MEMORY_STORE_URL", "redis://user:secret@10.1.2.3:6379")
+	if _, err := LoadMemoryStore("SHOP_CACHE_MEMORY_STORE"); err == nil || strings.Contains(err.Error(), "secret") {
+		t.Errorf("err = %v; want a refusal that does not echo the URL", err)
+	}
+}

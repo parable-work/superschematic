@@ -148,8 +148,10 @@ type PlatformSpec struct {
 	// ir.IdentityConfigField) unless its environment sets the field: the
 	// local platform's turns the session cookie's Secure attribute off,
 	// since it serves plain HTTP. Empty leaves the field unbound, and the
-	// server runs with the identity runtime's defaults. Only a server
-	// platform declares one: a job builds no identity service.
+	// server runs with the identity runtime's defaults. Only a server or
+	// an app platform declares one: an app serves requests over its API's
+	// identity as a server does (D78), and a job builds no identity
+	// service.
 	IdentityConfig string
 
 	// NoIdentity, when set, says why a server on this platform cannot
@@ -157,8 +159,8 @@ type PlatformSpec struct {
 	// identity runtime (D50): resolution refuses such a server as
 	// unrealizable, giving the reason. The cloudflare.workers platform sets
 	// it, since the TypeScript identity runtime hashes passwords with
-	// node:crypto's argon2, which Workers lacks (D64). Only a server
-	// platform sets it, and not beside IdentityConfig.
+	// node:crypto's argon2, which Workers lacks (D64). Only a server or an
+	// app platform sets it, and not beside IdentityConfig.
 	NoIdentity string
 
 	// NoQueueClaims, when set, says why no worker claims the messages of a
@@ -253,7 +255,8 @@ type ConnectorSpec struct {
 
 	// From and To name the platforms at the two ends. From is a server, a
 	// job or a worker platform; To is a database platform for sql, a
-	// server platform for http and a bucket platform for bucket (D54). A
+	// server platform for http, a bucket platform for bucket (D54) and a
+	// memoryStore platform for memoryStore (D75). A
 	// job's edges are its API's (D52), and so are a worker's (D53), so a
 	// target that places jobs or workers registers a connector from its
 	// job or worker platform for each edge its servers take. A site edge
@@ -311,7 +314,10 @@ type TargetSpec struct {
 	// none of it and where one runs instead: resolution refuses a
 	// deployable of that kind with the reason in place of saying to place
 	// it with a settings platform (the cloudflare target's queue workers,
-	// D64 amended). A kind may not be in both.
+	// D64 amended, its derivers, D74, and its apps, D78). A kind may not
+	// be in both. A target that neither places a kind nor says why gets
+	// the plain refusal: no platform for it, so place it with a settings
+	// platform.
 	Unplaced map[ir.DeployableKind]string
 
 	// DatabasePlatforms names, by SQL dialect, the platform a database
@@ -677,7 +683,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		return err
 	}
 	switch spec.Kind {
-	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver:
+	case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver, ir.DeployableApp:
 		if len(spec.Languages) == 0 {
 			return fmt.Errorf("registry: %s platform %q declares no languages", spec.Kind, spec.Name)
 		}
@@ -692,7 +698,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: database platform %q declares no SQL dialects", spec.Name)
 		}
 		if len(spec.Languages) > 0 {
-			return fmt.Errorf("registry: database platform %q declares server languages; only a server, job, worker, runner or deriver platform does", spec.Name)
+			return fmt.Errorf("registry: database platform %q declares server languages; only a server, job, worker, runner, deriver or app platform does", spec.Name)
 		}
 		if err := checkList("database platform "+spec.Name, "SQL dialect", spec.Dialects, SQLDialectNames); err != nil {
 			return err
@@ -708,6 +714,10 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
 			return fmt.Errorf("registry: bucket platform %q declares server languages or SQL dialects; a bucket runs no code and hosts no schema (D54)", spec.Name)
 		}
+	case ir.DeployableMemoryStore:
+		if len(spec.Languages) > 0 || len(spec.Dialects) > 0 {
+			return fmt.Errorf("registry: memoryStore platform %q declares server languages or SQL dialects; a memory store runs no code and hosts no schema (D75)", spec.Name)
+		}
 	default:
 		return fmt.Errorf("registry: platform %q has deployable kind %q (want %s)", spec.Name, spec.Kind, deployableKindList())
 	}
@@ -716,7 +726,7 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.Artifact != "" {
 		if !spec.Kind.RunsCode() {
-			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker, runner or deriver platform builds one", spec.Kind, spec.Name)
+			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker, runner, deriver or app platform builds one", spec.Kind, spec.Name)
 		}
 		if !spec.Artifact.Valid() {
 			return fmt.Errorf("registry: platform %q declares artifact %q (want %s or %s)", spec.Name, spec.Artifact, ir.ArtifactImage, ir.ArtifactBundle)
@@ -724,16 +734,16 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	}
 	if spec.IdentityConfig != "" {
 		var object map[string]any
-		if spec.Kind != ir.DeployableServer {
-			return fmt.Errorf("registry: %s platform %q declares an identity config; only a server platform does", spec.Kind, spec.Name)
+		if spec.Kind != ir.DeployableServer && spec.Kind != ir.DeployableApp {
+			return fmt.Errorf("registry: %s platform %q declares an identity config; only a server or an app platform does", spec.Kind, spec.Name)
 		}
 		if err := json.Unmarshal([]byte(spec.IdentityConfig), &object); err != nil || object == nil {
 			return fmt.Errorf("registry: platform %q IdentityConfig is not a JSON object: %v", spec.Name, err)
 		}
 	}
 	if spec.NoIdentity != "" {
-		if spec.Kind != ir.DeployableServer {
-			return fmt.Errorf("registry: %s platform %q says why it runs no identity runtime; only a server platform serves an API over the user model", spec.Kind, spec.Name)
+		if spec.Kind != ir.DeployableServer && spec.Kind != ir.DeployableApp {
+			return fmt.Errorf("registry: %s platform %q says why it runs no identity runtime; only a server or an app platform serves an API over the user model", spec.Kind, spec.Name)
 		}
 		if spec.IdentityConfig != "" {
 			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
@@ -789,7 +799,7 @@ func (r *Registry) RegisterConnector(spec ConnectorSpec) error {
 		return fmt.Errorf("registry: connector %q is already registered", spec.Name)
 	}
 	if !spec.Edge.Valid() {
-		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket)
+		return fmt.Errorf("registry: connector %q has edge kind %q (want %s, %s, %s, %s or %s)", spec.Name, spec.Edge, ir.EdgeSQL, ir.EdgeHTTP, ir.EdgeSite, ir.EdgeBucket, ir.EdgeMemoryStore)
 	}
 	switch {
 	case spec.Generic && (spec.From != "" || spec.To != ""):
@@ -1028,7 +1038,7 @@ func (r *Registry) checkStackReferences() error {
 		if spec.Edge == ir.EdgeSQL {
 			toKind = ir.DeployableDatabase
 		}
-		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver}
+		fromKinds := []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp}
 		if spec.Edge == ir.EdgeSQL {
 			// An engine's runner reaches its engine database (D58).
 			fromKinds = append(fromKinds, ir.DeployableRunner)
@@ -1039,6 +1049,9 @@ func (r *Registry) checkStackReferences() error {
 		}
 		if spec.Edge == ir.EdgeBucket {
 			toKind = ir.DeployableBucket
+		}
+		if spec.Edge == ir.EdgeMemoryStore {
+			toKind = ir.DeployableMemoryStore
 		}
 		for _, end := range []struct {
 			role, platform string

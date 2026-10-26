@@ -49,7 +49,7 @@ breaks your code, the type checker of each language points at the line.
 | You need | Declare | The build generates | You write | Guide |
 | --- | --- | --- | --- | --- |
 | A project | nothing: `superschematic init` writes the schemas root, its naming file, base tsconfig and ignore rules | nothing yet | nothing | [CLI](/superschematic/reference/cli/#init-schemas-root) |
-| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsite) |
+| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site\|MemoryStore` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystore) |
 
 ## Data
 
@@ -83,6 +83,7 @@ breaks your code, the type checker of each language points at the line.
 | A field that names an item of another list | `RefersTo<T, Target>` | the operation that lists the targets, recorded for the documents, forms and pickers | nothing | [References and search](/superschematic/reference/references-and-search/) |
 | Errors with the right status | nothing | `NotFoundError`, `BadRequestError`, `ConflictError` and the rest | returning one | [API routes](/superschematic/guides/api-routes/#errors) |
 | Rate, body and time limits | `@rateLimit`, `@bodyLimit`, `@timeout` | the limits, in every server | nothing | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
+| A rate limit every replica shares | `rateLimitStore: ShopCache` in the API's config, a MemoryStore it lists | the `@rateLimit` routes counted in the store, by httprate's sliding window, each replica on its own budget while the store is unavailable | nothing | [Memory stores](/superschematic/guides/memory-stores/#share-a-rate-limit) |
 | A webhook a third party calls | `@webhook` and `@hmacVerified({ provider })` | the signature check before anything else | the handler | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | The server in another language | `outputs.api.language`: `GO`, `TYPESCRIPT` or `RUST` | the same routes and checks in that language | the implementation in it | [API routes](/superschematic/guides/api-routes/#the-typescript-server) |
 | Settings and secrets for a server | a class with `@envVars`, fields `Secret<T>` where secret | a typed loader and `values-schema.json` | nothing | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |
@@ -113,6 +114,7 @@ breaks your code, the type checker of each language points at the line.
 | You need | Declare | The build generates | You write | Guide |
 | --- | --- | --- | --- | --- |
 | A private file bucket | a Bucket service, listed in an API config's `buckets` | the bucket in the API's `Deps`, signed upload and download URLs | which object to sign for | [Buckets](/superschematic/guides/buckets/#declare-a-bucket) |
+| Wake-ups, counters and claims every replica shares | a MemoryStore service whose schema declares each `@channel` and `@key`, listed in an API config's `memoryStores` | typed definitions of each channel and key, the store in the API's `Deps` on Redis or Valkey, Valkey under `stack dev` and Memorystore on gcp | the publish, the subscribe and the claim, and the path for when the store is unavailable | [Memory stores](/superschematic/guides/memory-stores/#declare-a-store) |
 | A static front end | a Site service | the config, served in each environment, that holds each API's address, and CORS on each API it calls | the front end | [Static sites](/superschematic/guides/static-sites/#declare-a-site) |
 | Clients in Go, TypeScript, Python, Rust | a line per language in `outputs.sdk` | an SDK with the server's checks, pages, errors and retries | nothing | [Client SDKs](/superschematic/guides/client-sdks/#generate-them) |
 | Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs | nothing | [MCP tools](/superschematic/reference/mcp-tools/) |

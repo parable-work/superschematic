@@ -17,9 +17,9 @@ times than expected.
 
 Version sites (relative to the repository root):
   versions.env                        VERSION=
-  packages/{api,db,schema,schema-config,stack}/package.json
+  packages/{api,db,memory-store,schema,schema-config,stack}/package.json
                                       version
-  packages/bun.lock                   the five workspace entries
+  packages/bun.lock                   the six workspace entries
   ir/typescript/package.json          version
   runtime/schema/typescript/package.json
                                       version
@@ -91,10 +91,15 @@ Version sites (relative to the repository root):
                                       .../extensions/gcp vX.Y.Z and
                                       .../extensions/cloudflare vX.Y.Z (its
                                       tests')
-  extensions/topcoat/go.mod           require .../superschematic vX.Y.Z and
-                                      .../superschematic/ir vX.Y.Z
   cmd/superschematic/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
+                                      .../extensions/gcp vX.Y.Z,
+                                      .../extensions/cloudflare vX.Y.Z and
+                                      .../extensions/pulumi vX.Y.Z
+  extensions/topcoat/go.mod           require .../superschematic vX.Y.Z,
+                                      .../superschematic/ir vX.Y.Z,
+                                      .../cmd/superschematic vX.Y.Z (the
+                                      official extensions its binary links),
                                       .../extensions/gcp vX.Y.Z,
                                       .../extensions/cloudflare vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
@@ -111,8 +116,10 @@ The `replace` lines stay in a release, and `go install <package>@vX.Y.Z`
 refuses a command whose module carries any, as cmd/superschematic does.
 runtime/migrate/go carries none, so superschematic-migrate installs that
 way; runtime/http/go carries them, so superschematic-identity does not.
-The installed binary is downloaded from the release or built from a
-checkout.
+The installed binary, and superschematic-topcoat beside it (D78), whose
+extensions/topcoat module carries replaces too, are downloaded from the
+release (release.yml builds both against the release's archives) or built
+from a checkout.
 
 Pre-releases: SemVer `-alpha.N`, `-beta.N` and `-rc.N` map to PEP 440 `aN`,
 `bN` and `rcN`. Other pre-release identifiers and build metadata are rejected
@@ -128,7 +135,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GO_MODULE = "github.com/parable-work/superschematic"
 
-NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config", "stack"]
+NPM_WORKSPACE_PACKAGES = ["api", "db", "memory-store", "schema", "schema-config", "stack"]
 
 # The targets of the engine's prebuilt Node-API addon, one npm package each
 # (@superschematic/engine-<target>, runtime/engine/typescript/npm/<target>),
@@ -138,7 +145,9 @@ ENGINE_ADDON_TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-ar
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z. cmd/superschematic, the installed binary, links the core and the
-# official extensions, so it comes last.
+# official extensions, so it comes after them, and extensions/topcoat, whose
+# binary links the official extensions from cmd/superschematic's list
+# (D78), last.
 GO_MODULES = [
     "ir",
     "runtime/schema/go",
@@ -150,8 +159,8 @@ GO_MODULES = [
     "extensions/gcp",
     "extensions/cloudflare",
     "extensions/pulumi",
-    "extensions/topcoat",
     "cmd/superschematic",
+    "extensions/topcoat",
 ]
 
 SEMVER = re.compile(
@@ -474,7 +483,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "cloudflare", "topcoat"):
+    for ext in ("gcp", "cloudflare"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",
@@ -503,6 +512,23 @@ def sites():
             [
                 (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
+            ],
+            "gomod",
+        )
+    )
+    # extensions/topcoat requires the installed binary's module, whose
+    # official list superschematic-topcoat links (D78), and through it the
+    # official extensions.
+    out.append(
+        (
+            ROOT / "extensions" / "topcoat" / "go.mod",
+            [
+                (go_require_pattern(GO_MODULE), 1),
+                (go_require_pattern(GO_MODULE + "/ir"), 1),
+                (go_require_pattern(GO_MODULE + "/cmd/superschematic"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),

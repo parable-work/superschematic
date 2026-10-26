@@ -319,6 +319,17 @@ func rustEnvConfigOf(output *ConfigOutput) *rustEnvConfig {
 		case ir.EdgeBucket:
 			stack(field.Key, "load_bucket", "Bucket",
 				fmt.Sprintf("How the server reaches %s, a bucket the API lists. It is read from %s_*.", field.Service, field.Key))
+		case ir.EdgeMemoryStore:
+			// None when none of the field's variables is set: a disabled
+			// store (D75).
+			env.Stack = true
+			stackItems["self"], stackItems["MemoryStore"] = true, true
+			env.Fields = append(env.Fields, rustEnvField{
+				Name: toRustFieldName(field.Key),
+				Type: "Option<MemoryStore>",
+				Read: fmt.Sprintf("stackconfig::load_memory_store(%q).map_err(problems_of)", field.Key),
+				Doc:  wrapRustDoc(fmt.Sprintf("How the server reaches %s, a memory store the API uses (D75). It is read from %s_*; None when none of them is set, a disabled store.", field.Service, field.Key)),
+			})
 		default:
 			stack(field.Key, "load_service", "Service",
 				fmt.Sprintf("The endpoint of %s, which the API calls. It is read from %s_*.", field.Service, field.Key))

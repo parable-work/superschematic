@@ -136,7 +136,8 @@ type Input struct {
 
 	// DependencySchemas holds the loaded schemas of the dependencies whose
 	// types a RefersTo names (D61), or a SortBy operation lists (D60,
-	// amended), by service name, which ResolveReference reads a target and
+	// amended), or a MemoryStore schema's payloads and enum parts name
+	// (D75), by service name, which ResolveReference reads a target and
 	// its options from, and checkSorts an item, when the schema does not
 	// declare it. The loader reads a dependency only for a reference or a
 	// sorted list that names a type the schema imports from it, and leaves
@@ -233,6 +234,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkEnqueueOnChange(schema, r)
 	checkWorkers(schema, r)
 	checkDerivers(schema, r)
+	checkMemoryStore(schema, in, r)
+	checkApps(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)

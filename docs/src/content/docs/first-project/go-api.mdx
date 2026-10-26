@@ -162,8 +162,13 @@ run it from `examples/acme-shop`, naming the stack, since the example
 holds two others, `storefront-stack` and `wishlist-stack`:
 
 ```sh
-superschematic stack dev schemas/services/shop-stack
+superschematic-topcoat stack dev schemas/services/shop-stack
 ```
+
+`superschematic-topcoat` is the installed binary with the Topcoat
+extension linked ([Build the crate](/superschematic/guides/topcoat/#build-the-crate)).
+`shop-stack` runs `shop-stock`'s app `Backoffice`, a Topcoat app, whose
+build needs it; `superschematic` refuses to build the stack and says so.
 
 `stack dev` builds the stack and each service it deploys, with their
 dependencies, then:
@@ -186,7 +191,10 @@ dependencies, then:
   asks ([Jobs](/superschematic/guides/stacks/#jobs));
 - builds and starts `shop-db`'s engine runner, which runs the reactions
   and deadlines of its engine types, the shop's checkouts among them
-  ([Engine behaviors](/superschematic/guides/engine-behaviors/)).
+  ([Engine behaviors](/superschematic/guides/engine-behaviors/));
+- builds `shop-stock`'s app `Backoffice` and starts it after
+  `shop-stock`'s server: the stock pages and the engine console under
+  `/stock` ([Apps](/superschematic/guides/stacks/#apps)).
 
 The checkouts pay through acmepay, a fake payment provider in
 `go/acmepay`, which `stack dev` reaches at the address `shop-orders`'
@@ -204,7 +212,8 @@ bindings are the configuration it is started with:
 
 Ctrl-C stops the servers and the containers, Postgres's and the storage
 emulator's that holds `shop-media`, which keep their data for the next
-run; `--remove-data` removes them too. The routes answer a caller
+run, and Valkey's for `shop-cache`, which keeps none; `--remove-data`
+removes them too. The routes answer a caller
 with a session in `shop-db`. `TestStackDevRunsTheShop`, in
 `examples/acme-shop/go/stack_dev_test.go`, runs `stack dev`, creates a
 user with the identity runtime's store, signs them in through `shop-api`'s

@@ -657,14 +657,15 @@ part of the build cache key: moving the copy rebuilds nothing.
 ## `[derived_fields]`
 
 How the config fields an API's edges derive in a stack are named: the
-API's database connection, the endpoint of each API it `calls`, and the
-connection of each bucket it lists in `buckets`
+API's database connection, the endpoint of each API it `calls`, the
+connection of each bucket it lists in `buckets`, and of each memory store
+it lists in `memoryStores`
 (see [What an API gets from its edges](/superschematic/guides/stacks/#what-an-api-gets-from-its-edges)). In each template `{SERVICE}` is the
-DB, called API or Bucket service's name in upper snake case, and the rest
+DB, called API, Bucket or MemoryStore service's name in upper snake case, and the rest
 of the template holds upper-case letters, digits and underscores. A
 platform sets each field as one environment variable per member of its
 value (`SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_CREDENTIAL_SOURCE`,
-`SHOP_MEDIA_BUCKET_NAME`), and the loader refuses an `@envVars` field
+`SHOP_MEDIA_BUCKET_NAME`, `SHOP_CACHE_MEMORY_STORE_URL`), and the loader refuses an `@envVars` field
 named after one.
 
 ### `derived_fields.database`
@@ -686,6 +687,32 @@ Default: `{SERVICE}_BUCKET`
 
 The field of each bucket an API lists in `buckets`
 ([Buckets](/superschematic/guides/buckets/)).
+
+### `derived_fields.memory_store`
+
+Default: `{SERVICE}_MEMORY_STORE`
+
+The field of each memory store an API lists in `memoryStores`, its
+`rateLimitStore` among them
+([Memory stores](/superschematic/guides/memory-stores/#what-an-api-gets)).
+Its variables are the field's name followed by `_STORE`, `_URL`, `_CA`,
+`_AUTH` and `_MEMBER`: `SHOP_CACHE_MEMORY_STORE_URL`, and so on. None
+set is a disabled store.
+
+A MemoryStore service's definitions take the names of its types output,
+since they are that output (D75):
+
+| Language | Name | `shop-cache` with the defaults |
+| --- | --- | --- |
+| Go | the module `<go_module_root>/types/go/<name>`, its package the name without hyphens or underscores | `example.com/schemas/types/go/shop-cache`, package `shopcache` |
+| TypeScript | the package `<npm_scope>/<name>-types` | `@schemas/shop-cache-types` |
+| Rust | the crate `<rust_crate_prefix><name>-types` | `schemas-shop-cache-types`, `schemas_shop_cache_types` in a `use` |
+
+No key of the naming file changes the names the store holds. A full name
+is the store's name, then `:` and the declaration's name, then `:` and
+each part's wire string: `shop-cache:product-changed:<productId>`. In a
+member of a parameterized environment the store's name is followed by
+`@` and the member's: `shop-cache@pr123:product-changed:<productId>`.
 
 ## `[implementation_paths]`
 
@@ -725,6 +752,23 @@ The scaffold writes it once, a `Cargo.toml` and `src/lib.rs`, never into a
 directory that holds a `Cargo.toml`. It names the crate
 `<rust_crate_prefix><service>-implementation`, a name you may change, and
 depends on the API crate and the HTTP runtime by path.
+
+### `implementation_paths.rust_app`
+
+Default: `apps/{app}`
+
+The crate of an app of a Rust API (D78), the program a stack runs for an
+`@app` class: `{app}` is the class's name in kebab case, and `{service}`,
+when the template holds it, the API's name. The template must hold
+`{app}`, since each app has a crate of its own. The crate is a library
+that exports `pub async fn serve(parts: <api crate>::apps::<App>Parts) ->
+std::io::Result<()>`. A stack's build writes it once when it is missing,
+a `Cargo.toml` naming it `<rust_crate_prefix><api>-<app>-app` and a
+`src/lib.rs` whose `serve` answers every request with 501, and refuses
+one whose `src/lib.rs` declares no `serve`. Each build copies it into
+the output root's `impl/`, its path dependencies re-based there, and the
+app's entrypoint depends on that copy
+([Apps](/superschematic/guides/stacks/#apps)).
 
 ### `implementation_paths.site`
 

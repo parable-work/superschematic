@@ -31,8 +31,9 @@ type field struct {
 // DerivedField returns the name of the config field an edge of kind to
 // service fills under the core's rule: the service's name in upper snake
 // case, suffixed `_DATABASE` for a sql edge, `_SERVICE` for an http edge
-// and `_BUCKET` for a bucket edge (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`,
-// `SHOP_MEDIA_BUCKET`). Input.FieldNames replaces the rule with the naming
+// `_BUCKET` for a bucket edge and `_MEMORY_STORE` for a memoryStore edge
+// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`, `SHOP_MEDIA_BUCKET`,
+// `SHOP_CACHE_MEMORY_STORE`). Input.FieldNames replaces the rule with the naming
 // file's (section 3.4).
 func DerivedField(kind ir.EdgeKind, service string) string {
 	return ir.DerivedFieldNames{}.Field(kind, service)
@@ -64,8 +65,9 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 
 // deriveEdges finds every edge: a sql edge from each server to the
 // database of each API it serves, an http edge from each server to the
-// server of each API it calls, and a bucket edge from each server to each
-// bucket an API it serves lists (D54). A job takes its API's edges, from
+// server of each API it calls, a bucket edge from each server to each
+// bucket an API it serves lists (D54), and a memoryStore edge from each to
+// each memory store an API it serves uses (D75). A job takes its API's edges, from
 // itself (D52). An engine's runner has one, a sql edge to its engine
 // database (D58). Each finds the connector between the two platforms.
 func (r *resolver) deriveEdges() {
@@ -94,6 +96,9 @@ func (r *resolver) deriveEdges() {
 		}
 		for _, bucket := range d.res.Buckets {
 			r.addEdge(ir.EdgeBucket, d, bucket.Name)
+		}
+		for _, store := range d.res.MemoryStores {
+			r.addEdge(ir.EdgeMemoryStore, d, store.Name)
 		}
 	}
 }
@@ -216,13 +221,19 @@ func (r *resolver) bindConfig() {
 		}
 		var callers, identity, cors map[string]string
 		refused := map[string]bool{}
-		if d.res.Kind == ir.DeployableServer {
+		if d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp {
+			// An app serves requests over its API's Deps as the API's
+			// server does, so it reads its API's callers and identity
+			// fields (D78). No deployable calls it and no site does, so
+			// its callers field lists no issuer and it has no CORS field.
 			callers = r.callersFields(d)
 			refused = r.checkCallersFields(d, callers, derived)
 			// A job serves no request: it builds no identity service, so
 			// it reads no identity config field (D50, D52).
 			identity = r.identityFields(d)
 			r.checkIdentityFields(d, identity, callers, derived)
+		}
+		if d.res.Kind == ir.DeployableServer {
 			cors = r.corsFields(d)
 			for key := range r.checkCORSFields(d, cors, callers, identity, derived) {
 				refused[key] = true
@@ -373,6 +384,9 @@ func contractOf(kind ir.EdgeKind) string {
 	}
 	if kind == ir.EdgeBucket {
 		return "bucket connection (ir.BucketConnection)"
+	}
+	if kind == ir.EdgeMemoryStore {
+		return "memory store connection (ir.MemoryStoreConnection)"
 	}
 	return "service endpoint (ir.ServiceEndpoint)"
 }

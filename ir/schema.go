@@ -38,6 +38,14 @@ const (
 	// generates nothing, and each Bucket service a stack reaches is a
 	// deployable of kind bucket.
 	SchemaKindBucket SchemaKind = "Bucket"
+
+	// SchemaKindMemoryStore represents a memory store: a Redis or Valkey
+	// server the replicas of a stack share, which holds no fact (D75).
+	// Its schema declares each channel and key it carries with @channel
+	// and @key (MemoryStoreDeclaration); the APIs that use it list it in
+	// their config's memoryStores, and each MemoryStore service a stack
+	// reaches is a deployable of kind memoryStore.
+	SchemaKindMemoryStore SchemaKind = "MemoryStore"
 )
 
 // String returns the string representation of a SchemaKind.
@@ -95,6 +103,24 @@ type Schema struct {
 	// config's buckets (D54). Each gives the API's server and jobs a bucket
 	// edge, and its Deps a Bucket.
 	Buckets []ServiceRef `json:"buckets,omitempty" yaml:"buckets,omitempty"`
+
+	// MemoryStores lists the MemoryStore services an API's implementation
+	// uses: the config's memoryStores, with its rateLimitStore when the
+	// list leaves it out (D75). Each gives the API's server, jobs and
+	// workers a memoryStore edge, and its Deps a MemoryStore.
+	MemoryStores []ServiceRef `json:"memoryStores,omitempty" yaml:"memoryStores,omitempty"`
+
+	// RateLimitStore is the MemoryStore service an API's @rateLimit
+	// routes count in, shared by its replicas: the config's
+	// rateLimitStore, which MemoryStores also lists (D75). Nil keeps each
+	// replica's own in-process budget.
+	RateLimitStore *ServiceRef `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
+
+	// MemoryStoreDeclarations are a MemoryStore schema's channels and keys,
+	// each an @channel or @key class, sorted by name, with the core's
+	// reserved rate-limit declaration among them (D75). Such a class is no
+	// type, so Types does not hold it.
+	MemoryStoreDeclarations []*MemoryStoreDeclaration `json:"memoryStoreDeclarations,omitempty" yaml:"memoryStoreDeclarations,omitempty"`
 
 	// References lists the services the schema's decorator arguments name
 	// by a service handle, other than as identities: a stack's `deploy`,
@@ -159,6 +185,11 @@ type Schema struct {
 	// in declaration order (D74). A deriver's class is no type, so Types
 	// does not hold it.
 	Derivers []*Deriver `json:"derivers,omitempty" yaml:"derivers,omitempty"`
+
+	// Apps lists the apps an API service declares with `@app`, in
+	// declaration order (D78). An app's class is no type, so Types does not
+	// hold it.
+	Apps []*App `json:"apps,omitempty" yaml:"apps,omitempty"`
 
 	// Documents holds the loaded sidecar documents keyed by document name
 	// (the registered DocumentSpec.Name), each in canonical JSON (see
