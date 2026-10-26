@@ -64,7 +64,7 @@ export interface DescribeDocument {
    * The JSON Schema of an instance's behaviors: by behavior name, an
    * object of each field the behavior declares, read-only, for every
    * behavior on the type that declares one; a volatile field says
-   * `volatile: true`.
+   * `volatile: true`, and a per-reader one `perReader: true` besides.
    */
   instanceBehaviors: JSONSchemaObject;
   behaviors: DescribedBehavior[];
@@ -102,9 +102,12 @@ export interface DescribedBehavior {
   config: unknown;
   /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
   summary?: string;
-  /** Its fields, as its declaration lists them; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields, as its declaration lists them; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
+  /** Its operations on the type: an instance's and the schema's. */
   operations: string[];
+  /** Its namespace operations (D77), which run on no schema and the tools document lists by the behavior's name; absent when it has none. */
+  namespaceOperations?: string[];
   /** The codes its vetoes carry, as its declaration lists them. */
   vetoes: Array<{ code: string; description?: string }>;
 }
@@ -118,7 +121,7 @@ export interface DescribedOperation {
   /** The behavior that adds it; absent for the operations every schema has. */
   behavior?: string;
   /** For a behavior's operation, what it runs on: an instance, or the schema as a whole. */
-  scope?: OperationScope;
+  scope?: Exclude<OperationScope, 'namespace'>;
   /** Its tool's title, as the tools document writes it. */
   title: string;
   description: string;
@@ -245,8 +248,8 @@ export interface BehaviorDocument {
   preconditionSchema?: JSONSchema;
   requires: string[];
   conflicts: string[];
-  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
   operations: BehaviorOperationDocument[];
   /** Its signals (D77), present when it declares any. */
   signals?: Array<{ name: string; description?: string; access: 'read' | 'write' | 'operation'; paramsSchema: JSONSchema }>;
@@ -258,13 +261,15 @@ export interface BehaviorDocument {
 export interface BehaviorOperationDocument {
   name: string;
   description?: string;
-  /** What it runs on: an instance, or the schema as a whole. */
+  /** What it runs on: an instance, the schema as a whole, or the namespace (D77). */
   scope: OperationScope;
   writes: boolean;
   /** True for an operation beside the instance (D77); absent otherwise. */
   beside?: true;
   /** False for a beside operation that appends no event; absent otherwise. */
   log?: false;
+  /** `read` for a beside operation the policy is asked read for (D77); absent otherwise. */
+  asks?: 'read';
   /** The invocation policy, its declaration's or the policy's default, under the policy's key (after writes, as the describe document has it). */
   [policyKey: string]: unknown;
   /** Its parameters: an object schema with `additionalProperties: false`. */

@@ -114,7 +114,7 @@ const EXPECTED: &str = r#"{
     }
   },
   "comments": {
-    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 40000 characters, ref and action blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 1 minute is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, and composing names who is writing a message; none of them moves in an event, so read the instance for them.",
+    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 40000 characters, ref and action blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 1 minute is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, composing names who is writing a message, and unread counts the caller's unread top-level messages of others; none of them moves in an event, so read the instance for them. A caller follows each thread it posts in or is mentioned in; markRead moves its read marker and follow its follows, and the namespace operation Comments.inbox lists its mentions, followed threads and read conversations. Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which the inbox reads; this type names no deliverPermission, so nobody claims them.",
     "operations": {
       "post": {
         "useWhen": "Use to post a message as the caller, top-level or with thread a reply in a top-level message's thread; quotes names a message of that thread. Give clientId to make a retry safe: a post with a clientId the caller has used returns that message and posts nothing. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
@@ -458,6 +458,34 @@ const EXPECTED: &str = r#"{
           }
         ]
       },
+      "markRead": {
+        "useWhen": "Use to mark the conversation's top-level messages read, or with thread that thread's replies, up to the message id upTo the caller has shown; a streamed message that comes to stand later stays unread. The marker never moves back. It writes only the caller's read state, appends no event and needs only read.",
+        "success": "Returns readUpTo, the marker, and unread, how many messages of others in the listing stand above it.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          }
+        ]
+      },
+      "follow": {
+        "useWhen": "Use to follow a thread, named by its top-level message, so each reply in it records a delivery for the caller and the inbox lists it; on false stops until the caller next posts in it or is mentioned in it. It writes only the caller's state, appends no event and needs only read.",
+        "success": "Returns thread and following, whether the caller follows it now.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          }
+        ]
+      },
       "getMessage": {
         "useWhen": "Use to read one message's record by its id, a deleted one's included; a composing message's body is its draft so far, which draft signals extend.",
         "errors": [
@@ -478,7 +506,7 @@ const EXPECTED: &str = r#"{
     }
   },
   "commentsConfigured": {
-    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 2000 characters, ref blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 30 seconds is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, and composing names who is writing a message; none of them moves in an event, so read the instance for them.",
+    "summary": "Each Order holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with a Markdown body of at most 2000 characters, ref blocks and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for 30 seconds is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, composing names who is writing a message, and unread counts the caller's unread top-level messages of others; none of them moves in an event, so read the instance for them. A caller follows each thread it posts in or is mentioned in; markRead moves its read marker and follow its follows, and the namespace operation Comments.inbox lists its mentions, followed threads and read conversations. Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which a caller with permission orders.notify claims with Comments.claimDeliveries and settles with Comments.settleDeliveries.",
     "operations": {
       "post": {
         "useWhen": "Use to post a message as the caller, top-level or with thread a reply in a top-level message's thread; quotes names a message of that thread. Give clientId to make a retry safe: a post with a clientId the caller has used returns that message and posts nothing. It is beside the instance: the instance's seq and ETag do not move, and a lease held by another does not stop it.",
@@ -840,6 +868,34 @@ const EXPECTED: &str = r#"{
           }
         ]
       },
+      "markRead": {
+        "useWhen": "Use to mark the conversation's top-level messages read, or with thread that thread's replies, up to the message id upTo the caller has shown; a streamed message that comes to stand later stays unread. The marker never moves back. It writes only the caller's read state, appends no event and needs only read.",
+        "success": "Returns readUpTo, the marker, and unread, how many messages of others in the listing stand above it.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          }
+        ]
+      },
+      "follow": {
+        "useWhen": "Use to follow a thread, named by its top-level message, so each reply in it records a delivery for the caller and the inbox lists it; on false stops until the caller next posts in it or is mentioned in it. It writes only the caller's state, appends no event and needs only read.",
+        "success": "Returns thread and following, whether the caller follows it now.",
+        "errors": [
+          {
+            "code": "no_message",
+            "commonCorrection": "Read the conversation with listMessages for the ids it has; a purged message is gone."
+          },
+          {
+            "code": "not_a_thread",
+            "commonCorrection": "Name the top-level message, the reply's thread, instead."
+          }
+        ]
+      },
       "getMessage": {
         "useWhen": "Use to read one message's record by its id, a deleted one's included; a composing message's body is its draft so far, which draft signals extend.",
         "errors": [
@@ -1000,6 +1056,10 @@ fn the_guidance_is_the_typescript_engines_text() {
                 resolve_permission: Some("orders.resolve".to_owned()),
                 compose_timeout_ms: 30_000,
                 max_drafts: 3,
+                deliver_permission: Some("orders.notify".to_owned()),
+                max_attempts: 3,
+                retry_backoff_ms: 10_000,
+                delivery_retention_ms: 86_400_000,
             },
             "commentsConfigured",
         ),

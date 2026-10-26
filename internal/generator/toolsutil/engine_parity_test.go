@@ -74,6 +74,10 @@ var (
 	engineNameInputs = []string{
 		"Order", "LineItem", "line_item", "Line_Item", "HTTPRoute", "Tail-", "a-b-C", "Order2Line", "x9Y",
 		"create", "addComment", "listSchemas", "claimNext",
+		// A namespace operation's tool is named after its behavior (D77),
+		// an extension's with its dot made a dash: comments.claimDeliveries,
+		// handle comments_claim_deliveries.
+		"Comments", "acme-Rating", "claimDeliveries",
 	}
 	engineHandleInputs = []string{
 		"order_create", "line_item_add_comment", "a", "a1_b2", "tail__get", "_order", "order_", "Order_create",

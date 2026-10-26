@@ -716,14 +716,26 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   display names one by its qualified name, `acme.Rating.ratingCount`.
   A config never renames a field. A field the engine computes at a read
   from other instances, the clock or the config says `"volatile": true`,
-  since no event of its instance records its moves.
+  since no event of its instance records its moves. One whose value is
+  the caller's, not the instance's (an unread count), also says
+  `"perReader": true`, so no event records it as the instance's; only a
+  volatile field may.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an
   operation's parameters are exactly the ones it declares; the registry
   and the engine both refuse one that does not.
   `invocationPolicy` is a value of the registry's tool invocation policy;
-  left out, the policy's default applies.
+  left out, the policy's default applies. `scope` is `instance`, the
+  default, `schema`, an operation on the schema as a whole, or
+  `namespace`, one on the behavior's own tables across every schema of a
+  namespace that composes it, called by the behavior's name
+  ([namespace operations](/superschematic/guides/engine-behaviors/#namespace-operations));
+  `engine-client` types a behavior's namespace operations once per
+  module, with a client of their own, `acmeRatingNamespaceClient`, apart
+  from every schema's. An instance operation that writes only its
+  caller's own state may say `"beside": true, "log": false, "asks":
+  "read"`, and the policy is asked `read` for it.
 - `signals` are the messages about an instance the engine hands to the
   event streams open on it and keeps nowhere (D77): a typing indicator,
   a draft's next chunk. Each is `{ name, description, paramsSchema,

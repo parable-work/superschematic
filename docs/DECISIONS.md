@@ -9998,6 +9998,9 @@ Three rules hold throughout.
 | A behavior operation may declare `scope: "namespace"`. It runs on the behavior's tables across every schema of the namespace that composes the behavior, which its behavior's tables already hold, keyed by schema (each behavior has one key per engine, "Storage"). `engine.behaviors.invoke(principal, behavior, operation, params, { namespace })`, `POST /namespaces/{namespace}/behaviors/{behavior}/operations/{operation}` and an MCP tool per operation call it. | A copy of Search's every-schema search for each behavior that needs one. |
 | Its `sql` has `sql.readable()`, a relation of the schemas that compose the behavior and that the caller may read, asked of the policy once per schema per call; a statement joins it, and a row of a schema the caller may not read never leaves the statement. A schema is skipped, never refused, as Search's every-schema search skips it. | Asking per row, which is a policy call per message in an inbox. Trusting the behavior to filter, which one missed join leaks. |
 | The policy is asked `{ principal, action, namespace, behavior, operation }`, a fourth kind of question beside the schema, namespace and listing ones. `permissionPolicy` allows a read one, whose rows `readable()` filters, and a writing one to a caller holding `<behavior>.<operation>`. A writing one writes only its behavior's tables and appends no event. | A namespace operation that appends events, which belong to no instance. |
+| In a `{ rules }` policy only a rule that names `behavior` (`true`, or names) matches a namespace operation's question; a rule that leaves it out, as every rule written before D77 does, matches none, and a question no rule matches is refused. `"allowAll"` allows them, and `"permission"` answers them with rules that name `behavior`. | A rule without `behavior` matching every question, which turns a deployment's existing subject- or service-wide allow, acme-shop's `{ service: ["shop-orders"], action: ["read", "write"], allow: true }`, into an allow of every behavior's writing namespace operations, a claim of every schema's deliveries among them. |
+| A namespace operation has no config of its own: `cx.configs()` gives each composing schema's live config, and `cx.config(schema)` one, so a setting that is a schema's (who may claim its deliveries, how often they are tried) stays the schema's. A writing one runs under the namespace's writer, as an instance's write does, so it serializes with the writes whose rows it reads; a read-only one takes none. It may read instances and invoke their read-only operations under the caller's policy, and writes no instance. It is not part of any type: the describe document lists it under its behavior, and its MCP tool is named after the behavior (`comments.inbox`). | One config per behavior per namespace, which the schema documents do not hold. Running claims outside the writer, guarded only by what each update read. |
+| An operation beside the instance with `"log": false` may say `"asks": "read"`: it writes only the caller's own state, so the policy is asked `read`, and a caller who may only read an instance may mark it read or follow it. | Asking `write`, which under `permissionPolicy` keeps a reader from marking anything read. |
 
 ### Primitive 4: acting for a subject
 
@@ -10047,7 +10050,7 @@ Operations, each beside the instance (primitive 1):
 | `react({ message, emoji })`, `unreact({ message, emoji })` | at most 20 emoji on a message, each a name or a character of at most 32 code points | yes |
 | `pin({ message })`, `unpin({ message })` | `pinPermission` | yes |
 | `resolve({ thread })`, `reopen({ thread })` | the thread's author, or `resolvePermission` | yes |
-| `markRead({ upTo })`, `follow({ thread, on })` | the caller's read marker on the conversation, and whether the caller follows a thread; a poster follows each thread it posts in | no |
+| `markRead({ upTo, thread? })`, `follow({ thread, on })` | the caller's read marker on the conversation or a thread, and whether the caller follows a thread; a poster follows each thread it posts in; asked as reads | no |
 | `listMessages({ thread?, around?, before?, after?, limit? })`, `getMessage({ message })`, `listEdits({ message })`, `listReactions({ message, emoji })` | read-only; a page of top-level messages, or a thread's, in either direction or around one message; a composing message's draft to a reader | - |
 
 Signals: `typing` (`{ thread? }`, `read`), `viewing` (`{}`, `read`), sent
@@ -10093,6 +10096,32 @@ nothing for `composeTimeoutMs` (60000 when absent) becomes `interrupted`
 on the runner's schedule, its draft kept as its body, so a crashed agent
 leaves what it wrote and no message stuck as writing.
 
+A read marker counts stands, not message ids: each message takes the
+conversation's next stand number when it comes to stand, so a streamed
+reply that began before what a reader read and finished after it is
+still unread. A caller has a marker on the conversation's top-level
+messages and one per thread on its replies, as a chat has; `unread`, the
+caller's, counts top-level messages of others above it, and a caller who
+has never read a conversation has nothing unread there, since a mention
+reaches them anyway. An author follows a thread when its message stands,
+and a mentioned subject follows it, but not a group (`role:<name>`), which
+would hear every later reply. A delivery records why, `mention`, `reply`
+or both; it is made when a message stands (`post`, `finish`, `interrupt`)
+and when an edit adds a mention, dropped when the message goes, and pruned
+`deliveryRetentionMs` after it was made, since the inbox reads a mention
+from it and a notice a month late is no notice. A claim drops what no
+longer needs sending: a message that no longer stands, and one the
+subject has read. A failed delivery is tried again after
+`retryBackoffMs`, doubling, and dropped at `maxAttempts`.
+
+Three limits of this design a deployment carries. The engine knows
+subjects, not who they are, so it cannot check that a mentioned subject
+may read the instance: a notifier checks before it sends a body. A group
+mention reaches the notifier, not each member's inbox. And an agent
+dispatcher acts on `mention` reasons alone: agents follow the threads
+they post and are mentioned in, so two agents acting on `reply` would
+answer each other without end.
+
 Fields, all volatile (primitive 1): `messages`, the standing messages;
 `lastMessageAt`; `threads`, `{ open, resolved }`; `unread`, the caller's;
 `composing`, the subjects writing now. `commentCount` goes; a type's
@@ -10132,7 +10161,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
+Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10163,7 +10192,21 @@ Status: steps 1 and 2 are built; steps 3 to 5 are not. The order to build it in:
    the typed clients carry each behavior's signals as types, a guard and a
    send helper per signal a caller may send.
 3. Primitive 3, namespace operations, with the inbox, read state and
-   deliveries.
+   deliveries. Built. Namespace operations are
+   `runtime/engine/rust/engine/src/behaviors/namespace.rs` and the
+   behavior question in `access.rs`; `testkit/tests/behavior_namespace.rs`
+   holds them on both databases, `asks: read` and the writer included. A
+   field may say `perReader`, which no event records, so Comments'
+   `unread`, the caller's, is never logged as the instance's. A policy
+   rule decides a behavior's question only when it names `behavior`, so a
+   rule written before namespace operations grants none. Comments' read
+   state, follows, inbox and deliveries are `comments/follows.rs`,
+   `inbox.rs` and `deliveries.rs` with migration 4, held by
+   `testkit/tests/core_comments_inbox.rs` and an end-to-end dispatcher
+   over HTTP in the TypeScript suite; `prune` removes full batches, up to
+   twenty a run, so a busy schema's deliveries do not outgrow it. The
+   typed clients give each behavior with namespace operations a client of
+   its own, kept off every schema's.
 4. Primitive 4, acting for a subject, in the principal, the events,
    Provenance and Comments.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.

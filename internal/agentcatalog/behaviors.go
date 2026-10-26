@@ -86,7 +86,10 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 			b.WriteString("\nFields:\n\n")
 			for _, f := range beh.Fields {
 				fmt.Fprintf(&b, "- `%s`", registry.BehaviorFieldPath(beh.Name, f.Name))
-				if f.Volatile {
+				switch {
+				case f.PerReader:
+					b.WriteString(" (volatile, per reader: computed for each caller when read, and no event records it)")
+				case f.Volatile:
 					b.WriteString(" (volatile: computed when read)")
 				}
 				if f.Description != "" {
@@ -104,9 +107,12 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 				} else {
 					traits = append(traits, "reads")
 				}
-				if op.Scope == "schema" {
+				switch op.Scope {
+				case registry.OperationScopeSchema:
 					traits = append(traits, "on the schema")
-				} else {
+				case registry.OperationScopeNamespace:
+					traits = append(traits, "across the namespace's schemas, called by the behavior's name")
+				default:
 					traits = append(traits, "on an instance")
 				}
 				if op.Beside {
@@ -114,6 +120,9 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 					if !op.Logged() {
 						traits = append(traits, "no event")
 					}
+				}
+				if op.AsksRead() {
+					traits = append(traits, "asks read")
 				}
 				fmt.Fprintf(&b, "- `%s` (%s)", op.Name, strings.Join(traits, ", "))
 				if op.Description != "" {

@@ -15,8 +15,12 @@
 //! takes its parameters and no instance id), three tools for writing
 //! schemas (list, describe and define a draft), two that list and describe
 //! the behaviors a schema may compose, `get_value`, the search across the
-//! namespace's schemas where one composes Search, and four that list,
-//! create, archive and unarchive namespaces. No tool publishes.
+//! namespace's schemas where one composes Search, four that list, create,
+//! archive and unarchive namespaces, and one per namespace operation (D77)
+//! of each behavior a schema the caller may read composes, named after the
+//! behavior (`comments.inbox`, `comments_inbox`), which the policy's
+//! listing question for the operation hides from a caller it refuses. No
+//! tool publishes.
 //!
 //! Names follow the SDK generators: a tool's name is
 //! `<namespace>.<method>`, the namespace the schema name in kebab case and
@@ -115,6 +119,7 @@ enum ToolKind {
     Lookup,
     Operation,
     SchemaOperation,
+    NamespaceOperation,
     ListSchemas,
     DescribeSchema,
     DefineSchema,
@@ -139,6 +144,7 @@ impl ToolKind {
             ToolKind::Lookup => "lookup",
             ToolKind::Operation => "operation",
             ToolKind::SchemaOperation => "schemaOperation",
+            ToolKind::NamespaceOperation => "namespaceOperation",
             ToolKind::ListSchemas => "listSchemas",
             ToolKind::DescribeSchema => "describeSchema",
             ToolKind::DefineSchema => "defineSchema",
@@ -467,16 +473,25 @@ impl<'e> Tools<'e> {
                 entry.insert("summary".into(), Value::from(summary));
             }
             entry.insert("fields".into(), declared_fields(&declaration));
-            entry.insert(
-                "operations".into(),
-                Value::Array(
-                    declaration
-                        .operations
-                        .iter()
-                        .map(|operation| Value::from(operation.name.as_str()))
-                        .collect(),
-                ),
-            );
+            let named = |namespace: bool| -> Vec<Value> {
+                declaration
+                    .operations
+                    .iter()
+                    .filter(|operation| (operation.scope == OperationScope::Namespace) == namespace)
+                    .map(|operation| Value::from(operation.name.as_str()))
+                    .collect()
+            };
+            entry.insert("operations".into(), Value::Array(named(false)));
+            // A behavior's namespace operations (D77) run on no schema: the
+            // describe document names them under the behavior, and the
+            // tools document holds their tools.
+            let namespace_operations = named(true);
+            if !namespace_operations.is_empty() {
+                entry.insert(
+                    "namespaceOperations".into(),
+                    Value::Array(namespace_operations),
+                );
+            }
             entry.insert("vetoes".into(), declared_vetoes(&declaration));
             described.push(Value::Object(entry));
         }
@@ -874,6 +889,23 @@ impl<'e> Tools<'e> {
                     .instances()
                     .invoke_schema(principal, &schema, &tool.method_name, params, ns)
             }
+            ToolKind::NamespaceOperation => {
+                only(&tool, &input, &["params"])?;
+                let behavior = tool
+                    .behavior
+                    .as_ref()
+                    .map(|behavior| behavior.name.clone())
+                    .unwrap_or_default();
+                engine.behaviors().invoke(
+                    principal,
+                    &crate::behaviors::NamespaceCall {
+                        namespace: ns,
+                        behavior: &behavior,
+                        operation: &tool.method_name,
+                        params: input.get("params"),
+                    },
+                )
+            }
             ToolKind::Search => engine.search(principal, &Value::Object(input), ns),
             ToolKind::GetValue => {
                 only(&tool, &input, &["hash"])?;
@@ -924,14 +956,16 @@ impl<'e> Tools<'e> {
     // decided.
     fn tool_set(&self, principal: &Principal, namespace: &str) -> Result<Vec<ToolSpec>> {
         let mut schema_tools: Vec<ToolSpec> = Vec::new();
+        let mut composed: Vec<String> = Vec::new();
         for summary in self.engine.schemas().list(
             principal,
             SchemaTarget {
                 namespace: Some(namespace),
             },
         )? {
-            schema_tools.extend(self.live_tools(principal, namespace, &summary)?);
+            schema_tools.extend(self.live_tools(principal, namespace, &summary, &mut composed)?);
         }
+        schema_tools.extend(self.namespace_tools(namespace, &composed));
         let searches = schema_tools.iter().any(|tool| {
             tool.kind == ToolKind::SchemaOperation
                 && tool.behavior.as_ref().is_some_and(|b| b.name == "Search")
@@ -999,6 +1033,7 @@ impl<'e> Tools<'e> {
         principal: &Principal,
         namespace: &str,
         summary: &crate::registry::SchemaSummary,
+        composed: &mut Vec<String>,
     ) -> Result<Vec<ToolSpec>> {
         if summary.live_version.is_none() {
             return Ok(Vec::new());
@@ -1029,7 +1064,98 @@ impl<'e> Tools<'e> {
             Err(error) if unavailable(&error) => return Ok(Vec::new()),
             Err(error) => return Err(error),
         };
+        for behavior in &behaviors {
+            if !composed.contains(&behavior.name) {
+                composed.push(behavior.name.clone());
+            }
+        }
         self.schema_tools(namespace, &record, &runtime, &behaviors)
+    }
+
+    // namespace_tools lists the namespace operations (D77) of the behaviors
+    // the namespace's readable live schemas compose, by behavior name: a
+    // tool each, named after its behavior, `<behavior>.<operation>` in
+    // kebab case and its handle in snake case.
+    fn namespace_tools(&self, namespace: &str, composed: &[String]) -> Vec<ToolSpec> {
+        let options = self.options();
+        let registry = self.engine.catalog.registry();
+        let mut names: Vec<&String> = composed.iter().collect();
+        names.sort_by(|a, b| json::compare_utf16(a, b));
+        let mut tools = Vec::new();
+        for name in names {
+            let Some(behavior) = registry.lookup(name) else {
+                continue;
+            };
+            let parts = name.replace('.', "-");
+            let kebab = kebab_case(&parts);
+            for operation in behavior
+                .declaration
+                .operations
+                .iter()
+                .filter(|operation| operation.scope == OperationScope::Namespace)
+            {
+                let hidden: Vec<(HiddenBy, String)> = options
+                    .hides(name, &operation.name)
+                    .then(|| {
+                        (
+                            HiddenBy::Deployment,
+                            format!(
+                                "the deployment's tool options hide {name}.{} (tools.hidden): a service calls it through the API, and no agent is offered it",
+                                operation.name
+                            ),
+                        )
+                    })
+                    .into_iter()
+                    .collect();
+                tools.push(ToolSpec {
+                    kind: ToolKind::NamespaceOperation,
+                    name: format!("{kebab}.{}", operation.name),
+                    handle: format!("{}_{}", snake_case(&parts), snake_case(&operation.name)),
+                    namespace: kebab.clone(),
+                    method_name: operation.name.clone(),
+                    operation_id: format!("{name}.{}", operation.name),
+                    title: format!("{name}: {}", operation.name),
+                    description: operation
+                        .description
+                        .clone()
+                        .filter(|description| !description.is_empty())
+                        .unwrap_or_else(|| {
+                            format!(
+                                "Operation {} of behavior {name}, across every schema of the namespace that composes it.",
+                                operation.name
+                            )
+                        }),
+                    writes: operation.writes,
+                    policy: options
+                        .operation_invocation(
+                            name,
+                            &operation.name,
+                            operation.invocation_policy.as_deref(),
+                        )
+                        .to_owned(),
+                    http_method: "POST",
+                    http_path: format!(
+                        "/namespaces/{}/behaviors/{}/operations/{}",
+                        encode_component(namespace),
+                        encode_component(name),
+                        encode_component(&operation.name)
+                    ),
+                    schema: None,
+                    behavior: Some(ComposedBehavior {
+                        name: name.clone(),
+                        config: Value::Object(Map::new()),
+                        declaration: behavior.declaration.json.clone(),
+                    }),
+                    operation: Some(operation.clone()),
+                    create_params: Vec::new(),
+                    hidden,
+                    preconditions: None,
+                    filter: None,
+                    key: None,
+                });
+            }
+        }
+        tools
     }
 
     fn engine_tools(&self, namespace: &str) -> Vec<ToolSpec> {
@@ -1199,7 +1325,11 @@ impl<'e> Tools<'e> {
         }
         for behavior in behaviors {
             let declaration = declaration_of(behavior)?;
-            for operation in declaration.operations {
+            for operation in declaration
+                .operations
+                .into_iter()
+                .filter(|operation| operation.scope != OperationScope::Namespace)
+            {
                 let schema_level = operation.scope == OperationScope::Schema;
                 let mut tool = spec(
                     if schema_level {
@@ -1361,7 +1491,13 @@ impl<'e> Tools<'e> {
         tool: &ToolSpec,
     ) -> Option<(HiddenBy, String)> {
         let engine = self.engine;
-        if tool.writes && !tool.kind.acts_on_namespaces() && archived {
+        // An operation that asks read writes only the caller's own state,
+        // which an archived namespace lets it write (D77).
+        let asks_read = tool
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.asks_read);
+        if tool.writes && !asks_read && !tool.kind.acts_on_namespaces() && archived {
             return Some((
                 HiddenBy::Archived,
                 format!(
@@ -1389,8 +1525,41 @@ impl<'e> Tools<'e> {
                 ),
             ));
         }
+        // A behavior's namespace operation (D77) asks the behavior listing
+        // question: it names the behavior and no schema.
+        if tool.kind == ToolKind::NamespaceOperation {
+            let behavior = tool
+                .behavior
+                .as_ref()
+                .map(|behavior| behavior.name.as_str())
+                .unwrap_or_default();
+            let action = if tool.writes {
+                SchemaAction::Write
+            } else {
+                SchemaAction::Read
+            };
+            if engine.access.allows_behavior(
+                principal,
+                action,
+                namespace,
+                behavior,
+                &tool.method_name,
+                true,
+            ) {
+                return None;
+            }
+            return Some((
+                HiddenBy::Policy,
+                format!(
+                    "the access policy refuses {} {} of {behavior}'s {} in namespace {namespace}",
+                    principal.subject,
+                    action.as_str(),
+                    tool.method_name
+                ),
+            ));
+        }
         let record = tool.record()?;
-        let action = if tool.writes {
+        let action = if tool.writes && !asks_read {
             SchemaAction::Write
         } else {
             SchemaAction::Read
@@ -1579,7 +1748,7 @@ impl<'e> Tools<'e> {
                 properties.extend(preconditions(tool));
                 schema(properties, if required { &["id", "params"] } else { &["id"] })
             }
-            ToolKind::SchemaOperation => {
+            ToolKind::SchemaOperation | ToolKind::NamespaceOperation => {
                 let params = tool
                     .operation
                     .as_ref()
@@ -1786,6 +1955,18 @@ impl<'e> Tools<'e> {
     }
 
     fn tool_guidance(&self, tool: &ToolSpec) -> Result<ToolGuidance> {
+        if tool.kind == ToolKind::NamespaceOperation {
+            let behavior = tool
+                .behavior
+                .as_ref()
+                .map(|behavior| behavior.name.as_str())
+                .unwrap_or_default();
+            return Ok(namespace_guidance(
+                behavior,
+                &tool.method_name,
+                &tool.description,
+            ));
+        }
         let Some((record, runtime)) = &tool.schema else {
             return Ok(engine_guidance(tool.kind.name()));
         };
@@ -1942,13 +2123,28 @@ impl<'e> Tools<'e> {
                 })
             }
             ToolKind::Delete => json!({"type": "null"}),
-            ToolKind::Operation | ToolKind::SchemaOperation => tool
+            ToolKind::Operation | ToolKind::SchemaOperation | ToolKind::NamespaceOperation => tool
                 .operation
                 .as_ref()
                 .map(|operation| operation.result_schema.clone())
                 .unwrap_or(Value::Bool(true)),
             _ => Value::Bool(true),
         })
+    }
+}
+
+// namespace_guidance is a namespace operation's tool guidance (D77): what
+// its declaration says, and where it reaches.
+fn namespace_guidance(behavior: &str, operation: &str, description: &str) -> ToolGuidance {
+    ToolGuidance {
+        use_when: format!(
+            "Use to call {behavior}'s {operation} across every schema of this namespace that composes {behavior}: {description}"
+        ),
+        do_not_use_when: format!(
+            "Do not use for one instance or one schema's instances; call that schema's operations of {behavior}."
+        ),
+        success: "Returns the operation's result, over the schemas the caller may read.".to_owned(),
+        errors: Vec::new(),
     }
 }
 
@@ -1998,7 +2194,7 @@ fn returns(tool: &ToolSpec) -> Value {
         ToolKind::CreateNamespace | ToolKind::ArchiveNamespace | ToolKind::UnarchiveNamespace => {
             json!({"type": "object", "description": "The namespace"})
         }
-        ToolKind::Operation | ToolKind::SchemaOperation => {
+        ToolKind::Operation | ToolKind::SchemaOperation | ToolKind::NamespaceOperation => {
             let result = tool
                 .operation
                 .as_ref()
@@ -2119,6 +2315,9 @@ fn behavior_document(declaration: &BehaviorDeclaration, options: &ResolvedToolOp
                     if !operation.log {
                         entry.insert("log".into(), Value::Bool(false));
                     }
+                    if operation.asks_read {
+                        entry.insert("asks".into(), Value::from("read"));
+                    }
                     entry.insert(
                         policy.key.clone(),
                         Value::from(options.operation_invocation(
@@ -2181,6 +2380,9 @@ fn declared_fields(declaration: &BehaviorDeclaration) -> Value {
                 }
                 if field.volatile {
                     entry.insert("volatile".into(), Value::Bool(true));
+                }
+                if field.per_reader {
+                    entry.insert("perReader".into(), Value::Bool(true));
                 }
                 Value::Object(entry)
             })
@@ -2261,7 +2463,8 @@ fn params_required(params: &Value) -> bool {
 
 /// The JSON Schema of an instance's behaviors as reads return them: by
 /// behavior name, for each behavior on the type that declares a field, an
-/// object of its fields, read-only, a volatile one marked `volatile: true`.
+/// object of its fields, read-only, a volatile one marked `volatile: true`
+/// and a per-reader one `perReader: true` besides.
 fn behaviors_schema(behaviors: &[ComposedBehavior]) -> Value {
     let mut properties = Map::new();
     for behavior in behaviors {
@@ -2283,6 +2486,9 @@ fn behaviors_schema(behaviors: &[ComposedBehavior]) -> Value {
             entry.insert("readOnly".into(), Value::Bool(true));
             if field.get("volatile") == Some(&Value::Bool(true)) {
                 entry.insert("volatile".into(), Value::Bool(true));
+            }
+            if field.get("perReader") == Some(&Value::Bool(true)) {
+                entry.insert("perReader".into(), Value::Bool(true));
             }
             members.insert(
                 text_of(field, "name").unwrap_or_default().to_owned(),

@@ -12,10 +12,20 @@
 //! preconditionSchema an object schema with `additionalProperties: false`.
 //! Each veto code is lowercase snake case, listed once. A field may say it
 //! is volatile (D56): it can move without an event of its own instance.
+//! A volatile field may say it is per reader (D77): its value is the
+//! caller's, so it is left out of every event and reference move, and
+//! only a read computes it.
 //! An instance operation that writes may say it is beside the instance
 //! (D77): it writes only its behavior's own storage, so it leaves the
 //! instance's seq alone, and with `"log": false` appends no event. A
 //! behavior that declares one declares every field volatile.
+//! An operation may say it runs on the namespace (D77, `"scope":
+//! "namespace"`): on its behavior's tables across every schema of the
+//! namespace that composes it, with no instance and no schema; it is
+//! never beside an instance and always appends no event, so it sets
+//! neither `beside` nor `log`. A beside operation with `"log": false` may
+//! say `"asks": "read"`: it writes only the caller's own state, so the
+//! policy is asked `read` for it, and an archived namespace lets it run.
 //! A behavior may declare signals (D77): messages about an instance the
 //! engine delivers to the event streams open on it and keeps nowhere, each
 //! with a camelCase name unique among its signals, a JSON Schema of its
@@ -59,9 +69,9 @@ const DECLARATION_KEYS: [&str; 11] = [
     "vetoes",
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
-const FIELD_KEYS: [&str; 3] = ["name", "description", "volatile"];
+const FIELD_KEYS: [&str; 4] = ["name", "description", "volatile", "perReader"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
-const OPERATION_KEYS: [&str; 9] = [
+const OPERATION_KEYS: [&str; 10] = [
     "name",
     "description",
     "paramsSchema",
@@ -70,6 +80,7 @@ const OPERATION_KEYS: [&str; 9] = [
     "scope",
     "beside",
     "log",
+    "asks",
     "invocationPolicy",
 ];
 
@@ -133,6 +144,9 @@ pub enum OperationScope {
     Instance,
     /// The schema as a whole, with no instance.
     Schema,
+    /// The behavior's tables across every schema of a namespace that
+    /// composes it (D77), with no instance and no schema.
+    Namespace,
 }
 
 impl OperationScope {
@@ -140,6 +154,17 @@ impl OperationScope {
         match self {
             OperationScope::Instance => "instance",
             OperationScope::Schema => "schema",
+            OperationScope::Namespace => "namespace",
+        }
+    }
+
+    /// The scope a declaration names; `None` for any other value.
+    pub fn parse(scope: &str) -> Option<Self> {
+        match scope {
+            "instance" => Some(OperationScope::Instance),
+            "schema" => Some(OperationScope::Schema),
+            "namespace" => Some(OperationScope::Namespace),
+            _ => None,
         }
     }
 }
@@ -213,6 +238,10 @@ pub struct FieldDeclaration {
     /// Whether it can move without an event of its own instance: computed
     /// at a read from other instances, the clock or the config (D56).
     pub volatile: bool,
+    /// Whether its value is the caller's, not the instance's (D77): a read
+    /// computes it, and no event patch, create event or reference move
+    /// carries it. Only a volatile field is.
+    pub per_reader: bool,
 }
 
 /// One operation a behavior adds.
@@ -232,6 +261,10 @@ pub struct OperationDeclaration {
     /// Whether it appends an event; false only for a beside operation that
     /// declares `"log": false`.
     pub log: bool,
+    /// Whether the policy is asked `read` for it though it writes (D77,
+    /// `"asks": "read"`): a beside operation with `"log": false` that
+    /// writes only the caller's own state, a read marker say.
+    pub asks_read: bool,
     /// The MCP invocation policy of its tool (D11); absent for the policy's
     /// default.
     pub invocation_policy: Option<String>,
@@ -305,6 +338,7 @@ impl BehaviorDeclaration {
                     name: text(field, "name").unwrap_or_default(),
                     description: text(field, "description"),
                     volatile: field.get("volatile") == Some(&Value::Bool(true)),
+                    per_reader: field.get("perReader") == Some(&Value::Bool(true)),
                 })
                 .collect(),
             operations: list("operations")
@@ -321,13 +355,14 @@ impl BehaviorDeclaration {
                         .cloned()
                         .unwrap_or(Value::Null),
                     writes: operation.get("writes") == Some(&Value::Bool(true)),
-                    scope: if operation.get("scope").and_then(Value::as_str) == Some("schema") {
-                        OperationScope::Schema
-                    } else {
-                        OperationScope::Instance
-                    },
+                    scope: operation
+                        .get("scope")
+                        .and_then(Value::as_str)
+                        .and_then(OperationScope::parse)
+                        .unwrap_or(OperationScope::Instance),
                     beside: operation.get("beside") == Some(&Value::Bool(true)),
                     log: operation.get("log") != Some(&Value::Bool(false)),
+                    asks_read: operation.get("asks") == Some(&Value::from("read")),
                     invocation_policy: text(operation, "invocationPolicy"),
                 })
                 .collect(),
@@ -524,6 +559,17 @@ fn check_fields(fields: Option<&Value>, problems: &mut Vec<String>) {
         {
             problems.push(format!("{at}.volatile is a boolean"));
         }
+        match members.get("perReader") {
+            None => {}
+            Some(Value::Bool(per_reader)) => {
+                if *per_reader && members.get("volatile") != Some(&Value::Bool(true)) {
+                    problems.push(format!(
+                        "{at}.perReader needs \"volatile\": true: a value each reader reads its own of is computed at a read"
+                    ));
+                }
+            }
+            Some(_) => problems.push(format!("{at}.perReader is a boolean")),
+        }
         let name = members.get("name");
         let Some(text) = name
             .and_then(Value::as_str)
@@ -592,14 +638,19 @@ fn check_operations(operations: Option<&Value>, problems: &mut Vec<String>) {
             problems.push(format!("{at} writes is a boolean"));
         }
         if let Some(scope) = members.get("scope") {
-            if !matches!(scope.as_str(), Some("instance" | "schema")) {
+            if scope.as_str().and_then(OperationScope::parse).is_none() {
                 problems.push(format!(
-                    "{at} scope {} is not \"instance\" or \"schema\"",
+                    "{at} scope {} is not \"instance\", \"schema\" or \"namespace\"",
                     json::stringify(scope)
                 ));
             }
         }
-        check_beside(members, &at, problems);
+        if members.get("scope").and_then(Value::as_str) == Some("namespace") {
+            check_namespace_operation(members, &at, problems);
+        } else {
+            check_beside(members, &at, problems);
+        }
+        check_asks(members, &at, problems);
         if !members.get("resultSchema").is_some_and(is_schema) {
             problems.push(format!("{at} has no resultSchema"));
         }
@@ -697,6 +748,45 @@ fn check_beside(members: &Map<String, Value>, at: &str, problems: &mut Vec<Strin
     } else if members.get("log") == Some(&Value::Bool(false)) {
         problems.push(format!(
             "{at} sets \"log\": false and is not beside the instance: only a beside operation appends no event"
+        ));
+    }
+}
+
+// check_asks holds an operation's asks to its rule (D77): only "read", and
+// only on a beside operation that appends no event, which writes nothing
+// anyone but its caller reads.
+fn check_asks(members: &Map<String, Value>, at: &str, problems: &mut Vec<String>) {
+    let Some(asks) = members.get("asks") else {
+        return;
+    };
+    if asks != &Value::from("read") {
+        problems.push(format!(
+            "{at} asks {}: the only value is \"read\"",
+            json::stringify(asks)
+        ));
+        return;
+    }
+    if members.get("beside") != Some(&Value::Bool(true))
+        || members.get("log") != Some(&Value::Bool(false))
+    {
+        problems.push(format!(
+            "{at} asks \"read\" and is not beside the instance with \"log\": false: only an operation that writes its caller's own state, and appends no event, asks read"
+        ));
+    }
+}
+
+// check_namespace_operation holds a namespace operation to its rule (D77):
+// it runs on no instance, so it is never beside one, and it appends no
+// event, so it says nothing of one.
+fn check_namespace_operation(members: &Map<String, Value>, at: &str, problems: &mut Vec<String>) {
+    if members.get("beside") == Some(&Value::Bool(true)) {
+        problems.push(format!(
+            "{at} has scope \"namespace\" and is beside the instance: a namespace operation runs on no instance"
+        ));
+    }
+    if members.contains_key("log") {
+        problems.push(format!(
+            "{at} has scope \"namespace\" and sets \"log\": a namespace operation appends no event"
         ));
     }
 }
@@ -806,7 +896,7 @@ mod tests {
             "colour": 1,
             "requires": ["test.bad"],
             "conflicts": ["test.bad"],
-            "fields": [{"name": "1x"}, {"name": "a", "volatile": "yes"}, {"name": "a"}],
+            "fields": [{"name": "1x"}, {"name": "a", "volatile": "yes"}, {"name": "a"}, {"name": "b", "perReader": true}, {"name": "c", "volatile": true, "perReader": 1}],
             "operations": [
                 {"name": "create", "paramsSchema": {"type": "object"}, "resultSchema": true, "scope": "row"},
                 {"name": "Go", "paramsSchema": {}, "resultSchema": 3}
@@ -825,8 +915,10 @@ mod tests {
                 "fields[0].name \"1x\" is not an identifier",
                 "fields[1].volatile is a boolean",
                 "field a is declared twice",
+                "fields[3].perReader needs \"volatile\": true: a value each reader reads its own of is computed at a read",
+                "fields[4].perReader is a boolean",
                 "operation create has the name of an operation the engine serves on a schema (create, get, list, update, delete, lookup)",
-                "operation create scope \"row\" is not \"instance\" or \"schema\"",
+                "operation create scope \"row\" is not \"instance\", \"schema\" or \"namespace\"",
                 "operation create paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares",
                 "operations[1].name \"Go\" is not camelCase",
                 "operations[1] has no resultSchema",
@@ -938,13 +1030,15 @@ mod tests {
     #[test]
     fn a_declaration_reads_what_the_engine_needs() {
         let declaration = BehaviorDeclaration::parse(
-            r#"{"name": "test.Counter", "fields": [{"name": "count", "volatile": true}],
+            r#"{"name": "test.Counter", "fields": [{"name": "count", "volatile": true}, {"name": "unseen", "volatile": true, "perReader": true}],
                 "operations": [{"name": "count", "scope": "schema", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true, "writes": true}],
                 "vetoes": [{"code": "stale"}]}"#,
         )
         .unwrap();
         assert_eq!(declaration.name, "test.Counter");
         assert!(declaration.fields[0].volatile);
+        assert!(!declaration.fields[0].per_reader);
+        assert!(declaration.fields[1].volatile && declaration.fields[1].per_reader);
         let operation = declaration.operation("count").unwrap();
         assert_eq!(
             (operation.scope, operation.writes),

@@ -85,7 +85,7 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Comments.composing", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Comments.composing", "Comments.unread", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
 		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
@@ -182,18 +182,44 @@ func TestCoreBehaviors(t *testing.T) {
 		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {
 		t.Errorf("Branches operations = %v, want %v", branchOps, want)
 	}
-	// Comments' operations (D77): every writing one is beside the instance
-	// and logged but appendDraft, whose draft only signals carry; the reads
-	// are not beside.
+	// Comments' operations (D77): every writing one on an instance is
+	// beside it and logged but appendDraft, whose draft only signals carry,
+	// and markRead and follow, which only their caller reads back; the
+	// instance reads are not beside; inbox, claimDeliveries and
+	// settleDeliveries run on the namespace, the inbox reading and the
+	// other two writing.
 	var commentOps []string
 	for _, op := range comments.Operations {
-		commentOps = append(commentOps, fmt.Sprintf("%s:%v:%v:%v", op.Name, op.Writes, op.Beside, op.Logged()))
+		scope := op.Scope
+		if scope == "" {
+			scope = OperationScopeInstance
+		}
+		commentOps = append(commentOps, fmt.Sprintf("%s:%s:%v:%v:%v", op.Name, scope, op.Writes, op.Beside, op.Logged()))
 	}
-	if want := []string{"post:true:true:true", "begin:true:true:true", "appendDraft:true:true:false", "finish:true:true:true", "interrupt:true:true:true",
-		"edit:true:true:true", "deleteMessage:true:true:true", "purge:true:true:true", "react:true:true:true", "unreact:true:true:true", "pin:true:true:true",
-		"unpin:true:true:true", "resolve:true:true:true", "reopen:true:true:true", "listMessages:false:false:true", "getMessage:false:false:true",
-		"listEdits:false:false:true", "listReactions:false:false:true"}; !slices.Equal(commentOps, want) {
-		t.Errorf("Comments operations (name:writes:beside:logged) = %v, want %v", commentOps, want)
+	if want := []string{"post:instance:true:true:true", "begin:instance:true:true:true", "appendDraft:instance:true:true:false", "finish:instance:true:true:true",
+		"interrupt:instance:true:true:true", "edit:instance:true:true:true", "deleteMessage:instance:true:true:true", "purge:instance:true:true:true",
+		"react:instance:true:true:true", "unreact:instance:true:true:true", "pin:instance:true:true:true", "unpin:instance:true:true:true",
+		"resolve:instance:true:true:true", "reopen:instance:true:true:true", "markRead:instance:true:true:false", "follow:instance:true:true:false",
+		"listMessages:instance:false:false:true", "getMessage:instance:false:false:true", "listEdits:instance:false:false:true",
+		"listReactions:instance:false:false:true", "inbox:namespace:false:false:true", "claimDeliveries:namespace:true:false:true",
+		"settleDeliveries:namespace:true:false:true"}; !slices.Equal(commentOps, want) {
+		t.Errorf("Comments operations (name:scope:writes:beside:logged) = %v, want %v", commentOps, want)
+	}
+	// Each message record carries its stand, the order read markers count
+	// in, and listMessages the caller's marker on its listing.
+	for _, op := range comments.Operations {
+		var result struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(op.ResultSchema, &result); err != nil {
+			t.Fatalf("Comments.%s resultSchema: %v", op.Name, err)
+		}
+		if _, record := result.Properties["postedAt"]; record != (result.Properties["stand"] != nil) {
+			t.Errorf("Comments.%s result has postedAt %v and stand %v, want both or neither", op.Name, record, result.Properties["stand"] != nil)
+		}
+		if op.Name == "listMessages" && result.Properties["readUpTo"] == nil {
+			t.Errorf("Comments.listMessages result has no readUpTo")
+		}
 	}
 	// Every work-queue operation writes but countClaimable and checkReserve,
 	// which read; claimNext, countClaimable and expireHolder are schema-level.
@@ -229,6 +255,9 @@ func TestCoreBehaviors(t *testing.T) {
 		codes    []string
 	}{
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
+		{comments, []string{"no_message", "not_a_thread", "not_in_thread", "deleted", "composing", "not_composing", "not_author", "edit_window_passed", "too_many_edits",
+			"already_reacted", "not_reacted", "too_many_reactions", "already_pinned", "not_pinned", "already_resolved", "not_resolved", "block_not_allowed", "ref_not_found",
+			"not_idle", "too_many_drafts", "draft_too_long", "not_configured", "unknown_delivery", "token_stale", "not_claimed"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
 		{links, []string{"no_revision", "no_release", "required_link", "required_target", "too_many", "not_linked"}},
 		{rollups, []string{"not_held"}},
@@ -285,6 +314,15 @@ func TestCoreBehaviors(t *testing.T) {
 		{comments, `{"maxLength": 10}`, "behavior Comments config: "},
 		{comments, `{"maxBodyLength": 40001}`, "behavior Comments config: "},
 		{comments, `{"blocks": ["code"]}`, "behavior Comments config: "},
+		{comments, `{"deliverPermission": "comments.deliver", "maxAttempts": 20, "retryBackoffMs": 3600000, "deliveryRetentionMs": 31536000000}`, ""},
+		{comments, `{"maxAttempts": 1, "retryBackoffMs": 1000, "deliveryRetentionMs": 86400000}`, ""},
+		{comments, `{"deliverPermission": ""}`, "behavior Comments config: "},
+		{comments, `{"maxAttempts": 0}`, "behavior Comments config: "},
+		{comments, `{"maxAttempts": 21}`, "behavior Comments config: "},
+		{comments, `{"retryBackoffMs": 999}`, "behavior Comments config: "},
+		{comments, `{"retryBackoffMs": 3600001}`, "behavior Comments config: "},
+		{comments, `{"deliveryRetentionMs": 86399999}`, "behavior Comments config: "},
+		{comments, `{"deliveryRetentionMs": 31536000001}`, "behavior Comments config: "},
 		{revisions, ``, ""},
 		{revisions, `{"review": {"permission": "documents.review"}}`, ""},
 		{revisions, `{"review": {}}`, "behavior Revisions config: "},

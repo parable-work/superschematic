@@ -27,8 +27,9 @@ postgres = ["superschematic-engine-napi/postgres", "superschematic-engine-behavi
 # The test addon's bridge to behaviors written in TypeScript
 # (superschematic-engine-napi's feature): scripts/engine-napi.sh
 # --js-behaviors. Never in a shipped addon. It also registers test.Chatter
-# (src/chatter.rs), a behavior with signals (D77) an engine opened with
-# openEngineAsync, which runs no TypeScript behavior, can name.
+# (src/chatter.rs), a behavior with signals (D77), and test.Inbox
+# (src/inbox.rs), one with namespace operations (D77), which an engine
+# opened with openEngineAsync, which runs no TypeScript behavior, can name.
 js-behaviors = ["superschematic-engine-napi/js-behaviors", "dep:superschematic-engine", "dep:serde_json"]
 
 [dependencies]
@@ -46,7 +47,7 @@ superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", def
 # @superschematic/engine-commerce's.
 superschematic-engine-commerce = { path = "../../../engine-commerce/rust", default-features = false }
 
-# test.Chatter's, in the test addon alone.
+# test.Chatter's and test.Inbox's, in the test addon alone.
 superschematic-engine = { path = "../engine", default-features = false, optional = true }
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"], optional = true }
 

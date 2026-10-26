@@ -9,7 +9,9 @@
 //! `call()`) under [`OperationCx`] (an operation: `update()`,
 //! `validate_update()`, `unchanged()`, `signal()`). Each derefs to the one below it.
 //! [`ReferenceCx`], [`ValidationCx`], [`SchemaCx`], [`ReactionCx`],
-//! [`ScheduleCx`] and [`PublishCx`] are the other hooks' contexts.
+//! [`ScheduleCx`] and [`PublishCx`] are the other hooks' contexts, and
+//! [`NamespaceCx`] a namespace operation's (D77), which has no config, no
+//! schema and no instance.
 //!
 //! A context borrows the engine's call (`Core`): the one transaction every
 //! part of the call shares, borrowed for one statement at a time, so no
@@ -125,6 +127,15 @@ pub(crate) trait Core {
     fn sql_table(&self, name: &str) -> Result<String>;
     fn sql_instances(&self) -> Result<String> {
         Err(unreachable_here("sql.instances()"))
+    }
+    fn namespace_configs(&self) -> Result<&[(String, super::erased::ConfigBox)]> {
+        Err(unreachable_here("configs()"))
+    }
+    fn sql_readable(&self) -> Result<String> {
+        Err(Error::behavior(
+            self.behavior(),
+            "sql.readable() is a namespace operation's: it names the schemas of the call's namespace that compose the behavior and that the principal may read",
+        ))
     }
     fn sql_get(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Option<Row>>;
     fn sql_all(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Vec<Row>>;
@@ -498,6 +509,16 @@ impl SqlReader<'_> {
     /// names it asks read on the schema, as the principal.
     pub fn instances(&self) -> Result<String> {
         self.core.sql_instances()
+    }
+
+    /// In a namespace operation (D77), the SQL name of the read-only
+    /// relation over the schemas of the call's namespace that compose the
+    /// behavior and that the principal may read, one row each, its column
+    /// `schema`: a statement joins it to keep only those schemas' rows of
+    /// the behavior's tables. The policy is asked `read` once per schema
+    /// per call, and a schema it refuses is left out. Elsewhere it refuses.
+    pub fn readable(&self) -> Result<String> {
+        self.core.sql_readable()
     }
 
     pub fn get<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<Option<Row>> {
@@ -930,6 +951,124 @@ impl<'a, C> SchemaCx<'a, C> {
         Values {
             core: self.scope.core,
         }
+    }
+}
+
+/// A namespace operation's context (D77): the behavior's tables across
+/// every schema of the call's namespace, with no config, no schema and no
+/// instance. Its SQL reads the behavior's tables and joins
+/// [`SqlReader::readable`]; a writing operation's writes them, in the
+/// call's transaction, and a read-only one's `run` refuses. Neither appends
+/// an event or changes an instance: it reads other instances, and invokes
+/// their read-only operations, as the principal, and a writing invoke, a
+/// create, `update()` and `signal()` are not there. It has no config of its
+/// own: [`NamespaceCx::configs`] gives each composing schema's.
+pub struct NamespaceCx<'a, C> {
+    pub(crate) core: &'a dyn Core,
+    pub(crate) config: std::marker::PhantomData<fn() -> C>,
+}
+
+impl<C> Clone for NamespaceCx<'_, C> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C> Copy for NamespaceCx<'_, C> {}
+
+impl<'a, C: 'static> NamespaceCx<'a, C> {
+    /// Each schema of the call's namespace whose live version composes the
+    /// behavior, by name, with the config it gives the behavior, as
+    /// `parse_config` returned it for the schema's instance operations. It
+    /// asks no policy: a statement keeps the rows of the schemas the
+    /// principal may read by joining [`SqlReader::readable`], and a handler
+    /// that decides by a schema's config (who may claim its deliveries,
+    /// say) reads the config of each schema it keeps.
+    pub fn configs(&self) -> Result<Vec<(&'a str, &'a C)>> {
+        self.core
+            .namespace_configs()?
+            .iter()
+            .map(|(schema, config)| {
+                config
+                    .downcast_ref::<C>()
+                    .map(|config| (schema.as_str(), config))
+                    .ok_or_else(|| {
+                        Error::internal(format!(
+                            "behavior {}: a config of another behavior's type",
+                            self.core.behavior()
+                        ))
+                    })
+            })
+            .collect()
+    }
+
+    /// The config a schema of the call's namespace gives the behavior;
+    /// `None` when its live version does not compose it.
+    pub fn config(&self, schema: &str) -> Result<Option<&'a C>> {
+        Ok(self
+            .configs()?
+            .into_iter()
+            .find(|(each, _)| *each == schema)
+            .map(|(_, config)| config))
+    }
+}
+
+impl<'a, C> NamespaceCx<'a, C> {
+    /// The behavior's name.
+    pub fn behavior(&self) -> &'a str {
+        self.core.behavior()
+    }
+
+    /// The call's namespace: the rows of the behavior's tables a statement
+    /// reads are the ones whose namespace column holds it.
+    pub fn namespace(&self) -> &'a str {
+        self.core.namespace()
+    }
+
+    /// Who the call acts for.
+    pub fn principal(&self) -> &'a Principal {
+        self.core.principal()
+    }
+
+    /// The engine clock's time for the call, in epoch milliseconds.
+    pub fn now(&self) -> i64 {
+        self.core.now()
+    }
+
+    /// Whether the principal holds a permission, as the engine's
+    /// permission matcher answers.
+    pub fn can(&self, permission: &str) -> Result<bool> {
+        self.core.can(permission)
+    }
+
+    /// The namespace's instances as the principal reaches them: reads, and
+    /// invokes of read-only operations; a writing invoke and a create are
+    /// a `BehaviorError`.
+    pub fn instances(&self) -> InstancesHandle<'a> {
+        InstancesHandle { core: self.core }
+    }
+
+    /// SQL on the behavior's own tables, with [`SqlReader::readable`]; a
+    /// read-only operation's `run` refuses.
+    pub fn sql(&self) -> SqlWriter<'a> {
+        SqlWriter {
+            reader: SqlReader { core: self.core },
+        }
+    }
+
+    /// Loads what the behavior's rows keep through the value store.
+    pub fn values(&self) -> ValueReader<'a> {
+        ValueReader { core: self.core }
+    }
+
+    /// Which database the call runs on.
+    pub fn dialect(&self) -> Dialect {
+        self.core.dialect()
+    }
+
+    /// Where the version 4 UUIDs the behavior makes of its own come from.
+    pub fn uuids(&self) -> UuidSource {
+        self.core.uuids()
     }
 }
 

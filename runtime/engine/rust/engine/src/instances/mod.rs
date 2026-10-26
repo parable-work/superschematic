@@ -694,18 +694,10 @@ fn start_operation(
     let engine = probe.engine;
     let spec = found.spec();
     let schema = found.record.name.as_str();
-    engine.access.require_operation(
-        principal,
-        if spec.writes {
-            SchemaAction::Write
-        } else {
-            SchemaAction::Read
-        },
-        namespace,
-        schema,
-        Some(&spec.name),
-    )?;
-    if spec.writes {
+    engine
+        .access
+        .require_operation(principal, spec.asks(), namespace, schema, Some(&spec.name))?;
+    if spec.refused_when_archived() {
         probe.view.require_writable(namespace)?;
     }
     check_expected_seq(options.expected_seq)?;
@@ -820,7 +812,7 @@ pub(crate) fn run_operation(
             Own::Row(row.clone()),
             true,
         );
-        let before = execution.fields(None)?;
+        let before = execution.logged_fields()?;
         let (result, unchanged) =
             execution.operate(bound, spec, checked, None, preconditions)?;
         // A call that says it changed nothing, and wrote nothing, writes
@@ -849,7 +841,7 @@ pub(crate) fn run_operation(
             attribution: attribution.as_ref(),
         };
         execution.after_change(&change)?;
-        let after = execution.fields(None)?;
+        let after = execution.logged_fields()?;
         let seq = row.i64("seq")? + 1;
         Reads::forget_instance(reach.tx, namespace, schema, id);
         reach.tx.run(
@@ -1079,7 +1071,7 @@ fn update(
         true,
         preconditions.as_ref(),
     )?;
-    let before = execution.fields(None)?;
+    let before = execution.logged_fields()?;
     let seq = row.i64("seq")? + 1;
     write_own(
         engine,
@@ -1113,7 +1105,10 @@ fn update(
         before: &current,
     };
     execution.after_change(&change)?;
-    let after = execution.fields(None)?;
+    // The result is what the caller reads; the event and the moves record
+    // the instance's fields alone, not the caller's own.
+    let read = execution.fields(None)?;
+    let after = execution.logged(&read);
     let logged = engine.values.stow_change(
         tx,
         "",
@@ -1138,11 +1133,7 @@ fn update(
             values: Some((&engine.values, &logged)),
         },
     )?;
-    let updated = to_instance(
-        &existing(tx, namespace, schema, id)?,
-        merged.clone(),
-        after.clone(),
-    )?;
+    let updated = to_instance(&existing(tx, namespace, schema, id)?, merged.clone(), read)?;
     reach.referenced(
         schema,
         id,
@@ -1364,8 +1355,10 @@ pub(crate) fn insert(
         )?;
         execution.initialize(&params)?;
         execution.after_change(&InstanceChange::Create)?;
-        let fields = execution.fields(None)?;
-        let instance = to_instance(&existing(tx, namespace, schema, id)?, own, fields.clone())?;
+        let read = execution.fields(None)?;
+        // The event records the instance's fields, not the caller's own.
+        let fields = execution.logged(&read);
+        let instance = to_instance(&existing(tx, namespace, schema, id)?, own, read)?;
         // The event's instance is what a read returns, { data, behaviors }:
         // its own fields keep the row's refs, and a large field of a
         // behavior's goes to the store as an own field does.

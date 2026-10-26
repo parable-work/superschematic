@@ -188,7 +188,15 @@ beside them (`PostgresOptions`); a `path` in its place opens a SQLite file
 the same way. Its calls run off the JavaScript thread, so its options are
 data alone: the policy is `allowAll`, `permissionPolicy()` (or its name,
 `'permission'`) or `{ rules }`, a list of rules the first match of which
-decides. It takes no policy of your own written as a function, no
+decides. A behavior's namespace operation (below) is decided only by a
+rule that names `behavior` (`true`, or the behaviors' names): a rule
+without it, such as `{ service: ["shop-orders"], action: ["read",
+"write"], allow: true }`, does not reach Comments' `inbox` or
+`claimDeliveries`, and with no rule that names `behavior` the call is
+refused. `{ behavior: ["Comments"], action: "read", allow: true }`
+allows its reads, and `{ behavior: true, action: "write", require:
+"{behavior}.{operation}" }` its writes to a caller holding
+`Comments.claimDeliveries`, as `'permission'` does. It takes no policy of your own written as a function, no
 permission matcher but the HTTP runtime's `hasAnyPermission`, no id
 function and no behavior written in TypeScript.
 Every instance of the server opens its own engine on the one schema; the
@@ -218,6 +226,22 @@ either engine.
   reads. This policy lets a reader post in a note's conversation, edit
   and delete her messages, react, and `propose`, and nothing else that
   writes.
+- An operation that writes only its caller's own state, and appends no
+  event, declares `"asks": "read"`, and the policy is asked `read` for
+  it: Comments' `markRead` and `follow`. A reader marks what she has read
+  and follows a thread with no write permission, and an archived
+  namespace lets both run.
+- A behavior's namespace operation, which runs across every schema of
+  the namespace that composes the behavior, names no schema. The policy
+  is asked `{ principal, action, namespace, behavior, operation }`, with
+  `action` `read` or `write` as the operation declares, so a policy that
+  builds a permission from `schema` checks `behavior` first, as this one
+  does. Its rows are those of the schemas the caller may read, which the
+  engine asks `read` of one schema at a time and skips when refused, so
+  this policy lets every read one through, and a writing one only to a
+  caller holding `<behavior>.<operation>` (`Comments.claimDeliveries`).
+  `permissionPolicy()` answers both the same way. In a `{ rules }`
+  policy, only a rule that names `behavior` answers them.
 - Where a behavior limits who may do something, its config names a
   permission and the behavior asks the engine's permission matcher. That
   is the HTTP runtime's `hasAnyPermission` unless you pass another, so
@@ -321,7 +345,8 @@ curl -s $API/schemas/notes/instances \
           "open": 0,
           "resolved": 0
         },
-        "composing": []
+        "composing": [],
+        "unread": 0
       },
       "Revisions": {
         "revision": 1,
@@ -389,7 +414,7 @@ curl -s -X PATCH $API/schemas/notes/instances/launch \
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft","enteredAt":1790790700324},"Comments":{"messages":0,"threads":{"open":0,"resolved":0},"composing":[]},"Revisions":{"revision":2,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships in the fall."},"behaviors":{"Workflow":{"status":"draft","enteredAt":1790790700324},"Comments":{"messages":0,"threads":{"open":0,"resolved":0},"composing":[],"unread":0},"Revisions":{"revision":2,"pendingProposals":0}}}
 ```
 
 `GET $API/schemas/notes/instances` lists notes in creation order, a page
@@ -462,6 +487,12 @@ A few operations run
 on the whole schema instead, such as `Search`'s `search` and `Queue`'s
 `claimNext`, at `POST .../schemas/{name}/operations/{operation}`
 ([schema-level operations](/superschematic/guides/engine-behaviors/#schema-level-operations)).
+And a few run across the namespace, on the behavior's own tables in every
+schema that composes it, such as Comments' `inbox`, at
+`POST /namespaces/{namespace}/behaviors/{behavior}/operations/{operation}`.
+They are the behavior's, not a type's: no schema's routes, describe
+document or typed client has them
+([namespace operations](/superschematic/guides/engine-behaviors/#namespace-operations)).
 The README's
 [core behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
 section lists every operation, guard and config change of each.
@@ -619,6 +650,184 @@ types or looks at the conversation, and `draft`, `{ message, offset,
 text }`, which `appendDraft` sends with each chunk, so a reader shows a
 streamed reply as it is written without reading it again.
 
+#### Read state and follows
+
+Each caller has a read marker on a note's conversation and one on each
+thread. `markRead`, `{ upTo, thread? }`, moves the caller's marker past
+the messages up to an id, on the top-level messages or with `thread` on
+that thread's replies, and never moves it back. alice has read carol's
+question:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/markRead \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -d '{"upTo": 1}' | jq .data
+```
+
+```json
+{
+  "readUpTo": 1,
+  "unread": 0
+}
+```
+
+Markers count in stands, not ids. A message's `stand` is its place in
+the order the conversation's messages came to stand, given when it is
+posted, finished or interrupted, so a streamed reply that began before a
+message alice read and finished after it is still unread to her.
+`listMessages` returns the caller's marker as `readUpTo`, absent until
+there is one, and a client shows a message of another as unread when its
+`stand` is above it. The note's `unread` field is the reader's own count
+of the top-level messages of others above her conversation marker: two
+callers read two values, and a conversation she has never marked read,
+nor posted in, counts 0 for her rather than everything.
+
+A caller follows each thread it posts in and each it is mentioned in.
+`follow`, `{ thread, on }`, follows another or stops, until the caller
+posts there or is mentioned again. Neither call appends an event or moves
+the note, and both ask the policy `read`, so carol, a reader, may call
+them.
+
+#### The inbox and deliveries
+
+Comments declares three [namespace
+operations](/superschematic/guides/engine-behaviors/#namespace-operations),
+which run on its tables across every schema of the namespace that
+composes it. `inbox`, `{ kinds?, unread?, limit?, cursor? }`, is the
+caller's, newest first: each message that mentions it, each thread it
+follows that has replies of others, and each conversation it has marked
+read that has top-level messages of others since, over the schemas it
+may read. Each item names the latest such message and how many the
+caller has not read; one with none unread is done. Had carol mentioned
+alice in a reply, alice's inbox would hold it:
+
+```sh
+curl -s $API/behaviors/Comments/operations/inbox \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -d '{"unread": true}' | jq .data
+```
+
+```json
+{
+  "items": [
+    {
+      "kind": "mention",
+      "schema": "notes",
+      "instanceId": "launch",
+      "message": 2,
+      "thread": 1,
+      "author": "carol",
+      "postedAt": 1790790700610,
+      "excerpt": "@alice the first week of October?",
+      "unread": 1
+    }
+  ],
+  "next": null
+}
+```
+
+A mention is done once alice's marker passes it, the thread's for a
+reply. The MCP tool is `comments_inbox`, in every list whose caller may
+read a schema that composes Comments.
+
+The engine sends nothing. When a message comes to stand, Comments records
+a delivery for each subject that should hear of it: each subject it
+mentions, a person's, an agent's (`agent:reviewer`) or a group's
+(`role:editors`), with the reason `mention`, and each follower of its
+thread but its author, with the reason `reply`; a subject both is one
+delivery with both reasons. Something outside the engine claims them
+with `claimDeliveries`, `{ subjects?, prefix?, limit?, ttlMs? }`, under a
+token that lapses after `ttlMs`, so two claimers never send one twice,
+and settles each with `settleDeliveries`, `{ token, ids, outcome }`:
+`sent`, `dropped`, or `failed`, which makes it due again after a backoff
+until the config's `maxAttempts`. A delivery whose subject has read its
+message by the time it is claimed is dropped instead of returned.
+Deliveries are claimed only for a schema whose Comments config names a
+`deliverPermission`, `{ "name": "Comments", "config": {
+"deliverPermission": "notes.deliver" } }` say, by a caller holding it,
+and the policy is asked `write` for both operations
+(`Comments.claimDeliveries` and `Comments.settleDeliveries` under
+`permissionPolicy()`). Without one the deliveries still feed the inbox;
+the runner removes each after the config's `deliveryRetentionMs`,
+thirty days by default. This example's notes name none, so a claim is
+409 `vetoed` with the code `not_configured` until they do.
+
+Check the recipient before you send a body. Comments records a delivery
+for every subject a message mentions, and every follower, whether or not
+that subject may read the schema. A claim returns up to 4000 code points
+of the message's body to the claimer, and says nothing of what the
+recipient may see. Before a notifier sends the
+body, it checks that the recipient may read the instance:
+
+- read the instance as the recipient: `engine.instances.get` with a
+  principal of the recipient's subject and their permissions from your
+  identity store, which asks the policy as their own read would; or
+- ask your policy the same question with the recipient's permissions,
+  `<schema>.read` under `permissionPolicy()`.
+
+For a group subject (`role:editors`), check each member you send to. A
+recipient who may not read it gets no body: settle the delivery
+`dropped`, or send a notice with a link and no text, where signing in
+decides.
+
+A deployment runs two claimers: a notifier that claims people's
+deliveries and sends them to chat, mail or a phone, and an agent
+dispatcher that claims `prefix: "agent:"` and hands each to its agent,
+which answers with `begin`, `appendDraft` and `finish`. A dispatcher
+acts on `mention` reasons only. An agent mentioned once follows the
+thread like anyone, so every later reply in it by someone else is a
+`reply` delivery to it; one that answered each would answer every
+message of a busy thread, and two agents in one thread would answer
+each other without end. It drops those. With the typed client
+from [Typed wrappers](#typed-wrappers-for-your-schemas):
+
+```ts
+import { commentsNamespaceClient, isCommentsNamespaceVeto, type CommentsDelivery } from './notes.client.ts';
+
+const comments = commentsNamespaceClient(client, 'default');
+
+async function dispatch(ask: (agent: string, delivery: CommentsDelivery) => Promise<void>): Promise<void> {
+  const { token, items } = await comments.claimDeliveries({ prefix: 'agent:', limit: 20, ttlMs: 60_000 });
+  if (token === null) return;                                           // nothing due
+  const sent: string[] = [];
+  const failed: string[] = [];
+  const ignored: string[] = [];
+  for (const delivery of items) {
+    if (!delivery.reasons.includes('mention')) {
+      ignored.push(delivery.id);                                        // a reply in a thread it follows
+      continue;
+    }
+    try {
+      await ask(delivery.subject, delivery);                            // queue the agent's turn
+      sent.push(delivery.id);
+    } catch {
+      failed.push(delivery.id);
+    }
+  }
+  for (const [ids, outcome] of [[sent, 'sent'], [failed, 'failed'], [ignored, 'dropped']] as const) {
+    if (ids.length === 0) continue;
+    try {
+      await comments.settleDeliveries({ token, ids, outcome });
+    } catch (error) {
+      // The claim lapsed and another claimer took them: they are its now.
+      if (!isCommentsNamespaceVeto(error, ['token_stale', 'not_claimed'])) throw error;
+    }
+  }
+}
+```
+
+A delivery carries what the agent needs with no other read: the schema,
+the instance and the message, its thread, its author, and its body as it
+is now. The dispatcher's principal holds the schema's `deliverPermission`
+and, under `permissionPolicy()`, `Comments.claimDeliveries` and
+`Comments.settleDeliveries`. A mention does not mean the agent may read
+the instance: anyone who may post can mention `agent:reviewer`. Before
+`ask` hands the agent the body, the dispatcher checks that the agent may
+read the instance, as a notifier checks a person (above), by reading it
+as the agent's principal or asking the policy with the agent's
+permissions, and drops the delivery when it may not. Run the agent as
+its own principal, so what it reads next is held to the same policy.
+
 ### Revisions
 
 carol cannot change the note, but she can propose a change. The proposal
@@ -677,7 +886,7 @@ curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-toke
 ```
 
 ```json
-{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published","enteredAt":1790790702190},"Comments":{"messages":1,"lastMessageAt":1790790700450,"threads":{"open":1,"resolved":0},"composing":[]},"Revisions":{"revision":3,"pendingProposals":0}}}
+{"data":{"title":"Launch","body":"Ships on October 1."},"behaviors":{"Workflow":{"status":"published","enteredAt":1790790702190},"Comments":{"messages":1,"lastMessageAt":1790790700450,"threads":{"open":1,"resolved":0},"composing":[],"unread":0},"Revisions":{"revision":3,"pendingProposals":0}}}
 ```
 
 `reject` settles a proposal without applying it, `listProposals` and
@@ -1039,6 +1248,28 @@ A reader also takes the record from a `finish`, `interrupt`,
 ignores a `draft` whose offset is below what it holds, one the read
 before it already had.
 
+`markRead` and `follow` are a note's operations, typed as any other. A
+behavior's namespace operations are no schema's, so the module types
+them once, named after the behavior: `CommentsInboxParams` and
+`CommentsInboxResult` for each, the items `CommentsInboxItem`,
+`CommentsDelivery` and `CommentsSettledDelivery`,
+`CommentsNamespaceOperations`, `isCommentsNamespaceVeto`, and
+`commentsNamespaceClient(client, namespace?)`, whose `inbox`,
+`claimDeliveries` and `settleDeliveries` call them in that namespace,
+the client's own when none is given. `notes.inbox` fails to compile:
+
+```ts
+import { commentsNamespaceClient } from './notes.client.ts';
+
+const comments = commentsNamespaceClient(client);
+const { items } = await comments.inbox({ unread: true, kinds: ['mention'] });
+for (const item of items) {                                             // CommentsInboxItem
+  if (item.schema !== 'notes') continue;
+  // A mention is read once the marker of its listing passes it: the thread's for a reply.
+  await notes.markRead(item.instanceId, item.thread === undefined ? { upTo: item.message } : { upTo: item.message, thread: item.thread });
+}
+```
+
 The behaviors' configs narrow the types: a `Workflow`'s states, the names
 of a `Links` config with each required link required at create, the
 schemas a `Dependencies` blocker may come from, the kinds of block a
@@ -1055,7 +1286,8 @@ its end-to-end test; regenerate it when the schema changes, and run
 
 The MCP endpoint serves one tool per operation of every live schema the
 caller may read, `lookup` for a schema with a unique field among them,
-and ten engine tools: `list_schemas`, `describe_schema`
+one per namespace operation of each behavior they compose, and ten
+engine tools: `list_schemas`, `describe_schema`
 and `define_schema`, `list_behaviors` and `describe_behavior`, which
 list the behaviors the engine runs and return one's declaration, its
 config's JSON Schema included, `get_value`, which reads a value of
@@ -1086,6 +1318,8 @@ notes_edit
 notes_delete_message
 notes_react
 notes_unreact
+notes_mark_read
+notes_follow
 notes_list_messages
 notes_get_message
 notes_list_edits
@@ -1094,7 +1328,15 @@ notes_list_revisions
 notes_get_revision
 notes_propose
 notes_list_proposals
+comments_inbox
 ```
+
+`notes_mark_read` and `notes_follow` ask `read`, so a reader has them.
+`comments_inbox` is one of the tools of the namespace operations of the
+behaviors the caller's schemas compose, named after the behavior; the
+policy's question for each, with `listing: true`, decides whether the
+caller sees it, so carol, who holds no `Comments.claimDeliveries`, does
+not see `comments_claim_deliveries` or `comments_settle_deliveries`.
 
 `define_schema` and the namespace tools name their schema or namespace
 only when called, so the list asks the policy whether the caller may

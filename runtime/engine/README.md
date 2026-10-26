@@ -1533,7 +1533,19 @@ operation, listing: true }` for the namespace tools, the operation
 `list`, `create`, `archive` or `unarchive`, and it names no schema. A
 refusal hides the tool from the caller; a call of it asks the question
 its call asks, with the name it gives. A policy that cannot answer
-without a name answers false. Only `true` allows, and anything else is
+without a name answers false.
+
+A behavior's namespace operation (D77, "Namespace operations" under
+"Behaviors") asks a fourth kind, which names the behavior and no schema
+(`BehaviorAccessRequest`): `{ principal, action, namespace, behavior,
+operation }`, `action` `read` or `write` as its declaration says. The
+tools document asks it with `listing: true` while it lists the
+operation's tool. `behavior` tells it from a schema's question of the
+same action, so a policy that reads `schema` checks `behavior` first. Its
+rows are those of the schemas the principal may read, which the engine
+asks `read` of itself, so a policy can let every read one through.
+
+Only `true` allows, and anything else is
 `forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles of its own; a policy can hold the principal's `permissions` to
@@ -1542,11 +1554,30 @@ whatever rule the deployment has, through the HTTP runtime's
 opt-in: it allows an action to a caller holding `<schema>.<action>`
 (`Task.read`, `Task.write`, `Task.define`, `Task.publish`), by the
 engine's `permissionMatcher`, so a caller holding `Task` may do all four.
-It refuses a question that names no schema: `manage`, which a
+It allows a namespace operation that reads to anyone, and one that writes
+to a caller holding `<behavior>.<operation>` (`Comments.claimDeliveries`),
+its listing question the same. It refuses the other questions that name
+no schema: `manage`, which a
 deployment's policy answers before it asks `permissionPolicy` the rest,
 and a listing question, so the tools document hides `define_schema` and
 the namespace tools from the caller, though a define, which names its
-schema, asks `<schema>.define`.
+schema, asks `<schema>.define`. The Rust engine reads it as the policy
+`"permission"`; a policy of rules (`{ "rules": [...] }`, the Rust
+engine's `PolicyConfig`) matches a namespace operation's question with a
+rule's `behavior`, `true` for any, `false` for none, or names, and fills
+`{behavior}` in a permission it requires, as it fills `{schema}`, which
+renders nothing in such a question. Only a rule that names `behavior`
+matches such a question: a rule that leaves `behavior` out, as every
+rule written before D77 does, matches schema, namespace and listing
+questions alone. So a subject- or service-wide allow, `{ "service":
+["shop-orders"], "action": ["read", "write"], "allow": true }`, lets its
+principal read and write schemas and call no behavior's namespace
+operation; with no rule naming `behavior`, the question falls past the
+last rule and is refused. A deployment that wants one allowed says so:
+`{ "behavior": ["Comments"], "action": "read", "allow": true }`, or
+`{ "behavior": true, "action": "write", "require":
+"{behavior}.{operation}" }` as `"permission"` does. `"allowAll"` still
+allows them.
 With the core user model ("Users" under "HTTP"), a user's permissions are
 those of their roles. `permissionPolicy({ permissionMatcher })` matches
 with the matcher it is given instead; called from a policy of the
@@ -1723,6 +1754,7 @@ function is synchronous (D16): one that returns a promise is a
 | `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). It is asked once every `validate` has accepted the fields. A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
+| `namespaceOperations` | a handler per declared namespace operation (`scope: "namespace"`, D77): `(context, params) => result`, with a `NamespaceContext` ("Namespace operations") |
 | `fields` | a reader per declared field: `(view) => value`. A read returns them under the behavior's name, apart from the own fields ("Instances and events") |
 | `filters` | what a list filters on, `{ <name>: { column, type, description? } }`: a declared field, or `<field>.<member>`, a camelCase member of a declared field whose value is an object, whose value is one of its columns, by its own name; a list's `where` names it by its qualified name, the behavior's name and a dot before it (`Lease.holder`); `type` is its JSON type, `string`, `number`, `integer` or `boolean`, and `description` what the list tool's `where` says of it, the declared field's when absent. A list's `where` compares the column in SQL, a null column holding no value, so the field's reader must return what the column holds, and nothing (absent or null) for null; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them, and `attribution` when its `update()`s attributed the fields they changed ("Contexts") |
@@ -1743,9 +1775,13 @@ over a column no migration up to its own adds included; a filter on a
 field it does not declare, or a member of one whose name is not `<field>.<member>` with a camelCase member, or a column its migrations do not add; a veto code that is
 not lowercase snake case of at most 64 characters, or is listed twice;
 an operation beside the instance that does not write or has `scope:
-"schema"`, `"log": false` on an operation that is not beside, and a
-behavior with a beside operation and a field that is not volatile
-("Instances and events"); and a signal whose name is not camelCase or is
+"schema"`, `"log": false` on an operation that is not beside, `"asks"`
+other than `"read"` or on an operation that is not beside with `"log":
+false`, and a behavior with a beside operation and a field that is not
+volatile ("Instances and events"); a namespace operation that sets
+`beside` or `log`, and `namespaceOperations` that are not exactly the
+namespace operations its declaration names ("Namespace operations"); and
+a signal whose name is not camelCase or is
 declared twice, whose `paramsSchema` is absent or does not compile, or
 whose `access` is not `read`, `write` or `operation`.
 
@@ -2389,6 +2425,82 @@ instances"). An instance operation is `not_found` there and to
 `instances.invokeSchema`, and a schema-level one is `not_found` to
 `invoke`, `call()` and `instances.invoke`, each naming the other scope.
 
+### Namespace operations
+
+An operation declared with `scope: "namespace"` (D77) runs on the
+behavior's own tables across every schema of a namespace that composes
+it, with no instance and no schema: "my mentions" and "what is unread"
+over every conversation, which one statement reads, since the tables
+already hold every schema's rows by their namespace and schema columns
+and each behavior has one key per engine ("Storage"). It is called by the
+behavior's name:
+
+```ts
+engine.behaviors.invoke(me, { namespace: 'default', behavior: 'Comments', operation: 'inbox', params: { limit: 20 } });
+// POST /namespaces/default/behaviors/Comments/operations/inbox, the MCP tool comments_inbox,
+// client.behaviors.invoke('Comments', 'inbox', { limit: 20 })
+```
+
+- **The call.** A behavior the engine does not run is `not_found`, and so
+  is an operation it does not declare with namespace scope, naming the
+  scope it has; one of namespace scope is `not_found` to `invoke`,
+  `invokeSchema`, `call()` and `instances.invoke`, and is no operation of
+  a type: the describe document names it under its behavior
+  (`namespaceOperations`), and the tools document holds its tool. The
+  policy is asked `{ principal, action, namespace, behavior, operation }`
+  ("Access"), then the parameters are held to its `paramsSchema`
+  (`invalid_argument`). A writing one runs in a write that holds its
+  namespace's writer, as an instance's write does, and an archived
+  namespace refuses it; a read-only one takes no writer. It is never
+  beside an instance and appends no event, so it declares neither
+  `beside` nor `log`.
+- **Its context** (`NamespaceContext`) has `behavior`, `namespace`,
+  `principal`, `now`, `can()`, `instances` (reads, and invokes of
+  read-only operations), `values` (`load`), `configs()` and `sql`. It has
+  no config, schema, instance, `update()`, `signal()` or `call()`: a
+  writing `instances.invoke` or `invokeSchema` and `instances.create`
+  are a `BehaviorError`, which rolls the call back.
+- **`sql.readable()`** names a read-only relation over the schemas of the
+  call's namespace whose live version composes the behavior and that the
+  principal may read, one row each, its column `schema`; a statement
+  joins it, and a row of a schema the principal may not read never
+  leaves the statement. The policy is asked `read` once per such schema
+  per call, the first time a statement names it, and a schema it refuses
+  is left out, never refused, as the search across schemas skips one.
+  It is defined like `sql.instances()`, a common table expression ahead
+  of the statement with the names inlined, as `bhv_<key>___readable`.
+  There is no `sql.instances()`: the operation has no schema.
+- **Its writes.** `sql.run` writes the behavior's own tables, in the
+  call's transaction, in a writing one; a read-only one's `run` is a
+  `BehaviorError`. The SQL checks every behavior's statement passes keep
+  `engine_*` out of it ("Storage"), so neither kind appends an event or
+  touches `engine_instances`.
+- **`configs()`** gives each composing schema with the config it gives
+  the behavior, as `parseConfig` returned it for its instance
+  operations, asking nothing (`config(schema)` one of them): a handler
+  that keeps a schema's rows only when its config names a permission the
+  caller holds (`can()`) reads the config of each schema it keeps.
+- A behavior no published schema composes has no storage yet; its first
+  namespace call creates it, as a publish would, and runs with empty
+  tables and an empty `readable()`.
+
+```ts
+namespaceOperations: {
+  inbox(context, params) {
+    const notes = context.sql.table('note');
+    return context.sql.all(
+      `SELECT n.schema, n.instance, n.body FROM ${notes} AS n JOIN ${context.sql.readable()} AS r ON r.schema = n.schema
+       WHERE n.namespace = ? AND n.subject = ? ORDER BY n.at DESC LIMIT ?`,
+      [context.namespace, context.principal.subject, (params as { limit: number }).limit],
+    );
+  },
+},
+```
+
+In Rust a namespace operation's handler is `fn(&B, &NamespaceCx<'_,
+B::Config>, &Value) -> Result<Value>` in `Hooks::namespace_operations`,
+and `cx.configs()` returns `(schema, &Config)` pairs.
+
 ### Reactions and schedules
 
 A behavior's `reactions` and `schedules` run after the commit, on the
@@ -2646,6 +2758,16 @@ such a field as the instance's last event found it, the describe
 document marks it, and `Reactions`' `changes`, which hears a field
 through its instance's events, refuses it (D56).
 
+A volatile field may also say `"perReader": true` when its value is the
+caller's rather than the instance's, as Comments' `unread` is (D77). A
+read computes it for whoever reads. No event records it: an operation's
+or an update's `patch` leaves it out, as does a create event's
+`behaviors`, and so do the moves a referring behavior's hook hears, so
+a caller's own count never lands in the log as the instance's. A
+declaration that gives `perReader` without `"volatile": true` is
+refused, by registration and by the compiler's registry. The describe
+document marks it `perReader: true` beside `volatile: true`.
+
 A writing operation appends an `operation` event, `{ behavior,
 operation, params, patch, attribution? }`, its `patch` a merge patch of `{ data,
 behaviors }`: under `data` the own fields its `update()` changed, under
@@ -2704,6 +2826,12 @@ behavior that declares one and a field that is not volatile.
   event at all, for a write only its writer reads back. `unchanged()`
   keeps its meaning: a beside call that says it changed nothing appends
   no event either.
+- `"asks": "read"`, which only a beside operation with `"log": false`
+  may declare, says it writes only its caller's own state, a read marker
+  or a follow, so the policy is asked `read` with its name instead of
+  `write`, a caller who may only read the instance may call it, and an
+  archived namespace lets it run. Its tool hides from no reader either.
+  The behavior's document carries `"asks": "read"` after `log`.
 - Its handler that reaches past its behavior's own storage, with
   `update()`, a `call()` or `instances.invoke` of a writing operation
   that is not beside, an `instances.invokeSchema` of a writing one,
@@ -2963,24 +3091,39 @@ in the thread of a top-level one, one level deep, which their authors
 edit and delete, others react to and pin, and whose threads are resolved
 and reopened. A message may be streamed as it is written: `begin` holds
 its place, `appendDraft` adds to its draft and sends the `draft` signal,
-and `finish` posts it. `rust/behaviors/src/comments-contract.md` is the
-contract the behavior, the generators and the corpora implement: every
-record, parameter, check and refusal in its order.
+and `finish` posts it. Each caller has its own read markers and follows,
+each message that comes to stand records a delivery for each subject that
+should hear of it, and three namespace operations read and work them
+across a namespace: the caller's `inbox`, and `claimDeliveries` and
+`settleDeliveries` for a notifier or an agent dispatcher. A delivery is
+recorded for each subject a message mentions, and each follower, whether
+or not that subject may read the schema, and a claim returns up to 4000
+code points of the message's body. So a notifier must check that the
+recipient may read the instance before it sends the body: read the
+instance as the recipient (`instances.get` with a principal of the
+recipient's subject and permissions, from the deployment's identity
+store), or ask the deployment's policy with the recipient's permissions,
+and for a `role:<name>` subject each member it sends to. One who may not
+read it gets no body: settle the delivery `dropped`, or send a notice
+with a link and no text.
+`rust/behaviors/src/comments-contract.md` is the contract the behavior,
+the generators and the corpora implement: every record, parameter, check
+and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once) |
-| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest |
-| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
+| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own (`perReader`, so no event records it): how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }`, which reads, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
 | Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
-| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run |
-| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
-| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft` none, and the reads none |
+| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run; `prune`, hourly: removes the schema's deliveries made more than `deliveryRetentionMs` ago that no live claim holds, oldest first, in batches of 1000, going on while a batch comes back full, at most 20 batches a run |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`, `unknown_delivery`, `token_stale`, `not_claimed`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft`, `markRead` and `follow` none, the namespace operations none, and the reads none |
 | `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
 A message's record is `{ id, thread?, quotes?, author, via?, state, body,
-blocks, mentions, reactions, createdAt, postedAt?, editedAt?, edits,
-pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
+blocks, mentions, reactions, createdAt, postedAt?, stand?, editedAt?,
+edits, pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
 `participants` (the latest ten authors of its thread's standing
 messages) and `resolved?: { by, at }`. `state` is `composing`, `posted`,
 `interrupted` or `deleted`; a message *stands* while it is posted or
@@ -3028,7 +3171,31 @@ thread's replies and its top-level message as `root`, always in
 ascending id order: with no anchor the latest page, `before` an older
 one, `after` a newer one, and `around` a page about one message. `before`
 and `after` in the result are the anchors of the pages either side, null
-at an end.
+at an end, and `readUpTo` is the caller's marker on the listing, absent
+while it has none.
+
+A message's `stand` is its place in the order the conversation's messages
+came to stand, given at its post, finish or interrupt and never changed;
+read markers count in stands, not ids, so a streamed reply that began
+before a message a reader read and finished after it is unread. `markRead`
+moves the caller's marker on the top-level messages, or with `thread` on a
+thread's replies, up to the greatest stand among the listing's messages
+with an id up to `upTo`, never back. A subject follows each thread it posts
+in and each it is mentioned in (a `role:` group never), and `follow` turns
+that on or off. When a message comes to stand it records one delivery per
+subject it mentions or that follows its thread, never its author, with its
+reasons (`mention`, `reply`); an edit that adds a mention adds one, and
+`deleteMessage`, `purge` and the instance's delete remove them but those a
+claim holds, which the instance's delete removes too. The engine sends
+nothing: `claimDeliveries` claims the due ones of the schemas whose
+`deliverPermission` the caller holds, under one token that lapses after
+`ttlMs`, dropping those whose message no longer stands or whose subject
+has read it, and `settleDeliveries` marks them `sent`, `failed` (due again
+after the backoff, dropped at `maxAttempts`) or `dropped`. The `inbox`
+lists the caller's mentions, the threads it follows and the conversations
+it has read, across the schemas of the namespace it may read, newest
+first, each with how many of its messages the caller has not read; an item
+with none is done, and stays.
 
 Its storage is migration 2 (`conversation`): `comment_messages`,
 `comment_edits`, `comment_reactions` and `comment_conversations`, the
@@ -3039,7 +3206,10 @@ thread is the root of its chain, and it quotes the comment it replied to
 when that was a reply. Migration 3 (`drafts`) adds `comment_drafts`, one
 row per non-empty append, and a composing message's columns,
 `draft_length` and `last_append_at`, with `posted_at`, which it sets to
-each existing message's `created_at`.
+each existing message's `created_at`. Migration 4 (`inbox`) adds a
+message's `stand` and the conversation's `last_stand`, numbering each
+message that stood by its id, and the tables `comment_reads`,
+`comment_follows` and `comment_deliveries`.
 
 #### Revisions
 
@@ -4485,6 +4655,7 @@ the engine does not raise.
 | POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match`, `Preconditions` | 200, the result, `ETag` |
 | POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/signals/{behavior}/{signal}` | `signals.send`, body: the signal's data, `{}` when absent ("Signals") | 204, no body |
+| POST | `/namespaces/{namespace}/behaviors/{behavior}/operations/{operation}` | `behaviors.invoke`, body: the parameters of a namespace operation ("Namespace operations") | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | POST | `/namespaces/{namespace}/search` | `engine.search`, body: its parameters | 200, `{items, next}`, the hits of every schema that composes Search ("Search", "Across schemas") |
@@ -4517,7 +4688,9 @@ read-only operation, and a call that changed nothing, leave where it
 was. A schema-level operation's route
 takes its parameters the same way and answers its result with no `ETag`,
 since it names no instance; each operation route answers 404 for an
-operation of the other scope.
+operation of the other scope. A namespace operation's route takes its
+parameters and answers its result the same way, and 404 for an operation
+of another scope or a behavior the engine does not run.
 
 The event route's `after` is a cursor or `head`; `kind`, `behavior` and
 `exclude` are lists, as repeated parameters or comma-separated
@@ -4852,7 +5025,7 @@ let app = Router::new().merge(routes).fallback_service(api_router);
 - **What the router answers itself.** A method no route on the path
   takes is the engine's 404, before the caller is asked, as the other
   runtimes answer it, not axum's 405 with `Allow`. A route that takes a
-  body (`Route::takes_body`: the seven whose spec declares one) reads at
+  body (`Route::takes_body`: the nine whose spec declares one) reads at
   most `Options::body_limit` bytes (1 MiB, `api::DEFAULT_BODY_LIMIT_BYTES`)
   and is 413 `payload_too_large` past it, as the HTTP runtimes' body limit
   answers. MCP reads up to its own 4 MiB and refuses past it as JSON-RPC.
@@ -5009,13 +5182,17 @@ a schema's live version:
   by behavior name, each behavior on the type that declares a field,
   with its fields `readOnly` and without a type, since a declaration
   gives a field a name, a description and whether it is volatile, and no
-  type. A volatile field says `"volatile": true` there, an annotation as
-  `readOnly` is ("Instances and events"). Each result that returns an
+  type. A volatile field says `"volatile": true` there, and a per-reader
+  one `"perReader": true` besides, annotations as `readOnly` is
+  ("Instances and events"). Each result that returns an
   instance carries it beside `data`.
 - `behaviors` lists each behavior's config, its `summary`, what its
   guidance says it does under the config ("Guidance", below; absent for
   a behavior that gives none), its fields, each with `volatile: true`
-  when it is, operations and the codes its vetoes carry (`vetoes`).
+  and `perReader: true` when it is, operations and the codes its vetoes carry (`vetoes`). A
+  behavior with namespace operations (D77) names them in
+  `namespaceOperations`, apart from the type's `operations`, which they
+  are not among.
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, `lookup`
   where the instance type has a unique field, then each behavior's
   operations in the type's list order. `list`'s `params` has `where`,
@@ -5065,8 +5242,9 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 reference): a tool per operation of every live schema the namespace
 reaches that the principal may read, by name, after the engine's tools:
 three schema tools, two behavior tools, the read of a value by its hash,
-four namespace tools, and the search across schemas where one of those
-schemas composes Search.
+four namespace tools, the search across schemas where one of those
+schemas composes Search, and a tool per namespace operation (D77) of each
+behavior one of those schemas composes.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
@@ -5089,9 +5267,13 @@ schemas composes Search.
 | archive a namespace | `engine.archiveNamespace` | `archive_namespace` | `name` |
 | unarchive a namespace | `engine.unarchiveNamespace` | `unarchive_namespace` | `name` |
 | search every schema | `engine.search` | `search` | `query`, `syntax`, `vector`, `model`, `limit`, `cursor` (`engine.search`'s); listed where a schema the principal may read composes Search |
+| a namespace operation | `<behavior>.<operation>` | `<behavior>_<operation>` | `params` (its `paramsSchema`); listed where a schema the principal may read composes the behavior |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
-name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
+name in kebab case as the namespace (`LineItem` is `line-item`), or for a
+namespace operation the behavior's, its dot a hyphen (`Comments.inbox` is
+`comments.inbox`, `acme.Rating`'s `topRated` `acme-rating.topRated`,
+handle `acme_rating_top_rated`). An SDK
 tool's handle is authored with `@mcp`; the engine derives one from the
 same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
@@ -5100,10 +5282,13 @@ below); the engine's tools keep theirs. A tool the access policy
 refuses the principal is hidden too, with that reason: a schema's tool
 asks what its call asks, and `define_schema` and the namespace tools,
 which name their schema or namespace only when called, ask a listing
-question ("Access"). So is, in an archived namespace, every tool that
-writes there, the namespace tools aside: the namespace refuses the
-write; and every tool a mount's `tools` filter leaves out of the
-caller's set ("MCP").
+question ("Access"), and so does a namespace operation's tool, with its
+behavior and operation. So is, in an archived namespace, every tool that
+writes there, the namespace tools and an operation that asks read
+(`markRead`, `follow`) aside: the namespace refuses the write; a
+namespace operation's tool that writes, `comments.claimDeliveries` say,
+is hidden there as `archived`; and every tool a mount's `tools` filter
+leaves out of the caller's set ("MCP").
 
 A hidden tool's `mcp` is `{ hidden: true, hiddenReason, hiddenBy }`.
 `hiddenBy` lists each cause, in this order: `deployment` (the tool
@@ -5248,8 +5433,9 @@ process. The catalog serves them:
   operation's `scope`, `writes` and invocation policy, the declaration's
   or the default, under the policy's key after `writes`, as the describe
   document writes it (D11); an operation beside the instance has
-  `"beside": true` after `writes`, and `"log": false` when it appends no
-  event (D77). `configSchema`, `createParamsSchema` and
+  `"beside": true` after `writes`, `"log": false` when it appends no
+  event, and `"asks": "read"` when it asks read (D77); a namespace
+  operation's `scope` is `namespace`. `configSchema`, `createParamsSchema` and
   `preconditionSchema` are as declared, and absent when the behavior
   takes none. A name the engine does not run is `not_found`; one that is
   not a behavior name, `invalid_argument`.
@@ -5379,7 +5565,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   called, so the list asks the policy a listing question for each
   (`define`, or `manage` with what the tool does; "Access"): a caller the
   policy would refuse does not see them, and a call of one still asks
-  the question its call asks. The tools that only read, `list_schemas`,
+  the question its call asks. A namespace operation's tool (D77) is
+  listed where a schema the caller may read composes its behavior, and
+  asks the listing question `{ principal, action, namespace, behavior,
+  operation, listing: true }`. The tools that only read, `list_schemas`,
   `describe_schema`, the behavior tools (`list_behaviors`,
   `describe_behavior`) and `get_value`, are in every caller's list: each
   answers with what the policy lets the caller read, and the behavior
@@ -5452,6 +5641,7 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
 | `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor?, where? }`), `lookup(schema, key)`, `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance, lookup and operation routes |
 | `events.read` (`{ after?, limit?, schema?, instanceId?, kinds?, behaviors?, exclude? }`), `events.head`, `events.subscribe` | the event route, as a page or the stream |
 | `behaviors.list`, `behaviors.describe`, `tools()`, `search(params)` | the behavior catalog, the tools document, the search across schemas |
+| `behaviors.invoke(behavior, operation, params?)` | a namespace operation's route (D77): its result |
 | `signals.send({ schema, instanceId, behavior, name, data? })` | the signal route ("Signals"): 204, nothing; a 429 `rate_limited` is not retried |
 
 - **Options.** Every call takes `namespace` (the client's `namespace`,

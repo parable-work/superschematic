@@ -9,7 +9,11 @@
 // appendDraft (its lengths in code points), finish and interrupt, their
 // refusals, maxDrafts, the composing and interrupted states, postedAt and
 // the composing field, batch 1's operations on a composing message, and
-// the runner's schedule interrupting an idle draft.
+// the runner's schedule interrupting an idle draft. Batch 3, read state:
+// stands and markRead, the unread field and readUpTo, follow, the
+// deliveries a standing message makes, and the namespace operations
+// inbox, claimDeliveries and settleDeliveries through
+// engine.behaviors.invoke.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -71,7 +75,7 @@ for (const driver of drivers) {
     test('post numbers messages per instance, a reply names its thread, and the fields count them', () => {
       let now = 1000;
       const engine = published({}, { clock: () => now });
-      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
       assert.deepEqual(on(engine, alice, 'post', { body: 'Looks right.' }), {
         id: 1,
         author: 'alice',
@@ -82,6 +86,7 @@ for (const driver of drivers) {
         reactions: {},
         createdAt: 1000,
         postedAt: 1000,
+        stand: 1,
         edits: 0,
         pinned: false,
         replies: 0,
@@ -99,6 +104,7 @@ for (const driver of drivers) {
         reactions: {},
         createdAt: 2000,
         postedAt: 2000,
+        stand: 2,
         edits: 0,
         pinned: false,
       });
@@ -110,7 +116,7 @@ for (const driver of drivers) {
       assert.equal((on(engine, alice, 'post', { body: 'First on r2.' }, 'r2') as Message).id, 1);
       const top = on(engine, alice, 'getMessage', { message: 1 }) as Message;
       assert.deepEqual([top.replies, top.lastReplyAt, top.participants], [2, 3000, ['carol', 'bob', 'alice']]);
-      assert.deepEqual(fields(engine), { messages: 4, lastMessageAt: 3000, threads: { open: 2, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 4, lastMessageAt: 3000, threads: { open: 2, resolved: 0 }, composing: [], unread: 0 });
       assert.deepEqual(
         engine.instances.list(alice, 'Review').items.map((item) => item.behaviors.Comments.messages),
         [4, 1]
@@ -235,6 +241,7 @@ for (const driver of drivers) {
         reactions: {},
         createdAt: 1000,
         postedAt: 1000,
+        stand: 1,
         edits: 0,
         pinned: false,
         replies: 2,
@@ -243,14 +250,14 @@ for (const driver of drivers) {
       });
       assert.equal((on(engine, alice, 'post', { body: 'Top.', clientId: 't' }) as Message).state, 'deleted');
       assert.deepEqual(vetoed(() => on(engine, alice, 'deleteMessage', { message: 1 })), ['deleted', { message: 1 }]);
-      assert.deepEqual(fields(engine), { messages: 3, lastMessageAt: 5000, threads: { open: 1, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 3, lastMessageAt: 5000, threads: { open: 1, resolved: 0 }, composing: [], unread: 1 });
       on(engine, moderator, 'deleteMessage', { message: 4 });
-      assert.deepEqual(fields(engine), { messages: 2, lastMessageAt: 1000, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 2, lastMessageAt: 1000, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
       const refused = thrown(() => on(engine, bob, 'purge', { message: 1 }), EngineError);
       assert.deepEqual([refused.code, refused.message], ['forbidden', 'bob may not purge on Review r1: it needs permission comments.moderate']);
       assert.deepEqual(vetoed(() => on(engine, moderator, 'purge', { message: 9 })), ['no_message', { message: 9 }]);
       assert.deepEqual(on(engine, moderator, 'purge', { message: 1 }), { message: 1, purged: [1, 2, 3] });
-      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
       assert.deepEqual(vetoed(() => on(engine, alice, 'getMessage', { message: 2 })), ['no_message', { message: 2 }]);
       // Ids are not reused, and a purged message's clientId is free again.
       assert.equal((on(engine, alice, 'post', { body: 'Again.', clientId: 't' }) as Message).id, 5);
@@ -348,7 +355,7 @@ for (const driver of drivers) {
       assert.deepEqual([ids(oldest), oldest.before, oldest.after], [[1], null, 1]);
       const newer = list({ limit: 3, after: 3 });
       assert.deepEqual([ids(newer), newer.before, newer.after], [[8, 9, 10], 8, 10]);
-      assert.deepEqual(list({ after: 99 }), { items: [], before: null, after: null });
+      assert.deepEqual(list({ after: 99 }), { items: [], before: null, after: null, readUpTo: 14 });
       const around = list({ limit: 4, around: 9 });
       assert.deepEqual([ids(around), around.before, around.after], [[8, 9, 10, 11], 8, 11]);
       assert.deepEqual(ids(list({ limit: 5, around: 1 })), [1, 2, 3]);
@@ -424,7 +431,7 @@ for (const driver of drivers) {
       on(engine, bob, 'react', { message: 1, emoji: 'x' });
       assert.equal(engine.instances.delete(alice, 'Review', 'r1'), true);
       engine.instances.create(alice, 'Review', { title: 'Q3 plan, again' }, { id: 'r1' });
-      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
       assert.deepEqual(on(engine, alice, 'listMessages'), { items: [], before: null, after: null });
       // The instance's events span both lives, so no id is used twice.
       assert.equal((on(engine, alice, 'post', { body: 'Fresh.' }) as Message).id, 3);
@@ -438,7 +445,7 @@ for (const driver of drivers) {
       engine.schemas.define(alice, reviewSchema());
       assert.equal(engine.schemas.publish(alice, 'Review').version, 2);
       const joined = engine.instances.get(alice, 'Review', 'r1');
-      assert.deepEqual([joined?.data, joined?.behaviors], [{ title: 'Q3 plan' }, { Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] } }]);
+      assert.deepEqual([joined?.data, joined?.behaviors], [{ title: 'Q3 plan' }, { Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 } }]);
       engine.instances.invoke(alice, 'Review', 'r1', 'post', { body: 'Late, but here.' });
 
       const removed = thrown(() => engine.schemas.define(alice, reviewSchema([])), IncompatibleChangeError);
@@ -464,7 +471,7 @@ for (const driver of drivers) {
         replies: 0,
         participants: [],
       });
-      assert.deepEqual(fields(engine), { messages: 1, lastMessageAt: 1000, threads: { open: 1, resolved: 0 }, composing: ['bob'] });
+      assert.deepEqual(fields(engine), { messages: 1, lastMessageAt: 1000, threads: { open: 1, resolved: 0 }, composing: ['bob'], unread: 0 });
       assert.deepEqual(on(engine, bob, 'appendDraft', { message: 2, text: 'Héllo, ' }), { message: 2, offset: 0, length: 7 });
       // Code points, not UTF-16 units: the emoji is one.
       assert.deepEqual(on(engine, bob, 'appendDraft', { message: 2, text: 'wörld 🙂' }), { message: 2, offset: 7, length: 14 });
@@ -480,7 +487,7 @@ for (const driver of drivers) {
       now = 3000;
       const reply = (on(engine, carol, 'begin', { thread: 1, quotes: 1, clientId: 'c-1' }) as Message).id;
       on(engine, carol, 'appendDraft', { message: reply, text: 'Agreed.' });
-      assert.deepEqual(fields(engine), { messages: 1, lastMessageAt: 1000, threads: { open: 1, resolved: 0 }, composing: ['bob', 'carol'] });
+      assert.deepEqual(fields(engine), { messages: 1, lastMessageAt: 1000, threads: { open: 1, resolved: 0 }, composing: ['bob', 'carol'], unread: 0 });
       now = 4000;
       assert.deepEqual(on(engine, bob, 'finish', { message: 2, mentions: ['alice'] }), {
         id: 2,
@@ -492,6 +499,7 @@ for (const driver of drivers) {
         reactions: {},
         createdAt: 2000,
         postedAt: 4000,
+        stand: 2,
         edits: 0,
         pinned: false,
         replies: 0,
@@ -502,7 +510,7 @@ for (const driver of drivers) {
       assert.deepEqual([finished.thread, finished.quotes, finished.body, finished.createdAt, finished.postedAt], [1, 1, 'Agreed, with a note.', 3000, 5000]);
       const top = on(engine, alice, 'getMessage', { message: 1 }) as Message;
       assert.deepEqual([top.replies, top.lastReplyAt, top.participants], [1, 5000, ['carol', 'alice']]);
-      assert.deepEqual(fields(engine), { messages: 3, lastMessageAt: 5000, threads: { open: 2, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 3, lastMessageAt: 5000, threads: { open: 2, resolved: 0 }, composing: [], unread: 1 });
       // begin, finish and interrupt are logged beside the instance;
       // appendDraft appends nothing.
       const events = engine.events.read(alice, { schema: 'Review', instanceId: 'r1', beside: true }).events;
@@ -588,10 +596,11 @@ for (const driver of drivers) {
         reactions: {},
         createdAt: 1000,
         postedAt: 3000,
+        stand: 2,
         edits: 0,
         pinned: false,
       });
-      assert.deepEqual(fields(engine), { messages: 2, lastMessageAt: 3000, threads: { open: 1, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 2, lastMessageAt: 3000, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 });
       // An interrupted message stands: a moderator's edit leaves it so,
       // its author's posts it, and its edit window counts from postedAt.
       assert.equal((on(engine, moderator, 'edit', { message: reply, mentions: ['bob'] }) as Message).state, 'interrupted');
@@ -638,12 +647,12 @@ for (const driver of drivers) {
       assert.deepEqual((on(engine, bob, 'listMessages', { thread: top }) as Listing).items, []);
       const dropped = on(engine, bob, 'deleteMessage', { message: top }) as Message;
       assert.deepEqual([dropped.state, dropped.body, dropped.postedAt], ['deleted', '', undefined]);
-      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
       const thread = (on(engine, alice, 'post', { body: 'Thread.' }) as Message).id;
       const streaming = (on(engine, carol, 'begin', { thread }) as Message).id;
       on(engine, carol, 'appendDraft', { message: streaming, text: 'Mid-reply' });
       assert.deepEqual(on(engine, moderator, 'purge', { message: thread }), { message: thread, purged: [thread, streaming] });
-      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] });
+      assert.deepEqual(fields(engine), { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
     });
 
     test("the runner's interrupt schedule interrupts each draft its author left idle for composeTimeoutMs", () => {
@@ -671,6 +680,96 @@ for (const driver of drivers) {
         ['runner', { behavior: 'Comments', schedule: 'interrupt', depth: 1 }, { message: written }],
         ['runner', { behavior: 'Comments', schedule: 'interrupt', depth: 1 }, { message: empty }],
       ]);
+    });
+
+    test('markRead counts stands, so a reply finished after a read is unread; unread is the reader’s and follow counts from the latest stand', () => {
+      let now = 1000;
+      const engine = published({}, { clock: () => now });
+      on(engine, alice, 'post', { body: 'One.' });
+      const streamed = (on(engine, bob, 'begin') as Message).id;
+      on(engine, carol, 'post', { body: 'Three.' });
+      const unread = (who: Principal) => (engine.instances.get(who, 'Review', 'r1')?.behaviors.Comments as { unread: number }).unread;
+      assert.deepEqual([unread(alice), unread(bob), unread(carol)], [1, 0, 0]);
+      assert.deepEqual(on(engine, alice, 'markRead', { upTo: 3 }), { readUpTo: 2, unread: 0 });
+      now = 2000;
+      const finished = on(engine, bob, 'finish', { message: streamed, body: 'Two.' }) as Message;
+      assert.deepEqual([finished.id, finished.postedAt, finished.stand], [2, 2000, 3]);
+      assert.equal(unread(alice), 1);
+      assert.deepEqual(on(engine, alice, 'markRead', { upTo: 1 }), { readUpTo: 2, unread: 1 });
+      assert.equal((on(engine, alice, 'listMessages') as Listing & { readUpTo?: number }).readUpTo, 2);
+      assert.deepEqual(on(engine, alice, 'markRead', { upTo: 99 }), { readUpTo: 3, unread: 0 });
+      assert.equal((on(engine, bob, 'listMessages', { thread: 1 }) as Listing & { readUpTo?: number }).readUpTo, undefined);
+      // A thread's marker counts its replies; follow counts from the
+      // conversation's latest stand.
+      const reply = (on(engine, carol, 'post', { body: 'Reply.', thread: 1 }) as Message).id;
+      assert.deepEqual(on(engine, bob, 'follow', { thread: 1, on: true }), { thread: 1, following: true });
+      assert.deepEqual(on(engine, bob, 'markRead', { thread: 1, upTo: reply }), { readUpTo: 4, unread: 0 });
+      assert.deepEqual(on(engine, bob, 'follow', { thread: 1, on: false }), { thread: 1, following: false });
+      assert.deepEqual(vetoed(() => on(engine, bob, 'markRead', { thread: reply, upTo: 1 })), ['not_a_thread', { message: reply, thread: 1 }]);
+      assert.deepEqual(vetoed(() => on(engine, bob, 'follow', { thread: 9, on: true })), ['no_message', { message: 9 }]);
+      // Neither appends an event.
+      const operations = engine.events
+        .read(alice, { schema: 'Review', instanceId: 'r1', beside: true })
+        .events.map((event) => (event.change as { operation: string }).operation);
+      assert.deepEqual(operations, ['post', 'begin', 'post', 'finish', 'post']);
+    });
+
+    test('a standing message delivers to its mentions and its thread’s followers, which a claim takes and a settle marks, and the inbox lists', () => {
+      let now = 1000;
+      const engine = published({ deliverPermission: 'comments.notify', retryBackoffMs: 1000 }, { clock: () => now });
+      const notifier: Principal = { subject: 'notifier', permissions: ['comments.notify'] };
+      const invoke = (who: Principal, operation: string, params: Record<string, unknown> = {}) =>
+        engine.behaviors.invoke(who, { behavior: 'Comments', operation, params }) as Record<string, any>;
+      on(engine, alice, 'post', { body: 'Look,   carol\nand agent:ada.', mentions: ['carol', 'agent:ada', 'role:leads', 'alice'] });
+      const claim = invoke(notifier, 'claimDeliveries', { prefix: 'agent:' });
+      assert.deepEqual(
+        claim.items.map((item: Record<string, unknown>) => [item.subject, item.message, item.reasons, item.attempt]),
+        [['agent:ada', 1, ['mention'], 1]]
+      );
+      assert.deepEqual(claim.expiresAt, 61_000);
+      assert.deepEqual(invoke(notifier, 'settleDeliveries', { token: claim.token, ids: [claim.items[0].id], outcome: 'sent' }), {
+        items: [{ id: claim.items[0].id, state: 'sent', attempts: 1 }],
+      });
+      now = 2000;
+      on(engine, bob, 'post', { body: 'A reply.', thread: 1, mentions: ['carol'] });
+      // carol and agent:ada follow the thread they were mentioned in; carol
+      // hears of the reply once, for both reasons.
+      const everyone = invoke(notifier, 'claimDeliveries', { limit: 10 });
+      assert.deepEqual(
+        everyone.items.map((item: Record<string, unknown>) => [item.subject, item.message, item.reasons]),
+        [
+          ['carol', 1, ['mention']],
+          ['role:leads', 1, ['mention']],
+          ['agent:ada', 2, ['reply']],
+          ['alice', 2, ['reply']],
+          ['carol', 2, ['mention', 'reply']],
+        ]
+      );
+      assert.deepEqual(invoke(notifier, 'settleDeliveries', { token: everyone.token, ids: [everyone.items[0].id], outcome: 'failed', error: 'busy' }).items, [
+        { id: everyone.items[0].id, state: 'failed', attempts: 1, nextAttemptAt: 3000 },
+      ]);
+      assert.deepEqual(vetoed(() => invoke(notifier, 'settleDeliveries', { token: 'stale', ids: [everyone.items[1].id], outcome: 'sent' })), ['token_stale', { token: 'stale' }]);
+      assert.equal(thrown(() => invoke(bob, 'claimDeliveries'), EngineError).code, 'forbidden');
+      // The inbox: carol's mentions, newest first, and the thread she
+      // follows.
+      const inbox = invoke(carol, 'inbox');
+      assert.deepEqual(
+        inbox.items.map((item: Record<string, unknown>) => [item.kind, item.message, item.thread, item.excerpt, item.unread]),
+        [
+          ['mention', 2, 1, 'A reply.', 1],
+          ['thread', 2, 1, 'A reply.', 1],
+          ['mention', 1, undefined, 'Look, carol and agent:ada.', 1],
+        ]
+      );
+      assert.equal(inbox.next, null);
+      const page = invoke(carol, 'inbox', { limit: 1 });
+      assert.deepEqual(invoke(carol, 'inbox', { limit: 2, cursor: page.next }).items.map((item: Record<string, unknown>) => item.kind), ['thread', 'mention']);
+      on(engine, carol, 'markRead', { thread: 1, upTo: 2 });
+      assert.deepEqual(
+        invoke(carol, 'inbox', { unread: true }).items.map((item: Record<string, unknown>) => [item.kind, item.message]),
+        [['mention', 1]]
+      );
+      assert.equal(thrown(() => invoke(carol, 'inbox', { cursor: 'nope' }), OperationParamsError).issues[0]?.path, '/cursor');
     });
   });
 }

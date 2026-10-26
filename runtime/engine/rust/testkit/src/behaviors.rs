@@ -19,7 +19,9 @@
 //! - `test/core-dependencies.test.ts`: [`Finisher`];
 //! - `test/core-numbering.test.ts`: [`Refuser`];
 //! - `test/core-reactions-changes.test.ts`: [`Score`] and [`WorkflowTally`];
-//! - the D56 behaviors' test files: [`crate::core_fixtures`].
+//! - the D56 behaviors' test files: [`crate::core_fixtures`];
+//! - the test addon's own, which the TypeScript suite names: [`Chatter`]
+//!   and [`Inbox`] (D77).
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
@@ -30,12 +32,14 @@ mod core_dependencies;
 mod core_numbering;
 mod core_reactions;
 mod core_revisions;
+mod inbox;
 
 pub use core_branches::Keep;
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
 pub use core_reactions::{Score, WorkflowTally};
 pub use core_revisions::RevisionHold;
+pub use inbox::Inbox;
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -1932,6 +1936,7 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Reader") => set.with(Reader),
         (_, "test.Broken") => set.with(Broken),
         (_, "test.Chatter") => set.with(Chatter),
+        (_, "test.Inbox") => set.with(Inbox),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
         (_, "test.Signal") => set.with(crate::workqueue_fixtures::Signal),
         (_, "test.Gate") => set.with(crate::workqueue_fixtures::Gate),

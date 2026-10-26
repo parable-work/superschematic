@@ -402,6 +402,34 @@ impl<'t, 'db> Execution<'t, 'db> {
     /// instance's other behaviors, or a list whose instances share one,
     /// reads each field once.
     pub fn fields(&self, only: Option<&[&str]>) -> Result<Map<String, Value>> {
+        self.fields_of(only, true)
+    }
+
+    /// The behaviors' declared fields as an event and a reference move
+    /// record them: [`Execution::fields`] without the per-reader ones
+    /// (D77), whose values are the caller's, not the instance's.
+    pub fn logged_fields(&self) -> Result<Map<String, Value>> {
+        self.fields_of(None, false)
+    }
+
+    /// `fields`, as [`Execution::fields`] read them, without the per-reader
+    /// ones: what an event records of them.
+    pub fn logged(&self, fields: &Map<String, Value>) -> Map<String, Value> {
+        let mut out = fields.clone();
+        for bound in self.behaviors().iter() {
+            let Some(Value::Object(entry)) = out.get_mut(&bound.behavior.name) else {
+                continue;
+            };
+            for declared in &bound.behavior.declaration.fields {
+                if declared.per_reader {
+                    entry.remove(&declared.name);
+                }
+            }
+        }
+        out
+    }
+
+    fn fields_of(&self, only: Option<&[&str]>, per_reader: bool) -> Result<Map<String, Value>> {
         let tx = self.reach.tx;
         let chain = self.reach.chain;
         let still = !self.writable && tx.read_only() && tx.stable(&chain.namespace);
@@ -414,6 +442,15 @@ impl<'t, 'db> Execution<'t, 'db> {
                 .iter()
                 .filter(|field| {
                     only.is_none_or(|only| only.contains(&format!("{name}.{field}").as_str()))
+                })
+                .filter(|field| {
+                    per_reader
+                        || !bound
+                            .behavior
+                            .declaration
+                            .fields
+                            .iter()
+                            .any(|declared| &declared.name == *field && declared.per_reader)
                 })
                 .collect();
             if wanted.is_empty() {
@@ -1699,7 +1736,7 @@ fn instance_columns(ctx: &Ctx<'_, '_, '_>) -> Result<Row> {
 /// A context's `can()`: whether the principal holds one permission, as the
 /// engine's permission matcher answers. A service standing in for an end
 /// user holds none (D37), so it is never asked for one.
-fn can(reach: &Reach<'_, '_>, behavior: &str, permission: &str) -> Result<bool> {
+pub(crate) fn can(reach: &Reach<'_, '_>, behavior: &str, permission: &str) -> Result<bool> {
     if permission.is_empty() {
         return Err(Error::behavior(
             behavior,
@@ -1916,7 +1953,7 @@ pub(crate) fn veto_of(
 }
 
 // check_veto_code holds a veto's code to one its declaration lists.
-fn check_veto_code(behavior: &RegisteredBehavior, code: Option<&str>) -> Result<()> {
+pub(crate) fn check_veto_code(behavior: &RegisteredBehavior, code: Option<&str>) -> Result<()> {
     let Some(code) = code else {
         return Ok(());
     };
@@ -1961,7 +1998,7 @@ pub(crate) fn declared_vetoes<T>(exec: &Execution<'_, '_>, result: Result<T>) ->
 }
 
 // check_result holds an operation's result to its resultSchema.
-fn check_result(
+pub(crate) fn check_result(
     behavior: &RegisteredBehavior,
     operation: &OperationSpec,
     result: Value,

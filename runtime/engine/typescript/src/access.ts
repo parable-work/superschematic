@@ -12,12 +12,17 @@ tools document asks one more kind when it lists a caller's tools: a
 listing question, marked `listing`, about an engine tool that names its
 schema or its namespace only when called (define_schema and the
 namespace tools), whether the caller may do that at all here; a refusal
-hides the tool, and its call still asks the question the call asks. The
-engine has no roles and no default policy; `allowAll` is explicit, for
-tests and local use, and `permissionPolicy` is opt-in: it allows an
-action on a schema to a caller holding `<schema>.<action>`, such as a
-user whose roles grant it (D50), and refuses the questions that name no
-schema.
+hides the tool, and its call still asks the question the call asks. A
+behavior's namespace operation (D77), which runs on the behavior's tables
+across every schema of a namespace, asks a fourth kind: `read` or `write`
+with the behavior and the operation, and no schema; the tools document
+asks it as a listing question too. The engine has no roles and no default
+policy; `allowAll` is explicit, for tests and local use, and
+`permissionPolicy` is opt-in: it allows an action on a schema to a caller
+holding `<schema>.<action>`, such as a user whose roles grant it (D50), a
+behavior's namespace operation that reads to anyone and one that writes to
+a caller holding `<behavior>.<operation>`, and refuses the other
+questions that name no schema.
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
@@ -95,10 +100,12 @@ export type NamespaceOperation = 'create' | 'archive' | 'unarchive' | 'list';
 
 /**
  * One question the engine asks the policy: about a schema of a namespace,
- * about a namespace itself, or, while it lists a caller's tools, whether
- * the caller may do what an engine tool does at all.
+ * about a namespace itself, while it lists a caller's tools whether the
+ * caller may do what an engine tool does at all, or about a behavior's
+ * namespace operation. A union on `action`, with `behavior` telling the
+ * last kind from a schema's question of the same action.
  */
-export type AccessRequest = SchemaAccessRequest | NamespaceAccessRequest | ListingAccessRequest;
+export type AccessRequest = SchemaAccessRequest | NamespaceAccessRequest | ListingAccessRequest | BehaviorAccessRequest;
 
 /** A question about one schema of a namespace: its instances, events, drafts and versions. */
 export interface SchemaAccessRequest {
@@ -110,6 +117,8 @@ export interface SchemaAccessRequest {
   readonly schema: string;
   /** For a behavior operation, its name; absent for every other call. */
   readonly operation?: string;
+  /** None: a schema's question names no behavior of its own. */
+  readonly behavior?: undefined;
 }
 
 /**
@@ -125,6 +134,7 @@ export interface NamespaceAccessRequest {
   readonly operation: NamespaceOperation;
   /** None: a namespace's own question names no schema. */
   readonly schema?: undefined;
+  readonly behavior?: undefined;
 }
 
 /**
@@ -148,7 +158,33 @@ export interface ListingAccessRequest {
   readonly operation?: NamespaceOperation;
   /** None: the tool names its schema only when called. */
   readonly schema?: undefined;
+  readonly behavior?: undefined;
   readonly listing: true;
+}
+
+/**
+ * A question about a behavior's namespace operation (D77): one its
+ * declaration gives `scope: "namespace"`, which runs on the behavior's
+ * tables across every schema of the namespace that composes it, with no
+ * schema of its own. `read` or `write`, as its declaration says. The
+ * engine asks it at the call, and, with `listing`, while the tools
+ * document lists the operation's tool; a refusal hides the tool. The rows
+ * a read returns are already only those of the schemas the principal may
+ * read (sql.readable(), asked read once per schema), so a policy can let
+ * every read one through; a writing one writes only the behavior's own
+ * tables.
+ */
+export interface BehaviorAccessRequest {
+  readonly principal: Principal;
+  readonly action: 'read' | 'write';
+  readonly namespace: string;
+  /** The behavior that declares the operation. */
+  readonly behavior: string;
+  readonly operation: string;
+  /** None: the operation runs across schemas. */
+  readonly schema?: undefined;
+  /** True while the tools document lists the operation's tool. */
+  readonly listing?: true;
 }
 
 /** Answers true to allow. It runs synchronously, before the engine's transaction. */
@@ -163,11 +199,18 @@ const enginePermissionPolicies = new WeakSet<AccessPolicy>();
 
 /**
  * permissionAllows is permissionPolicy's rule: the principal holds
- * `<schema>.<action>`, by matcher. A question that names no schema, a
- * namespace's own (`manage`) or a listing question, it cannot answer by a
- * schema's permission, so it refuses it.
+ * `<schema>.<action>`, by matcher. A behavior's namespace operation (D77)
+ * that reads is allowed, since its rows are those of the schemas the
+ * principal may read, and one that writes to a holder of
+ * `<behavior>.<operation>`, a listing question about one the same. Any
+ * other question that names no schema, a namespace's own (`manage`) or a
+ * listing question, it cannot answer by a schema's permission, so it
+ * refuses it.
  */
 function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): boolean {
+  if (request.behavior !== undefined) {
+    return request.action === 'read' || matcher(request.principal.permissions, [`${request.behavior}.${request.operation}`]);
+  }
   if (request.schema === undefined) {
     return false;
   }
@@ -180,8 +223,11 @@ function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): b
  * `Task.define`, `Task.publish`), so a role that grants `Task` grants every
  * action on Task. A behavior operation asks the action its declaration
  * says, so `Task.write` allows a transition; the behavior's own permission,
- * such as a Workflow transition's, is checked besides. It matches with the
- * engine's permissionMatcher, or with the one it is given. It refuses a
+ * such as a Workflow transition's, is checked besides. A behavior's
+ * namespace operation (D77) that reads it allows to anyone, and one that
+ * writes to a caller holding `<behavior>.<operation>`
+ * (`Comments.claimDeliveries`). It matches with the engine's
+ * permissionMatcher, or with the one it is given. It refuses any other
  * question that names no schema: a namespace's own (`manage`), which a
  * deployment's own policy answers, and a listing question, so the tools
  * document hides define_schema and the namespace tools, though a define
