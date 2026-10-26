@@ -72,12 +72,14 @@ checked and stored.
 | --- | --- | --- | --- | --- | --- |
 | `Finance.Currency` | ISO 4217 alphabetic currency code active on List One (e.g., USD, EUR, JPY) | `VARCHAR(3)` | string / string / str / String | length 3 to 3; pattern `^[A-Z]{3}$`; its own validator | `USD` |
 | `Finance.Money` | Monetary amount in smallest currency unit (e.g., cents for USD) | `BIGINT` | int64 / number / int / i64 | 0 to 9007199254740991 | `1000` |
+| `Finance.SignedMoney` | Signed monetary amount in smallest currency unit (e.g., cents for USD) | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `-1250` |
 
 ## Generic
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
 | `Generic.Boolean` | True or false | `BOOLEAN` | bool / boolean / bool / bool |  | `true` |
+| `Generic.Decimal` | Exact decimal number in plain notation, carried as a string | `NUMERIC` | string / string / decimal.Decimal / superscalar::Decimal | pattern `^[+-]?[0-9]+(\.[0-9]+)?$` | `19.99` |
 | `Generic.Float64` | A finite 64-bit floating-point number | `DOUBLE PRECISION` | float64 / number / float / f64 |  | `3.5` |
 | `Generic.Int64` | Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `1000` |
 | `Generic.JSON` | Any valid JSON value: object, array, primitive, or null | `JSONB` | json.RawMessage / JSONValue / Any / serde_json::Value | its own validator | `{"k":1}` |
