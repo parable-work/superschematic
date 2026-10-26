@@ -137,7 +137,7 @@ pub use signals::{
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;
 pub use tools::{
-    InvocationPolicy, ToolFilter, ToolKeys, ToolOptions, ToolSummary, ToolTarget, Tools,
+    HiddenBy, InvocationPolicy, ToolFilter, ToolKeys, ToolOptions, ToolSummary, ToolTarget, Tools,
 };
 pub use values::{
     is_hash, DriverError, StoredValue, SweepResult, ValueDriver, ValueOptions, Values,

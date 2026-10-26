@@ -73,6 +73,7 @@ func TestRegisterToolInvocationPolicyRejectsInvalid(t *testing.T) {
 		{"hyphenated key", ToolInvocationPolicy{Extension: "x", Key: "on-call", Values: []string{"a"}, Default: "a"}, `invocation policy key "on-call" must be a letter`},
 		{"record key", ToolInvocationPolicy{Extension: "x", Key: "handle", Values: []string{"a"}, Default: "a"}, `invocation policy key "handle" is a key @mcp already uses`},
 		{"authoring key", ToolInvocationPolicy{Extension: "x", Key: "reason", Values: []string{"a"}, Default: "a"}, `invocation policy key "reason" is a key @mcp already uses`},
+		{"engine's key", ToolInvocationPolicy{Extension: "x", Key: "hiddenBy", Values: []string{"a"}, Default: "a"}, `invocation policy key "hiddenBy" is a key @mcp already uses`},
 		{"no values", ToolInvocationPolicy{Extension: "x", Key: "review", Default: "a"}, "invocation policy review lists no values"},
 		{"quoted value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"it's"}, Default: "it's"}, `invocation policy review value "it's" must be lowercase`},
 		{"repeated value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"a", "a"}, Default: "a"}, `invocation policy review lists "a" twice`},

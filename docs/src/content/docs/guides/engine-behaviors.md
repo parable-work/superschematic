@@ -606,8 +606,9 @@ refuses a title that is not one of the type's own text fields, a summary
 field that is neither the type's nor its behaviors', and a state or a
 transition the `Workflow` config does not list, with the compiler's
 wording. The describe document carries the instance type's display, its
-fields with their `@docs` titles and `@icon`s, and each operation's
-title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
+fields with their `@docs` titles, `@icon`s and `@display`s (`multiline`,
+and `currency`, a code or another field by its JSON key), and each
+operation's title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
 has every rule.
 
 ## Create parameters

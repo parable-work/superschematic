@@ -56,7 +56,7 @@ export interface DescribeDocument {
    * when the type declares none.
    */
   display?: TypeDisplay;
-  /** The instance type's own fields, in declaration order, each with its title and icon where declared. */
+  /** The instance type's own fields, in declaration order, each with its title, icon and display where declared. */
   fields: DescribedField[];
   /** The JSON Schema of an instance's data: its own fields, closed. */
   instance: JSONSchemaObject;
@@ -80,6 +80,18 @@ export interface DescribedField {
   title?: string;
   /** The glyph a UI shows for it, from @icon. */
   icon?: string;
+  /** How a UI shows its value, from its @display (D48); absent when it declares none. */
+  display?: FieldDisplay;
+}
+
+/**
+ * An own field's @display (D48), as the schema holds it: `multiline` for
+ * text, and `currency` for an amount in minor units, an ISO 4217 code or
+ * the own field that holds one, by its key in an instance's data.
+ */
+export interface FieldDisplay {
+  multiline?: boolean;
+  currency?: string | { field: string };
 }
 
 /** A behavior a schema's instance type composes. */
@@ -124,10 +136,22 @@ export interface DescribedOperation {
   [policyKey: string]: unknown;
 }
 
-/** A visible tool's MCP record, or a hidden one's (ir.OperationMCP as tools/schema.json writes it). */
+/**
+ * Why the engine hides a tool from a caller, in the order `hiddenBy` lists
+ * them: the deployment's tool options (`tools.hidden`), an archived
+ * namespace the tool writes in, the access policy, MCP's refusal of its
+ * handle, and the mount's filter.
+ */
+export type ToolHiddenBy = 'deployment' | 'archived' | 'policy' | 'handle' | 'filter';
+
+/**
+ * A visible tool's MCP record, or a hidden one's (ir.OperationMCP as
+ * tools/schema.json writes it). A hidden one's `hiddenBy` names every cause
+ * the engine found, and `hiddenReason` is the first one's.
+ */
 export type ToolMCPRecord =
   | { hidden: false; name: string; handle: string; description: string; _meta?: Record<string, unknown>; [policyKey: string]: unknown }
-  | { hidden: true; hiddenReason: string };
+  | { hidden: true; hiddenReason: string; hiddenBy: ToolHiddenBy[] };
 
 /** One tool of the tools document: ir.ToolManifestTool. */
 export interface ToolDefinition {

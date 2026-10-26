@@ -4606,6 +4606,10 @@
       "valid": false
     },
     {
+      "value": "hiddenBy",
+      "valid": false
+    },
+    {
       "value": "reason",
       "valid": false
     },

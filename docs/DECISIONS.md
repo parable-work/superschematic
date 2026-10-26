@@ -11562,3 +11562,82 @@ Left: `Encrypted<T>` of other types than string; a blind index for
 lookups; encrypted fields in the engine, version graphs and the identity
 tables; a Rust or Python ORM's encryption; a schema-wide naming strategy;
 overrides on the engine's and a version graph's tables and on the Session, UserCredential and UserRoleGrant tables the user model adds.
+
+### D58, amended: a hidden tool names each cause in `hiddenBy`, the policy is asked of a tool hidden for its handle, and the describe document gives each field's display
+
+The console's engine pages (D44, amended, above) met two gaps in what the
+engine says of a type. A hidden tool's `mcp` carried only
+`hiddenReason`, text. The engine hid a tool for its MCP handle before it
+asked the policy, so a tool refused for its handle was never asked of the
+policy, and the handle's reason took the place of the deployment's when
+`tools.hidden` hid it too. A reader that offers the engine's operations
+outside MCP could only match the reason's prefix (`its MCP handle `), and
+re-read `tools.hidden` from the document the engine was opened with. And
+the describe document's `fields` held a field's `name`, `title` and
+`icon` but not its `@display`, so a field's currency (D48, amended,
+above) was read from the type's live schema document. The Topcoat batch
+4 amendments, D44's console and D48's currency, left both for the
+engine; they are built here.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A hidden tool's `mcp` is `{ hidden: true, hiddenReason, hiddenBy }`. `hiddenBy` lists each cause the engine found, in a fixed order: `deployment` (the tool options' `hidden`), `archived` (a write in an archived namespace), `policy` (the access policy refuses the caller what the call asks), `handle` (`@mcp` would refuse the handle: not snake case, longer than 48 characters, an engine tool's, or two tools'), and `filter` (the mount's `ToolFilter` leaves it out). The Rust engine exports the causes as `HiddenBy`, and the TypeScript package types them as `ToolHiddenBy`, on the server and the client alike. | Structured reasons, `[{ cause, reason }]`, which repeat `hiddenReason` for the common single cause; a code inside `hiddenReason`, which a client would parse again |
+| `hiddenReason` is the first cause's reason, so a tool the deployment hides keeps the deployment's reason when its handle is refused too, and one the policy refuses gives the policy's before the handle's. | The handle's reason first, as before, which named the cause no reader acts on and dropped the deployment's; joining every reason, which no reader could split |
+| The policy is asked of every tool the deployment does not hide, one hidden for its handle included. Such a tool's operation is still offered through `instances` and the HTTP routes, and the console offers it as a form, so the document now says whether the caller may run it: a refused one is `["policy", "handle"]` with the policy's reason. A tool the deployment hides is offered to no caller, so the policy is not asked of it, and the filter, which only narrows what MCP offers, is asked only of a tool nothing else hides. | Asking the policy of a deployment-hidden tool too, which no reader uses and which adds a policy call per hidden tool to every listing; leaving the handle-hidden tool unasked, which showed the console a form the engine then refused (403) |
+| `hiddenBy` is the engine's. The generators' `tools/schema.json`, `tools/index.ts` and `mcp-audit.json` hide an operation only for its `@mcp`, whose reason is the author's, so they do not write it, and `ir.OperationMCP` does not carry it. `hiddenBy` is reserved as an invocation-policy key, beside `hiddenReason` and `reason`, by `ir.ValidateMCPInvocationKey`, the engine's tool options in Rust and the TypeScript package's: a visible record never holds `hiddenBy`, so a client reads it without checking `hidden` first. The engine reads whether the namespace is archived once per tools document. | A member of `ir.OperationMCP`, which every generator, both data forms and the schema-file corpus would write for one value; leaving `hiddenBy` free as a policy key, since a hidden record carries no policy, which let a visible record hold `"hiddenBy": "ask"` |
+| Each entry of the describe document's `fields` gains `display`, after `icon`: the field's `display` as the schema document holds it (`multiline`, and `currency`, a literal ISO 4217 code or `{ field }`), absent when it declares none. A `{ field }` names the other field by its key in an instance's `data`, as `fields` names each field, whether the schema names it by its name or its JSON key. The engine applies no rule of its own: a reader takes a `Finance.Money` field without the hint in the type's one `Finance.Currency` field, each field's scalar in `instance` under the tools' scalar key. This replaces the D48 amendment's sentence that the engine reads no field's display and the console reads it from the live schema document. | Writing the inferred currency into `fields`, which D48 keeps the reader's; the schema's field name in `{ field }`, which a reader of `data` would map again |
+
+Status: built in the engine, its TypeScript package and its corpora.
+`a_hidden_tool_names_each_cause_in_hidden_by_and_the_first_ones_reason`
+(`runtime/engine/rust/testkit/tests/tools.rs`, SQLite and Postgres)
+hides `test.Counter.increment` by the deployment and publishes a schema
+whose 43-character name makes its handles too long: the deployment's
+hide alone, for alice and reader, `["deployment", "handle"]` with the
+deployment's reason, `["handle"]` for a read, `["policy", "handle"]`
+with the policy's reason for reader's delete, and `["policy"]`. The
+handle, filter and policy tests assert `hiddenBy` beside their reasons,
+and `describes_each_fields_display_its_currency_field_by_its_key` gives
+`multiline`, a code, and a `{ field }` named by the field's name and by
+its JSON key, both as the key. The TypeScript suite holds the same
+(`tools.test.ts`, `display.test.ts`, `namespaces.test.ts` for
+`archived`, `operations.test.ts` for `filter` over HTTP), and
+`client-types.test.ts` holds the server's and the client's
+`FieldDisplay` and `ToolHiddenBy` to one shape. The corpus, rerecorded
+with `UPDATE_ENGINE_CORPUS=1`, moves only by `hiddenBy` on each hidden
+tool: `scenarios/namespaces.json` (`archived`) and `http/operations.json`
+(`policy`, `filter`). No describe document of the corpus has a field
+display. `hiddenBy` joins the policy-key verdicts of
+`tool_parameters_parity.json` (refused), and `TestValidateOperationMCP`,
+the registry's `TestRegisterToolInvocationPolicyRejectsInvalid`, the testkit's and the
+TypeScript suite's tool-options tests refuse it by name. The rule is
+reversible until the first release.
+
+### D44, amended: the console reads why the engine hides a tool, and a field's currency, from the engine
+
+The console amendment above told a tool hidden for its handle from one
+the deployment hides by the reason's prefix, read `tools.hidden` from the
+deployed `ENGINE_DOCUMENT`, and read a field's currency from the type's
+live schema document, as the caller. The engine now says both (D58,
+amended, above).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `engine_pages::offers` reads each tool's `mcp.hiddenBy` through `tool_offer`: a tool hidden by `deployment` is not offered, so its operation has no form and is 404; one whose every cause is a limit of MCP's, `handle` or `filter`, is offered; any other hidden tool is refused, 403 with `hiddenReason`: `policy`, whose reason is the policy's, `archived`, and a record whose causes are missing, empty or unknown to the pages, which fail closed. The prefix match and the `tools.hidden` read are gone, so an engine opened with other tool options than the document's is read as it was opened. Because the engine asks the policy of a tool hidden for its handle, a caller the policy refuses has no form for it and is refused it (403) before the method is checked. | Keeping the document's `tools.hidden` as a second source, which would disagree with an engine opened by hand |
+| An instance's amounts take their currency from the describe document the page has read: each field's `display.currency`, a code or another own field by its key, else, for a `Finance.Money` field, the type's one `Finance.Currency` field, each scalar from `instance`. The page no longer calls `schemas().live()`, so a caller who may describe a type sees its money however the policy answers a read of its schema document. | The live schema document, a second engine call per instance page |
+
+Status: built in the Topcoat crate. `TestTheConsolePagesTheEngine`
+(`the_console_offers_what_the_deployment_and_the_policy_allow`) still
+signs off and withdraws on `SupplierContractAmendmentRequest`, whose
+`withdrawSignOff` handle has 53 characters, finds the deployment-hidden
+`listSignOffs` 404 on it and on `Request`, and now gives an auditor who
+may only read amendments no `withdrawSignOff` form and a 403 with the
+policy's reason for it. `tool_offer_tests`, appended to the fixture's
+`engine_pages.rs`, offers `handle` and `filter` alone, drops
+`deployment`, and refuses `policy`, `archived`, an unknown cause, a
+missing or empty `hiddenBy` and a non-string cause.
+`an_instances_amounts_show_as_money` shows a
+code's, a sibling field's and the type's one `Finance.Currency` field's
+amounts from the describe document. fixture-engine-api's golden
+`engine_pages.rs` is regenerated, and acme's console tests show its
+checkout and order amounts as money unchanged. The rule is reversible
+until the first release.

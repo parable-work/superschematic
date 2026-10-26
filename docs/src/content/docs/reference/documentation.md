@@ -273,8 +273,11 @@ wins, and with two currency fields and no hint the amount names none.
 Like `multiline` it is presentation only: no generated type, validator
 or wire format changes. The Topcoat crate shows such an amount as
 `GBP 4.50` and takes it in a decimal control
-([Money](/superschematic/guides/topcoat/#money)). The engine's own
-amounts name their currency in their behavior's config, as
+([Money](/superschematic/guides/topcoat/#money)). The engine's describe
+document gives an engine type's field its display as the schema holds it,
+a `{ field }` by the other field's JSON key, and leaves the `Finance.Money`
+rule to its reader. The engine's own amounts name their currency in their
+behavior's config, as
 [commerce](/superschematic/guides/commerce/#totals-and-currency) does.
 
 ## A title on an enum member
@@ -459,7 +462,7 @@ rows and label its add button
 ([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
 The engine's describe document carries it
 for the schema's instance type, its `icon` included, with each field's
-title and icon
+title, icon and display
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
 The Topcoat console's nav shows a type's icon beside its link. The OpenAPI
 document and the tool manifests carry no display.
