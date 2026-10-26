@@ -1405,6 +1405,79 @@ fn the_schedule_prune_removes_deliveries_past_retention_on_the_runners_clock() {
     }
 }
 
+#[test]
+fn a_run_of_prune_removes_full_batches_up_to_its_budget() {
+    for target in targets("comments_inbox_prune_budget") {
+        let mut config = review_config();
+        config["deliveryRetentionMs"] = json!(86_400_000);
+        let world = world(&target, config);
+        world
+            .engine
+            .runner()
+            .run_due()
+            .expect("the runner's first pass");
+        // Expired deliveries straight into the table: more than one batch
+        // of 1000, then more than a run's 20 batches.
+        let seed = |count: i64| {
+            world
+                .engine
+                .db()
+                .write(
+                    superschematic_engine::storage::Lock::Namespace("default"),
+                    |tx| {
+                        tx.run(
+                            format!(
+                                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < {count})
+                                 INSERT INTO bhv_comments__comment_deliveries
+                                   (namespace, schema, id, message, subject, mention, reply, state, attempts, created_at)
+                                 SELECT 'default', 'Review', 'r1', i, 'seeded', 1, 0, 'pending', 0, 1000 + i FROM n"
+                            ),
+                            &[],
+                        )
+                    },
+                )
+                .expect("seed deliveries");
+        };
+        let count = |world: &World| {
+            world
+                .deliveries()
+                .iter()
+                .filter(|row| row[3] == "seeded")
+                .count()
+        };
+        seed(2500);
+        world.set_clock(1000 + 86_400_000 + 3_000_000);
+        world.engine.runner().run_due().unwrap();
+        assert_eq!(count(&world), 0, "one run clears 2500 in three batches");
+        // Past the budget, one run removes 20 batches, oldest first, and
+        // the next run the rest.
+        world
+            .engine
+            .db()
+            .write(
+                superschematic_engine::storage::Lock::Namespace("default"),
+                |tx| tx.run("DELETE FROM bhv_comments__comment_deliveries", &[]),
+            )
+            .unwrap();
+        seed(20_500);
+        world
+            .engine
+            .clock()
+            .advance(86_400_000 + 3_600_000)
+            .unwrap();
+        world.engine.runner().run_due().unwrap();
+        let left = rows(
+            &world.engine,
+            "SELECT min(message), count(*) FROM bhv_comments__comment_deliveries",
+        );
+        assert_eq!(left, [json!([20_001, 500])]);
+        world.engine.clock().advance(3_600_000).unwrap();
+        world.engine.runner().run_due().unwrap();
+        assert_eq!(count(&world), 0);
+        world.engine.shutdown();
+    }
+}
+
 // Comments at migration 3, as batch 2 shipped it: its tables, and `seed`,
 // which writes a message as batch 2's post, begin and deleteMessage left
 // it.

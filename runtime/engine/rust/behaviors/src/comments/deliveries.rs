@@ -36,8 +36,11 @@ const CLAIM_READ: i64 = 1000;
 const BODY: usize = 4000;
 /// The longest backoff, in milliseconds.
 const MAX_BACKOFF_MS: i64 = 3_600_000;
-/// The most deliveries one run of `prune` removes.
+/// How many deliveries `prune` reads and removes at a time.
 const PRUNE: i64 = 1000;
+/// The most batches of [`PRUNE`] one run of `prune` removes: 20000
+/// deliveries a run, 480000 a day at the hourly schedule.
+const PRUNE_BATCHES: usize = 20;
 
 /// A veto of a namespace operation: it names the namespace in place of an
 /// instance.
@@ -557,37 +560,53 @@ pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value
 }
 
 /// The schedule `prune`: the run's schema's deliveries made more than
-/// `deliveryRetentionMs` ago that no live claim holds, oldest first, at
-/// most 1000 a run.
+/// `deliveryRetentionMs` ago that no live claim holds, oldest first, in
+/// batches of 1000 for as long as a batch comes back full, at most 20
+/// batches a run.
 pub(super) fn prune(cx: &ScheduleCx<'_, CommentsConfig>) -> Result<()> {
-    let table = cx.sql().table(DELIVERIES)?;
-    let now = cx.now();
-    let rows = cx.sql().all(
-        format!(
-            "SELECT id, message, subject FROM {table}
-              WHERE namespace = ? AND schema = ? AND created_at < ?
-                AND (state <> 'claimed' OR due_at <= ?)
-              ORDER BY created_at LIMIT ?"
-        ),
-        &[
-            SqlValue::from(cx.namespace()),
-            SqlValue::from(cx.schema()),
-            SqlValue::Integer(now - cx.config().delivery_retention_ms),
-            SqlValue::Integer(now),
-            SqlValue::Integer(PRUNE),
-        ],
-    )?;
-    for row in &rows {
-        cx.sql().run(
-            format!("DELETE FROM {table} WHERE {KEYED}"),
-            &[
-                SqlValue::from(cx.namespace()),
-                SqlValue::from(cx.schema()),
-                SqlValue::from(row.text("id")?),
-                SqlValue::Integer(row.i64("message")?),
-                SqlValue::from(row.text("subject")?),
-            ],
-        )?;
+    for _ in 0..PRUNE_BATCHES {
+        if prune_batch(cx)? < PRUNE as usize {
+            break;
+        }
     }
     Ok(())
+}
+
+/// One batch of `prune`, oldest first: the 1000 oldest of the deliveries
+/// it removes, and any others made in the same millisecond as the last of
+/// them, in one statement each, through `comment_deliveries_created`. How
+/// many it removed.
+fn prune_batch(cx: &ScheduleCx<'_, CommentsConfig>) -> Result<usize> {
+    const PRUNABLE: &str = "namespace = ? AND schema = ? AND created_at < ?
+                AND (state <> 'claimed' OR due_at <= ?)";
+    let table = cx.sql().table(DELIVERIES)?;
+    let now = cx.now();
+    let mut params = vec![
+        SqlValue::from(cx.namespace()),
+        SqlValue::from(cx.schema()),
+        SqlValue::Integer(now - cx.config().delivery_retention_ms),
+        SqlValue::Integer(now),
+    ];
+    // The 1000th oldest, when there are that many: the batch stops there.
+    let mut last = params.clone();
+    last.push(SqlValue::Integer(PRUNE - 1));
+    let cutoff = cx.sql().get(
+        format!(
+            "SELECT created_at FROM {table} WHERE {PRUNABLE}
+              ORDER BY created_at LIMIT 1 OFFSET ?"
+        ),
+        &last,
+    )?;
+    let through = match &cutoff {
+        Some(row) => {
+            params.push(SqlValue::Integer(row.i64("created_at")?));
+            " AND created_at <= ?"
+        }
+        None => "",
+    };
+    let removed = cx.sql().run(
+        format!("DELETE FROM {table} WHERE {PRUNABLE}{through}"),
+        &params,
+    )?;
+    Ok(usize::try_from(removed.changes).unwrap_or(usize::MAX))
 }

@@ -1530,17 +1530,29 @@ top-level message whose record stands adds one, a `deleteMessage` or
 ### The schedule `prune`
 
 Comments declares a second schedule, `prune`, every 3600000 ms
-(`Every::Ms`). Each run, for its namespace and schema, reads up to 1000
+(`Every::Ms`). Each run, for its namespace and schema, removes the
 deliveries made more than `deliveryRetentionMs` ago that no live claim
-holds, oldest first, through `comment_deliveries_created`, and deletes them
-by key:
+holds, oldest first, through `comment_deliveries_created`, in batches. A
+batch reads the `created_at` of the 1000th oldest of them and deletes those
+made up to then, or every one of them when there are fewer:
 
 ```sql
-SELECT id, message, subject FROM <comment_deliveries>
+SELECT created_at FROM <comment_deliveries>
  WHERE namespace = ? AND schema = ? AND created_at < ?          -- now - deliveryRetentionMs
    AND (state <> 'claimed' OR due_at <= ?)                      -- now
- ORDER BY created_at LIMIT 1000
+ ORDER BY created_at LIMIT 1 OFFSET 999;
+
+DELETE FROM <comment_deliveries>
+ WHERE namespace = ? AND schema = ? AND created_at < ?
+   AND (state <> 'claimed' OR due_at <= ?)
+   AND created_at <= ?;                                         -- the batch's last; absent when fewer than 1000
 ```
+
+A batch takes 1000 deliveries, more when others share the last one's
+millisecond. The run goes on while a batch takes 1000 or more, up to 20
+batches: at least 20000 deliveries a run, 480000 a day. A schema that makes
+more than that keeps a backlog the next runs work through, and its oldest
+deliveries go first.
 
 A delivery lives `deliveryRetentionMs` whatever its state: a deployment
 that runs no notifier still records them for the inbox, and they must not
