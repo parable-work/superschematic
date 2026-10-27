@@ -344,6 +344,9 @@ CREATE TABLE engine_events (
   -- The JSON pointers of the members of change that hold a ref to the
   -- value store (migration 9); null for none.
   value_refs     TEXT,
+  -- The subject the writing principal acted for (D77, migration 14), the
+  -- event's `for`; null when it acted for no one.
+  for_subject    TEXT,
   CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
   CHECK (instance_id IS NOT NULL OR seq IS NULL),
   CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation'),
@@ -998,6 +1001,15 @@ carries `service`, the calling deployable, beside `actor`: the end user
 the service acted for, or the service's own subject when it stood in for
 one. An event no service's call wrote has no `service`.
 
+An event a principal acting for a subject wrote (D77, "Acting for a
+subject" under "Access") carries `for`, the subject, beside `actor`: an
+instance's create, update, delete and operation, a beside operation's
+included, and a define or publish. The log keeps it in its own column
+(`for_subject`, engine migration 14), so retention, replay, the value
+store's refs and the stream carry it as they carry `actor`; an event
+written before the migration, and every event the runner's work writes,
+has none. `events.read` has no filter on it.
+
 A namespace that looks names up in a shared namespace also reads the
 shared namespace's publish events, which change the schemas it reaches;
 they keep the shared namespace as their `namespace`. Its own instance
@@ -1592,6 +1604,44 @@ runtime, so one rule answers both.
 be passed on as it is. The main entry point does not import the HTTP
 runtime, which brings Hono; the `./http` entry point does.
 
+### Acting for a subject
+
+An agent or a service that works for a person carries the person in its
+principal (D77): `actingFor: { subject }`. The principal stays its own,
+so an event names the agent as `actor` and the person as `for` ("The
+event log"), Provenance records both (`by` and `for`), and a lease the
+agent holds is the agent's whoever it works for. It adds no permissions:
+`can()` answers for the principal's own, and the engine has no grant of
+its own for acting for anyone. Over HTTP and MCP the host's mount sets it
+from the `Acting-For` header when it opts in ("Authentication and
+access" under "HTTP"); a caller of the engine's API sets it on the
+principal it passes.
+
+The engine checks it with the rest of the principal (`checkPrincipal`):
+`invalid_argument` for an `actingFor` that is not `{ subject }`, a
+subject that is empty, or the principal's own. The runner's principal
+acts for no one: an engine whose `runner.principal` carries `actingFor`
+does not open, so an event the runner's work writes for a reaction or a
+schedule never carries `for`.
+
+The policy sees it on every question's principal, and may refuse it.
+`permissionPolicy()` refuses every question whose principal acts for
+someone unless the principal holds `actFor`, matched by its matcher
+(`ACT_FOR_PERMISSION`), and then answers as for the principal's own
+permissions: an agent holding `Task.write` and `actFor` may write tasks
+for anyone, and nothing else. In a `{ rules }` policy a rule matches on
+`actingFor`: `true` for a principal acting for any subject, `false` for
+one acting for none, or a subject or a list of them. As with `behavior`,
+a rule that leaves it out matches only a principal acting for no one, so
+every rule written before it, a subject- or service-wide allow among
+them, lets no principal act for anyone, and a question no rule matches is
+refused. `{ "actingFor": true, "require": "{schema}.{action}" }` lets a
+principal act for anyone within its own permissions; `"allowAll"` allows
+it, and `"permission"` answers as `permissionPolicy()` does. A policy of
+the deployment's own reads `principal.actingFor`, and one written before
+it, which does not, answers as if the principal acted for no one: check
+`actingFor` first, as the examples' `auth.ts` do.
+
 ### Service callers
 
 A call another deployable makes (D37) carries the calling service in the
@@ -1620,6 +1670,13 @@ their context's `principal`.
   matches end users' permissions.
 - `standsIn(principal)` says which case a principal is. The runner keeps
   its own principal, which the deployment names.
+- A service standing in may act for a subject (D77, "Acting for a
+  subject"): `service:<deployable>` is the actor, the deployable the
+  `service`, and the subject the `for` of what it writes. A service that
+  brings an end user already acts for that user, who is the actor: a call
+  that also acts for a third subject is `invalid_argument`, since an
+  event has one `actor`, one `service` and one `for`, and would lose
+  which of the two people the call was for.
 
 ## Errors
 
@@ -2081,6 +2138,8 @@ a field reader's) has:
 
 - `behavior`, `config`, `namespace`, `schema`, `version`, `id`;
 - `principal`, and `now`, the clock's time, read once for the whole call;
+  `principal.actingFor` is the subject the caller acts for, when it acts
+  for one ("Acting for a subject" under "Access");
 - `can(permission)`: whether the principal holds a permission, as the
   engine's `permissionMatcher` answers for its permissions. The default is
   the HTTP runtime's `hasAnyPermission`: dotted paths, a granted
@@ -4517,7 +4576,9 @@ Who set each own field last and through what (D73). afterChange compares
 a change's own fields before and after it and records each recorded
 field that moved: `caller` for a caller's create or update, else the
 attribution entry's behavior or the operation's own (D16, amended), the
-principal's subject, the time and the attributed confidence. With
+principal's subject (`by`), the subject it acted for (`for`, D77, absent
+when it acted for no one; its migration 2 adds the column), the time and
+the attributed confidence. With
 `review`, a write from one of its `sources` is `proposed`, or `accepted`
 when its confidence reaches `below`; `accept` and `reject` need the
 review's permission, and `reject` writes the field through its own
@@ -4779,6 +4840,30 @@ policy's to say. The engine wraps the deployment's `Authenticator`:
 A deployment whose callers are all services passes `authenticateService`
 and no `authenticate`. Without `authenticateService` the runtime ignores
 the header, as before.
+
+`actingFor` lets a caller act for a subject (D77, "Acting for a subject"
+under "Access") with the `Acting-For` request header (`ACTING_FOR_HEADER`),
+whose value, trimmed, is the subject. `engineApp` and `engineMcp` take it:
+
+- `false`, the default, ignores the header: a request that carries it is
+  answered as if it did not, so a deployment that never opted in is not
+  changed by a client that sends it;
+- `true` honors it on every route for any caller the runtime
+  authenticated, an end user or a service standing in, and the access
+  policy decides what the principal may do for the subject;
+- a function, `(principal, subject, request) => boolean`, decides per
+  request, given the engine's principal for the caller (the service
+  beside it included), the subject and the request: a host that trusts
+  only its agents' tokens to act for anyone says so here.
+
+An empty header acts for no one. A subject that is the caller's own, or
+one beside the end user a service brings, is the engine's 400
+`invalid_argument`. The Go binding's `enginehttp.Options.ActingFor` is
+the function (`enginehttp.HonorActingFor` for `true`, nil for `false`),
+and the Rust engine's `ApiOptions.acting_for` an `ActingForHeader`
+(`Ignore`, `Honor`, or `ActingForHeader::decide(...)`), which the axum
+router's `Options::acting_for` sets; each host passes the engine's routes
+`actingFor: true` for a request whose header it honors.
 
 ### Users
 
@@ -5546,6 +5631,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   ("Authentication and access" under "HTTP"), is the principal of every
   call, so the access policy answers each. An unknown namespace is the HTTP API's 404 problem; a request
   without a caller is 401.
+- `actingFor` honors the `Acting-For` header as `engineApp`'s does (D77,
+  "Authentication and access" under "HTTP"): ignored unless the mount
+  opts in, and then the principal of the request's every call acts for
+  the subject it names, which each event it writes records as `for`.
 - The engine speaks the protocol itself (D58, `rust/engine/src/api`):
   MCP's stateless streamable transport, each request answered on its own,
   on the 2025 revisions (`initialize`, `tools/list`, `tools/call`; GET and
@@ -5645,7 +5734,7 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
 | `signals.send({ schema, instanceId, behavior, name, data? })` | the signal route ("Signals"): 204, nothing; a 429 `rate_limited` is not retried |
 
 - **Options.** Every call takes `namespace` (the client's `namespace`,
-  `default`, otherwise), `signal` and `forward`. A write (`update`,
+  `default`, otherwise), `signal`, `forward` and `actingFor`. A write (`update`,
   `delete`, `invoke`, `operate`) also takes `expectedSeq`, sent as
   `If-Match`, and `preconditions`, sent as the `Preconditions` header.
   `operate` returns `{ result, seq }`, the sequence from the `ETag`.
@@ -5676,6 +5765,12 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
   `signedTokenSource` fill it. A call's `forward` sends that end user's
   token instead of the client's, or no `Authorization` when it has none,
   so a service stands in for one.
+- **Acting for a subject** (D77). The client's `actingFor`, or a call's,
+  is sent as the `Acting-For` header (`ACTING_FOR_HEADER`), a call's
+  `null` sending none: the subject an agent or a service works for. A
+  mount honors it only when its host opts in ("Authentication and
+  access" under "HTTP"), and answers as if it were not there otherwise;
+  an event a call acting for someone wrote carries `for`.
 - **The retry rule.** A 401 `service_unauthorized` asks the service source
   for a fresh token (`token(true)`) once and retries; the end-user refresh
   does not run. Any other 401 runs `auth.refreshToken` once, shared by the

@@ -5,6 +5,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import {
   EngineError,
+  permissionPolicy,
   servicePrincipal,
   standsIn,
   type AccessPolicy,
@@ -193,6 +194,54 @@ for (const driver of drivers) {
       assert.deepEqual([event.actor, event.service], ['service:worker', 'worker']);
       const crawler = servicePrincipal({ deployable: 'crawler', serves: [], subject: 'sa-2' });
       assert.equal(thrown(() => engine.instances.get(crawler, 'Order', 'o1'), EngineError).code, 'forbidden');
+    });
+
+    test('a principal acting for a subject (D77): the policy sees it, permissionPolicy refuses it without actFor, and each event records for', () => {
+      const asked: AccessRequest[] = [];
+      const engine = seeded(driver, (request) => {
+        asked.push(request);
+        return permissionPolicy()(request);
+      });
+      const agent: Principal = { ...principal('agent', 'Order.read', 'Order.write'), actingFor: { subject: 'bob' } };
+      assert.equal(thrown(() => engine.instances.update(agent, 'Order', 'o1', { title: 'Lamp' }), EngineError).code, 'forbidden');
+      assert.deepEqual(asked.at(-1)?.principal.actingFor, { subject: 'bob' });
+      const trusted: Principal = { ...agent, permissions: [...agent.permissions, 'actFor'] };
+      const updated = engine.instances.update(trusted, 'Order', 'o1', { title: 'Lamp' });
+      assert.equal(updated.updatedBy, 'agent');
+      engine.instances.create(trusted, 'Order', { title: 'Chair' }, { id: 'o2' });
+      engine.instances.delete(trusted, 'Order', 'o2');
+      // actFor adds nothing to the principal's own permissions.
+      assert.equal(thrown(() => engine.instances.get(trusted, 'Note', 'n1'), EngineError).code, 'forbidden');
+      const events = engine.events.read(owner, { schema: 'Order' }).events.filter((event) => event.instanceId !== null);
+      assert.deepEqual(
+        events.map((event) => [event.kind, event.actor, event.for]),
+        [
+          ['create', 'owner', undefined],
+          ['update', 'agent', 'bob'],
+          ['create', 'agent', 'bob'],
+          ['delete', 'agent', 'bob'],
+        ]
+      );
+    });
+
+    test('a principal acting for a subject is checked: a subject not empty and not its own, and none beside a service\'s end user', () => {
+      const engine = seeded(driver, () => true);
+      const service = { deployable: 'worker', serves: [], subject: 'sa-1' };
+      for (const malformed of [
+        { subject: 'bob', permissions: [], actingFor: { subject: '' } },
+        { subject: 'bob', permissions: [], actingFor: { subject: 'bob' } },
+        { subject: 'bob', permissions: [], actingFor: 'alice' },
+        { subject: 'bob', permissions: [], actingFor: {} },
+        { subject: 'bob', permissions: [], service: { ...service, standsIn: false }, actingFor: { subject: 'alice' } },
+      ]) {
+        const error = thrown(() => engine.instances.get(malformed as unknown as Principal, 'Order', 'o1'), EngineError);
+        assert.equal(error.code, 'invalid_argument', JSON.stringify(malformed));
+      }
+      // A service standing in (D37) may act for a subject.
+      const standing: Principal = { ...servicePrincipal(service), actingFor: { subject: 'alice' } };
+      engine.instances.update(standing, 'Order', 'o1', { title: 'Lamp' });
+      const [, event] = engine.events.read(owner, { schema: 'Order', instanceId: 'o1' }).events;
+      assert.deepEqual([event.actor, event.service, event.for], ['service:worker', 'worker', 'alice']);
     });
 
     test("a principal's service is checked: well formed, and holding no permission when it stands in", () => {

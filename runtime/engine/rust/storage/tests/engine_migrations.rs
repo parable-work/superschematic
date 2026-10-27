@@ -16,7 +16,7 @@ use superschematic_engine_storage::{
 };
 use support::targets;
 
-const NAMES: [&str; 13] = [
+const NAMES: [&str; 14] = [
     "schema versions",
     "instances and the event log",
     "publish events by namespace",
@@ -30,6 +30,7 @@ const NAMES: [&str; 13] = [
     "namespaces a create makes",
     "event log retention",
     "beside events",
+    "events acting for a subject",
 ];
 
 const TABLES: [&str; 13] = [
@@ -120,7 +121,7 @@ fn from_an_empty_database() {
             })
         };
         let result = db.migrate(&counted, 7).unwrap();
-        assert_eq!(result.applied, (1..=13).collect::<Vec<_>>());
+        assert_eq!(result.applied, (1..=14).collect::<Vec<_>>());
         assert_eq!(
             calls.load(Ordering::SeqCst),
             1,
@@ -325,7 +326,10 @@ fn migration_10_that_fails_leaves_the_database_at_version_9() {
         let ledger = db.applied_migrations(ENGINE_OWNER).unwrap();
         assert_eq!(ledger.len(), 9);
         assert!(!tables(&db).contains(&"engine_half_built".to_owned()));
-        assert_eq!(db.migrate(&engine(), 3).unwrap().applied, [10, 11, 12, 13]);
+        assert_eq!(
+            db.migrate(&engine(), 3).unwrap().applied,
+            [10, 11, 12, 13, 14]
+        );
     }
 }
 
@@ -367,7 +371,7 @@ fn migration_13_draws_no_cursor_retention_pruned() {
             Ok(last)
         })
         .unwrap();
-        assert_eq!(db.migrate(&engine(), 2).unwrap().applied, [13]);
+        assert_eq!(db.migrate(&engine(), 2).unwrap().applied, [13, 14]);
         let next = write(&db, |tx| append(tx, 4)).unwrap();
         assert!(next > last, "{next} after {last}");
     }
@@ -381,7 +385,7 @@ fn a_database_newer_than_the_build_is_refused() {
         later
             .migrations
             .push(superschematic_engine_storage::Migration::new(
-                14,
+                15,
                 "from a later build",
                 |_| Ok(()),
             ));
@@ -406,7 +410,7 @@ fn from_each_earlier_version() {
             let applied = db.migrate(&engine(), 2).unwrap().applied;
             assert_eq!(
                 applied,
-                ((from as u32 + 1)..=13).collect::<Vec<_>>(),
+                ((from as u32 + 1)..=14).collect::<Vec<_>>(),
                 "from {from}"
             );
             assert_eq!(event_log_objects(&db), EVENT_LOG_OBJECTS, "from {from}");
@@ -579,17 +583,30 @@ fn check(db: &Db, version: usize) {
     let logged = check_events(db, version);
     check_rows(db, version);
     // The log's cursors carry on from the seed's, and the rebuilt CHECKs
-    // admit a define and an operation.
+    // admit a define and an operation. Migration 14's column holds the
+    // subject an event's principal acted for (D77): none for every event
+    // written before it.
     let next = write(db, |tx| {
         tx.run(
-            "INSERT INTO engine_events (kind, namespace, schema, actor, at) VALUES (?, ?, ?, ?, ?)",
-            params!["define", "default", "Order", "alice", 900],
+            "INSERT INTO engine_events (kind, namespace, schema, actor, for_subject, at) VALUES (?, ?, ?, ?, ?, ?)",
+            params!["define", "default", "Order", "agent:reviewer", "alice", 900],
         )?;
         tx.get("SELECT MAX(cursor) AS last FROM engine_events", &[])
     })
     .unwrap()
     .unwrap();
     assert_eq!(next.i64("last").unwrap(), logged + 1, "from {version}");
+    assert_eq!(
+        rows(db, "SELECT for_subject FROM engine_events ORDER BY cursor")
+            .iter()
+            .map(|row| row.opt_text("for_subject").unwrap().map(str::to_owned))
+            .collect::<Vec<_>>(),
+        (0..logged)
+            .map(|_| None)
+            .chain([Some("alice".to_owned())])
+            .collect::<Vec<_>>(),
+        "from {version}"
+    );
 }
 
 fn check_schemas(db: &Db, version: usize) {

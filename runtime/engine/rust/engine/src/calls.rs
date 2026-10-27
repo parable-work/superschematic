@@ -46,7 +46,8 @@ use std::borrow::Cow;
 use serde_json::{Map, Value};
 
 use crate::api::{
-    self, ApiOptions, Body, Caller, McpOptions, Refusal, Request, ServiceCaller, StreamOptions,
+    self, ActingForHeader, ApiOptions, Body, Caller, McpOptions, Refusal, Request, ServiceCaller,
+    StreamOptions,
 };
 use crate::engine::Engine;
 use crate::errors::{EngineError, Error, Result};
@@ -755,9 +756,20 @@ pub fn principal_from_json(given: &Value) -> Result<Principal, EngineError> {
             )));
         }
     }
+    if let Some(acting) = members.get("actingFor") {
+        if !acting
+            .as_object()
+            .and_then(|acting| acting.get("subject"))
+            .is_some_and(Value::is_string)
+        {
+            return Err(EngineError::invalid_argument(
+                "a principal's actingFor is { subject }, a subject that is not empty",
+            ));
+        }
+    }
     serde_json::from_value(given.clone()).map_err(|error| {
         EngineError::invalid_argument(format!(
-            "a principal is {{ subject, permissions, claims?, service? }}: {error}"
+            "a principal is {{ subject, permissions, claims?, service?, actingFor? }}: {error}"
         ))
     })
 }
@@ -992,8 +1004,10 @@ fn request_of(given: &Value) -> Result<Request> {
 }
 
 // api_options_of is how `api.handle` serves: `stream` ({pageSize,
-// heartbeatMs}) and `mcp` ({serverInfo: {name, version}, instructions}).
-// A tool filter is a function, which JSON cannot carry.
+// heartbeatMs}), `mcp` ({serverInfo: {name, version}, instructions}) and
+// `actingFor`, true when the Acting-For header is honored (D77). A tool
+// filter, or a function deciding actingFor, is a function, which JSON
+// cannot carry.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
     let member = |key: &str| {
         options
@@ -1012,6 +1026,16 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
             instructions: text_member(mcp, "instructions"),
         },
         tools: None,
+        acting_for: match options.and_then(|options| options.get("actingFor")) {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
+            Some(Value::Bool(true)) => ActingForHeader::Honor,
+            Some(given) => {
+                return Err(Error::usage(format!(
+                    "actingFor must be true or false, got {}",
+                    js_string(given)
+                )))
+            }
+        },
     })
 }
 

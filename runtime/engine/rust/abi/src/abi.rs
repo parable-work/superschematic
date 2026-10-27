@@ -18,8 +18,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use superschematic_engine::api::{
-    self, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal, Request, ServiceCaller,
-    StreamOptions,
+    self, ActingForHeader, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal,
+    Request, ServiceCaller, StreamOptions,
 };
 use superschematic_engine::calls::{self, js_string};
 use superschematic_engine::storage::Dialect;
@@ -527,8 +527,10 @@ fn head_of(given: &Value) -> Result<(Request, ApiOptions), Failure> {
     Ok((request, api_options_of(options)?))
 }
 
-// api_options_of is how a mount serves: `stream` ({pageSize, heartbeatMs})
-// and `mcp` ({serverInfo: {name, version}, instructions}).
+// api_options_of is how a mount serves: `stream` ({pageSize, heartbeatMs}),
+// `mcp` ({serverInfo: {name, version}, instructions}) and `actingFor`,
+// true when the request's Acting-For header is honored (D77): a host whose
+// mount decides per request by a function passes what it decided.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Failure> {
     let object = |within: Option<&Map<String, Value>>, key: &str| {
         within
@@ -569,6 +571,16 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Fa
             .transpose()?,
     };
     stream.check().map_err(Failure::usage)?;
+    let acting_for = match options.and_then(|within| member(within, "actingFor")) {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
+        Some(Value::Bool(true)) => ActingForHeader::Honor,
+        Some(given) => {
+            return Err(Failure::usage(format!(
+                "actingFor must be true or false, got {}",
+                js_string(given)
+            )))
+        }
+    };
     Ok(ApiOptions {
         stream,
         mcp: McpOptions {
@@ -577,6 +589,7 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Fa
             instructions: text(mcp.as_ref(), "instructions"),
         },
         tools: None,
+        acting_for,
     })
 }
 

@@ -27,6 +27,12 @@ enginehttp.Background answers, and once it opens, the open engine serves
 them. A host that stops serving aborts the mount's done signal, which ends
 every event stream, so its shutdown waits for none.
 
+The mount's actingFor (D77) is decided here, per request: a request whose
+Acting-For header names a subject reaches the engine with the option
+actingFor true when the mount honors it (true, or its function says so),
+and the engine sets the principal's actingFor from the header; otherwise
+the engine ignores the header.
+
 A tool filter written in TypeScript (the mount's tools option) is asked on
 this thread, during the request. A behavior written in TypeScript that
 throws inside a request answers 500, as on the TypeScript engine; the
@@ -54,7 +60,8 @@ import {
 } from '@superschematic/http-runtime/identity';
 import { Hono, type Context } from 'hono';
 
-import type { EngineHttpOptions } from '../http/app.js';
+import type { Principal } from '../access.js';
+import type { ActingForOption, EngineHttpOptions } from '../http/app.js';
 import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { engineProblem } from '../http/problems.js';
 import { checkStreamOptions } from '../http/stream.js';
@@ -206,6 +213,29 @@ interface Mount {
   readonly heartbeatMs: number;
   /** Aborted when the host stops serving, which ends every event stream. */
   readonly done?: AbortSignal;
+  /** Whether the Acting-For header is honored (D77). */
+  readonly actingFor?: ActingForOption;
+}
+
+// checkActingFor refuses an actingFor that is not a boolean or a function.
+function checkActingFor(actingFor: unknown, app: string): ActingForOption | undefined {
+  if (actingFor === undefined || typeof actingFor === 'boolean' || typeof actingFor === 'function') {
+    return actingFor as ActingForOption | undefined;
+  }
+  throw new TypeError(`${app}: actingFor is true, false or a function (principal, subject, request) => boolean`);
+}
+
+// honorsActingFor is whether the mount honors a request's Acting-For
+// header for the principal: never without one that names a subject.
+async function honorsActingFor(actingFor: ActingForOption | undefined, principal: Principal, c: Context): Promise<boolean> {
+  if (actingFor === undefined || actingFor === false) {
+    return false;
+  }
+  const subject = (c.req.header('acting-for') ?? '').trim();
+  if (subject === '') {
+    return false;
+  }
+  return actingFor === true || (await actingFor(principal, subject, c.req.raw)) === true;
 }
 
 /** nativeEngineApp is engineApp for an engine on the Rust engine. */
@@ -231,6 +261,7 @@ export function nativeEngineApp(engine: ServedEngine, options: EngineHttpOptions
     onError: deployed,
     options: { stream },
     heartbeatMs: stream.heartbeatMs,
+    actingFor: checkActingFor(options.actingFor, 'engineApp'),
     ...(options.done !== undefined ? { done: options.done } : {}),
   });
   if (identity && options.identityRoutes?.sessions !== false) {
@@ -272,6 +303,7 @@ export function nativeEngineMcp(engine: ServedEngine, options: EngineMcpOptions 
     onError: deployed,
     options: { mcp: { serverInfo, ...(options.instructions ? { instructions: options.instructions } : {}) } },
     heartbeatMs: 5_000,
+    actingFor: checkActingFor(options.actingFor, 'engineMcp'),
     ...(options.done !== undefined ? { done: options.done } : {}),
   });
   app.notFound(notFoundHandler());
@@ -337,7 +369,7 @@ async function serve(engine: Serving, route: EngineRoute, mount: Mount, c: Conte
     headers,
     caller,
     requestId: ctx.requestId,
-    options: mount.options,
+    options: (await honorsActingFor(mount.actingFor, principal, c)) ? { ...mount.options, actingFor: true } : mount.options,
   };
   const { answer, thrown } = await engine.serve(head, body !== undefined && body.length > 0 ? body : undefined, mount.tools);
   if (thrown !== undefined && mount.onError !== undefined) {

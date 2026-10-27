@@ -17,6 +17,12 @@
 //		Timeout: runtimemiddleware.Timeout(10*time.Second, getLogger),
 //	}))
 //
+// With Options.ActingFor, the routes honor the Acting-For request header
+// (D77): its value is the subject the caller acts for, which the engine's
+// principal carries and every event it writes records as for. Unset, the
+// header is ignored, and a request that carries it is answered as if it
+// did not.
+//
 // An event stream is pulled without waiting (Stream.Poll) whenever the
 // engine's one waiter sees a commit (Engine.Changed) or a quarter of the
 // heartbeat passes, each frame flushed with http.ResponseController, the
@@ -121,7 +127,22 @@ type Options struct {
 	// stream ends then, as when its client goes away, so a server's
 	// shutdown waits for no stream (http.Server.RegisterOnShutdown).
 	Done <-chan struct{}
+	// ActingFor decides whether a request's Acting-For header is honored
+	// (D77), given the engine's principal for the caller, the subject the
+	// header names and the request: the principal then acts for the
+	// subject, and the access policy decides what it may do. Nil ignores
+	// the header; HonorActingFor honors it for every caller.
+	ActingFor func(principal engine.Principal, subject string, r *http.Request) bool
 }
+
+// ActingForHeader is the request header that names the subject a caller
+// acts for (D77).
+const ActingForHeader = "Acting-For"
+
+// HonorActingFor is an Options.ActingFor that honors the Acting-For header
+// for every caller the host authenticated, leaving the rest to the access
+// policy.
+func HonorActingFor(engine.Principal, string, *http.Request) bool { return true }
 
 // Handler serves the engine's routes. Mount it at Options.Prefix (chi's
 // Mount, or Handle with the prefix and /*), or serve it at the root with
@@ -253,6 +274,11 @@ func (h *handler) route(route engine.Route) http.HandlerFunc {
 			RequestID: id,
 			Options:   h.api,
 		}
+		if h.honorsActingFor(caller, r) {
+			honored := *h.api
+			honored.ActingFor = true
+			request.Options = &honored
+		}
 		response, err := h.e.ServeHTTPRequest(r.Context(), request, body)
 		switch {
 		case errors.Is(err, engine.ErrClosed):
@@ -336,6 +362,57 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request, response *engin
 		case <-timer.C:
 		}
 	}
+}
+
+// honorsActingFor is whether the mount honors the request's Acting-For
+// header (D77): never without a header that names a subject, or a caller.
+func (h *handler) honorsActingFor(caller engine.Caller, r *http.Request) bool {
+	if h.options.ActingFor == nil {
+		return false
+	}
+	subject := strings.TrimSpace(r.Header.Get(ActingForHeader))
+	if subject == "" {
+		return false
+	}
+	principal, ok := principalOf(caller, r)
+	return ok && h.options.ActingFor(principal, subject, r)
+}
+
+// principalOf is the engine's principal for a caller, as the engine
+// establishes it (D37): the end user's, with the calling service beside it;
+// the service's own, standing in, when it brings no end user and the
+// request no Authorization header; none otherwise.
+func principalOf(caller engine.Caller, r *http.Request) (engine.Principal, bool) {
+	if caller.Refused != nil {
+		return engine.Principal{}, false
+	}
+	if caller.Principal != nil {
+		if caller.Principal.Subject == "" {
+			return engine.Principal{}, false
+		}
+		principal := *caller.Principal
+		principal.Service = nil
+		if caller.Service != nil {
+			principal.Service = &engine.PrincipalService{
+				Deployable: caller.Service.Deployable,
+				Serves:     caller.Service.Serves,
+				Subject:    caller.Service.Subject,
+			}
+		}
+		return principal, true
+	}
+	if caller.Service == nil || strings.TrimSpace(r.Header.Get("Authorization")) != "" {
+		return engine.Principal{}, false
+	}
+	return engine.Principal{
+		Subject: "service:" + caller.Service.Deployable,
+		Service: &engine.PrincipalService{
+			Deployable: caller.Service.Deployable,
+			Serves:     caller.Service.Serves,
+			Subject:    caller.Service.Subject,
+			StandsIn:   true,
+		},
+	}, true
 }
 
 // headersOf is a request's headers as the engine reads them: lowercase

@@ -903,6 +903,7 @@ function encodeError(error: unknown, record: Case): JSONObject {
 /** The request headers an exchange records; the rest are the transport's. */
 const REQUEST_HEADERS = [
   'accept',
+  'acting-for',
   'authorization',
   'content-type',
   'if-match',
