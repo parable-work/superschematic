@@ -576,8 +576,22 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
     /// table the TypeScript engine creates, through the checker; on
     /// Postgres the engine writes its table, its generated vectors, their
     /// GIN index and its text search configuration itself, creating the
-    /// `unaccent` extension when the database lacks it.
+    /// `unaccent` extension when the database lacks it
+    /// ([`fulltext::Unaccent::Required`]).
     pub fn create_fulltext(&self, name: &str, columns: &[&str]) -> Result<()> {
+        self.create_fulltext_with(name, columns, fulltext::Unaccent::Required)
+    }
+
+    /// [`BehaviorSql::create_fulltext`], saying whether a Postgres index
+    /// needs `unaccent`: with [`fulltext::Unaccent::IfAvailable`] a
+    /// database that lacks it and refuses the engine its create gets an
+    /// index that folds case alone, and the migration goes on.
+    pub fn create_fulltext_with(
+        &self,
+        name: &str,
+        columns: &[&str],
+        unaccent: fulltext::Unaccent,
+    ) -> Result<()> {
         if self.mode != SqlMode::Migrate {
             return Err(Error::behavior(
                 self.behavior,
@@ -594,10 +608,38 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
                 self.run(fulltext::sqlite_create(&table, columns), &[])?;
             }
             Dialect::Postgres => {
-                let extension = self.unaccent_schema()?;
                 let config = fulltext::config_name(self.prefix, name);
-                for statement in fulltext::postgres_create(&table, &config, &extension, columns) {
-                    self.tx.exec(statement)?;
+                match unaccent {
+                    fulltext::Unaccent::Required => {
+                        let extension = self.unaccent_schema()?;
+                        for statement in
+                            fulltext::postgres_create(&table, &config, &extension, columns)
+                        {
+                            self.tx.exec(statement)?;
+                        }
+                    }
+                    fulltext::Unaccent::IfAvailable => {
+                        self.tx.exec(fulltext::postgres_configuration(&config))?;
+                        // unaccent where the database has it or the engine
+                        // may create it, and the role may use it; else
+                        // simple alone. Each try in a savepoint, so a
+                        // refusal leaves the migration running.
+                        let mapped = match self.unaccent_schema() {
+                            Ok(extension) => self
+                                .tx
+                                .savepoint(|tx| {
+                                    tx.exec(fulltext::postgres_mapping(&config, Some(&extension)))
+                                })
+                                .is_ok(),
+                            Err(_) => false,
+                        };
+                        if !mapped {
+                            self.tx.exec(fulltext::postgres_mapping(&config, None))?;
+                        }
+                        for statement in fulltext::postgres_tables(&table, &config, columns) {
+                            self.tx.exec(statement)?;
+                        }
+                    }
                 }
             }
         }
@@ -619,10 +661,17 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
         let index = self.table(query.index)?;
         let keys = self.table(query.keys)?;
         let config = fulltext::config_name(self.prefix, query.index);
+        // A match kept to the readable schemas is a namespace operation's:
+        // readable() refuses anywhere else.
+        let readable = match query.readable {
+            Some(_) => Some(self.readable()?),
+            None => None,
+        };
         let names = fulltext::Names {
             index: &index,
             keys: &keys,
             config: &config,
+            readable: readable.as_deref(),
         };
         let expression = match dialect {
             Dialect::Sqlite => query.expression.to_owned(),
