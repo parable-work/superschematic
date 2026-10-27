@@ -62,9 +62,12 @@ type Refusal struct {
 type HTTPOptions struct {
 	Stream *StreamOptions `json:"stream,omitempty"`
 	MCP    *MCPOptions    `json:"mcp,omitempty"`
-	// ActingFor honors the request's Acting-For header: the engine's
-	// principal then acts for the subject it names. False ignores it.
-	ActingFor bool `json:"actingFor,omitempty"`
+	// ActingFor is the subject a host's mount decided the caller acts for
+	// (D77), from the request's Acting-For header: the engine's principal
+	// then acts for exactly this subject, and the engine does not read the
+	// header again, so the subject the host's decision approved is the one
+	// every event records. Empty acts for no one.
+	ActingFor string `json:"actingFor,omitempty"`
 }
 
 // StreamOptions are the event stream's page size (1 to 500, 100 unless

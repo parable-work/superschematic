@@ -1632,10 +1632,15 @@ permissions: an agent holding `Task.write` and `actFor` may write tasks
 for anyone, and nothing else. In a `{ rules }` policy a rule matches on
 `actingFor`: `true` for a principal acting for any subject, `false` for
 one acting for none, or a subject or a list of them. As with `behavior`,
-a rule that leaves it out matches only a principal acting for no one, so
-every rule written before it, a subject- or service-wide allow among
-them, lets no principal act for anyone, and a question no rule matches is
-refused. `{ "actingFor": true, "require": "{schema}.{action}" }` lets a
+an allow or a require that leaves it out matches only a principal acting
+for no one, so every rule written before it, a subject- or service-wide
+allow among them, lets no principal act for anyone, and a question no
+rule matches is refused. A deny (`allow: false`) that leaves it out
+matches a principal acting for a subject too, as it matches one acting
+for none: `[{ "service": "crawler", "standsIn": true, "allow": false },
+{ "actingFor": true, "allow": true }]` refuses the crawler whether or not
+it acts for someone, and only `"actingFor": false` keeps a deny to the
+principal acting for no one. `{ "actingFor": true, "require": "{schema}.{action}" }` lets a
 principal act for anyone within its own permissions; `"allowAll"` allows
 it, and `"permission"` answers as `permissionPolicy()` does. A policy of
 the deployment's own reads `principal.actingFor`, and one written before
@@ -3331,6 +3336,18 @@ it, and a delete, a purge and the instance's delete remove it, in the
 call's transaction. The order is each database's own ranking, as
 Search's is (bm25 on SQLite, `ts_rank_cd` on Postgres).
 
+`searchMessages` and `inbox` keep to the schemas the caller may read by
+the policy's schema-wide question alone (`read` on the schema, no
+operation): `sql.readable()` asks nothing about Comments' instance
+operations. A policy that refuses `listMessages` or `getMessage` on a
+schema by a rule that names the operation still lets `searchMessages`
+return that schema's messages, snippets and all, and `inbox` list them.
+To hide a schema's messages from both, refuse `read` on the schema (a
+rule that names the schema and `read` and no operation), or refuse the
+namespace operations themselves through the behavior question (`{
+"behavior": "Comments", "operation": ["searchMessages", "inbox"],
+"allow": false }`).
+
 Its storage is migration 2 (`conversation`): `comment_messages`,
 `comment_edits`, `comment_reactions` and `comment_conversations`, the
 last holding each instance's counters and the counts the fields read
@@ -4938,7 +4955,7 @@ the header, as before.
 
 `actingFor` lets a caller act for a subject (D77, "Acting for a subject"
 under "Access") with the `Acting-For` request header (`ACTING_FOR_HEADER`),
-whose value, trimmed, is the subject. `engineApp` and `engineMcp` take it:
+whose value is the subject. `engineApp` and `engineMcp` take it:
 
 - `false`, the default, ignores the header: a request that carries it is
   answered as if it did not, so a deployment that never opted in is not
@@ -4951,14 +4968,28 @@ whose value, trimmed, is the subject. `engineApp` and `engineMcp` take it:
   beside it included), the subject and the request: a host that trusts
   only its agents' tokens to act for anyone says so here.
 
-An empty header acts for no one. A subject that is the caller's own, or
-one beside the end user a service brings, is the engine's 400
+Every host reads a header it honors by one rule (the Rust engine's
+`acting_for_header_subject`, the Go binding's
+`enginehttp.ActingForSubject` and the TypeScript mount's): ASCII
+whitespace around the value (space, tab, LF, FF, CR) is trimmed, and
+nothing else. A request with more than one `Acting-For` header is 400
+`invalid_argument`, and so is a value holding a comma, which is how two
+read once a host or a proxy folds them into one, or a control character
+or any other whitespace, Unicode's included (U+0085, U+00A0, U+2028):
+such a value is refused, never trimmed into a subject the function did
+not see. An empty header acts for no one. A subject that is the caller's
+own, or one beside the end user a service brings, is the engine's 400
 `invalid_argument`. The Go binding's `enginehttp.Options.ActingFor` is
 the function (`enginehttp.HonorActingFor` for `true`, nil for `false`),
 and the Rust engine's `ApiOptions.acting_for` an `ActingForHeader`
-(`Ignore`, `Honor`, or `ActingForHeader::decide(...)`), which the axum
-router's `Options::acting_for` sets; each host passes the engine's routes
-`actingFor: true` for a request whose header it honors.
+(`Ignore`, `Honor`, `ActingForHeader::decide(...)`, or `Decided` with
+the subject a host decided), which the axum router's
+`Options::acting_for` sets. A host whose mount honors the header for
+every caller passes the engine's routes `actingFor: true`, and the
+engine reads the header; a host whose function decides passes the
+subject it approved, `actingFor: "<subject>"`, and the engine acts for
+exactly that subject without reading the header again, so the subject a
+function approves is the one every event records.
 
 ### Users
 

@@ -530,7 +530,8 @@ fn head_of(given: &Value) -> Result<(Request, ApiOptions), Failure> {
 // api_options_of is how a mount serves: `stream` ({pageSize, heartbeatMs}),
 // `mcp` ({serverInfo: {name, version}, instructions}) and `actingFor`,
 // true when the request's Acting-For header is honored (D77): a host whose
-// mount decides per request by a function passes what it decided.
+// mount decides per request by a function passes the subject it decided,
+// a string, which the engine uses without reading the header again.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Failure> {
     let object = |within: Option<&Map<String, Value>>, key: &str| {
         within
@@ -574,9 +575,10 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Fa
     let acting_for = match options.and_then(|within| member(within, "actingFor")) {
         None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
         Some(Value::Bool(true)) => ActingForHeader::Honor,
+        Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
         Some(given) => {
             return Err(Failure::usage(format!(
-                "actingFor must be true or false, got {}",
+                "actingFor must be true, false or the subject the host decided, got {}",
                 js_string(given)
             )))
         }

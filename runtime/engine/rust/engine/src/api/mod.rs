@@ -36,7 +36,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::engine::Engine;
-use crate::principal::{ActingFor, Principal, PrincipalService};
+use crate::principal::{acting_for_header_subject, ActingFor, Principal, PrincipalService};
 use crate::tools::ToolFilter;
 
 pub use mcp::{McpOptions, MCP_DISCOVER_VERSIONS, MCP_INITIALIZE_VERSIONS, MCP_SERVER_NAME};
@@ -190,7 +190,9 @@ pub type ActingForDecision = dyn Fn(&Principal, &str, &Request) -> bool + Send +
 /// subject the caller acts for. Ignored by default: a request carrying it
 /// is answered as if it did not. Honored, it sets the principal's
 /// `actingFor` for any caller the host authenticated, and the access policy
-/// decides; a decision says per request.
+/// decides; a decision says per request. A header the mount reads is read
+/// by [`acting_for_header_subject`]'s one rule, and a request with more
+/// than one is 400 `invalid_argument`.
 #[derive(Clone, Default)]
 pub enum ActingForHeader {
     /// The header is ignored.
@@ -200,6 +202,12 @@ pub enum ActingForHeader {
     Honor,
     /// The header is honored when the function says so.
     Decide(Arc<ActingForDecision>),
+    /// The host read the header and decided for this request: the caller
+    /// acts for exactly this subject, and the engine does not read the
+    /// header again. A TypeScript or Go host whose mount decides by a
+    /// function passes it across the ABI (`actingFor: "<subject>"`), so
+    /// the subject its function approved is the one the engine uses.
+    Decided(String),
 }
 
 impl ActingForHeader {
@@ -211,23 +219,50 @@ impl ActingForHeader {
     }
 
     /// The subject a request's caller acts for: its `Acting-For` header,
-    /// trimmed, when the mount honors it for this principal; `None` when
-    /// it is absent or empty, or the mount ignores it.
-    pub fn subject(&self, principal: &Principal, request: &Request) -> Option<String> {
-        if matches!(self, ActingForHeader::Ignore) {
-            return None;
-        }
-        let subject = request.header(ACTING_FOR_HEADER)?.trim();
-        if subject.is_empty() {
-            return None;
-        }
-        match self {
-            ActingForHeader::Ignore => None,
-            ActingForHeader::Honor => Some(subject.to_owned()),
+    /// read by [`acting_for_header_subject`], when the mount honors it for
+    /// this principal, or the subject the host decided; `None` when it is
+    /// absent or empty, or the mount ignores it. A request with more than
+    /// one `Acting-For` header, or one the rule refuses, is 400
+    /// `invalid_argument`.
+    pub fn subject(
+        &self,
+        principal: &Principal,
+        request: &Request,
+    ) -> Result<Option<String>, Problem> {
+        let refused = |detail: String| Problem::new(400, detail, "invalid_argument");
+        let header = match self {
+            ActingForHeader::Ignore => return Ok(None),
+            ActingForHeader::Decided(subject) => {
+                return acting_for_header_subject(subject)
+                    .map(|subject| subject.map(str::to_owned))
+                    .map_err(refused)
+            }
+            ActingForHeader::Honor | ActingForHeader::Decide(_) => {
+                let mut values = request
+                    .headers
+                    .iter()
+                    .filter(|(name, _)| name.eq_ignore_ascii_case(ACTING_FOR_HEADER))
+                    .map(|(_, value)| value.as_str());
+                let Some(value) = values.next() else {
+                    return Ok(None);
+                };
+                if values.next().is_some() {
+                    return Err(refused(
+                        "the request carries more than one Acting-For header".to_owned(),
+                    ));
+                }
+                value
+            }
+        };
+        let Some(subject) = acting_for_header_subject(header).map_err(refused)? else {
+            return Ok(None);
+        };
+        Ok(match self {
             ActingForHeader::Decide(decide) => {
                 decide(principal, subject, request).then(|| subject.to_owned())
             }
-        }
+            _ => Some(subject.to_owned()),
+        })
     }
 }
 
@@ -237,6 +272,7 @@ impl std::fmt::Debug for ActingForHeader {
             ActingForHeader::Ignore => "Ignore",
             ActingForHeader::Honor => "Honor",
             ActingForHeader::Decide(_) => "Decide(..)",
+            ActingForHeader::Decided(_) => "Decided(..)",
         })
     }
 }
@@ -495,8 +531,10 @@ pub fn handle(engine: &Engine, options: &ApiOptions, request: &Request) -> Respo
             .unwrap_or_else(|| problems::default_detail(&refused.code).to_owned());
         return Problem::new(refused.status, detail, &refused.code).response(request_id);
     }
-    let Some(principal) = principal_with(request, &options.acting_for) else {
-        return Problem::unauthorized().response(request_id);
+    let principal = match principal_with(request, &options.acting_for) {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return Problem::unauthorized().response(request_id),
+        Err(problem) => return problem.response(request_id),
     };
     // A route that captured a path parameter refuses a path that does not
     // decode, so `%ZZ` and `%25ZZ` never reach it as one value.
@@ -559,13 +597,20 @@ pub fn principal_of(request: &Request) -> Option<Principal> {
 /// The engine's principal for a request ([`principal_of`]), acting for the
 /// subject its `Acting-For` header names when the mount honors it (D77).
 /// The engine's call checks it: a subject that is the caller's own, or one
-/// beside the end user a service brings, is `invalid_argument`.
-pub fn principal_with(request: &Request, acting_for: &ActingForHeader) -> Option<Principal> {
-    let mut principal = principal_of(request)?;
-    if let Some(subject) = acting_for.subject(&principal, request) {
+/// beside the end user a service brings, is `invalid_argument`. `Ok(None)`
+/// when there is no principal (401); a problem when the header is refused
+/// ([`ActingForHeader::subject`]).
+pub fn principal_with(
+    request: &Request,
+    acting_for: &ActingForHeader,
+) -> Result<Option<Principal>, Problem> {
+    let Some(mut principal) = principal_of(request) else {
+        return Ok(None);
+    };
+    if let Some(subject) = acting_for.subject(&principal, request)? {
         principal.acting_for = Some(ActingFor { subject });
     }
-    Some(principal)
+    Ok(Some(principal))
 }
 
 /// The JSON a JSON body holds: `None` for an empty body, a problem for one

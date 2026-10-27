@@ -71,7 +71,7 @@ interface Call {
   token?: string | null;
   body?: unknown;
   type?: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | [string, string][];
 }
 
 async function call(app: Hono, method: string, path: string, options: Call = {}): Promise<Response> {
@@ -979,6 +979,43 @@ describe('acting for a subject (D77)', () => {
     assert.deepEqual([forOf(engine, 'o1'), forOf(engine, 'o2')], ['bob', undefined]);
     assert.deepEqual(seen, ['agent for bob on POST', 'agent for carol on POST']);
     assert.throws(() => engineApp(engine, { authenticate, actingFor: 'yes' as never }), /actingFor is true, false or a function/);
+  });
+
+  test('one rule reads the header: ASCII whitespace is trimmed, and a second header, a comma, a control or other whitespace is refused', async () => {
+    const seen: string[] = [];
+    // A function that refuses role: subjects sees the subject the engine
+    // records, so no spelling of one gets past it.
+    const deciding = await withOrders({
+      actingFor: (_principal, subject) => {
+        seen.push(subject);
+        return !subject.startsWith('role:');
+      },
+    });
+    const honoring = await withOrders({ actingFor: true });
+    for (const { app, engine } of [deciding, honoring]) {
+      const create = (id: string, headers: Record<string, string> | [string, string][]) =>
+        call(app, 'POST', ORDERS, { token: 'agent', headers, body: { id, data: { title: 'Desk' } } });
+      await data(create('o1', actingFor('\t bob \r')), 201);
+      assert.equal(forOf(engine, 'o1'), 'bob');
+      for (const [id, headers] of [
+        // U+0085 is whitespace to Rust and to Unicode, but not to JavaScript's trim.
+        ['o2', actingFor('\u0085role:admins')],
+        ['o3', actingFor('role:admins\u00a0')],
+        // A header is bytes, which fetch reads as Latin-1: U+2028 sent as
+        // UTF-8 arrives as \u00e2\u0080\u00a8, whose U+0080 is a control.
+        ['o4', actingFor('bob\u00e2\u0080\u00a8')],
+        ['o5', actingFor('b ob')],
+        ['o6', actingFor('bob, role:admins')],
+        ['o7', [['acting-for', 'bob'], ['acting-for', 'role:admins']]],
+      ] as const) {
+        const refused = await problem(create(id, headers as Record<string, string> | [string, string][]), 400);
+        assert.equal(refused.code, 'invalid_argument', id);
+        assert.equal(forOf(engine, id), undefined);
+      }
+    }
+    await data(call(deciding.app, 'POST', ORDERS, { token: 'agent', headers: actingFor('role:admins'), body: { id: 'o8', data: { title: 'Desk' } } }), 201);
+    assert.equal(forOf(deciding.engine, 'o8'), undefined);
+    assert.deepEqual(seen, ['bob', 'role:admins']);
   });
 
   test('an agent acting for Alice replies over HTTP: the reply is for her, she hears nothing of it, and searchMessages finds it', async () => {

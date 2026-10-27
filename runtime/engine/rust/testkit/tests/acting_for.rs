@@ -8,7 +8,8 @@
 //! policy sees it: `"permission"` refuses it unless the principal holds
 //! `actFor`, and a `{ rules }` policy decides it only by a rule that names
 //! `actingFor`. Over HTTP and MCP the `Acting-For` header sets it when the
-//! mount honors it, and is ignored when it does not. On SQLite and, with
+//! mount honors it, read by one rule, a second header refused, and is
+//! ignored when it does not. On SQLite and, with
 //! the variable set, on Postgres.
 
 mod support;
@@ -554,6 +555,122 @@ fn the_acting_for_header_is_ignored_unless_the_mount_honors_it() {
         );
         assert_eq!(
             create_over_http(&engine, &ignoring, by(agent()), "t11", Some("alice")),
+            (201, Value::Null, None)
+        );
+    }
+}
+
+// create_with_headers creates a task over HTTP with the Acting-For
+// headers given, each one a header of its own, and returns what
+// create_over_http does.
+fn create_with_headers(
+    engine: &Engine,
+    options: &ApiOptions,
+    id: &str,
+    acting_for: &[&str],
+) -> (u16, Value, Option<String>) {
+    let mut request = post(
+        "/namespaces/default/schemas/Task/instances",
+        by(agent()),
+        &json!({"id": id, "data": {"title": id}}),
+        None,
+    );
+    for value in acting_for {
+        request
+            .headers
+            .push(("acting-for".to_owned(), (*value).to_owned()));
+    }
+    let response = handle(engine, options, &request);
+    let recorded = events(engine, "Task")
+        .into_iter()
+        .find(|event| event.instance_id.as_deref() == Some(id))
+        .and_then(|event| event.for_subject);
+    (
+        response.status,
+        body_of(&response)["code"].clone(),
+        recorded,
+    )
+}
+
+#[test]
+fn one_rule_reads_the_header_and_a_second_header_is_refused() {
+    for target in targets("acting_for_header_rule") {
+        let engine = open_with(&target, |_| {});
+        let honoring = ApiOptions {
+            acting_for: ActingForHeader::Honor,
+            ..ApiOptions::default()
+        };
+        let refused = (400, json!("invalid_argument"), None);
+        // ASCII whitespace around the subject is trimmed, and nothing else.
+        assert_eq!(
+            create_with_headers(&engine, &honoring, "t1", &[" \talice\t "]),
+            (201, Value::Null, Some("alice".to_owned()))
+        );
+        // Two headers, or two folded into one, are refused.
+        assert_eq!(
+            create_with_headers(&engine, &honoring, "t2", &["alice", "bob"]),
+            refused
+        );
+        assert_eq!(
+            create_with_headers(&engine, &honoring, "t3", &["alice, bob"]),
+            refused
+        );
+        // A control character or Unicode whitespace anywhere in it is
+        // refused, never trimmed away.
+        for (id, value) in [
+            ("t4", "\u{85}role:admins"),
+            ("t5", "role:admins\u{a0}"),
+            ("t6", "al ice"),
+            ("t7", "alice\u{0}"),
+            ("t8", "\u{2028}alice"),
+        ] {
+            assert_eq!(
+                create_with_headers(&engine, &honoring, id, &[value]),
+                refused,
+                "{value:?}"
+            );
+        }
+        // A function that refuses role: subjects sees the subject the
+        // engine records: a refused one never reaches it, so it cannot be
+        // passed around the function.
+        let deciding = ApiOptions {
+            acting_for: ActingForHeader::decide(|_, subject, _| !subject.starts_with("role:")),
+            ..ApiOptions::default()
+        };
+        assert_eq!(
+            create_with_headers(&engine, &deciding, "t9", &["role:admins"]),
+            (201, Value::Null, None)
+        );
+        assert_eq!(
+            create_with_headers(&engine, &deciding, "t10", &["\u{85}role:admins"]),
+            refused
+        );
+        assert_eq!(
+            create_with_headers(&engine, &deciding, "t11", &["alice", "role:admins"]),
+            refused
+        );
+        assert_eq!(
+            create_with_headers(&engine, &deciding, "t12", &["alice"]),
+            (201, Value::Null, Some("alice".to_owned()))
+        );
+        // A subject a host decided is the one the engine uses: it does not
+        // read the header again.
+        let decided = ApiOptions {
+            acting_for: ActingForHeader::Decided("alice".to_owned()),
+            ..ApiOptions::default()
+        };
+        assert_eq!(
+            create_with_headers(&engine, &decided, "t13", &["role:admins"]),
+            (201, Value::Null, Some("alice".to_owned()))
+        );
+        let decided = ApiOptions {
+            acting_for: ActingForHeader::Decided("\u{85}alice".to_owned()),
+            ..ApiOptions::default()
+        };
+        assert_eq!(create_with_headers(&engine, &decided, "t14", &[]), refused);
+        // A mount that ignores the header reads none of it.
+        assert_eq!(
+            create_with_headers(&engine, &ApiOptions::default(), "t15", &["a", "b"]),
             (201, Value::Null, None)
         );
     }

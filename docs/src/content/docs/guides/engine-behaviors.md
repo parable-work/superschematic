@@ -417,7 +417,9 @@ more keys of the database's `outputs.engine` say how:
   someone](/superschematic/guides/engine/#callers-and-the-access-policy)
   only when it also holds `actFor`; `"allowAll"`, for tests and local
   use; or `{ "rules": [...] }`, the engine's ordered rules, where only a
-  rule that names `actingFor` matches a caller acting for someone.
+  rule that names `actingFor` allows a caller acting for someone, and a
+  deny that leaves it out refuses such a caller as it refuses one acting
+  as itself.
 - **`retention`** is how long the event log keeps events, as the engine's
   `retention` option reads it (see the runner below): `maxAgeMs`,
   `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each

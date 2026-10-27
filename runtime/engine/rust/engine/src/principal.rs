@@ -68,6 +68,33 @@ pub struct ActingFor {
     pub subject: String,
 }
 
+/// The subject an `Acting-For` header names (D77), by the one rule every
+/// host applies to the header's value, in Rust, TypeScript and Go alike:
+/// ASCII whitespace around it is trimmed, and nothing else. `Ok(None)` when
+/// it is empty. A value holding a comma is refused, since that is how two
+/// `Acting-For` headers read once a host or a proxy folds them into one
+/// (RFC 9110, 5.3), and so is one holding a control character or any other
+/// whitespace, Unicode's included: what a host's decision approved is then
+/// the subject the engine records, byte for byte.
+pub fn acting_for_header_subject(value: &str) -> Result<Option<&str>, String> {
+    let subject = value.trim_matches(|c: char| c.is_ascii_whitespace());
+    if subject.is_empty() {
+        return Ok(None);
+    }
+    if subject.contains(',') {
+        return Err(
+            "the request carries more than one Acting-For header, or one holding a comma"
+                .to_owned(),
+        );
+    }
+    if subject.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(
+            "the Acting-For header's subject holds a control or whitespace character".to_owned(),
+        );
+    }
+    Ok(Some(subject))
+}
+
 /// The prefix of a service's subject when it stands in for an end user.
 pub const SERVICE_SUBJECT_PREFIX: &str = "service:";
 
@@ -238,6 +265,27 @@ pub fn actor_of(principal: &Principal) -> Actor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_acting_for_header_is_read_by_one_rule() {
+        assert_eq!(acting_for_header_subject(" \talice\r\n"), Ok(Some("alice")));
+        assert_eq!(acting_for_header_subject(" \t "), Ok(None));
+        assert_eq!(acting_for_header_subject(""), Ok(None));
+        for refused in [
+            "alice, bob",
+            "alice,bob",
+            "\u{85}role:admins",
+            "role:admins\u{85}",
+            "\u{a0}alice",
+            "al ice",
+            "alice\u{0}",
+            "\u{b}alice",
+            "\u{2028}alice",
+            "\u{3000}alice",
+        ] {
+            assert!(acting_for_header_subject(refused).is_err(), "{refused:?}");
+        }
+    }
 
     #[test]
     fn a_principal_is_checked() {

@@ -274,16 +274,25 @@ either engine.
   => boolean`, decides per request, so a host that trusts only its
   agents' tokens to act for anyone says so there. The Go binding's
   `enginehttp.Options.ActingFor` is that function
-  (`enginehttp.HonorActingFor` for `true`).
+  (`enginehttp.HonorActingFor` for `true`). Every host reads the header
+  by one rule: spaces, tabs and line ends around it are trimmed, and a
+  request with two `Acting-For` headers, or one whose value holds a
+  comma, a control character or any other whitespace (U+0085 and U+00A0
+  among them), is 400 `invalid_argument`. The subject a function approves
+  is the one the engine records.
 - The policy sees `principal.actingFor` on every question and decides.
   `permissionPolicy()` refuses a principal acting for someone unless it
   holds `actFor`, and then answers as for its own permissions: an agent
   holding `notes.write` and `actFor` may write notes for anyone, and
   nothing else. In a `{ rules }` policy a rule matches on `actingFor`:
   `true` for a principal acting for any subject, `false` for one acting
-  for none, or a subject or a list of them; a rule that leaves it out
-  matches only a principal acting for no one, so rules written before it
-  let nobody act for anyone. `{ "actingFor": true, "require":
+  for none, or a subject or a list of them; an allow or a require that
+  leaves it out matches only a principal acting for no one, so rules
+  written before it let nobody act for anyone. A deny (`"allow": false`)
+  that leaves it out binds a principal acting for someone too: `{
+  "service": "crawler", "allow": false }` refuses the crawler whoever it
+  acts for, and only `"actingFor": false` narrows a deny to callers
+  acting as themselves. `{ "actingFor": true, "require":
   "{schema}.{action}" }` lets a principal act for anyone within its own
   permissions. A policy of your own reads `principal.actingFor` first,
   as this example's does: its callers act only as themselves, and its
@@ -773,6 +782,14 @@ namespace. Like `inbox` it is a namespace operation, asked of the policy
 as `read`, and it finds only messages of the schemas the caller may
 read: a `schema` it may not read finds nothing, rather than a refusal
 that would say the schema is there.
+
+"May read" is the policy's schema-wide `read`, which names no
+operation. A rule that refuses `listMessages` or `getMessage` on a
+schema by naming the operation does not keep that schema's messages
+out of `searchMessages`, snippets and all, or out of `inbox`. To hide
+them, refuse `read` on the schema, or refuse the namespace operations
+through the behavior question:
+`{ "behavior": "Comments", "operation": ["searchMessages", "inbox"], "allow": false }`.
 
 ```sh
 curl -s $API/behaviors/Comments/operations/searchMessages \

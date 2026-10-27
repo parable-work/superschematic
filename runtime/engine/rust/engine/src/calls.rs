@@ -1005,9 +1005,9 @@ fn request_of(given: &Value) -> Result<Request> {
 
 // api_options_of is how `api.handle` serves: `stream` ({pageSize,
 // heartbeatMs}), `mcp` ({serverInfo: {name, version}, instructions}) and
-// `actingFor`, true when the Acting-For header is honored (D77). A tool
-// filter, or a function deciding actingFor, is a function, which JSON
-// cannot carry.
+// `actingFor`, true when the Acting-For header is honored (D77), or the
+// subject a host's function decided, a string. A tool filter, or a
+// function deciding actingFor, is a function, which JSON cannot carry.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
     let member = |key: &str| {
         options
@@ -1029,9 +1029,10 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
         acting_for: match options.and_then(|options| options.get("actingFor")) {
             None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
             Some(Value::Bool(true)) => ActingForHeader::Honor,
+            Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
             Some(given) => {
                 return Err(Error::usage(format!(
-                    "actingFor must be true or false, got {}",
+                    "actingFor must be true, false or the subject the host decided, got {}",
                     js_string(given)
                 )))
             }

@@ -242,10 +242,10 @@ fn mount_of(prefix: &str, kind: &str, options: &Value) -> Mount {
                     .map(str::to_owned),
             },
             tools: None,
-            acting_for: if member("actingFor") == Some(&Value::Bool(true)) {
-                ActingForHeader::Honor
-            } else {
-                ActingForHeader::Ignore
+            acting_for: match member("actingFor") {
+                Some(Value::Bool(true)) => ActingForHeader::Honor,
+                Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
+                _ => ActingForHeader::Ignore,
             },
         },
         rate_limit: member("rateLimitPerMinute")

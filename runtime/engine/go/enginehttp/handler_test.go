@@ -70,7 +70,7 @@ func send(t *testing.T, method, url, body string, headers ...string) (*http.Resp
 		t.Fatal(err)
 	}
 	for i := 0; i+1 < len(headers); i += 2 {
-		req.Header.Set(headers[i], headers[i+1])
+		req.Header.Add(headers[i], headers[i+1])
 	}
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -530,5 +530,69 @@ func TestTheActingForHeaderIsHonoredOnlyWhenTheOptionSaysSo(t *testing.T) {
 		"Authorization", "Bearer agent", "Content-Type", "application/json", "Acting-For", "agent")
 	if response.StatusCode != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
 		t.Fatalf("acting for itself: %d %s", response.StatusCode, body)
+	}
+}
+
+// One rule reads the Acting-For header: ASCII whitespace is trimmed, and a
+// second header, a comma, a control or other whitespace is refused, so a
+// function that refuses role: subjects sees the subject the engine
+// records, and no spelling of one gets past it.
+func TestTheActingForHeaderIsReadByOneRule(t *testing.T) {
+	e := openNotes(t)
+	var seen []string
+	decide := func(_ engine.Principal, subject string, _ *http.Request) bool {
+		seen = append(seen, subject)
+		return !strings.HasPrefix(subject, "role:")
+	}
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{Caller: bearer, ActingFor: decide}))
+	defer server.Close()
+	create := func(id string, actingFor ...string) (int, string) {
+		t.Helper()
+		headers := []string{"Authorization", "Bearer agent", "Content-Type", "application/json"}
+		for _, value := range actingFor {
+			headers = append(headers, "Acting-For", value)
+		}
+		response, body := send(t, "POST", server.URL+"/namespaces/default/schemas/Note/instances",
+			`{"id": "`+id+`", "data": {"body": "hello"}}`, headers...)
+		return response.StatusCode, body
+	}
+	if status, body := create("n1", " \tbob\t "); status != 201 || !strings.Contains(body, `"createdBy":"agent"`) {
+		t.Fatalf("a trimmed subject: %d %s", status, body)
+	}
+	for id, values := range map[string][]string{
+		"n2": {"bob", "role:admins"},
+		"n3": {"bob, role:admins"},
+		"n4": {"\u0085role:admins"},
+		"n5": {"role:admins\u00a0"},
+		"n6": {"b ob"},
+		"n7": {"bob\u2028"},
+	} {
+		if status, body := create(id, values...); status != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
+			t.Fatalf("%s %q: %d %s", id, values, status, body)
+		}
+	}
+	if status, body := create("n8", "role:admins"); status != 201 {
+		t.Fatalf("refused by the function: %d %s", status, body)
+	}
+	if strings.Join(seen, ", ") != "bob, role:admins" {
+		t.Fatalf("the function saw %q", seen)
+	}
+	for _, check := range []struct {
+		values  []string
+		subject string
+		refused bool
+	}{
+		{nil, "", false},
+		{[]string{" \r\n"}, "", false},
+		{[]string{"\talice "}, "alice", false},
+		{[]string{"alice", "bob"}, "", true},
+		{[]string{"\u000balice"}, "", true},
+		{[]string{"\u3000alice"}, "", true},
+		{[]string{"alice\u0000"}, "", true},
+	} {
+		subject, err := enginehttp.ActingForSubject(check.values)
+		if subject != check.subject || (err != nil) != check.refused {
+			t.Fatalf("ActingForSubject(%q) = %q, %v", check.values, subject, err)
+		}
 	}
 }

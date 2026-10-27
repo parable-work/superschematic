@@ -2037,6 +2037,16 @@ with `{ behavior: "Comments", operation: "searchMessages" }`, so
 `permissionPolicy` lets it through, and only rows of `sql.readable()`'s
 schemas leave its statement. Result `{ items, next }`.
 
+`sql.readable()` keeps the schemas the policy lets the caller `read` by
+the schema-wide question, which names no operation; it asks nothing
+about `listMessages` or `getMessage`. A policy that refuses those on a
+schema by a rule that names the operation still lets `searchMessages`
+return that schema's messages and snippets, as it lets `inbox` list
+them (batch 3). A deployment that would hide a schema's messages from
+both refuses `read` on the schema, or refuses the namespace operations
+through the behavior question (`{ "behavior": "Comments", "operation":
+["searchMessages", "inbox"], "allow": false }`).
+
 An item, members in this order:
 
 | Member | Type | Value |

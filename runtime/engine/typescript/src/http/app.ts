@@ -36,7 +36,11 @@ its value is the subject the caller acts for, which the engine's principal
 carries as `actingFor` and every event it writes records as `for`. The
 default, false, ignores the header: a request that carries it is answered
 as if it did not. true honors it for any caller the runtime authenticated,
-and the access policy decides; a function decides per request.
+and the access policy decides; a function decides per request, and the
+subject it approves is the one the engine acts for. A header is read by
+one rule, the Rust engine's and the Go binding's too: ASCII whitespace
+around it is trimmed, and two headers, a comma, a control character or
+any other whitespace is 400 invalid_argument.
 
 With `identity`, the HTTP runtime's identity service (identity.ts, D50),
 the service authenticates every route in place of `authenticate`, which is
