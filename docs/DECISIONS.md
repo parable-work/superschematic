@@ -10169,7 +10169,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
+Status: built, all five steps. The order they were built in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10216,13 +10216,31 @@ Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
    typed clients give each behavior with namespace operations a client of
    its own, kept off every schema's.
 4. Primitive 4, acting for a subject, in the principal, the events,
-   Provenance and Comments.
+   Provenance and Comments. Built. The principal and its checks are
+   `runtime/engine/rust/engine/src/principal.rs`, the header rule and the
+   mount's choice `api/mod.rs` (`acting_for_header_subject`,
+   `ActingForHeader`), the policy's gate and rule member `access.rs`, and
+   engine migration 14 the events' column; `testkit/tests/acting_for.rs`
+   holds them on both databases, and the TypeScript and Go mounts each
+   have the header rule's test. A host that decides by a function hands
+   the engine the subject it approved, so the two never read the header
+   apart. Comments' side is `testkit/tests/core_comments_acting_for.rs`.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
+   Built, with `listPinned`. A full-text match in a namespace operation
+   keeps to `sql.readable()`'s schemas (`storage/src/fulltext.rs`), so one
+   query ranks across them. Comments' index takes `unaccent` where the
+   database has it or can create it, and folds case alone where it is
+   refused or missing, so a Comments engine never fails to migrate for
+   the extension; Search still requires it. Held by
+   `testkit/tests/core_comments_search.rs` and
+   `testkit/tests/behavior_fulltext.rs` on both databases, a Postgres
+   without `unaccent` included.
 
-Left: vectors over messages;
-moving Search's every-schema search onto namespace operations; a notifier
-and an agent dispatcher as stack workers; and a conversation UI. The rule is reversible until the first
-release.
+Left: vectors over messages; moving Search's every-schema search onto
+namespace operations; asking `readable()` per operation, so a rule that
+refuses `listMessages` on a schema hides its messages from search too; a
+notifier and an agent dispatcher as stack workers; and a conversation UI.
+The rule is reversible until the first release.
 
 ## D75. A memory store is a service of the core kind MemoryStore that APIs list in their config, whose schema declares each channel and key it carries, and which holds no fact
 
