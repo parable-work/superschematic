@@ -24,7 +24,7 @@ import {
 
 /*
 The memory store parity vectors (D75), which ir writes (`cd ir && go test
--run TestWriteMemoryStoreParityVectors -update-memorystore-parity`) and the
+-run TestWriteMemoryStoreParityVectors -update`) and the
 Go, TypeScript and Rust runtimes each run: names, and the shared rate
 limit's window and key names.
 */
